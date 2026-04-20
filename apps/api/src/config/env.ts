@@ -6,6 +6,7 @@ const envSchema = z.object({
   APP_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
   API_PORT: z.coerce.number().default(4000),
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+  WEB_ORIGINS: z.string().optional(),
   DATABASE_URL: z.string().min(1).default("postgresql://postgres:postgres@localhost:5432/sige_2"),
   JWT_ACCESS_SECRET: z.string().min(32).default("replace-this-in-dev-with-a-real-secret-value-1234"),
   JWT_REFRESH_SECRET: z.string().min(32).default("replace-this-in-dev-with-a-second-secret-value-1234"),

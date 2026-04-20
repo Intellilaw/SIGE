@@ -82,8 +82,11 @@ declare module "fastify" {
 }
 
 export async function buildApp() {
+  const configuredWebOrigins = env.WEB_ORIGINS
+    ? env.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+    : [env.WEB_ORIGIN];
   const allowedOrigins = new Set([
-    env.WEB_ORIGIN,
+    ...configuredWebOrigins,
     "http://localhost:5173",
     "http://127.0.0.1:5173"
   ]);
