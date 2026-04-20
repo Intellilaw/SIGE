@@ -445,6 +445,27 @@ textarea {
   flex-shrink: 0;
 }
 
+.dashboard-page {
+  gap: 14px;
+}
+
+.dashboard-page .hero-logo-only {
+  min-height: 76px;
+  padding-block: 14px;
+}
+
+.dashboard-page .hero-logo-only-mark {
+  width: min(220px, 40vw);
+}
+
+.dashboard-page .panel {
+  padding: 18px;
+}
+
+.dashboard-page .panel-header {
+  margin-bottom: 12px;
+}
+
 .hero-topline {
   display: flex;
   align-items: center;
@@ -533,18 +554,18 @@ textarea {
 
 .dashboard-module-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
+  gap: 10px;
 }
 
 .dashboard-module-card {
   display: grid;
-  gap: 14px;
-  padding: 20px;
-  border-radius: 24px;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
   border: 1px solid rgba(31, 41, 51, 0.1);
   background: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 16px 36px rgba(31, 41, 51, 0.07);
+  box-shadow: 0 10px 24px rgba(31, 41, 51, 0.06);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
@@ -565,7 +586,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .dashboard-module-icon,
@@ -587,15 +608,23 @@ textarea {
 }
 
 .dashboard-module-icon {
-  width: 52px;
+  min-width: 36px;
+  width: 36px;
+  height: 36px;
   padding: 0;
-  font-size: 1.45rem;
+  border-radius: 8px;
+  font-size: 1.1rem;
   font-weight: 400;
 }
 
 .dashboard-module-card h3,
 .module-card h3 {
   margin: 0;
+}
+
+.dashboard-module-card h3 {
+  font-size: 1rem;
+  line-height: 1.25;
 }
 
 .dashboard-module-card p,
@@ -606,6 +635,7 @@ textarea {
 
 .dashboard-module-link {
   color: #1d4ed8;
+  font-size: 0.92rem;
   font-weight: 700;
 }
 
