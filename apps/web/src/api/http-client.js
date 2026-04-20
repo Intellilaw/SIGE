@@ -1,4 +1,13 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api/v1";
+function getDefaultApiBaseUrl() {
+    if (window.location.hostname.endsWith("pruebasb.online")) {
+        return "https://api.pruebasb.online/api/v1";
+    }
+    return "http://localhost:4000/api/v1";
+}
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = window.location.hostname.endsWith("pruebasb.online")
+    ? "https://api.pruebasb.online/api/v1"
+    : configuredApiBaseUrl ?? getDefaultApiBaseUrl();
 const ACCESS_TOKEN_STORAGE_KEY = "sige.accessToken";
 const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";
 export const AUTH_STORAGE_EVENT = "sige-auth-storage-changed";
