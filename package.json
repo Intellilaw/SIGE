@@ -1,0 +1,15 @@
+{
+  "name": "sige-2",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @sige/contracts && npm run build --workspace @sige/api && npm run build --workspace @sige/web",
+    "lint": "npm run lint --workspace @sige/contracts && npm run lint --workspace @sige/api && npm run lint --workspace @sige/web",
+    "dev:api": "npm run dev --workspace @sige/api",
+    "dev:web": "npm run dev --workspace @sige/web"
+  }
+}

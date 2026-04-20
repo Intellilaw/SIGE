@@ -1,0 +1,47 @@
+{
+  "source": "Intranet",
+  "exportedAt": "2026-03-26T18:00:00.000Z",
+  "totalUsers": 2,
+  "users": [
+    {
+      "legacyUserId": "11111111-1111-1111-1111-111111111111",
+      "email": "eduardo.rusconi@calculadora.app",
+      "username": "Eduardo Rusconi",
+      "displayName": "Eduardo Rusconi",
+      "legacyRole": "superadmin",
+      "legacyTeam": "Direccion general",
+      "specificRole": "Direccion general",
+      "shortName": "ER",
+      "createdAt": "2025-08-01T10:00:00.000Z",
+      "lastLoginAt": "2026-03-25T08:15:00.000Z",
+      "emailConfirmedAt": "2025-08-01T10:00:00.000Z",
+      "rawUserMetaData": {
+        "username": "Eduardo Rusconi",
+        "role": "superadmin",
+        "team": "Direccion general",
+        "specific_role": "Direccion general",
+        "short_name": "ER"
+      }
+    },
+    {
+      "legacyUserId": "22222222-2222-2222-2222-222222222222",
+      "email": "analista@calculadora.app",
+      "username": "Analista Uno",
+      "displayName": "Analista Uno",
+      "legacyRole": "intranet",
+      "legacyTeam": "Finanzas",
+      "specificRole": "Finanzas",
+      "shortName": "AU1",
+      "createdAt": "2025-09-01T10:00:00.000Z",
+      "lastLoginAt": "2026-03-24T17:00:00.000Z",
+      "emailConfirmedAt": "2025-09-01T10:00:00.000Z",
+      "rawUserMetaData": {
+        "username": "Analista Uno",
+        "role": "intranet",
+        "team": "Finanzas",
+        "specific_role": "Finanzas",
+        "short_name": "AU1"
+      }
+    }
+  ]
+}

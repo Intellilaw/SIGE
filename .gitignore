@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.local
+.local-postgres/
+runtime-logs/
+apps/api/runtime-assets/local-auth-store.json
+.turbo/
+coverage/
+.DS_Store
+*.log
+apps/api/.cache/
+apps/web/.vite/

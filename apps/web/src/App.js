@@ -1,0 +1,41 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AuthProvider, useAuth } from "./features/auth/AuthContext";
+import { EntryPage } from "./features/auth/EntryPage";
+import { LoginPage } from "./features/auth/LoginPage";
+import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
+import { PasswordResetPage } from "./features/auth/PasswordResetPage";
+import { ModulePlaceholderPage } from "./features/modules/ModulePlaceholderPage";
+import { ThirdPartyDocumentsPage } from "./features/modules/ThirdPartyDocumentsPage";
+import { AppShell } from "./features/shell/AppShell";
+import { DashboardPage } from "./features/dashboard/DashboardPage";
+import { ExecutionPage } from "./features/execution/ExecutionPage";
+import { ExecutionTeamPage } from "./features/execution/ExecutionTeamPage";
+import { TaskAdditionalTasksPage } from "./features/tasks/TaskAdditionalTasksPage";
+import { TaskDistributorPage } from "./features/tasks/TaskDistributorPage";
+import { TaskLegacyTablePage } from "./features/tasks/TaskLegacyTablePage";
+import { TaskTermsPage } from "./features/tasks/TaskTermsPage";
+import { TasksPage } from "./features/tasks/TasksPage";
+import { TasksTeamPage } from "./features/tasks/TasksTeamPage";
+import { UsersPage } from "./features/users/UsersPage";
+import { ClientsPage } from "./features/workbench/ClientsPage";
+import { QuotesPage } from "./features/workbench/QuotesPage";
+import { LeadsPage } from "./features/workbench/LeadsPage";
+import { MattersPage } from "./features/workbench/MattersPage";
+import { MatterCatalogPage } from "./features/workbench/MatterCatalogPage";
+import { CommissionsPage } from "./features/commissions/CommissionsPage";
+import { FinancesPage } from "./features/finances/FinancesPage";
+import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
+function ProtectedLayout() {
+    const { user, loading } = useAuth();
+    if (loading) {
+        return _jsx("div", { className: "centered-message", children: "Loading SIGE_2..." });
+    }
+    if (!user) {
+        return _jsx(Navigate, { to: "/", replace: true });
+    }
+    return _jsx(AppShell, {});
+}
+export default function App() {
+    return (_jsx(AuthProvider, { children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(EntryPage, {}) }), _jsx(Route, { path: "/intranet-login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/intranet-password-help", element: _jsx(PasswordAssistancePage, {}) }), _jsx(Route, { path: "/intranet-reset-password", element: _jsx(PasswordResetPage, {}) }), _jsx(Route, { path: "/login", element: _jsx(Navigate, { to: "/", replace: true }) }), _jsxs(Route, { path: "/app", element: _jsx(ProtectedLayout, {}), children: [_jsx(Route, { index: true, element: _jsx(DashboardPage, {}) }), _jsx(Route, { path: "clients", element: _jsx(ClientsPage, {}) }), _jsx(Route, { path: "quotes", element: _jsx(QuotesPage, {}) }), _jsx(Route, { path: "leads", element: _jsx(LeadsPage, {}) }), _jsx(Route, { path: "matters", element: _jsx(MattersPage, {}) }), _jsx(Route, { path: "execution", element: _jsx(ExecutionPage, {}) }), _jsx(Route, { path: "execution/:slug", element: _jsx(ExecutionTeamPage, {}) }), _jsx(Route, { path: "tasks", element: _jsx(TasksPage, {}) }), _jsx(Route, { path: "tasks/:slug/distribuidor", element: _jsx(TaskDistributorPage, {}) }), _jsx(Route, { path: "tasks/:slug/adicionales", element: _jsx(TaskAdditionalTasksPage, {}) }), _jsx(Route, { path: "tasks/:slug/terminos", element: _jsx(TaskTermsPage, {}) }), _jsx(Route, { path: "tasks/:slug/terminos-recurrentes", element: _jsx(TaskTermsPage, {}) }), _jsx(Route, { path: "tasks/:slug/:tableId", element: _jsx(TaskLegacyTablePage, {}) }), _jsx(Route, { path: "tasks/:slug", element: _jsx(TasksTeamPage, {}) }), _jsx(Route, { path: "kpis", element: _jsx(ModulePlaceholderPage, { moduleId: "kpis" }) }), _jsx(Route, { path: "finances", element: _jsx(FinancesPage, {}) }), _jsx(Route, { path: "general-expenses", element: _jsx(GeneralExpensesPage, {}) }), _jsx(Route, { path: "commissions", element: _jsx(CommissionsPage, {}) }), _jsx(Route, { path: "general-supervision", element: _jsx(ModulePlaceholderPage, { moduleId: "general-supervision" }) }), _jsx(Route, { path: "matter-catalog", element: _jsx(MatterCatalogPage, {}) }), _jsx(Route, { path: "brief-manager", element: _jsx(ModulePlaceholderPage, { moduleId: "brief-manager" }) }), _jsx(Route, { path: "labor-file", element: _jsx(ModulePlaceholderPage, { moduleId: "labor-file" }) }), _jsx(Route, { path: "third-party-documents", element: _jsx(ThirdPartyDocumentsPage, {}) }), _jsx(Route, { path: "holidays", element: _jsx(ModulePlaceholderPage, { moduleId: "holidays" }) }), _jsx(Route, { path: "users", element: _jsx(UsersPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }) }));
+}

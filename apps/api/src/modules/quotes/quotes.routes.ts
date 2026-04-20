@@ -1,0 +1,134 @@
+import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
+
+import { requireAuth } from "../../core/auth/guards";
+import { exportQuoteDocument } from "./quote-export";
+
+const teamSchema = z.enum([
+  "ADMIN",
+  "CLIENT_RELATIONS",
+  "FINANCE",
+  "LITIGATION",
+  "CORPORATE_LABOR",
+  "SETTLEMENTS",
+  "FINANCIAL_LAW",
+  "TAX_COMPLIANCE",
+  "ADMIN_OPERATIONS"
+] as const);
+
+const lineItemSchema = z.object({
+  concept: z.string().min(2),
+  amountMxn: z.number().nonnegative()
+});
+
+const templateCellSchema = z.object({
+  value: z.string(),
+  rowSpan: z.number().int().min(1),
+  hidden: z.boolean()
+});
+
+const amountColumnSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  enabled: z.boolean(),
+  mode: z.enum(["FIXED", "VARIABLE"])
+});
+
+const tableRowSchema = z.object({
+  id: z.string().min(1),
+  conceptDescription: z.string(),
+  amountCells: z.array(templateCellSchema).length(2),
+  paymentMoment: templateCellSchema,
+  notesCell: templateCellSchema
+});
+
+const quoteSchema = z.object({
+  clientId: z.string(),
+  clientName: z.string().min(2),
+  responsibleTeam: teamSchema.optional(),
+  subject: z.string().min(3),
+  status: z.enum(["DRAFT", "SENT", "APPROVED", "REJECTED"]),
+  quoteType: z.enum(["ONE_TIME", "RETAINER"]),
+  amountColumns: z.array(amountColumnSchema).length(2).optional(),
+  tableRows: z.array(tableRowSchema).min(1).optional(),
+  lineItems: z.array(lineItemSchema).min(1),
+  milestone: z.string().optional(),
+  notes: z.string().optional()
+});
+
+const quoteTemplateSchema = z.object({
+  team: teamSchema,
+  services: z.string().min(2),
+  quoteType: z.enum(["ONE_TIME", "RETAINER"]),
+  amountColumns: z.array(amountColumnSchema).length(2),
+  tableRows: z.array(tableRowSchema).min(1),
+  milestone: z.string().optional(),
+  notes: z.string().optional()
+});
+
+const quoteTemplateIdParamsSchema = z.object({
+  templateId: z.string().min(1)
+});
+
+const quoteIdParamsSchema = z.object({
+  quoteId: z.string().min(1)
+});
+
+const quoteExportParamsSchema = z.object({
+  quoteId: z.string().min(1),
+  format: z.enum(["pdf", "word"])
+});
+
+export const quotesRoutes: FastifyPluginAsync = async (app) => {
+  const service = new app.services.QuotesService(app.repositories.quotes);
+
+  app.get("/quotes", { preHandler: [requireAuth] }, async () => service.list());
+  app.get("/quotes/templates", { preHandler: [requireAuth] }, async () => service.listTemplates());
+  app.post("/quotes", { preHandler: [requireAuth] }, async (request) => {
+    const payload = quoteSchema.parse(request.body);
+    return service.create(payload);
+  });
+  app.patch("/quotes/:quoteId", { preHandler: [requireAuth] }, async (request) => {
+    const params = quoteIdParamsSchema.parse(request.params);
+    const payload = quoteSchema.parse(request.body);
+    return service.update(params.quoteId, payload);
+  });
+  app.delete("/quotes/:quoteId", { preHandler: [requireAuth] }, async (request, reply) => {
+    const params = quoteIdParamsSchema.parse(request.params);
+    await service.delete(params.quoteId);
+    reply.code(204);
+    return null;
+  });
+  app.get("/quotes/:quoteId/export/:format", { preHandler: [requireAuth] }, async (request, reply) => {
+    const params = quoteExportParamsSchema.parse(request.params);
+    const quote = await service.findById(params.quoteId);
+
+    if (!quote) {
+      reply.code(404);
+      return {
+        code: "QUOTE_NOT_FOUND",
+        message: "Quote was not found."
+      };
+    }
+
+    const file = await exportQuoteDocument(quote, params.format);
+    reply.header("Content-Type", file.contentType);
+    reply.header("Content-Disposition", `attachment; filename="${file.filename}"`);
+    return reply.send(file.buffer);
+  });
+  app.post("/quotes/templates", { preHandler: [requireAuth] }, async (request) => {
+    const payload = quoteTemplateSchema.parse(request.body);
+    return service.createTemplate(payload);
+  });
+  app.patch("/quotes/templates/:templateId", { preHandler: [requireAuth] }, async (request) => {
+    const params = quoteTemplateIdParamsSchema.parse(request.params);
+    const payload = quoteTemplateSchema.parse(request.body);
+    return service.updateTemplate(params.templateId, payload);
+  });
+  app.delete("/quotes/templates/:templateId", { preHandler: [requireAuth] }, async (request, reply) => {
+    const params = quoteTemplateIdParamsSchema.parse(request.params);
+    await service.deleteTemplate(params.templateId);
+    reply.code(204);
+    return null;
+  });
+};

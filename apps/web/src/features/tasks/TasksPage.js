@@ -1,0 +1,16 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { Navigate, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { getVisibleExecutionModules } from "../execution/execution-config";
+export function TasksPage() {
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const visibleModules = getVisibleExecutionModules(user);
+    if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
+        return _jsx(Navigate, { to: `/app/tasks/${visibleModules[0].slug}`, replace: true });
+    }
+    if (visibleModules.length === 0) {
+        return (_jsx("section", { className: "page-stack", children: _jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "T" }), _jsx("div", { children: _jsx("h2", { children: "Tareas" }) })] }), _jsx("p", { className: "muted", children: "Tu equipo actual no tiene acceso a modulos de tareas en esta version." })] }) }));
+    }
+    return (_jsxs("section", { className: "page-stack", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "T" }), _jsx("div", { children: _jsx("h2", { children: "Tareas" }) })] }), _jsx("p", { className: "muted", children: "Replica funcional del legado: seleccion por equipo, vista diaria por integrante y tablero con siguientes tareas, historial y resaltado rojo cuando falta informacion o hay vencimientos." })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Equipos" }), _jsxs("span", { children: [visibleModules.length, " modulos"] })] }), _jsx("div", { className: "execution-module-grid", children: visibleModules.map((module) => (_jsxs("button", { type: "button", className: "execution-module-card", onClick: () => navigate(`/app/tasks/${module.slug}`), children: [_jsx("span", { className: "execution-module-icon", style: { color: module.color }, children: module.icon }), _jsx("strong", { children: module.label }), _jsx("p", { children: module.description })] }, module.moduleId))) })] })] }));
+}
