@@ -5,6 +5,7 @@ import type { AuthUser } from "@sige/contracts";
 
 import type { TokenPair } from "./types";
 import type { AuthRepository } from "../../repositories/types";
+import { parseTtlSeconds } from "./token-ttl";
 
 export function hashToken(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -32,11 +33,12 @@ export async function issueTokenPair(app: FastifyInstance, repository: AuthRepos
   );
 
   const rawRefreshToken = randomUUID();
+  const refreshTtlSeconds = parseTtlSeconds(app.config.JWT_REFRESH_TTL, 7 * 24 * 60 * 60);
   await repository.saveRefreshToken({
     id: randomUUID(),
     userId: user.id,
     tokenHash: hashToken(rawRefreshToken),
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + refreshTtlSeconds * 1000).toISOString(),
     revokedAt: null,
     createdAt: new Date().toISOString()
   });

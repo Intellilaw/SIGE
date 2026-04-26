@@ -241,6 +241,7 @@ export class PrismaMattersRepository implements MattersRepository {
     if (!clientNumber && current.clientName) {
       const linkedClient = await this.prisma.client.findFirst({
         where: {
+          deletedAt: null,
           name: {
             equals: current.clientName,
             mode: "insensitive"
@@ -447,6 +448,7 @@ export class PrismaMattersRepository implements MattersRepository {
     if (normalizedClientName) {
       const existingByName = await prisma.client.findFirst({
         where: {
+          deletedAt: null,
           name: {
             equals: normalizedClientName,
             mode: "insensitive"

@@ -1,29 +1,10 @@
-function getDefaultApiBaseUrl() {
-  if (window.location.hostname.endsWith("pruebasb.online")) {
-    return "https://api.pruebasb.online/api/v1";
-  }
-
-  return "http://localhost:4000/api/v1";
-}
-
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const API_BASE_URL = window.location.hostname.endsWith("pruebasb.online")
-  ? "https://api.pruebasb.online/api/v1"
-  : configuredApiBaseUrl ?? getDefaultApiBaseUrl();
+const API_BASE_URL = configuredApiBaseUrl ?? "/api/v1";
 
 const ACCESS_TOKEN_STORAGE_KEY = "sige.accessToken";
 const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";
 
 export const AUTH_STORAGE_EVENT = "sige-auth-storage-changed";
-
-type TokenPair = {
-  accessToken: string;
-  refreshToken: string;
-};
-
-type RefreshResponse = {
-  tokens?: TokenPair;
-};
 
 let refreshRequest: Promise<boolean> | null = null;
 
@@ -31,35 +12,23 @@ function notifyAuthStorageChanged() {
   window.dispatchEvent(new Event(AUTH_STORAGE_EVENT));
 }
 
-function getStoredAccessToken() {
-  return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+function clearLegacyAuthTokens() {
+  window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+  window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
 }
 
-function getStoredRefreshToken() {
-  return window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
-}
-
-export function persistAuthTokens(tokens: TokenPair) {
-  window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, tokens.accessToken);
-  window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokens.refreshToken);
+export function persistAuthTokens() {
+  clearLegacyAuthTokens();
   notifyAuthStorageChanged();
 }
 
 export function clearAuthTokens() {
-  window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-  window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  clearLegacyAuthTokens();
   notifyAuthStorageChanged();
 }
 
 function withAuthHeaders(headers?: HeadersInit) {
-  const merged = new Headers(headers);
-  const token = getStoredAccessToken();
-
-  if (token) {
-    merged.set("Authorization", `Bearer ${token}`);
-  }
-
-  return merged;
+  return new Headers(headers);
 }
 
 function shouldRetryWithRefresh(path: string) {
@@ -101,21 +70,15 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 async function refreshAccessToken() {
-  const refreshToken = getStoredRefreshToken();
-  if (!refreshToken) {
-    clearAuthTokens();
-    return false;
-  }
-
   if (!refreshRequest) {
     refreshRequest = (async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ refreshToken })
+          }
         });
 
         if (!response.ok) {
@@ -123,13 +86,7 @@ async function refreshAccessToken() {
           return false;
         }
 
-        const payload = await readJson<RefreshResponse>(response);
-        if (!payload.tokens?.accessToken || !payload.tokens.refreshToken) {
-          clearAuthTokens();
-          return false;
-        }
-
-        persistAuthTokens(payload.tokens);
+        persistAuthTokens();
         return true;
       } catch {
         clearAuthTokens();
@@ -147,6 +104,7 @@ async function request(path: string, init: RequestInit, fallback: string): Promi
   const execute = () =>
     fetch(`${API_BASE_URL}${path}`, {
       ...init,
+      credentials: "include",
       headers: withAuthHeaders(init.headers)
     });
 
@@ -159,7 +117,7 @@ async function request(path: string, init: RequestInit, fallback: string): Promi
   }
 
   if (!response.ok) {
-    if (response.status === 401 && shouldRetryWithRefresh(path) && !getStoredAccessToken()) {
+    if (response.status === 401 && shouldRetryWithRefresh(path)) {
       throw new Error("La sesion expiro. Inicia sesion nuevamente.");
     }
 

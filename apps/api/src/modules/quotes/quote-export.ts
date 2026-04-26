@@ -1,19 +1,25 @@
-import { execFile } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { Buffer } from "node:buffer";
+
+import {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  HeadingLevel,
+  Packer,
+  PageOrientation,
+  Paragraph,
+  Table,
+  TableCell,
+  TableLayoutType,
+  TableRow,
+  TextRun,
+  VerticalAlign,
+  VerticalMergeType,
+  WidthType
+} from "docx";
+import PDFDocument from "pdfkit";
 
 import type { Quote, QuoteTemplateAmountColumn, QuoteTemplateTableRow } from "@sige/contracts";
-
-import { AppError } from "../../core/errors/app-error";
-
-const execFileAsync = promisify(execFile);
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const exportScriptPath = path.resolve(currentDir, "../../../scripts/quotes/export-quote.ps1");
-const templatePath = path.resolve(currentDir, "../../../runtime-assets/quotes/quote-letterhead-template.docx");
 
 export type QuoteExportFormat = "pdf" | "word";
 
@@ -21,6 +27,54 @@ export type QuoteExportResult = {
   buffer: Buffer;
   contentType: string;
   filename: string;
+};
+
+type ExportAmountColumn = {
+  id: string;
+  title: string;
+  mode: "FIXED" | "VARIABLE";
+};
+
+type ExportCell = {
+  value: string;
+  rowSpan: number;
+  hidden: boolean;
+};
+
+type ExportRow = {
+  id: string;
+  conceptDescription: string;
+  amountCells: ExportCell[];
+  paymentMoment: ExportCell;
+  notesCell: ExportCell;
+};
+
+type QuoteExportPayload = {
+  quoteNumber: string;
+  clientName: string;
+  createdAt: string;
+  formattedDate: string;
+  quoteNumberLabel: string;
+  introText: string;
+  disclaimerText: string;
+  closingText: string;
+  signatureText: string;
+  signatureFirm: string;
+  totalLabel: string;
+  conceptHeader: string;
+  paymentHeader: string;
+  notesHeader: string;
+  emptyCellLabel: string;
+  amountColumns: ExportAmountColumn[];
+  tableRows: ExportRow[];
+  amountSummaries: Array<number | null>;
+  lineItems: Quote["lineItems"];
+  totalMxn: number;
+  subject: string;
+  milestone: string;
+  notes: string;
+  quoteTypeLabel: string;
+  teamLabel: string;
 };
 
 function sanitizeFileSegment(value: string) {
@@ -47,6 +101,15 @@ function formatQuoteDate(value: string) {
   }).format(date);
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
 function getContentType(format: QuoteExportFormat) {
   return format === "pdf"
     ? "application/pdf"
@@ -55,6 +118,35 @@ function getContentType(format: QuoteExportFormat) {
 
 function getExtension(format: QuoteExportFormat) {
   return format === "pdf" ? "pdf" : "docx";
+}
+
+function getQuoteTypeLabel(quoteType: Quote["quoteType"]) {
+  return quoteType === "RETAINER" ? "Iguala" : "Por evento";
+}
+
+function getTeamLabel(team?: Quote["responsibleTeam"]) {
+  switch (team) {
+    case "ADMIN":
+      return "Administracion";
+    case "CLIENT_RELATIONS":
+      return "Relacion con clientes";
+    case "FINANCE":
+      return "Finanzas";
+    case "LITIGATION":
+      return "Litigio";
+    case "CORPORATE_LABOR":
+      return "Corporativo laboral";
+    case "SETTLEMENTS":
+      return "Convenios";
+    case "FINANCIAL_LAW":
+      return "Financiero";
+    case "TAX_COMPLIANCE":
+      return "Compliance";
+    case "ADMIN_OPERATIONS":
+      return "Operacion administrativa";
+    default:
+      return "Sin equipo asignado";
+  }
 }
 
 function buildLegacyExportTable(quote: Quote) {
@@ -151,7 +243,7 @@ function buildExportTable(quote: Quote) {
   };
 }
 
-function buildPayload(quote: Quote) {
+function buildPayload(quote: Quote): QuoteExportPayload {
   const exportTable = buildExportTable(quote);
 
   return {
@@ -159,13 +251,13 @@ function buildPayload(quote: Quote) {
     clientName: quote.clientName,
     createdAt: quote.createdAt,
     formattedDate: formatQuoteDate(quote.createdAt),
-    quoteNumberLabel: "N\u00famero de cotizaci\u00f3n",
+    quoteNumberLabel: "Numero de cotizacion",
     introText:
-      "Por medio de este documento le hacemos llegar la cotizaci\u00f3n de los honorarios que ser\u00edan generados por el despacho con motivo de la prestaci\u00f3n de los servicios detallados a continuaci\u00f3n:",
+      "Por medio de este documento le hacemos llegar la cotizacion de los honorarios que serian generados por el despacho con motivo de la prestacion de los servicios detallados a continuacion:",
     disclaimerText:
-      "Las sumas anteriores no contemplan los gastos generados con motivo de la prestaci\u00f3n de los servicios detallados, tales como copias simples o certificadas, gastos de transportaci\u00f3n fuera de la Ciudad de M\u00e9xico, o impuestos o derechos generados a cargo del cliente, entre otros conceptos an\u00e1logos distintos a los arriba se\u00f1alados expresamente. Asimismo, a las sumas anteriores les deber\u00e1 ser agregado el monto correspondiente al Impuesto al Valor Agregado.",
+      "Las sumas anteriores no contemplan los gastos generados con motivo de la prestacion de los servicios detallados, tales como copias simples o certificadas, gastos de transportacion fuera de la Ciudad de Mexico, o impuestos o derechos generados a cargo del cliente, entre otros conceptos analogos distintos a los arriba senalados expresamente. Asimismo, a las sumas anteriores les debera ser agregado el monto correspondiente al Impuesto al Valor Agregado.",
     closingText:
-      "El despacho se encuentra en la mejor disposici\u00f3n de comentar con mayor precisi\u00f3n los detalles, mecanismos, tiempos y dem\u00e1s consideraciones t\u00e9cnicas de los servicios propuestos.",
+      "El despacho se encuentra en la mejor disposicion de comentar con mayor precision los detalles, mecanismos, tiempos y demas consideraciones tecnicas de los servicios propuestos.",
     signatureText: "Atentamente,",
     signatureFirm: "RUSCONI CONSULTING",
     totalLabel: "TOTAL (SIN IVA)",
@@ -177,75 +269,519 @@ function buildPayload(quote: Quote) {
     tableRows: exportTable.tableRows,
     amountSummaries: exportTable.amountSummaries,
     lineItems: quote.lineItems,
-    totalMxn: quote.totalMxn
+    totalMxn: quote.totalMxn,
+    subject: normalizeText(quote.subject),
+    milestone: normalizeText(quote.milestone),
+    notes: normalizeText(quote.notes),
+    quoteTypeLabel: getQuoteTypeLabel(quote.quoteType),
+    teamLabel: getTeamLabel(quote.responsibleTeam)
   };
+}
+
+function buildFilename(quote: Quote, format: QuoteExportFormat) {
+  return `${sanitizeFileSegment(quote.quoteNumber)}_${sanitizeFileSegment(
+    quote.clientName.toUpperCase()
+  )}.${getExtension(format)}`;
+}
+
+function normalizeCellValue(value: string, emptyCellLabel: string) {
+  const normalized = normalizeText(value);
+  return normalized || emptyCellLabel;
+}
+
+function getVerticalMerge(cell: ExportCell) {
+  if (cell.hidden) {
+    return VerticalMergeType.CONTINUE;
+  }
+
+  if (cell.rowSpan > 1) {
+    return VerticalMergeType.RESTART;
+  }
+
+  return undefined;
+}
+
+function createDocxCell(
+  text: string,
+  options?: {
+    width?: number;
+    bold?: boolean;
+    fill?: string;
+    alignment?: (typeof AlignmentType)[keyof typeof AlignmentType];
+    verticalMerge?: (typeof VerticalMergeType)[keyof typeof VerticalMergeType];
+  }
+) {
+  return new TableCell({
+    width: options?.width ? { size: options.width, type: WidthType.PERCENTAGE } : undefined,
+    verticalAlign: VerticalAlign.CENTER,
+    verticalMerge: options?.verticalMerge,
+    shading: options?.fill ? { fill: options.fill } : undefined,
+    margins: {
+      top: 90,
+      bottom: 90,
+      left: 100,
+      right: 100
+    },
+    borders: {
+      top: { style: BorderStyle.SINGLE, color: "D8D4CC", size: 4 },
+      bottom: { style: BorderStyle.SINGLE, color: "D8D4CC", size: 4 },
+      left: { style: BorderStyle.SINGLE, color: "D8D4CC", size: 4 },
+      right: { style: BorderStyle.SINGLE, color: "D8D4CC", size: 4 }
+    },
+    children: [
+      new Paragraph({
+        alignment: options?.alignment ?? AlignmentType.LEFT,
+        children: [
+          new TextRun({
+            text,
+            bold: options?.bold ?? false,
+            size: 21
+          })
+        ]
+      })
+    ]
+  });
+}
+
+function buildTableWidths(amountColumnCount: number) {
+  const conceptWidth = amountColumnCount === 2 ? 30 : 38;
+  const amountWidth = amountColumnCount === 2 ? 14 : 18;
+  const paymentWidth = amountColumnCount === 2 ? 21 : 22;
+  const notesWidth = amountColumnCount === 2 ? 21 : 22;
+
+  return {
+    conceptWidth,
+    amountWidth,
+    paymentWidth,
+    notesWidth
+  };
+}
+
+function buildDocxTable(payload: QuoteExportPayload) {
+  const widths = buildTableWidths(payload.amountColumns.length);
+  const rows: TableRow[] = [];
+
+  rows.push(
+    new TableRow({
+      tableHeader: true,
+      children: [
+        createDocxCell(payload.conceptHeader, {
+          width: widths.conceptWidth,
+          bold: true,
+          fill: "EEE7D8",
+          alignment: AlignmentType.CENTER
+        }),
+        ...payload.amountColumns.map((column) =>
+          createDocxCell(column.title, {
+            width: widths.amountWidth,
+            bold: true,
+            fill: "EEE7D8",
+            alignment: AlignmentType.CENTER
+          })
+        ),
+        createDocxCell(payload.paymentHeader, {
+          width: widths.paymentWidth,
+          bold: true,
+          fill: "EEE7D8",
+          alignment: AlignmentType.CENTER
+        }),
+        createDocxCell(payload.notesHeader, {
+          width: widths.notesWidth,
+          bold: true,
+          fill: "EEE7D8",
+          alignment: AlignmentType.CENTER
+        })
+      ]
+    })
+  );
+
+  for (const row of payload.tableRows) {
+    rows.push(
+      new TableRow({
+        children: [
+          createDocxCell(row.conceptDescription, {
+            width: widths.conceptWidth
+          }),
+          ...row.amountCells.map((cell) =>
+            createDocxCell(
+              cell.hidden ? "" : normalizeCellValue(cell.value, payload.emptyCellLabel),
+              {
+                width: widths.amountWidth,
+                alignment: AlignmentType.CENTER,
+                verticalMerge: getVerticalMerge(cell)
+              }
+            )
+          ),
+          createDocxCell(
+            row.paymentMoment.hidden
+              ? ""
+              : normalizeCellValue(row.paymentMoment.value, payload.emptyCellLabel),
+            {
+              width: widths.paymentWidth,
+              verticalMerge: getVerticalMerge(row.paymentMoment)
+            }
+          ),
+          createDocxCell(
+            row.notesCell.hidden ? "" : normalizeCellValue(row.notesCell.value, payload.emptyCellLabel),
+            {
+              width: widths.notesWidth,
+              verticalMerge: getVerticalMerge(row.notesCell)
+            }
+          )
+        ]
+      })
+    );
+  }
+
+  rows.push(
+    new TableRow({
+      children: [
+        createDocxCell(payload.totalLabel, {
+          width: widths.conceptWidth,
+          bold: true,
+          fill: "F7F2E6"
+        }),
+        ...payload.amountSummaries.map((summary) =>
+          createDocxCell(summary == null ? "Variable" : formatCurrency(summary), {
+            width: widths.amountWidth,
+            bold: true,
+            fill: "F7F2E6",
+            alignment: AlignmentType.CENTER
+          })
+        ),
+        createDocxCell(payload.emptyCellLabel, {
+          width: widths.paymentWidth,
+          bold: true,
+          fill: "F7F2E6",
+          alignment: AlignmentType.CENTER
+        }),
+        createDocxCell(payload.emptyCellLabel, {
+          width: widths.notesWidth,
+          bold: true,
+          fill: "F7F2E6",
+          alignment: AlignmentType.CENTER
+        })
+      ]
+    })
+  );
+
+  return new Table({
+    width: {
+      size: 100,
+      type: WidthType.PERCENTAGE
+    },
+    layout: TableLayoutType.FIXED,
+    rows
+  });
+}
+
+function createMetadataParagraph(label: string, value: string) {
+  return new Paragraph({
+    spacing: { after: 120 },
+    children: [
+      new TextRun({
+        text: `${label}: `,
+        bold: true,
+        size: 22
+      }),
+      new TextRun({
+        text: value,
+        size: 22
+      })
+    ]
+  });
+}
+
+async function renderWordDocument(payload: QuoteExportPayload) {
+  const document = new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: 900,
+              right: 900,
+              bottom: 900,
+              left: 900
+            },
+            size: {
+              orientation: PageOrientation.PORTRAIT
+            }
+          }
+        },
+        children: [
+          new Paragraph({
+            heading: HeadingLevel.TITLE,
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 120 },
+            children: [
+              new TextRun({
+                text: payload.signatureFirm,
+                bold: true,
+                size: 34
+              })
+            ]
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 280 },
+            children: [
+              new TextRun({
+                text: "Cotizacion de servicios",
+                size: 26,
+                bold: true
+              })
+            ]
+          }),
+          createMetadataParagraph(payload.quoteNumberLabel, payload.quoteNumber),
+          createMetadataParagraph("Fecha", payload.formattedDate),
+          createMetadataParagraph("Cliente", payload.clientName),
+          createMetadataParagraph("Tipo", payload.quoteTypeLabel),
+          createMetadataParagraph("Equipo", payload.teamLabel),
+          ...(payload.subject ? [createMetadataParagraph("Asunto", payload.subject)] : []),
+          ...(payload.milestone ? [createMetadataParagraph("Hito", payload.milestone)] : []),
+          new Paragraph({
+            spacing: { before: 160, after: 220 },
+            children: [
+              new TextRun({
+                text: payload.introText,
+                size: 22
+              })
+            ]
+          }),
+          buildDocxTable(payload),
+          ...(payload.notes
+            ? [
+                new Paragraph({
+                  spacing: { before: 220, after: 120 },
+                  children: [
+                    new TextRun({
+                      text: "Notas adicionales:",
+                      bold: true,
+                      size: 22
+                    })
+                  ]
+                }),
+                new Paragraph({
+                  spacing: { after: 220 },
+                  children: [
+                    new TextRun({
+                      text: payload.notes,
+                      size: 22
+                    })
+                  ]
+                })
+              ]
+            : []),
+          new Paragraph({
+            spacing: { before: 220, after: 220 },
+            children: [
+              new TextRun({
+                text: payload.disclaimerText,
+                size: 20
+              })
+            ]
+          }),
+          new Paragraph({
+            spacing: { after: 220 },
+            children: [
+              new TextRun({
+                text: payload.closingText,
+                size: 20
+              })
+            ]
+          }),
+          new Paragraph({
+            spacing: { after: 90 },
+            children: [
+              new TextRun({
+                text: payload.signatureText,
+                size: 22
+              })
+            ]
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: payload.signatureFirm,
+                size: 22,
+                bold: true
+              })
+            ]
+          })
+        ]
+      }
+    ]
+  });
+
+  return Packer.toBuffer(document);
+}
+
+function drawPdfKeyValue(document: PDFKit.PDFDocument, label: string, value: string) {
+  document.font("Helvetica-Bold").text(`${label}: `, { continued: true });
+  document.font("Helvetica").text(value);
+}
+
+function drawPdfParagraph(document: PDFKit.PDFDocument, value: string, options?: { gap?: number }) {
+  document.font("Helvetica").fontSize(10.5).text(value, {
+    align: "justify"
+  });
+  document.moveDown(options?.gap ?? 0.8);
+}
+
+function drawPdfTable(document: PDFKit.PDFDocument, payload: QuoteExportPayload) {
+  const startX = document.page.margins.left;
+  const tableWidth = document.page.width - document.page.margins.left - document.page.margins.right;
+  const widths = buildTableWidths(payload.amountColumns.length);
+  const columns = [
+    { key: "concept", title: payload.conceptHeader, width: tableWidth * (widths.conceptWidth / 100) },
+    ...payload.amountColumns.map((column) => ({
+      key: column.id,
+      title: column.title,
+      width: tableWidth * (widths.amountWidth / 100)
+    })),
+    { key: "payment", title: payload.paymentHeader, width: tableWidth * (widths.paymentWidth / 100) },
+    { key: "notes", title: payload.notesHeader, width: tableWidth * (widths.notesWidth / 100) }
+  ];
+
+  const drawRow = (values: string[], options?: { header?: boolean }) => {
+    const topY = document.y;
+    let maxHeight = 24;
+
+    for (let index = 0; index < values.length; index += 1) {
+      const textHeight = document.heightOfString(values[index], {
+        width: columns[index].width - 10,
+        align: index === 0 ? "left" : "center"
+      });
+      maxHeight = Math.max(maxHeight, textHeight + 10);
+    }
+
+    if (topY + maxHeight > document.page.height - document.page.margins.bottom) {
+      document.addPage();
+    }
+
+    let cursorX = startX;
+    const rowY = document.y;
+
+    for (let index = 0; index < values.length; index += 1) {
+      const column = columns[index];
+      document
+        .save()
+        .lineWidth(0.7)
+        .rect(cursorX, rowY, column.width, maxHeight);
+
+      if (options?.header) {
+        document.fillColor("#EEE7D8").fill();
+        document.fillColor("#000000");
+      } else {
+        document.stroke();
+      }
+
+      if (options?.header) {
+        document.stroke();
+      }
+
+      document
+        .font(options?.header ? "Helvetica-Bold" : "Helvetica")
+        .fontSize(9.5)
+        .text(values[index], cursorX + 5, rowY + 5, {
+          width: column.width - 10,
+          align: index === 0 ? "left" : "center"
+        });
+
+      document.restore();
+      cursorX += column.width;
+    }
+
+    document.y = rowY + maxHeight;
+  };
+
+  drawRow(columns.map((column) => column.title), { header: true });
+
+  for (const row of payload.tableRows) {
+    drawRow([
+      row.conceptDescription,
+      ...row.amountCells.map((cell) =>
+        cell.hidden ? "" : normalizeCellValue(cell.value, payload.emptyCellLabel)
+      ),
+      row.paymentMoment.hidden
+        ? ""
+        : normalizeCellValue(row.paymentMoment.value, payload.emptyCellLabel),
+      row.notesCell.hidden ? "" : normalizeCellValue(row.notesCell.value, payload.emptyCellLabel)
+    ]);
+  }
+
+  drawRow([
+    payload.totalLabel,
+    ...payload.amountSummaries.map((summary) => (summary == null ? "Variable" : formatCurrency(summary))),
+    payload.emptyCellLabel,
+    payload.emptyCellLabel
+  ]);
+
+  document.moveDown(1);
+}
+
+async function renderPdfDocument(payload: QuoteExportPayload) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const document = new PDFDocument({
+      size: "LETTER",
+      margin: 50
+    });
+
+    const chunks: Buffer[] = [];
+    document.on("data", (chunk: Buffer) => chunks.push(chunk));
+    document.on("error", reject);
+    document.on("end", () => resolve(Buffer.concat(chunks)));
+
+    document.font("Helvetica-Bold").fontSize(19).text(payload.signatureFirm, { align: "center" });
+    document.moveDown(0.3);
+    document.font("Helvetica-Bold").fontSize(14).text("Cotizacion de servicios", { align: "center" });
+    document.moveDown(1.2);
+
+    document.fontSize(11);
+    drawPdfKeyValue(document, payload.quoteNumberLabel, payload.quoteNumber);
+    drawPdfKeyValue(document, "Fecha", payload.formattedDate);
+    drawPdfKeyValue(document, "Cliente", payload.clientName);
+    drawPdfKeyValue(document, "Tipo", payload.quoteTypeLabel);
+    drawPdfKeyValue(document, "Equipo", payload.teamLabel);
+    if (payload.subject) {
+      drawPdfKeyValue(document, "Asunto", payload.subject);
+    }
+    if (payload.milestone) {
+      drawPdfKeyValue(document, "Hito", payload.milestone);
+    }
+
+    document.moveDown(0.8);
+    drawPdfParagraph(document, payload.introText);
+    drawPdfTable(document, payload);
+
+    if (payload.notes) {
+      document.font("Helvetica-Bold").fontSize(10.5).text("Notas adicionales:");
+      document.moveDown(0.2);
+      drawPdfParagraph(document, payload.notes, { gap: 0.8 });
+    }
+
+    drawPdfParagraph(document, payload.disclaimerText);
+    drawPdfParagraph(document, payload.closingText);
+    document.font("Helvetica").fontSize(10.5).text(payload.signatureText);
+    document.moveDown(0.2);
+    document.font("Helvetica-Bold").fontSize(11).text(payload.signatureFirm);
+    document.end();
+  });
 }
 
 export async function exportQuoteDocument(
   quote: Quote,
   format: QuoteExportFormat
 ): Promise<QuoteExportResult> {
-  if (process.platform !== "win32") {
-    throw new AppError(
-      500,
-      "QUOTE_EXPORT_UNAVAILABLE",
-      "La exportacion de cotizaciones solo esta disponible en hosts Windows."
-    );
-  }
+  const payload = buildPayload(quote);
+  const buffer = format === "pdf"
+    ? await renderPdfDocument(payload)
+    : await renderWordDocument(payload);
 
-  await access(exportScriptPath, fsConstants.F_OK);
-  await access(templatePath, fsConstants.F_OK);
-
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "sige-quote-export-"));
-  const payloadPath = path.join(tempDir, "quote.json");
-  const wordOutputPath = path.join(tempDir, `${quote.quoteNumber}.docx`);
-  const pdfOutputPath = path.join(tempDir, `${quote.quoteNumber}.pdf`);
-
-  try {
-    await writeFile(payloadPath, JSON.stringify(buildPayload(quote), null, 2), "utf8");
-
-    const args = [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      exportScriptPath,
-      "-TemplatePath",
-      templatePath,
-      "-QuoteJsonPath",
-      payloadPath,
-      "-WordOutputPath",
-      wordOutputPath
-    ];
-
-    if (format === "pdf") {
-      args.push("-PdfOutputPath", pdfOutputPath);
-    }
-
-    await execFileAsync("powershell.exe", args, {
-      timeout: 180_000,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024
-    });
-
-    const outputPath = format === "pdf" ? pdfOutputPath : wordOutputPath;
-    const buffer = await readFile(outputPath);
-    const filename = `${sanitizeFileSegment(quote.quoteNumber)}_${sanitizeFileSegment(
-      quote.clientName.toUpperCase()
-    )}.${getExtension(format)}`;
-
-    return {
-      buffer,
-      contentType: getContentType(format),
-      filename
-    };
-  } catch (error) {
-    const message = error instanceof Error && error.message
-      ? error.message
-      : "No se pudo generar el archivo de la cotizacion.";
-
-    throw new AppError(500, "QUOTE_EXPORT_FAILED", message);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
+  return {
+    buffer,
+    contentType: getContentType(format),
+    filename: buildFilename(quote, format)
+  };
 }

@@ -8,8 +8,8 @@ function PasswordVisibilityIcon({ visible }) {
 }
 export function LoginPage() {
     const { user, login } = useAuth();
-    const [identifier, setIdentifier] = useState("director");
-    const [password, setPassword] = useState("ChangeMe123!");
+    const [identifier, setIdentifier] = useState("Eduardo Rusconi");
+    const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState(null);
     if (user) {
@@ -19,11 +19,11 @@ export function LoginPage() {
         event.preventDefault();
         setError(null);
         try {
-            await login(identifier, password);
+            await login(identifier.trim(), password);
         }
         catch (caughtError) {
             setError(caughtError instanceof Error ? caughtError.message : "Unable to sign in.");
         }
     }
-    return (_jsx("main", { className: "login-page", children: _jsxs("section", { className: "login-card", children: [_jsx("div", { className: "login-brand", children: _jsx("img", { className: "rusconi-logo login-brand-logo", src: rusconiLogo, alt: "Rusconi Consulting" }) }), _jsx("p", { className: "eyebrow", children: "Rusconi Consulting" }), _jsx("h1", { children: "Intranet RC" }), _jsx("p", { className: "muted", children: "Accede al entorno operativo de SIGE_2 para continuar con clientes, cotizaciones, leads, asuntos y tareas." }), _jsx("p", { className: "login-back-link", children: _jsx(Link, { to: "/", children: "Volver a la pantalla de entrada" }) }), _jsx("p", { className: "login-support-link", children: _jsx(Link, { to: "/intranet-password-help", children: "Activar cuenta o restablecer contrasena" }) }), _jsxs("form", { className: "login-form", onSubmit: handleSubmit, children: [_jsxs("label", { children: ["Usuario o email", _jsx("input", { value: identifier, onChange: (event) => setIdentifier(event.target.value), type: "text" })] }), _jsxs("label", { children: ["Password", _jsxs("span", { className: "password-input-wrap", children: [_jsx("input", { value: password, onChange: (event) => setPassword(event.target.value), type: showPassword ? "text" : "password" }), _jsx("button", { "aria-label": showPassword ? "Ocultar contrasena" : "Mostrar contrasena", "aria-pressed": showPassword, className: "password-visibility-toggle", onClick: () => setShowPassword((current) => !current), type: "button", children: _jsx(PasswordVisibilityIcon, { visible: showPassword }) })] })] }), error ? _jsx("p", { className: "error-text", children: error }) : null, _jsx("button", { type: "submit", children: "Entrar a Rusconi Consulting" })] })] }) }));
+    return (_jsx("main", { className: "login-page", children: _jsxs("section", { className: "login-card", children: [_jsx("div", { className: "login-brand", children: _jsx("img", { className: "rusconi-logo login-brand-logo", src: rusconiLogo, alt: "Rusconi Consulting" }) }), _jsx("p", { className: "eyebrow", children: "Rusconi Consulting" }), _jsx("h1", { children: "Intranet RC" }), _jsx("p", { className: "muted", children: "Accede al entorno operativo de SIGE_2 para continuar con clientes, cotizaciones, leads, asuntos y tareas." }), _jsx("p", { className: "login-back-link", children: _jsx(Link, { to: "/", children: "Volver a la pantalla de entrada" }) }), _jsx("p", { className: "login-support-link", children: _jsx(Link, { to: "/intranet-password-help", children: "Activar cuenta o restablecer contrasena" }) }), _jsxs("form", { className: "login-form", onSubmit: handleSubmit, children: [_jsxs("label", { children: ["Usuario o email", _jsx("input", { autoComplete: "username", value: identifier, onChange: (event) => setIdentifier(event.target.value), type: "text" })] }), _jsxs("label", { children: ["Password", _jsxs("span", { className: "password-input-wrap", children: [_jsx("input", { value: password, autoComplete: "current-password", onChange: (event) => setPassword(event.target.value), placeholder: "Escribe tu contrasena", type: showPassword ? "text" : "password" }), _jsx("button", { "aria-label": showPassword ? "Ocultar contrasena" : "Mostrar contrasena", "aria-pressed": showPassword, className: "password-visibility-toggle", onClick: () => setShowPassword((current) => !current), type: "button", children: _jsx(PasswordVisibilityIcon, { visible: showPassword }) })] })] }), error ? _jsx("p", { className: "error-text", children: error }) : null, _jsx("button", { type: "submit", children: "Entrar a Rusconi Consulting" })] })] }) }));
 }

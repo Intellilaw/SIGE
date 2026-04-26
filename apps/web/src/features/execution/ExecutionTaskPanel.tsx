@@ -7,7 +7,7 @@ type MatterTaskView = TaskItem & {
   trackLabel: string;
   sourceLabel: string;
   isMatterFallback?: boolean;
-  sourceType: "task" | "tracking" | "matter";
+  sourceType: "task" | "tracking" | "term" | "matter";
 };
 
 interface CreateTaskInput {

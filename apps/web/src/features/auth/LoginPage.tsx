@@ -31,8 +31,8 @@ function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
 
 export function LoginPage() {
   const { user, login } = useAuth();
-  const [identifier, setIdentifier] = useState("director");
-  const [password, setPassword] = useState("ChangeMe123!");
+  const [identifier, setIdentifier] = useState("Eduardo Rusconi");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +45,7 @@ export function LoginPage() {
     setError(null);
 
     try {
-      await login(identifier, password);
+      await login(identifier.trim(), password);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to sign in.");
     }
@@ -72,14 +72,21 @@ export function LoginPage() {
         <form className="login-form" onSubmit={handleSubmit}>
           <label>
             Usuario o email
-            <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type="text" />
+            <input
+              autoComplete="username"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              type="text"
+            />
           </label>
           <label>
             Password
             <span className="password-input-wrap">
               <input
                 value={password}
+                autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)}
+                placeholder="Escribe tu contrasena"
                 type={showPassword ? "text" : "password"}
               />
               <button

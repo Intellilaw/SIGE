@@ -4,30 +4,43 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json --resolve-full-paths",
+    "predev": "prisma generate",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "lint:migration": "tsc -p tsconfig.migration.json --noEmit",
     "db:generate": "prisma generate",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "prisma migrate status",
     "db:seed": "tsx prisma/seed.ts",
     "users:extract": "tsx scripts/users/extract-intranet-users.ts",
-    "users:import": "tsx scripts/users/import-intranet-users.ts"
+    "users:import": "tsx scripts/users/import-intranet-users.ts",
+    "intranet:extract-business": "tsx scripts/migration/extract-intranet-business-data.ts",
+    "intranet:import-business": "tsx scripts/migration/import-intranet-business-data.ts",
+    "intranet:repair-task-names": "tsx scripts/migration/repair-legacy-task-names.ts",
+    "db:transfer": "tsx scripts/migration/transfer-postgres.ts"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.1",
     "@fastify/helmet": "^13.0.0",
     "@fastify/jwt": "^9.1.0",
     "@fastify/rate-limit": "^10.3.0",
     "@prisma/client": "^6.5.0",
     "@sige/contracts": "0.1.0",
+    "@types/pdfkit": "^0.17.6",
+    "docx": "^9.6.1",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
+    "pdfkit": "^0.18.0",
     "pino-pretty": "^13.0.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
     "prisma": "^6.5.0",
+    "tsc-alias": "^1.8.16",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }

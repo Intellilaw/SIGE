@@ -21,10 +21,6 @@ interface SessionUser {
 
 interface LoginResponse {
   user: SessionUser;
-  tokens: {
-    accessToken: string;
-    refreshToken: string;
-  };
 }
 
 export interface PasswordResetRequestResponse {
@@ -46,7 +42,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function persistSession(response: LoginResponse) {
-  persistAuthTokens(response.tokens);
+  persistAuthTokens();
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -54,12 +50,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = window.localStorage.getItem("sige.accessToken");
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
     apiGet<SessionUser>("/auth/me")
       .then((profile) => setUser(profile))
       .catch(() => {
@@ -71,9 +61,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     const handleAuthStorageChange = () => {
-      if (!window.localStorage.getItem("sige.accessToken")) {
-        setUser(null);
-      }
+      setUser(null);
     };
 
     window.addEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
@@ -97,6 +85,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }
 
   function logout() {
+    void apiPost<void>("/auth/logout", {}).catch(() => undefined);
     clearAuthTokens();
     setUser(null);
   }

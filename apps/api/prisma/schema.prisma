@@ -60,11 +60,14 @@ model Client {
   id           String   @id @default(uuid())
   clientNumber String   @unique
   name         String
+  deletedAt    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   quotes       Quote[]
   leads        Lead[]
   matters      Matter[]
+
+  @@index([deletedAt, clientNumber])
 }
 
 model Quote {
@@ -470,4 +473,32 @@ model AuditLog {
   user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId, createdAt])
+}
+
+model LegacyImportBatch {
+  id         String              @id @default(uuid())
+  source     String
+  exportName String?
+  exportedAt DateTime?
+  appliedAt  DateTime?
+  summary    Json?
+  createdAt  DateTime            @default(now())
+  rows       LegacyImportArchive[]
+
+  @@index([source, createdAt])
+}
+
+model LegacyImportArchive {
+  id          String            @id @default(uuid())
+  batchId     String
+  legacyTable String
+  legacyId    String?
+  entityType  String
+  payload     Json
+  createdAt   DateTime          @default(now())
+  batch       LegacyImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, legacyTable])
+  @@index([legacyTable, legacyId])
+  @@index([entityType, createdAt])
 }

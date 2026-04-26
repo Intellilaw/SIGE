@@ -4,14 +4,15 @@ import { z } from "zod";
 import { getSessionUser, requireAuth } from "../../core/auth/guards";
 import { PASSWORD_POLICY_MESSAGE } from "../../core/auth/password-policy";
 import { hashToken, issueTokenPair } from "../../core/auth/token-service";
+import {
+  clearAuthCookies,
+  REFRESH_TOKEN_COOKIE_NAME,
+  setAuthCookies
+} from "../../core/auth/session-cookies";
 
 const loginSchema = z.object({
   identifier: z.string().min(1),
   password: z.string().min(8)
-});
-
-const refreshSchema = z.object({
-  refreshToken: z.string().uuid()
 });
 
 const passwordResetRequestSchema = z.object({
@@ -32,37 +33,58 @@ function getAppOrigin(request: { headers: Record<string, unknown> }, fallbackOri
   return typeof origin === "string" && origin.length > 0 ? origin : fallbackOrigin;
 }
 
+function getRefreshTokenFromCookie(request: { cookies: Record<string, string | undefined> }) {
+  return request.cookies[REFRESH_TOKEN_COOKIE_NAME];
+}
+
 export const authRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.AuthService(app.repositories.auth);
 
-  app.post("/auth/login", async (request) => {
+  app.post("/auth/login", async (request, reply) => {
     const payload = loginSchema.parse(request.body);
     const user = await service.login(payload.identifier, payload.password);
     const tokens = await issueTokenPair(app, app.repositories.auth, user);
+    setAuthCookies(reply, app.config, tokens);
 
     return {
-      user,
-      tokens
+      user
     };
   });
 
-  app.post("/auth/refresh", async (request) => {
-    const payload = refreshSchema.parse(request.body);
-    const tokenHash = hashToken(payload.refreshToken);
+  app.post("/auth/refresh", async (request, reply) => {
+    const refreshToken = getRefreshTokenFromCookie(request);
+    if (!refreshToken) {
+      clearAuthCookies(reply, app.config);
+      throw new app.errors.AppError(401, "INVALID_REFRESH_TOKEN", "Refresh token is invalid or expired.");
+    }
+
+    const tokenHash = hashToken(refreshToken);
     const record = await app.repositories.auth.findRefreshToken(tokenHash);
 
     if (!record) {
+      clearAuthCookies(reply, app.config);
       throw new app.errors.AppError(401, "INVALID_REFRESH_TOKEN", "Refresh token is invalid or expired.");
     }
 
     const user = await service.getProfile(record.userId);
     await app.repositories.auth.revokeRefreshToken(tokenHash);
     const tokens = await issueTokenPair(app, app.repositories.auth, user);
+    setAuthCookies(reply, app.config, tokens);
 
     return {
-      user,
-      tokens
+      user
     };
+  });
+
+  app.post("/auth/logout", async (request, reply) => {
+    const refreshToken = getRefreshTokenFromCookie(request);
+    if (refreshToken) {
+      await app.repositories.auth.revokeRefreshToken(hashToken(refreshToken));
+    }
+
+    clearAuthCookies(reply, app.config);
+    reply.code(204);
+    return null;
   });
 
   app.post("/auth/password-resets/request", async (request) => {
@@ -71,7 +93,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       payload.identifier,
       getAppOrigin(request, app.config.WEB_ORIGIN),
       app.config.PASSWORD_RESET_TTL_MINUTES,
-      { exposePreview: app.config.APP_ENV !== "production" }
+      { exposePreview: app.config.PASSWORD_RESET_EXPOSE_PREVIEW }
     );
   });
 
@@ -80,13 +102,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return service.verifyPasswordResetToken(payload.token);
   });
 
-  app.post("/auth/password-resets/complete", async (request) => {
+  app.post("/auth/password-resets/complete", async (request, reply) => {
     const payload = passwordResetCompleteSchema.parse(request.body);
     if (payload.password.length > 128) {
       throw new app.errors.AppError(400, "WEAK_PASSWORD", PASSWORD_POLICY_MESSAGE);
     }
 
-    return service.completePasswordReset(app, payload.token, payload.password);
+    const session = await service.completePasswordReset(app, payload.token, payload.password);
+    setAuthCookies(reply, app.config, session.tokens);
+
+    return {
+      user: session.user
+    };
   });
 
   app.get("/auth/me", { preHandler: [requireAuth] }, async (request) => {

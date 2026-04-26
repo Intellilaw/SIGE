@@ -40,8 +40,8 @@ export function PasswordAssistancePage() {
         <p className="eyebrow">Onboarding seguro</p>
         <h1>Activar o restablecer contrasena</h1>
         <p className="muted">
-          Si tu cuenta fue migrada desde Intranet o perdiste acceso, escribe tu usuario o correo. En ambiente local,
-          SIGE_2 mostrara un enlace de vista previa para completar el proceso sin exponer contrasenas legacy.
+          Si tu cuenta fue migrada desde Intranet o perdiste acceso, escribe tu usuario o correo. SIGE_2 generara el
+          flujo seguro definido para el ambiente actual sin reutilizar contrasenas legacy.
         </p>
         <p className="login-back-link">
           <Link to="/intranet-login">Volver al acceso RC</Link>
@@ -71,8 +71,8 @@ export function PasswordAssistancePage() {
                 <p className="eyebrow">Vista previa local</p>
                 <h2>Enlace listo para usar</h2>
                 <p className="muted">
-                  Este enlace solo aparece fuera de produccion. En despliegue real se enviara por el canal de
-                  onboarding definido.
+                  Este enlace solo aparece cuando el backend fue configurado explicitamente para exponer previews de
+                  desarrollo. En AWS debe permanecer desactivado.
                 </p>
                 <a className="preview-link" href={result.resetUrl}>
                   Abrir flujo de activacion

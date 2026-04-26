@@ -48,7 +48,7 @@ SIGE_2/
   infra/
 ```
 
-## Local setup
+## Environment setup
 
 1. Install dependencies:
 
@@ -64,7 +64,8 @@ copy apps\api\.env.example apps\api\.env
 copy apps\web\.env.example apps\web\.env
 ```
 
-3. Point `DATABASE_URL` to PostgreSQL.
+3. Point `DATABASE_URL` to your managed PostgreSQL instance.
+   Recommended: AWS RDS or Aurora PostgreSQL, with secrets injected from Secrets Manager.
 
 4. Generate Prisma client:
 
@@ -72,9 +73,10 @@ copy apps\web\.env.example apps\web\.env
 npm run db:generate --workspace @sige/api
 ```
 
-5. Apply your Prisma migration workflow, then seed baseline data:
+5. Apply Prisma migrations, then seed baseline data:
 
 ```bash
+npm run db:migrate:deploy --workspace @sige/api
 npm run db:seed --workspace @sige/api
 ```
 
@@ -112,20 +114,27 @@ npm run dev:web
 
 ## Next migration steps
 
-1. Add Prisma migrations and import scripts for legacy `Intranet` data.
-2. Move auth from seeded local credentials to full persistent user administration and optional SSO/OAuth.
-3. Add audit logging, S3 document storage, and background jobs for recurring task generation.
-4. Migrate the remaining legacy modules: finance ledger, expenses, commissions, KPI history, calculators, and document library.
+1. Replace browser-side token storage with HttpOnly/SameSite cookies.
+2. Add audit logging, S3 document storage, and background jobs for recurring task generation.
+3. Finish replacing any Windows-only document generation flows with Linux-safe renderers.
+4. Migrate the remaining legacy modules: KPI history, calculators, and document library.
 
 ## Users migration
 
 The `Usuarios` module now has a dedicated metadata migration path documented in [docs/users-migration.md](docs/users-migration.md).
+
+Business-data migration from legacy `Intranet` into the normalized `SIGE_2` schema is documented in [docs/business-data-migration.md](docs/business-data-migration.md).
+
+The operational cutover checklist for Supabase -> AWS is documented in [docs/aws-cutover-checklist.md](docs/aws-cutover-checklist.md).
 
 Prepared assets:
 
 - extraction SQL from `Intranet` metadata
 - dry-run/apply importer into `SIGE_2`
 - password strategy based on metadata-only import plus forced reset
+- business-data extractor/importer for operational modules
+- PostgreSQL transfer helper for Supabase -> AWS cutover
+- Prisma baseline migration for `migrate deploy`
 
 ## Onboarding and reset flow
 
@@ -136,9 +145,9 @@ Imported users now land in a secure onboarding flow instead of reusing legacy pa
 - admin manual link generation: `Usuarios` module
 - imported `@calculadora.app` users are marked with `passwordResetRequired = true`
 
-Local usage:
+Development usage:
 
 1. Open the RC access page and choose `Activar cuenta o restablecer contrasena`.
 2. Enter the imported username or email.
-3. In local development, SIGE_2 shows a preview reset link.
+3. Only if `PASSWORD_RESET_EXPOSE_PREVIEW=true`, SIGE_2 shows a preview reset link.
 4. Open the link, define a new password, and the user is signed in automatically.

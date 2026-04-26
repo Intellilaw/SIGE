@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "SIGE_2 PostgreSQL database for AWS RDS."
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: sige
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]{1,30}$"
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  DBSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "At least two subnets in different Availability Zones."
+  AllowedCidr:
+    Type: String
+    Default: "10.0.0.0/8"
+    Description: "CIDR allowed to connect to PostgreSQL. Use a private VPC CIDR for production."
+  DBName:
+    Type: String
+    Default: sige_2
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{1,62}$"
+  DBUsername:
+    Type: String
+    Default: sige_admin
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{1,62}$"
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 65536
+  PubliclyAccessible:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+Conditions:
+  IsPubliclyAccessible: !Equals [!Ref PubliclyAccessible, "true"]
+
+Resources:
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${EnvironmentName} PostgreSQL access"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref AllowedCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-postgres-sg"
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "${EnvironmentName} PostgreSQL subnet group"
+      SubnetIds: !Ref DBSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-postgres-subnets"
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub "${EnvironmentName}-postgres"
+      Engine: postgres
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: gp3
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      BackupRetentionPeriod: 7
+      CopyTagsToSnapshot: true
+      DeletionProtection: true
+      EnablePerformanceInsights: true
+      PubliclyAccessible: !If [IsPubliclyAccessible, true, false]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-postgres"
+
+Outputs:
+  DatabaseEndpoint:
+    Description: "RDS PostgreSQL endpoint."
+    Value: !GetAtt Database.Endpoint.Address
+  DatabasePort:
+    Description: "RDS PostgreSQL port."
+    Value: !GetAtt Database.Endpoint.Port
+  DatabaseName:
+    Description: "Database name."
+    Value: !Ref DBName
+  DatabaseSecurityGroupId:
+    Description: "Security group attached to RDS."
+    Value: !Ref DatabaseSecurityGroup

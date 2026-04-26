@@ -153,6 +153,40 @@ function buildTrackingRecordTaskMap(records, trackLabels, sourcePrefix, includeC
     });
     return taskMap;
 }
+function buildTermTaskMap(terms, sourcePrefix, includeCompleted = false) {
+    const taskMap = new Map();
+    const filteredTerms = terms
+        .filter((term) => (includeCompleted ? true : term.status === "pendiente" && !term.deletedAt))
+        .slice()
+        .sort((left, right) => {
+        const leftDate = toDateInput(left.dueDate ?? left.termDate);
+        const rightDate = toDateInput(right.dueDate ?? right.termDate);
+        return leftDate.localeCompare(rightDate);
+    });
+    filteredTerms.forEach((term) => {
+        const trackLabel = "Terminos";
+        const view = {
+            id: term.id,
+            moduleId: term.moduleId,
+            trackId: "legacy-term",
+            clientName: term.clientName,
+            matterId: term.matterId,
+            matterNumber: term.matterNumber,
+            subject: term.pendingTaskLabel || term.eventName || term.subject || trackLabel,
+            responsible: term.responsible,
+            dueDate: term.dueDate ?? term.termDate ?? "",
+            state: term.status === "pendiente" ? "PENDING" : "COMPLETED",
+            recurring: Boolean(term.recurring),
+            createdAt: term.createdAt,
+            updatedAt: term.updatedAt,
+            trackLabel,
+            sourceLabel: `${sourcePrefix}: ${trackLabel}`,
+            sourceType: "term"
+        };
+        addTaskViewToMap(taskMap, [term.matterId ?? "", term.matterNumber ?? "", term.matterIdentifier ?? ""], view);
+    });
+    return taskMap;
+}
 function buildMatterFallbackTask(matter, sourcePrefix) {
     if (!normalizeText(matter.nextAction)) {
         return null;
@@ -236,6 +270,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const [clients, setClients] = useState([]);
     const [tasks, setTasks] = useState([]);
     const [trackingRecords, setTrackingRecords] = useState([]);
+    const [terms, setTerms] = useState([]);
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState(null);
     const [clientSearch, setClientSearch] = useState("");
@@ -251,18 +286,20 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             setLoading(true);
             setErrorMessage(null);
             try {
-                const [loadedMatters, loadedDeleted, loadedClients, loadedTasks, loadedTrackingRecords] = await Promise.all([
+                const [loadedMatters, loadedDeleted, loadedClients, loadedTasks, loadedTrackingRecords, loadedTerms] = await Promise.all([
                     apiGet("/matters"),
                     apiGet("/matters/recycle-bin"),
                     apiGet("/clients"),
                     apiGet(`/tasks/items?moduleId=${currentModule.moduleId}`),
-                    apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`)
+                    apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
+                    apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`)
                 ]);
                 const teamMatters = loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team);
                 const teamDeleted = loadedDeleted.filter((matter) => matter.responsibleTeam === currentModule.team);
                 setClients(loadedClients);
                 setTasks(loadedTasks);
                 setTrackingRecords(loadedTrackingRecords);
+                setTerms(loadedTerms);
                 setActiveMatters(sortActiveMatters(teamMatters, loadedClients));
                 setDeletedMatters(sortDeletedMatters(teamDeleted));
             }
@@ -281,8 +318,10 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const allTaskItemMap = useMemo(() => buildMatterTaskMap(tasks, trackLabels, sourcePrefix, true), [tasks, trackLabels, sourcePrefix]);
     const activeTrackingMap = useMemo(() => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix), [trackingRecords, trackLabels, sourcePrefix]);
     const allTrackingMap = useMemo(() => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, true), [trackingRecords, trackLabels, sourcePrefix]);
-    const activeTaskMap = useMemo(() => mergeTaskMaps(activeTrackingMap, activeTaskItemMap), [activeTrackingMap, activeTaskItemMap]);
-    const allTaskMap = useMemo(() => mergeTaskMaps(allTrackingMap, allTaskItemMap), [allTrackingMap, allTaskItemMap]);
+    const activeTermMap = useMemo(() => buildTermTaskMap(terms, sourcePrefix), [terms, sourcePrefix]);
+    const allTermMap = useMemo(() => buildTermTaskMap(terms, sourcePrefix, true), [terms, sourcePrefix]);
+    const activeTaskMap = useMemo(() => mergeTaskMaps(activeTermMap, activeTrackingMap, activeTaskItemMap), [activeTermMap, activeTrackingMap, activeTaskItemMap]);
+    const allTaskMap = useMemo(() => mergeTaskMaps(allTermMap, allTrackingMap, allTaskItemMap), [allTermMap, allTrackingMap, allTaskItemMap]);
     const searchQuery = normalizeComparableText(clientSearch);
     const filteredMatters = useMemo(() => activeMatters.filter((matter) => {
         if (!searchQuery) {
@@ -410,6 +449,23 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                 setTrackingRecords((items) => items
                     .map((record) => (record.id === updated.id ? updated : record))
                     .sort((left, right) => (left.dueDate ?? "").localeCompare(right.dueDate ?? "")));
+            }
+            catch (error) {
+                setErrorMessage(toErrorMessage(error));
+            }
+            return;
+        }
+        if (task.sourceType === "term") {
+            try {
+                const updated = await apiPatch(`/tasks/terms/${task.id}`, {
+                    status: state === "COMPLETED" ? "presentado" : "pendiente"
+                });
+                if (!updated) {
+                    return;
+                }
+                setTerms((items) => items
+                    .map((term) => (term.id === updated.id ? updated : term))
+                    .sort((left, right) => (left.dueDate ?? left.termDate ?? "").localeCompare(right.dueDate ?? right.termDate ?? "")));
             }
             catch (error) {
                 setErrorMessage(toErrorMessage(error));

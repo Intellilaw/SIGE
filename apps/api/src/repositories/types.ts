@@ -96,6 +96,8 @@ export interface AuthRepository {
 export interface ClientsRepository {
   list(): Promise<Client[]>;
   create(name: string): Promise<Client>;
+  update(clientId: string, name: string): Promise<Client>;
+  delete(clientId: string): Promise<void>;
 }
 
 export interface QuotesRepository {

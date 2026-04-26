@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { APP_VERSION_LABEL } from "@sige/contracts";
+import { APP_VERSION_TEXT } from "@sige/contracts";
 
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 import { appModules } from "../../config/modules";
@@ -9,7 +9,7 @@ export function DashboardPage() {
     <section className="page-stack dashboard-page">
       <header className="hero hero-logo-only">
         <img className="rusconi-logo hero-logo-only-mark" src={rusconiLogo} alt="Rusconi Consulting" />
-        <span className="app-version-badge hero-logo-version">{APP_VERSION_LABEL}</span>
+        <span className="app-version-badge hero-logo-version">{APP_VERSION_TEXT}</span>
       </header>
 
       <section className="panel">

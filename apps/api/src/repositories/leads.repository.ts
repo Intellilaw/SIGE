@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { Lead } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getNextClientNumber } from "./clients.shared";
 import { mapLead } from "./mappers";
 import type { LeadUpdateRecord, LeadsRepository } from "./types";
 
@@ -363,6 +364,7 @@ export class PrismaLeadsRepository implements LeadsRepository {
 
     const existingByName = await prisma.client.findFirst({
       where: {
+        deletedAt: null,
         name: {
           equals: clientName,
           mode: "insensitive"
@@ -374,10 +376,9 @@ export class PrismaLeadsRepository implements LeadsRepository {
       return existingByName;
     }
 
-    const count = await prisma.client.count();
     return prisma.client.create({
       data: {
-        clientNumber: String(1000 + count + 1),
+        clientNumber: await getNextClientNumber(prisma),
         name: clientName
       }
     });

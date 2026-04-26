@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
@@ -42,9 +43,8 @@ import { PrismaMattersRepository } from "./repositories/matters.repository";
 import { PrismaQuotesRepository } from "./repositories/quotes.repository";
 import { PrismaTasksRepository } from "./repositories/tasks.repository";
 import { PrismaUsersRepository } from "./repositories/users.repository";
-import { LocalAuthRepository } from "./repositories/local-auth.repository";
-import { ResilientAuthRepository } from "./repositories/resilient-auth.repository";
 import type { AuthRepository } from "./repositories/types";
+import { ACCESS_TOKEN_COOKIE_NAME } from "./core/auth/session-cookies";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -85,11 +85,7 @@ export async function buildApp() {
   const configuredWebOrigins = env.WEB_ORIGINS
     ? env.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [env.WEB_ORIGIN];
-  const allowedOrigins = new Set([
-    ...configuredWebOrigins,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173"
-  ]);
+  const allowedOrigins = new Set(configuredWebOrigins);
 
   const app = Fastify({
     logger: {
@@ -103,15 +99,8 @@ export async function buildApp() {
 
   app.decorate("config", env);
   app.decorate("errors", { AppError });
-  const authRepository = new ResilientAuthRepository(
-    new PrismaAuthRepository(prisma),
-    env.APP_ENV === "development" && LocalAuthRepository.isAvailable()
-      ? new LocalAuthRepository()
-      : null,
-    app.log
-  );
   app.decorate("repositories", {
-    auth: authRepository,
+    auth: new PrismaAuthRepository(prisma),
     clients: new PrismaClientsRepository(prisma),
     commissions: new PrismaCommissionsRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
@@ -147,14 +136,19 @@ export async function buildApp() {
 
       callback(new Error("Origin not allowed."), false);
     },
-    credentials: false
+    credentials: true
   });
   await app.register(rateLimit, {
     max: 100,
     timeWindow: "1 minute"
   });
+  await app.register(cookie);
   await app.register(jwt, {
-    secret: env.JWT_ACCESS_SECRET
+    secret: env.JWT_ACCESS_SECRET,
+    cookie: {
+      cookieName: ACCESS_TOKEN_COOKIE_NAME,
+      signed: false
+    }
   });
 
   registerErrorHandler(app);

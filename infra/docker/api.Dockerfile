@@ -13,6 +13,8 @@ RUN npm ci
 
 COPY packages/contracts packages/contracts
 COPY apps/api apps/api
+COPY apps/web/package.json apps/web/package.json
+COPY apps/web/src/features/tasks apps/web/src/features/tasks
 
 RUN npm run db:generate --workspace @sige/api
 RUN npm run build --workspace @sige/contracts

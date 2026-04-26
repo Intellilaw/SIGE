@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { APP_NAME, APP_VERSION_LABEL } from "@sige/contracts";
+import { APP_VERSION_TEXT } from "@sige/contracts";
 
 import { useAuth } from "./AuthContext";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
@@ -20,9 +20,7 @@ export function EntryPage() {
           </div>
 
           <h1 className="entry-title">Intranet</h1>
-          <p className="entry-version">
-            {APP_NAME} {APP_VERSION_LABEL}
-          </p>
+          <p className="entry-version">{APP_VERSION_TEXT}</p>
           <p className="entry-subtitle">Sistema Integral de Administracion Empresarial</p>
 
           <div className="entry-actions">

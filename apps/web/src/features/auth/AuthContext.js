@@ -3,17 +3,12 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, persistAuthTokens } from "../../api/http-client";
 const AuthContext = createContext(null);
 function persistSession(response) {
-    persistAuthTokens(response.tokens);
+    persistAuthTokens();
 }
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     useEffect(() => {
-        const token = window.localStorage.getItem("sige.accessToken");
-        if (!token) {
-            setLoading(false);
-            return;
-        }
         apiGet("/auth/me")
             .then((profile) => setUser(profile))
             .catch(() => {
@@ -24,9 +19,7 @@ export function AuthProvider({ children }) {
     }, []);
     useEffect(() => {
         const handleAuthStorageChange = () => {
-            if (!window.localStorage.getItem("sige.accessToken")) {
-                setUser(null);
-            }
+            setUser(null);
         };
         window.addEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
         return () => window.removeEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
@@ -45,6 +38,7 @@ export function AuthProvider({ children }) {
         setUser(response.user);
     }
     function logout() {
+        void apiPost("/auth/logout", {}).catch(() => undefined);
         clearAuthTokens();
         setUser(null);
     }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import type { Client, Matter, TaskItem, TaskState, TaskTrackingRecord } from "@sige/contracts";
+import type { Client, Matter, TaskItem, TaskState, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -18,7 +18,7 @@ type MatterTaskView = Omit<TaskItem, "id"> & {
   trackLabel: string;
   sourceLabel: string;
   isMatterFallback?: boolean;
-  sourceType: "task" | "tracking" | "matter";
+  sourceType: "task" | "tracking" | "term" | "matter";
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -214,6 +214,48 @@ function buildTrackingRecordTaskMap(
   return taskMap;
 }
 
+function buildTermTaskMap(terms: TaskTerm[], sourcePrefix: string, includeCompleted = false) {
+  const taskMap = new Map<string, MatterTaskView[]>();
+  const filteredTerms = terms
+    .filter((term) => (includeCompleted ? true : term.status === "pendiente" && !term.deletedAt))
+    .slice()
+    .sort((left, right) => {
+      const leftDate = toDateInput(left.dueDate ?? left.termDate);
+      const rightDate = toDateInput(right.dueDate ?? right.termDate);
+      return leftDate.localeCompare(rightDate);
+    });
+
+  filteredTerms.forEach((term) => {
+    const trackLabel = "Terminos";
+    const view: MatterTaskView = {
+      id: term.id,
+      moduleId: term.moduleId,
+      trackId: "legacy-term",
+      clientName: term.clientName,
+      matterId: term.matterId,
+      matterNumber: term.matterNumber,
+      subject: term.pendingTaskLabel || term.eventName || term.subject || trackLabel,
+      responsible: term.responsible,
+      dueDate: term.dueDate ?? term.termDate ?? "",
+      state: term.status === "pendiente" ? "PENDING" : "COMPLETED",
+      recurring: Boolean(term.recurring),
+      createdAt: term.createdAt,
+      updatedAt: term.updatedAt,
+      trackLabel,
+      sourceLabel: `${sourcePrefix}: ${trackLabel}`,
+      sourceType: "term"
+    };
+
+    addTaskViewToMap(
+      taskMap,
+      [term.matterId ?? "", term.matterNumber ?? "", term.matterIdentifier ?? ""],
+      view
+    );
+  });
+
+  return taskMap;
+}
+
 function buildMatterFallbackTask(matter: Matter, sourcePrefix: string): MatterTaskView | null {
   if (!normalizeText(matter.nextAction)) {
     return null;
@@ -316,6 +358,7 @@ export function ExecutionTeamWorkspace({
   const [clients, setClients] = useState<Client[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
+  const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [clientSearch, setClientSearch] = useState("");
@@ -336,12 +379,20 @@ export function ExecutionTeamWorkspace({
       setErrorMessage(null);
 
       try {
-        const [loadedMatters, loadedDeleted, loadedClients, loadedTasks, loadedTrackingRecords] = await Promise.all([
+        const [
+          loadedMatters,
+          loadedDeleted,
+          loadedClients,
+          loadedTasks,
+          loadedTrackingRecords,
+          loadedTerms
+        ] = await Promise.all([
           apiGet<Matter[]>("/matters"),
           apiGet<Matter[]>("/matters/recycle-bin"),
           apiGet<Client[]>("/clients"),
           apiGet<TaskItem[]>(`/tasks/items?moduleId=${currentModule.moduleId}`),
-          apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`)
+          apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
+          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`)
         ]);
 
         const teamMatters = loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team);
@@ -350,6 +401,7 @@ export function ExecutionTeamWorkspace({
         setClients(loadedClients);
         setTasks(loadedTasks);
         setTrackingRecords(loadedTrackingRecords);
+        setTerms(loadedTerms);
         setActiveMatters(sortActiveMatters(teamMatters, loadedClients));
         setDeletedMatters(sortDeletedMatters(teamDeleted));
       } catch (error) {
@@ -383,13 +435,21 @@ export function ExecutionTeamWorkspace({
     () => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, true),
     [trackingRecords, trackLabels, sourcePrefix]
   );
+  const activeTermMap = useMemo(
+    () => buildTermTaskMap(terms, sourcePrefix),
+    [terms, sourcePrefix]
+  );
+  const allTermMap = useMemo(
+    () => buildTermTaskMap(terms, sourcePrefix, true),
+    [terms, sourcePrefix]
+  );
   const activeTaskMap = useMemo(
-    () => mergeTaskMaps(activeTrackingMap, activeTaskItemMap),
-    [activeTrackingMap, activeTaskItemMap]
+    () => mergeTaskMaps(activeTermMap, activeTrackingMap, activeTaskItemMap),
+    [activeTermMap, activeTrackingMap, activeTaskItemMap]
   );
   const allTaskMap = useMemo(
-    () => mergeTaskMaps(allTrackingMap, allTaskItemMap),
-    [allTrackingMap, allTaskItemMap]
+    () => mergeTaskMaps(allTermMap, allTrackingMap, allTaskItemMap),
+    [allTermMap, allTrackingMap, allTaskItemMap]
   );
 
   const searchQuery = normalizeComparableText(clientSearch);
@@ -553,6 +613,26 @@ export function ExecutionTeamWorkspace({
           items
             .map((record) => (record.id === updated.id ? updated : record))
             .sort((left, right) => (left.dueDate ?? "").localeCompare(right.dueDate ?? ""))
+        );
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+      }
+      return;
+    }
+
+    if (task.sourceType === "term") {
+      try {
+        const updated = await apiPatch<TaskTerm | null>(`/tasks/terms/${task.id}`, {
+          status: state === "COMPLETED" ? "presentado" : "pendiente"
+        });
+        if (!updated) {
+          return;
+        }
+
+        setTerms((items) =>
+          items
+            .map((term) => (term.id === updated.id ? updated : term))
+            .sort((left, right) => (left.dueDate ?? left.termDate ?? "").localeCompare(right.dueDate ?? right.termDate ?? ""))
         );
       } catch (error) {
         setErrorMessage(toErrorMessage(error));

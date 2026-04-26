@@ -7,7 +7,11 @@ export class PrismaDashboardRepository implements DashboardRepository {
 
   public async getSummary() {
     const [clients, quotes, leads, matters, pendingTasks] = await Promise.all([
-      this.prisma.client.count(),
+      this.prisma.client.count({
+        where: {
+          deletedAt: null
+        }
+      }),
       this.prisma.quote.count(),
       this.prisma.lead.count(),
       this.prisma.matter.count(),
