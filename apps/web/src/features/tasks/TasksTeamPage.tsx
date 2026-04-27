@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import type { Client, Matter, TaskAdditionalTask, TaskItem, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import type { Client, Matter, TaskAdditionalTask, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -112,7 +112,6 @@ export function TasksTeamPage() {
 
   const [clients, setClients] = useState<Client[]>([]);
   const [matters, setMatters] = useState<Matter[]>([]);
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [additionalTasks, setAdditionalTasks] = useState<TaskAdditionalTask[]>([]);
@@ -132,10 +131,9 @@ export function TasksTeamPage() {
       setLoading(true);
 
       try {
-        const [loadedClients, loadedMatters, loadedTasks, loadedTracking, loadedTerms, loadedAdditional] = await Promise.all([
+        const [loadedClients, loadedMatters, loadedTracking, loadedTerms, loadedAdditional] = await Promise.all([
           apiGet<Client[]>("/clients"),
           apiGet<Matter[]>("/matters"),
-          apiGet<TaskItem[]>(`/tasks/items?moduleId=${currentModule.moduleId}`),
           apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
           apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`),
           apiGet<TaskAdditionalTask[]>(`/tasks/additional?moduleId=${currentModule.moduleId}`)
@@ -143,7 +141,6 @@ export function TasksTeamPage() {
 
         setClients(loadedClients);
         setMatters(loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team));
-        setTasks(loadedTasks);
         setTrackingRecords(loadedTracking);
         setTerms(loadedTerms);
         setAdditionalTasks(loadedAdditional);
@@ -168,44 +165,6 @@ export function TasksTeamPage() {
     () => new Map(legacyConfig?.tables.map((table) => [table.slug, table]) ?? []),
     [legacyConfig]
   );
-
-  const trackLabels = useMemo(
-    () => new Map(module?.definition.tracks.map((track) => [track.id, track.label]) ?? []),
-    [module]
-  );
-
-  function buildTaskItemRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
-    return tasks
-      .filter((task) => matchesResponsible(task.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []))
-      .filter((task) =>
-        belongsToTimeframe({
-          state: task.state === "COMPLETED" ? "closed" : "open",
-          date: toDateInput(task.dueDate)
-        }, timeframe)
-      )
-      .map((task) => {
-        const matter =
-          matterLookup.get(normalizeText(task.matterId)) ??
-          matterLookup.get(normalizeText(task.matterNumber));
-        const dueDate = toDateInput(task.dueDate);
-        const completionDate = toDateInput(task.updatedAt) || dueDate;
-        const highlighted = task.state !== "COMPLETED" && (!task.subject || !task.responsible || !dueDate || dueDate <= getLocalDateInput());
-
-        return {
-          taskId: `item-${task.id}`,
-          clientNumber: getEffectiveClientNumber(matter, clients),
-          clientName: matter?.clientName || task.clientName || "-",
-          subject: matter?.subject || task.subject || "-",
-          specificProcess: matter?.specificProcess || "-",
-          taskLabel: task.subject || trackLabels.get(task.trackId) || task.trackId,
-          typeLabel: task.state === "COMPLETED" ? "Completada" : highlighted ? "Vencida / incompleta" : "Fecha compromiso",
-          displayDate: task.state === "COMPLETED" ? completionDate : dueDate,
-          originLabel: trackLabels.get(task.trackId) || task.trackId,
-          originPath: `/app/tasks/${slug}`,
-          highlighted
-        };
-      });
-  }
 
   function buildTrackingRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
     return trackingRecords
@@ -239,16 +198,18 @@ export function TasksTeamPage() {
 
   function buildTermRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
     return terms
+      .filter((term) => !term.sourceRecordId)
       .filter((term) => matchesResponsible(term.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []))
       .filter((term) =>
         belongsToTimeframe({
-          state: term.status === "concluida" ? "closed" : "open",
+          state: term.status === "concluida" || term.status === "presentado" ? "closed" : "open",
           date: toDateInput(term.termDate || term.dueDate)
         }, timeframe)
       )
       .map((term) => {
         const dueDate = toDateInput(term.termDate || term.dueDate);
-        const highlighted = term.status !== "concluida" && (!term.responsible || !dueDate || dueDate <= getLocalDateInput() || !isVerificationComplete(term));
+        const completed = term.status === "concluida" || term.status === "presentado";
+        const highlighted = !completed && (!term.responsible || !dueDate || dueDate <= getLocalDateInput() || !isVerificationComplete(term));
 
         return {
           taskId: `term-${term.id}`,
@@ -300,7 +261,6 @@ export function TasksTeamPage() {
 
   function buildRows(member: TaskDashboardMember, timeframe: DashboardTimeframe) {
     return [
-      ...buildTaskItemRows(member, timeframe),
       ...buildTrackingRows(member, timeframe),
       ...buildTermRows(member, timeframe),
       ...buildAdditionalRows(member, timeframe)

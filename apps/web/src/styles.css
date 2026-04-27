@@ -2426,7 +2426,7 @@ textarea {
 }
 
 .execution-panel {
-  width: min(560px, 100%);
+  width: min(720px, 100%);
   height: 100vh;
   padding: 24px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
@@ -2507,6 +2507,72 @@ textarea {
   border-radius: 18px;
   background: rgba(29, 78, 216, 0.06);
   color: #1d4ed8;
+}
+
+.execution-selector-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.execution-selector-form,
+.execution-selector-summary,
+.execution-selector-target-list {
+  display: grid;
+  gap: 14px;
+}
+
+.execution-selector-matter {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.execution-selector-matter h4,
+.execution-selector-summary h3 {
+  margin: 0;
+  color: #243b53;
+}
+
+.execution-selector-matter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.execution-selector-span {
+  grid-column: 1 / -1;
+}
+
+.execution-selector-summary {
+  padding: 18px;
+  border-radius: 20px;
+  background: #f1f5f9;
+}
+
+.execution-selector-target-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(31, 41, 51, 0.04);
+}
+
+.execution-selector-target-card input {
+  width: 100%;
+  border: 1px solid #d9e2ec;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.execution-selector-submit {
+  justify-self: start;
 }
 
 .execution-task-list {
@@ -2885,6 +2951,22 @@ textarea {
   align-items: start;
 }
 
+.tasks-distributor-tabs {
+  margin-top: 0;
+}
+
+.tasks-distributor-active,
+.tasks-distributor-config,
+.tasks-distributor-config-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.tasks-distributor-config-layout {
+  grid-template-columns: minmax(320px, 1.1fr) minmax(280px, 0.9fr);
+  align-items: start;
+}
+
 .tasks-distributor-card,
 .tasks-distributor-target-card {
   display: grid;
@@ -2940,6 +3022,102 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.tasks-distributor-search {
+  max-width: 420px;
+}
+
+.tasks-distributor-active-table {
+  min-width: 1500px;
+}
+
+.tasks-distributor-date {
+  display: block;
+  color: #64748b;
+  font-size: 0.82rem;
+  margin: 6px 0 10px;
+}
+
+.tasks-distributor-small-button {
+  padding: 7px 11px;
+  font-size: 0.78rem;
+}
+
+.tasks-active-target-list,
+.tasks-active-target-fields,
+.tasks-distributor-table-count-grid,
+.tasks-distributor-entry-name-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tasks-active-target-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.tasks-active-target-card.is-danger {
+  border-color: rgba(180, 35, 24, 0.22);
+  background: #fff5f5;
+}
+
+.tasks-active-target-card.is-completed {
+  border-color: rgba(15, 118, 110, 0.22);
+  background: #f0fdf4;
+}
+
+.tasks-active-target-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.tasks-active-target-head span,
+.tasks-active-target-head small {
+  display: block;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.tasks-active-target-fields {
+  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.7fr) minmax(130px, 0.7fr);
+}
+
+.tasks-distributor-table-count-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.tasks-distributor-table-count-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.tasks-distributor-count-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tasks-distributor-count-controls span {
+  min-width: 28px;
+  text-align: center;
+  font-weight: 900;
+  color: #243b53;
+}
+
+.tasks-distributor-catalog-row {
+  grid-template-columns: 1fr auto auto;
+  align-items: start;
 }
 
 .finance-tabs-panel {
@@ -3582,7 +3760,10 @@ textarea {
   .quote-template-summary-grid,
   .commissions-layout,
   .commissions-group-grid,
-  .commissions-snapshot-grid {
+  .commissions-snapshot-grid,
+  .execution-selector-layout,
+  .tasks-distributor-config-layout,
+  .tasks-active-target-fields {
     grid-template-columns: 1fr;
   }
 

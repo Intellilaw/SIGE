@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import type { Client, Matter, TaskItem, TaskState, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import type { Client, Matter, TaskDistributionEvent, TaskState, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "./execution-config";
 
@@ -13,12 +14,24 @@ type MatterPatchPayload = {
   notes?: string | null;
 };
 
-type MatterTaskView = Omit<TaskItem, "id"> & {
+type MatterTaskView = {
   id: string;
+  moduleId: string;
+  trackId: string;
+  clientName: string;
+  matterId?: string;
+  matterNumber?: string;
+  subject: string;
+  responsible: string;
+  dueDate: string;
+  state: TaskState;
+  recurring: boolean;
+  createdAt?: string;
+  updatedAt?: string;
   trackLabel: string;
   sourceLabel: string;
   isMatterFallback?: boolean;
-  sourceType: "task" | "tracking" | "term" | "matter";
+  sourceType: "tracking" | "term" | "matter";
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -141,32 +154,6 @@ function mergeTaskMaps(...maps: Map<string, MatterTaskView[]>[]) {
   return merged;
 }
 
-function buildMatterTaskMap(
-  tasks: TaskItem[],
-  trackLabels: Map<string, string>,
-  sourcePrefix: string,
-  includeCompleted = false
-) {
-  const taskMap = new Map<string, MatterTaskView[]>();
-  const filteredTasks = tasks
-    .filter((task) => (includeCompleted ? true : task.state !== "COMPLETED"))
-    .slice()
-    .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
-
-  filteredTasks.forEach((task) => {
-    const trackLabel = trackLabels.get(task.trackId) ?? task.trackId;
-    const view: MatterTaskView = {
-      ...task,
-      trackLabel,
-      sourceLabel: `${sourcePrefix}: ${trackLabel}`,
-      sourceType: "task"
-    };
-    addTaskViewToMap(taskMap, [task.matterId ?? "", task.matterNumber ?? ""], view);
-  });
-
-  return taskMap;
-}
-
 function buildTrackingRecordTaskMap(
   records: TaskTrackingRecord[],
   trackLabels: Map<string, string>,
@@ -217,6 +204,7 @@ function buildTrackingRecordTaskMap(
 function buildTermTaskMap(terms: TaskTerm[], sourcePrefix: string, includeCompleted = false) {
   const taskMap = new Map<string, MatterTaskView[]>();
   const filteredTerms = terms
+    .filter((term) => !term.sourceRecordId)
     .filter((term) => (includeCompleted ? true : term.status === "pendiente" && !term.deletedAt))
     .slice()
     .sort((left, right) => {
@@ -256,42 +244,13 @@ function buildTermTaskMap(terms: TaskTerm[], sourcePrefix: string, includeComple
   return taskMap;
 }
 
-function buildMatterFallbackTask(matter: Matter, sourcePrefix: string): MatterTaskView | null {
-  if (!normalizeText(matter.nextAction)) {
-    return null;
-  }
-
-  return {
-    id: `matter-next-action-${matter.id}`,
-    moduleId: matter.executionLinkedModule ?? sourcePrefix,
-    trackId: "matter-next-action",
-    clientName: matter.clientName,
-    matterId: matter.id,
-    matterNumber: matter.matterNumber,
-    subject: matter.nextAction ?? "",
-    responsible: matter.commissionAssignee ?? "",
-    dueDate: matter.nextActionDueAt ?? "",
-    state: "PENDING",
-    recurring: false,
-    trackLabel: matter.nextActionSource ?? "Asuntos Activos",
-    sourceLabel: matter.nextActionSource ?? `${sourcePrefix}: Asuntos Activos`,
-    isMatterFallback: true,
-    sourceType: "matter"
-  };
-}
-
-function getMatterTasks(matter: Matter, taskMap: Map<string, MatterTaskView[]>, sourcePrefix: string) {
+function getMatterTasks(matter: Matter, taskMap: Map<string, MatterTaskView[]>) {
   const linkedTasks =
     taskMap.get(normalizeText(matter.id)) ??
     taskMap.get(normalizeText(matter.matterNumber)) ??
     taskMap.get(normalizeText(matter.matterIdentifier)) ??
     [];
-  if (linkedTasks.length > 0) {
-    return linkedTasks;
-  }
-
-  const fallbackTask = buildMatterFallbackTask(matter, sourcePrefix);
-  return fallbackTask ? [fallbackTask] : [];
+  return linkedTasks;
 }
 
 function getNextBusinessDate() {
@@ -352,13 +311,14 @@ export function ExecutionTeamWorkspace({
   const { user } = useAuth();
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const visibleModules = getVisibleExecutionModules(user);
+  const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
 
   const [activeMatters, setActiveMatters] = useState<Matter[]>([]);
   const [deletedMatters, setDeletedMatters] = useState<Matter[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
+  const [distributionEvents, setDistributionEvents] = useState<TaskDistributionEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [clientSearch, setClientSearch] = useState("");
@@ -383,25 +343,25 @@ export function ExecutionTeamWorkspace({
           loadedMatters,
           loadedDeleted,
           loadedClients,
-          loadedTasks,
           loadedTrackingRecords,
-          loadedTerms
+          loadedTerms,
+          loadedDistributionEvents
         ] = await Promise.all([
           apiGet<Matter[]>("/matters"),
           apiGet<Matter[]>("/matters/recycle-bin"),
           apiGet<Client[]>("/clients"),
-          apiGet<TaskItem[]>(`/tasks/items?moduleId=${currentModule.moduleId}`),
           apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
-          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`)
+          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`),
+          apiGet<TaskDistributionEvent[]>(`/tasks/distribution-events?moduleId=${currentModule.moduleId}`)
         ]);
 
         const teamMatters = loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team);
         const teamDeleted = loadedDeleted.filter((matter) => matter.responsibleTeam === currentModule.team);
 
         setClients(loadedClients);
-        setTasks(loadedTasks);
         setTrackingRecords(loadedTrackingRecords);
         setTerms(loadedTerms);
+        setDistributionEvents(loadedDistributionEvents);
         setActiveMatters(sortActiveMatters(teamMatters, loadedClients));
         setDeletedMatters(sortDeletedMatters(teamDeleted));
       } catch (error) {
@@ -419,14 +379,6 @@ export function ExecutionTeamWorkspace({
     [module]
   );
   const sourcePrefix = module?.shortLabel ?? "Ejecucion";
-  const activeTaskItemMap = useMemo(
-    () => buildMatterTaskMap(tasks, trackLabels, sourcePrefix),
-    [tasks, trackLabels, sourcePrefix]
-  );
-  const allTaskItemMap = useMemo(
-    () => buildMatterTaskMap(tasks, trackLabels, sourcePrefix, true),
-    [tasks, trackLabels, sourcePrefix]
-  );
   const activeTrackingMap = useMemo(
     () => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix),
     [trackingRecords, trackLabels, sourcePrefix]
@@ -444,12 +396,12 @@ export function ExecutionTeamWorkspace({
     [terms, sourcePrefix]
   );
   const activeTaskMap = useMemo(
-    () => mergeTaskMaps(activeTermMap, activeTrackingMap, activeTaskItemMap),
-    [activeTermMap, activeTrackingMap, activeTaskItemMap]
+    () => mergeTaskMaps(activeTermMap, activeTrackingMap),
+    [activeTermMap, activeTrackingMap]
   );
   const allTaskMap = useMemo(
-    () => mergeTaskMaps(allTermMap, allTrackingMap, allTaskItemMap),
-    [allTermMap, allTrackingMap, allTaskItemMap]
+    () => mergeTaskMaps(allTermMap, allTrackingMap),
+    [allTermMap, allTrackingMap]
   );
 
   const searchQuery = normalizeComparableText(clientSearch);
@@ -476,7 +428,7 @@ export function ExecutionTeamWorkspace({
     [deletedMatters, searchQuery]
   );
 
-  if (!module || !canAccess) {
+  if (!module || !canAccess || !legacyConfig) {
     return <Navigate to={fallbackPath} replace />;
   }
 
@@ -544,19 +496,23 @@ export function ExecutionTeamWorkspace({
   }
 
   async function handleCreateTask(payload: {
-    trackIds: string[];
-    subject: string;
+    eventName: string;
     responsible: string;
     dueDate: string;
-    state: TaskState;
+    targets: Array<{
+      tableCode: string;
+      taskName: string;
+      dueDate: string;
+      termDate: string;
+      reportedMonth: string;
+    }>;
   }) {
-    if (!panelMatter || !module) {
+    if (!panelMatter || !module || !legacyConfig) {
       return;
     }
 
     try {
-      const uniqueTrackIds = [...new Set(payload.trackIds)];
-      const eventName = payload.subject.trim() || panelMatter.subject || "Tarea de ejecucion";
+      const eventName = payload.eventName.trim() || panelMatter.subject || "Tarea de ejecucion";
 
       await apiPost("/tasks/distributions", {
         moduleId: module.moduleId,
@@ -569,21 +525,25 @@ export function ExecutionTeamWorkspace({
         matterIdentifier: panelMatter.matterIdentifier ?? null,
         eventName,
         responsible: payload.responsible,
-        targets: uniqueTrackIds.map((trackId) => {
-          const track = module.definition.tracks.find((candidate) => candidate.id === trackId);
-          const taskName = payload.subject.trim() || track?.label || eventName;
+        targets: payload.targets.map((target) => {
+          const table = legacyConfig.tables.find((candidate) => candidate.slug === target.tableCode);
+          const taskName = target.taskName.trim() || table?.title || eventName;
 
           return {
-            tableCode: trackId,
-            sourceTable: trackId,
-            tableLabel: track?.label ?? trackId,
+            tableCode: target.tableCode,
+            sourceTable: table?.sourceTable ?? target.tableCode,
+            tableLabel: table?.title ?? target.tableCode,
             taskName,
             dueDate: payload.dueDate,
-            status: payload.state === "COMPLETED" ? "presentado" : "pendiente",
+            termDate: table?.autoTerm ? target.termDate || payload.dueDate : target.termDate || null,
+            status: "pendiente",
             workflowStage: 1,
+            reportedMonth: target.reportedMonth || null,
+            createTerm: Boolean(table?.autoTerm),
             data: {
-              source: "execution-distributor",
-              recurring: Boolean(track?.recurring)
+              source: "execution-selector",
+              tableTitle: table?.title,
+              activeSource: "tasks-distributor"
             }
           };
         })
@@ -592,7 +552,9 @@ export function ExecutionTeamWorkspace({
       const loadedTrackingRecords = await apiGet<TaskTrackingRecord[]>(
         `/tasks/tracking-records?moduleId=${module.moduleId}`
       );
+      const loadedTerms = await apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${module.moduleId}`);
       setTrackingRecords(loadedTrackingRecords);
+      setTerms(loadedTerms);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     }
@@ -623,7 +585,7 @@ export function ExecutionTeamWorkspace({
     if (task.sourceType === "term") {
       try {
         const updated = await apiPatch<TaskTerm | null>(`/tasks/terms/${task.id}`, {
-          status: state === "COMPLETED" ? "presentado" : "pendiente"
+          status: state === "COMPLETED" ? "concluida" : "pendiente"
         });
         if (!updated) {
           return;
@@ -639,28 +601,9 @@ export function ExecutionTeamWorkspace({
       }
       return;
     }
-
-    if (task.sourceType !== "task") {
-      return;
-    }
-
-    try {
-      const updated = await apiPatch<TaskItem | null>(`/tasks/items/${task.id}/state`, { state });
-      if (!updated) {
-        return;
-      }
-
-      setTasks((items) =>
-        items
-          .map((task) => (task.id === updated.id ? updated : task))
-          .sort((left, right) => left.dueDate.localeCompare(right.dueDate))
-      );
-    } catch (error) {
-      setErrorMessage(toErrorMessage(error));
-    }
   }
 
-  const panelTasks = panelMatter ? getMatterTasks(panelMatter, allTaskMap, sourcePrefix) : [];
+  const panelTasks = panelMatter ? getMatterTasks(panelMatter, allTaskMap) : [];
 
   return (
     <section className="page-stack execution-page">
@@ -751,7 +694,7 @@ export function ExecutionTeamWorkspace({
                   <>
                     {filteredMatters.map((matter) => {
                       const clientNumber = getEffectiveClientNumber(matter, clients);
-                      const matterTasks = getMatterTasks(matter, activeTaskMap, sourcePrefix);
+                      const matterTasks = getMatterTasks(matter, activeTaskMap);
                       const validation = evaluateMatterRow(matter, clientNumber, matterTasks);
                       const rowClassName = validation.missing.length > 0 || validation.isOverdue
                         ? "execution-row-danger"
@@ -938,7 +881,7 @@ export function ExecutionTeamWorkspace({
                   </tr>
                 ) : (
                   filteredDeletedMatters.map((matter) => {
-                    const matterTasks = getMatterTasks(matter, allTaskMap, sourcePrefix);
+                    const matterTasks = getMatterTasks(matter, allTaskMap);
 
                     return (
                       <tr key={matter.id}>
@@ -991,7 +934,10 @@ export function ExecutionTeamWorkspace({
 
       <ExecutionTaskPanel
         module={module}
+        legacyConfig={legacyConfig}
+        distributionEvents={distributionEvents}
         matter={panelMatter}
+        clientNumber={panelMatter ? getEffectiveClientNumber(panelMatter, clients) : ""}
         mode={panelMode}
         tasks={panelTasks}
         userShortName={user?.shortName}

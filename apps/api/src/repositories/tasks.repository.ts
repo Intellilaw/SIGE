@@ -193,14 +193,63 @@ export class PrismaTasksRepository implements TasksRepository {
       }
     }).catch(() => null);
 
+    if (record) {
+      const termData: Prisma.TaskTermUpdateManyMutationInput = {};
+
+      if (payload.dueDate !== undefined) {
+        termData.dueDate = parseOptionalDateValue(payload.dueDate);
+      }
+      if (payload.termDate !== undefined) {
+        termData.termDate = parseOptionalDateValue(payload.termDate);
+      }
+      if (payload.responsible !== undefined) {
+        termData.responsible = payload.responsible;
+      }
+      if (payload.status !== undefined) {
+        termData.status = payload.status;
+      }
+      if (payload.reportedMonth !== undefined) {
+        termData.reportedMonth = normalizeOptionalText(payload.reportedMonth);
+      }
+      if (payload.deletedAt !== undefined) {
+        termData.deletedAt = parseOptionalDateValue(payload.deletedAt);
+      }
+
+      if (Object.keys(termData).length > 0) {
+        await this.prisma.taskTerm.updateMany({
+          where: {
+            OR: [
+              { sourceRecordId: record.id },
+              ...(record.termId ? [{ id: record.termId }] : [])
+            ]
+          },
+          data: termData
+        });
+      }
+    }
+
     return record ? mapTaskTrackingRecord(record) : null;
   }
 
   public async deleteTrackingRecord(recordId: string) {
-    await this.prisma.taskTrackingRecord.update({
+    const record = await this.prisma.taskTrackingRecord.update({
       where: { id: recordId },
       data: { deletedAt: new Date() }
     }).catch(() => null);
+
+    if (!record) {
+      return;
+    }
+
+    await this.prisma.taskTerm.updateMany({
+      where: {
+        OR: [
+          { sourceRecordId: record.id },
+          ...(record.termId ? [{ id: record.termId }] : [])
+        ]
+      },
+      data: { deletedAt: new Date() }
+    });
   }
 
   public async listTerms(moduleId: string) {
@@ -334,17 +383,19 @@ export class PrismaTasksRepository implements TasksRepository {
   public async createDistribution(payload: TaskDistributionWriteRecord) {
     const record = await this.prisma.$transaction(async (tx) => {
       const createdIds: Record<string, string> = {};
-      const targetTables = payload.targets.map((target) => getSourceTable(target));
+      const targetTables: string[] = [];
       const eventNamesPerTable: string[] = [];
 
-      for (const target of payload.targets) {
+      for (const [index, target] of payload.targets.entries()) {
         const sourceTable = getSourceTable(target);
+        const tableCode = normalizeRequiredText(target.tableCode) || sourceTable;
         const taskName = normalizeRequiredText(target.taskName) || payload.eventName;
+        targetTables.push(tableCode);
 
         const trackingRecord = await tx.taskTrackingRecord.create({
           data: {
             moduleId: payload.moduleId,
-            tableCode: normalizeRequiredText(target.tableCode) || sourceTable,
+            tableCode,
             sourceTable,
             matterId: normalizeOptionalText(payload.matterId),
             matterNumber: normalizeOptionalText(payload.matterNumber),
@@ -368,11 +419,14 @@ export class PrismaTasksRepository implements TasksRepository {
           }
         });
 
-        createdIds[sourceTable] = trackingRecord.id;
+        createdIds[`${tableCode}_${index}`] = trackingRecord.id;
+        createdIds[`${sourceTable}_${index}`] = trackingRecord.id;
+        createdIds[tableCode] = createdIds[tableCode] ?? trackingRecord.id;
+        createdIds[sourceTable] = createdIds[sourceTable] ?? trackingRecord.id;
         eventNamesPerTable.push(taskName);
 
         if (target.createTerm) {
-          await tx.taskTerm.create({
+          const term = await tx.taskTerm.create({
             data: {
               moduleId: payload.moduleId,
               sourceTable,
@@ -393,6 +447,14 @@ export class PrismaTasksRepository implements TasksRepository {
               reportedMonth: normalizeOptionalText(target.reportedMonth),
               data: toJsonValue(target.data) ?? {}
             }
+          });
+
+          createdIds[`term-${tableCode}_${index}`] = term.id;
+          createdIds[`term-${sourceTable}_${index}`] = term.id;
+
+          await tx.taskTrackingRecord.update({
+            where: { id: trackingRecord.id },
+            data: { termId: term.id }
           });
         }
       }

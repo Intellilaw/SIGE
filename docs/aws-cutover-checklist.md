@@ -94,6 +94,33 @@ npm.cmd run db:transfer --workspace @sige/api -- --mode restore --target-url "po
 2. redeploy the API if needed
 3. keep the frontend origin and API base URL aligned with the production host
 4. verify health checks and application startup logs
+5. run the AWS runtime guardrail before handing the environment back to users:
+
+```powershell
+npm.cmd run aws:verify-runtime --workspace @sige/api -- `
+  --app-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:sige-prod-api-config-ALU8io" `
+  --rds-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:rds!db-4d317298-c0ba-44a8-97f0-02ab35a3dc75-ZkgZoU" `
+  --api-base-url "https://api.pruebasb.online"
+```
+
+For a full login smoke test, set these only in the shell session before running the command:
+
+```powershell
+$env:SIGE_VERIFY_LOGIN_IDENTIFIER="Eduardo Rusconi"
+$env:SIGE_VERIFY_LOGIN_PASSWORD="REPLACE_WITH_TEST_PASSWORD"
+```
+
+The guardrail fails the deployment if the API secret is malformed, if `DATABASE_URL` no longer matches the active RDS secret, or if the production health endpoint fails.
+
+If the command runs from inside the AWS VPC or from a runner with network access to the private RDS endpoint, add `--direct-db` to also open a Prisma connection directly from the runner:
+
+```powershell
+npm.cmd run aws:verify-runtime --workspace @sige/api -- `
+  --app-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:sige-prod-api-config-ALU8io" `
+  --rds-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:rds!db-4d317298-c0ba-44a8-97f0-02ab35a3dc75-ZkgZoU" `
+  --api-base-url "https://api.pruebasb.online" `
+  --direct-db
+```
 
 ## 8. Smoke test after cutover
 

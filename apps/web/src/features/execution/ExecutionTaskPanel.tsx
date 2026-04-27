@@ -1,26 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Matter, TaskItem, TaskState } from "@sige/contracts";
+import type { Matter, TaskDistributionEvent, TaskState } from "@sige/contracts";
 
+import {
+  getCatalogTargetEntries,
+  getTableDisplayName,
+  type CatalogTargetEntry
+} from "../tasks/task-distribution-utils";
+import type { LegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import type { ExecutionModuleDescriptor } from "./execution-config";
 
-type MatterTaskView = TaskItem & {
-  trackLabel: string;
-  sourceLabel: string;
-  isMatterFallback?: boolean;
-  sourceType: "task" | "tracking" | "term" | "matter";
+type SelectorTargetEntry = CatalogTargetEntry & {
+  reportedMonth: string;
 };
 
-interface CreateTaskInput {
-  trackIds: string[];
+type MatterTaskView = {
+  id: string;
+  moduleId: string;
+  trackId: string;
+  clientName: string;
+  matterId?: string;
+  matterNumber?: string;
   subject: string;
   responsible: string;
   dueDate: string;
   state: TaskState;
+  recurring: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  trackLabel: string;
+  sourceLabel: string;
+  isMatterFallback?: boolean;
+  sourceType: "tracking" | "term" | "matter";
+};
+
+interface CreateTaskInput {
+  eventName: string;
+  responsible: string;
+  dueDate: string;
+  targets: Array<{
+    tableCode: string;
+    taskName: string;
+    dueDate: string;
+    termDate: string;
+    reportedMonth: string;
+  }>;
 }
 
 interface ExecutionTaskPanelProps {
   module: ExecutionModuleDescriptor;
+  legacyConfig: LegacyTaskModuleConfig;
+  distributionEvents: TaskDistributionEvent[];
   matter: Matter | null;
+  clientNumber?: string;
   mode: "create" | "history" | null;
   tasks: MatterTaskView[];
   userShortName?: string;
@@ -71,7 +102,10 @@ function getStateLabel(state: TaskState) {
 
 export function ExecutionTaskPanel({
   module,
+  legacyConfig,
+  distributionEvents,
   matter,
+  clientNumber,
   mode,
   tasks,
   userShortName,
@@ -80,20 +114,16 @@ export function ExecutionTaskPanel({
   onCreateTask,
   onUpdateState
 }: ExecutionTaskPanelProps) {
-  const tracks = module.definition.tracks;
-  const initialTrackId = tracks[0]?.id ?? "";
-  const initialLabel = tracks[0]?.label ?? "";
-
-  const [trackIds, setTrackIds] = useState<string[]>(initialTrackId ? [initialTrackId] : []);
-  const [subject, setSubject] = useState(initialLabel);
+  const [selectedEventId, setSelectedEventId] = useState("");
+  const [selectorTargets, setSelectorTargets] = useState<SelectorTargetEntry[]>([]);
   const [responsible, setResponsible] = useState(userShortName || module.defaultResponsible);
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
 
-  const selectedTracks = useMemo(
-    () => tracks.filter((track) => trackIds.includes(track.id)),
-    [trackIds, tracks]
+  const selectedEvent = useMemo(
+    () => distributionEvents.find((event) => event.id === selectedEventId),
+    [distributionEvents, selectedEventId]
   );
 
   useEffect(() => {
@@ -101,34 +131,47 @@ export function ExecutionTaskPanel({
       return;
     }
 
-    const defaultTrack = tracks[0];
-    setTrackIds(defaultTrack?.id ? [defaultTrack.id] : []);
-    setSubject(defaultTrack?.label ?? matter.subject);
+    setSelectedEventId("");
+    setSelectorTargets([]);
     setResponsible(userShortName || module.defaultResponsible);
     setDueDate(addBusinessDays(new Date(), 3));
-  }, [matter?.id, mode, module.defaultResponsible, tracks, userShortName, matter?.subject]);
+  }, [matter?.id, mode, module.defaultResponsible, userShortName]);
+
+  function handleEventSelect(eventId: string) {
+    setSelectedEventId(eventId);
+    const event = distributionEvents.find((candidate) => candidate.id === eventId);
+    setSelectorTargets(event ? getCatalogTargetEntries(event, legacyConfig).map((target) => ({ ...target, reportedMonth: "" })) : []);
+  }
 
   if (!matter || !mode) {
     return null;
   }
 
   const activeMatter = matter;
+  const missingTargetNames = selectorTargets.some((target) => !target.taskName.trim());
 
   async function handleCreate() {
-    if (selectedTracks.length === 0) {
+    if (!selectedEvent || selectorTargets.length === 0 || missingTargetNames) {
       return;
     }
 
     setSubmitting(true);
     try {
       await onCreateTask({
-        trackIds,
-        subject: subject.trim() || selectedTracks[0]?.label || activeMatter.subject,
+        eventName: selectedEvent.name,
         responsible: responsible.trim() || module.defaultResponsible,
         dueDate,
-        state: "PENDING"
+        targets: selectorTargets.map((target) => ({
+          tableCode: target.tableSlug,
+          taskName: target.taskName.trim() || selectedEvent.name,
+          dueDate,
+          termDate: dueDate,
+          reportedMonth: target.reportedMonth
+        }))
       });
       onModeChange("history");
+      setSelectedEventId("");
+      setSelectorTargets([]);
     } finally {
       setSubmitting(false);
     }
@@ -149,13 +192,13 @@ export function ExecutionTaskPanel({
         className="execution-panel"
         role="dialog"
         aria-modal="true"
-        aria-label={mode === "create" ? "Distribuidor de tareas" : "Lista de tareas"}
+        aria-label={mode === "create" ? "Selector de Tareas" : "Lista de tareas"}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="execution-panel-header">
           <div>
             <p className="eyebrow">Ejecucion / {module.shortLabel}</p>
-            <h3>{mode === "create" ? "Distribuidor de tareas" : "Lista de tareas"}</h3>
+            <h3>{mode === "create" ? "Selector de Tareas" : "Lista de tareas"}</h3>
             <p className="muted execution-panel-copy">
               {matter.clientName || "Cliente sin nombre"} - {matter.subject || "Asunto sin nombre"}
             </p>
@@ -184,67 +227,116 @@ export function ExecutionTaskPanel({
 
         {mode === "create" ? (
           <div className="execution-panel-body execution-panel-form">
-            <label className="form-field">
-              <span>Tablas de origen / destino</span>
-              <div className="execution-track-picker">
-                {tracks.map((track) => {
-                  const checked = trackIds.includes(track.id);
+            <div className="execution-selector-layout">
+              <div className="execution-selector-form">
+                <label className="form-field">
+                  <span>1. Seleccionar Tarea Maestra</span>
+                  <select value={selectedEventId} onChange={(event) => handleEventSelect(event.target.value)}>
+                    <option value="">Selecciona una tarea configurada</option>
+                    {distributionEvents.map((event) => (
+                      <option key={event.id} value={event.id}>{event.name}</option>
+                    ))}
+                  </select>
+                </label>
 
-                  return (
-                    <label key={track.id} className="execution-track-option">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => {
-                          if (event.target.checked) {
-                            setTrackIds((current) => [...new Set([...current, track.id])]);
-                            setSubject((current) => current || track.label);
-                            return;
-                          }
-
-                          setTrackIds((current) => current.filter((currentTrackId) => currentTrackId !== track.id));
-                        }}
-                      />
-                      <span>{track.label}</span>
+                <div className="execution-selector-matter">
+                  <h4>Detalles del Asunto (Lectura)</h4>
+                  <div className="execution-selector-matter-grid">
+                    <label className="form-field">
+                      <span>ID Asunto</span>
+                      <input readOnly value={activeMatter.matterIdentifier || activeMatter.matterNumber || ""} />
                     </label>
-                  );
-                })}
+                    <label className="form-field">
+                      <span>No. Cliente</span>
+                      <input readOnly value={clientNumber || activeMatter.clientNumber || ""} />
+                    </label>
+                    <label className="form-field execution-selector-span">
+                      <span>Cliente</span>
+                      <input readOnly value={activeMatter.clientName || ""} />
+                    </label>
+                    <label className="form-field execution-selector-span">
+                      <span>Asunto / Expediente</span>
+                      <input readOnly value={activeMatter.subject || ""} />
+                    </label>
+                    <label className="form-field execution-selector-span">
+                      <span>Proceso específico</span>
+                      <input readOnly value={activeMatter.specificProcess || ""} />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="execution-panel-grid">
+                  <label className="form-field">
+                    <span>Responsable</span>
+                    <input value={responsible} onChange={(event) => setResponsible(event.target.value)} />
+                  </label>
+
+                  <label className="form-field">
+                    <span>Fecha compromiso</span>
+                    <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  className="primary-button execution-selector-submit"
+                  onClick={() => void handleCreate()}
+                  disabled={submitting || !selectedEvent || selectorTargets.length === 0 || !dueDate || missingTargetNames}
+                >
+                  {submitting ? "Procesando..." : "Distribuir Tareas"}
+                </button>
               </div>
-            </label>
 
-            <label className="form-field">
-              <span>Nombre de la tarea</span>
-              <input value={subject} onChange={(event) => setSubject(event.target.value)} />
-            </label>
-
-            <div className="execution-panel-grid">
-              <label className="form-field">
-                <span>Responsable</span>
-                <input value={responsible} onChange={(event) => setResponsible(event.target.value)} />
-              </label>
-
-              <label className="form-field">
-                <span>Fecha compromiso</span>
-                <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-              </label>
-            </div>
-
-            <div className="execution-panel-note">
-              <strong>
-                {selectedTracks.length} tabla{selectedTracks.length === 1 ? "" : "s"} seleccionada{selectedTracks.length === 1 ? "" : "s"}
-              </strong>
-              <span>Se creara un registro pendiente por cada tabla seleccionada, como en el distribuidor.</span>
-            </div>
-
-            <div className="form-actions">
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void handleCreate()}
-                disabled={submitting || selectedTracks.length === 0 || !dueDate}
-              >
-                {submitting ? "Guardando..." : "Crear Tarea"}
-              </button>
+              <div className="execution-selector-summary">
+                <h3>Resumen de Envío</h3>
+                {selectorTargets.length === 0 ? (
+                  <div className="centered-inline-message">Selecciona una tarea para ver las tablas destino.</div>
+                ) : (
+                  <div className="execution-selector-target-list">
+                    {selectorTargets.map((target) => (
+                      <article key={target.id} className="execution-selector-target-card">
+                        <div className="tasks-distributor-target-head">
+                          <strong>{getTableDisplayName(legacyConfig, target.tableSlug)}</strong>
+                          <button
+                            type="button"
+                            className="danger-button tasks-distributor-small-button"
+                            onClick={() => setSelectorTargets((current) => current.filter((candidate) => candidate.id !== target.id))}
+                          >
+                            Quitar
+                          </button>
+                        </div>
+                        <input
+                          value={target.taskName}
+                          onChange={(event) =>
+                            setSelectorTargets((current) =>
+                              current.map((candidate) =>
+                                candidate.id === target.id ? { ...candidate, taskName: event.target.value } : candidate
+                              )
+                            )
+                          }
+                          placeholder="Nombre del registro"
+                        />
+                        {legacyConfig.tables.find((table) => table.slug === target.tableSlug)?.showReportedPeriod ? (
+                          <label className="form-field">
+                            <span>{legacyConfig.tables.find((table) => table.slug === target.tableSlug)?.reportedPeriodLabel ?? "Periodo reportado"}</span>
+                            <input
+                              type="month"
+                              value={target.reportedMonth}
+                              onChange={(event) =>
+                                setSelectorTargets((current) =>
+                                  current.map((candidate) =>
+                                    candidate.id === target.id ? { ...candidate, reportedMonth: event.target.value } : candidate
+                                  )
+                                )
+                              }
+                            />
+                          </label>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (
@@ -269,7 +361,7 @@ export function ExecutionTaskPanel({
 
                     {task.isMatterFallback ? (
                       <p className="muted execution-task-meta">
-                        Esta fila viene del origen del asunto. Para gestionarla desde Ejecucion, crea una tarea en el distribuidor.
+                        Esta fila viene del origen del asunto. Para gestionarla desde Ejecucion, crea una tarea en el Selector de Tareas.
                       </p>
                     ) : (
                       <div className="execution-task-actions">

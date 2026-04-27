@@ -144,7 +144,8 @@ export function TaskTermsPage() {
                 visibleTerms.map((term) => {
                   const missingVerification = moduleConfig.verificationColumns.some((column) => !isYes(term.verification[column.key]));
                   const date = toDateInput(term.termDate || term.dueDate);
-                  const red = term.status !== "concluida" && (!term.responsible || !date || date <= todayInput() || missingVerification);
+                  const completed = term.status === "concluida" || term.status === "presentado";
+                  const red = !completed && (!term.responsible || !date || date <= todayInput() || missingVerification);
                   const green = !red && moduleConfig.verificationColumns.every((column) => isYes(term.verification[column.key]));
 
                   return (
@@ -208,9 +209,9 @@ export function TaskTermsPage() {
                           <button
                             type="button"
                             className="secondary-button"
-                            onClick={() => void patchTerm(term, { status: term.status === "concluida" ? "pendiente" : "concluida" })}
+                            onClick={() => void patchTerm(term, { status: completed ? "pendiente" : "concluida" })}
                           >
-                            {term.status === "concluida" ? "Reabrir" : "Concluir"}
+                            {completed ? "Reabrir" : "Concluir"}
                           </button>
                           <button type="button" className="danger-button" onClick={() => void deleteTerm(term)}>
                             Borrar

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import type { TaskTrackingRecord } from "@sige/contracts";
 
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiDelete, apiGet, apiPatch } from "../../api/http-client";
 import {
   getAdjacentLegacyTaskTable,
   getLegacyTaskTable,
@@ -151,27 +151,6 @@ export function TaskLegacyTablePage() {
     setRecords((current) => current.filter((candidate) => candidate.id !== record.id));
   }
 
-  async function handleManualAdd() {
-    if (!moduleConfig || !tableConfig) {
-      return;
-    }
-
-    const created = await apiPost<TaskTrackingRecord>("/tasks/tracking-records", {
-      moduleId: moduleConfig.moduleId,
-      tableCode: tableConfig.slug,
-      sourceTable: tableConfig.sourceTable,
-      clientName: "",
-      subject: "",
-      taskName: "Tarea",
-      responsible: moduleConfig.defaultResponsible,
-      dueDate: tableConfig.showDateColumn === false ? null : todayInput(),
-      termDate: tableConfig.autoTerm ? todayInput() : null,
-      status: "pendiente",
-      workflowStage: 1
-    });
-    setRecords((current) => [created, ...current]);
-  }
-
   if (!moduleConfig || !tableConfig || !activeTab) {
     return <Navigate to="/app/tasks" replace />;
   }
@@ -209,10 +188,10 @@ export function TaskLegacyTablePage() {
           <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/terminos`)}>
             Ver terminos
           </button>
-          <button type="button" className="secondary-button" onClick={handleManualAdd}>
-            Agregar registro
-          </button>
         </div>
+        <p className="muted matter-table-caption">
+          Los registros nuevos se crean desde el Selector de Tareas en Ejecucion; esta tabla edita el mismo registro activo.
+        </p>
 
         <div className="tasks-legacy-tabs">
           {tableConfig.tabs.map((tab) => (

@@ -19,6 +19,7 @@
     "intranet:extract-business": "tsx scripts/migration/extract-intranet-business-data.ts",
     "intranet:import-business": "tsx scripts/migration/import-intranet-business-data.ts",
     "intranet:repair-task-names": "tsx scripts/migration/repair-legacy-task-names.ts",
+    "aws:verify-runtime": "tsx scripts/deploy/verify-aws-runtime.ts",
     "db:transfer": "tsx scripts/migration/transfer-postgres.ts"
   },
   "dependencies": {

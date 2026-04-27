@@ -8,6 +8,7 @@
     ]
   },
   "include": [
-    "scripts/migration/**/*.ts"
+    "scripts/migration/**/*.ts",
+    "scripts/deploy/**/*.ts"
   ]
 }
