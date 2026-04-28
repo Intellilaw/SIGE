@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Matter, TaskDistributionEvent, TaskState } from "@sige/contracts";
 
 import {
@@ -115,16 +115,28 @@ export function ExecutionTaskPanel({
   onUpdateState
 }: ExecutionTaskPanelProps) {
   const [selectedEventId, setSelectedEventId] = useState("");
+  const [taskSearch, setTaskSearch] = useState("");
+  const [taskSearchOpen, setTaskSearchOpen] = useState(false);
   const [selectorTargets, setSelectorTargets] = useState<SelectorTargetEntry[]>([]);
   const [responsible, setResponsible] = useState(userShortName || module.defaultResponsible);
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
   const selectedEvent = useMemo(
     () => distributionEvents.find((event) => event.id === selectedEventId),
     [distributionEvents, selectedEventId]
   );
+  const filteredDistributionEvents = useMemo(() => {
+    const query = taskSearch.trim().toLowerCase();
+
+    if (!query) {
+      return distributionEvents;
+    }
+
+    return distributionEvents.filter((event) => event.name.toLowerCase().includes(query));
+  }, [distributionEvents, taskSearch]);
 
   useEffect(() => {
     if (!matter || !mode) {
@@ -132,14 +144,44 @@ export function ExecutionTaskPanel({
     }
 
     setSelectedEventId("");
+    setTaskSearch("");
+    setTaskSearchOpen(false);
     setSelectorTargets([]);
     setResponsible(userShortName || module.defaultResponsible);
     setDueDate(addBusinessDays(new Date(), 3));
   }, [matter?.id, mode, module.defaultResponsible, userShortName]);
 
+  useEffect(() => {
+    if (!taskSearchOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!searchWrapRef.current?.contains(event.target as Node)) {
+        setTaskSearchOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setTaskSearchOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [taskSearchOpen]);
+
   function handleEventSelect(eventId: string) {
     setSelectedEventId(eventId);
     const event = distributionEvents.find((candidate) => candidate.id === eventId);
+    setTaskSearch(event?.name ?? "");
+    setTaskSearchOpen(false);
     setSelectorTargets(event ? getCatalogTargetEntries(event, legacyConfig).map((target) => ({ ...target, reportedMonth: "" })) : []);
   }
 
@@ -171,6 +213,8 @@ export function ExecutionTaskPanel({
       });
       onModeChange("history");
       setSelectedEventId("");
+      setTaskSearch("");
+      setTaskSearchOpen(false);
       setSelectorTargets([]);
     } finally {
       setSubmitting(false);
@@ -189,7 +233,7 @@ export function ExecutionTaskPanel({
   return (
     <div className="execution-panel-backdrop" role="presentation" onClick={onClose}>
       <aside
-        className="execution-panel"
+        className={`execution-panel ${mode === "create" ? "execution-panel-selector" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={mode === "create" ? "Selector de Tareas" : "Lista de tareas"}
@@ -208,36 +252,72 @@ export function ExecutionTaskPanel({
           </button>
         </div>
 
-        <div className="execution-panel-switcher">
-          <button
-            type="button"
-            className={mode === "history" ? "primary-button" : "secondary-button"}
-            onClick={() => onModeChange("history")}
-          >
-            Lista
-          </button>
-          <button
-            type="button"
-            className={mode === "create" ? "primary-button" : "secondary-button"}
-            onClick={() => onModeChange("create")}
-          >
-            Selector de tareas
-          </button>
-        </div>
+        {mode === "history" ? (
+          <div className="execution-panel-switcher">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onModeChange("create")}
+            >
+              Selector de tareas
+            </button>
+          </div>
+        ) : null}
 
         {mode === "create" ? (
           <div className="execution-panel-body execution-panel-form">
             <div className="execution-selector-layout">
               <div className="execution-selector-form">
-                <label className="form-field">
-                  <span>1. Seleccionar Tarea Maestra</span>
-                  <select value={selectedEventId} onChange={(event) => handleEventSelect(event.target.value)}>
-                    <option value="">Selecciona una tarea configurada</option>
-                    {distributionEvents.map((event) => (
-                      <option key={event.id} value={event.id}>{event.name}</option>
-                    ))}
-                  </select>
+                <label className="form-field execution-selector-search-field">
+                  <span>Seleccionar tarea</span>
+                  <div className="execution-selector-search" ref={searchWrapRef}>
+                    <input
+                      value={taskSearch}
+                      onChange={(event) => {
+                        setTaskSearch(event.target.value);
+                        setTaskSearchOpen(true);
+                        if (selectedEventId) {
+                          setSelectedEventId("");
+                          setSelectorTargets([]);
+                        }
+                      }}
+                      onClick={() => setTaskSearchOpen((current) => !current)}
+                      placeholder="Buscar tarea..."
+                      autoComplete="off"
+                    />
+                    {taskSearchOpen ? (
+                      <div className="execution-selector-search-results" role="listbox">
+                        {filteredDistributionEvents.length === 0 ? (
+                          <div className="execution-selector-search-empty">No hay tareas con ese criterio.</div>
+                        ) : (
+                          filteredDistributionEvents.map((event) => (
+                            <button
+                              key={event.id}
+                              type="button"
+                              role="option"
+                              aria-selected={event.id === selectedEventId}
+                              onMouseDown={(mouseEvent) => {
+                                mouseEvent.preventDefault();
+                                handleEventSelect(event.id);
+                              }}
+                            >
+                              {event.name}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                 </label>
+
+                <button
+                  type="button"
+                  className="primary-button execution-selector-submit"
+                  onClick={() => void handleCreate()}
+                  disabled={submitting || !selectedEvent || selectorTargets.length === 0 || !dueDate || missingTargetNames}
+                >
+                  {submitting ? "Procesando..." : "Distribuir Tareas"}
+                </button>
 
                 <div className="execution-selector-matter">
                   <h4>Detalles del Asunto (Lectura)</h4>
@@ -264,27 +344,6 @@ export function ExecutionTaskPanel({
                     </label>
                   </div>
                 </div>
-
-                <div className="execution-panel-grid">
-                  <label className="form-field">
-                    <span>Responsable</span>
-                    <input value={responsible} onChange={(event) => setResponsible(event.target.value)} />
-                  </label>
-
-                  <label className="form-field">
-                    <span>Fecha compromiso</span>
-                    <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-                  </label>
-                </div>
-
-                <button
-                  type="button"
-                  className="primary-button execution-selector-submit"
-                  onClick={() => void handleCreate()}
-                  disabled={submitting || !selectedEvent || selectorTargets.length === 0 || !dueDate || missingTargetNames}
-                >
-                  {submitting ? "Procesando..." : "Distribuir Tareas"}
-                </button>
               </div>
 
               <div className="execution-selector-summary">

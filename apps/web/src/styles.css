@@ -2367,6 +2367,10 @@ textarea {
   min-width: 2450px;
 }
 
+.execution-table thead th {
+  background: #eef4fb;
+}
+
 .execution-table-recycle thead th {
   background: #f7f3ea;
 }
@@ -2436,6 +2440,14 @@ textarea {
   gap: 18px;
 }
 
+.execution-panel-selector {
+  width: min(920px, 100%);
+  padding: 14px 18px;
+  gap: 10px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow-y: hidden;
+}
+
 .execution-panel-header {
   display: flex;
   justify-content: space-between;
@@ -2451,15 +2463,38 @@ textarea {
   margin: 6px 0 0;
 }
 
+.execution-panel-selector .eyebrow {
+  margin-bottom: 4px;
+  font-size: 0.68rem;
+}
+
+.execution-panel-selector .execution-panel-copy {
+  margin-top: 2px;
+}
+
 .execution-panel-switcher {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
 }
 
+.execution-panel-selector .execution-panel-switcher {
+  gap: 8px;
+}
+
+.execution-panel-selector .execution-panel-switcher .primary-button,
+.execution-panel-selector .execution-panel-switcher .secondary-button {
+  padding: 9px 16px;
+}
+
 .execution-panel-body {
   display: grid;
   gap: 16px;
+}
+
+.execution-panel-selector .execution-panel-body {
+  min-height: 0;
+  gap: 10px;
 }
 
 .execution-panel-form {
@@ -2516,11 +2551,76 @@ textarea {
   align-items: start;
 }
 
+.execution-panel-selector .execution-selector-layout {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(300px, 1.1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
 .execution-selector-form,
 .execution-selector-summary,
 .execution-selector-target-list {
   display: grid;
   gap: 14px;
+}
+
+.execution-panel-selector .execution-selector-form,
+.execution-panel-selector .execution-selector-summary {
+  gap: 10px;
+}
+
+.execution-panel-selector .execution-selector-target-list {
+  max-height: calc(100vh - 270px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.execution-selector-search {
+  position: relative;
+}
+
+.execution-selector-search input {
+  width: 100%;
+}
+
+.execution-selector-search-results {
+  position: absolute;
+  z-index: 5;
+  inset: calc(100% + 6px) 0 auto;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(31, 41, 51, 0.12);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+}
+
+.execution-selector-search-results button,
+.execution-selector-search-empty {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: transparent;
+  color: #243b53;
+  text-align: left;
+}
+
+.execution-selector-search-results button {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.execution-selector-search-results button:hover,
+.execution-selector-search-results button[aria-selected="true"] {
+  background: rgba(29, 78, 216, 0.08);
+  color: #1d4ed8;
+}
+
+.execution-selector-search-empty {
+  color: #64748b;
+  font-weight: 700;
 }
 
 .execution-selector-matter {
@@ -2532,16 +2632,47 @@ textarea {
   background: rgba(248, 250, 252, 0.92);
 }
 
+.execution-panel-selector .execution-selector-matter {
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+}
+
 .execution-selector-matter h4,
 .execution-selector-summary h3 {
   margin: 0;
   color: #243b53;
 }
 
+.execution-panel-selector .execution-selector-matter h4,
+.execution-panel-selector .execution-selector-summary h3 {
+  font-size: 1rem;
+}
+
 .execution-selector-matter-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.execution-panel-selector .execution-selector-matter-grid {
+  gap: 8px;
+}
+
+.execution-panel-selector .form-field {
+  gap: 5px;
+}
+
+.execution-panel-selector .form-field span {
+  font-size: 0.82rem;
+}
+
+.execution-panel-selector .form-field input,
+.execution-panel-selector .form-field select,
+.execution-panel-selector .form-field textarea {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 12px;
 }
 
 .execution-selector-span {
@@ -2554,6 +2685,11 @@ textarea {
   background: #f1f5f9;
 }
 
+.execution-panel-selector .execution-selector-summary {
+  min-height: 180px;
+  padding: 14px;
+}
+
 .execution-selector-target-card {
   display: grid;
   gap: 10px;
@@ -2562,6 +2698,12 @@ textarea {
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 8px 18px rgba(31, 41, 51, 0.04);
+}
+
+.execution-panel-selector .execution-selector-target-card {
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
 }
 
 .execution-selector-target-card input {
@@ -2573,6 +2715,11 @@ textarea {
 
 .execution-selector-submit {
   justify-self: start;
+}
+
+.execution-panel-selector .execution-selector-submit {
+  min-height: 42px;
+  padding: 10px 18px;
 }
 
 .execution-task-list {
@@ -3029,7 +3176,7 @@ textarea {
 }
 
 .tasks-distributor-active-table {
-  min-width: 1500px;
+  min-width: 1320px;
 }
 
 .tasks-distributor-date {
@@ -3050,6 +3197,22 @@ textarea {
 .tasks-distributor-entry-name-list {
   display: grid;
   gap: 10px;
+}
+
+.tasks-active-target-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(31, 41, 51, 0.04);
+}
+
+.tasks-active-target-toolbar span {
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .tasks-active-target-card {
@@ -3086,7 +3249,21 @@ textarea {
 }
 
 .tasks-active-target-fields {
-  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.7fr) minmax(130px, 0.7fr);
+  grid-template-columns: minmax(220px, 1fr) minmax(130px, 0.38fr);
+  align-items: center;
+}
+
+.tasks-active-target-date {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #24364b;
+  font-weight: 800;
 }
 
 .tasks-distributor-table-count-grid {

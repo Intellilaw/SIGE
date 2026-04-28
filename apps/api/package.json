@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json --resolve-full-paths",
-    "predev": "prisma generate",
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx scripts/dev/start-api-dev.ts",
     "start": "node dist/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "lint:migration": "tsc -p tsconfig.migration.json --noEmit",

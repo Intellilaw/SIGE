@@ -59,7 +59,7 @@ function isTrackingRecordRed(table: LegacyTaskTableConfig | undefined, record: T
   const dueDate = getRowDate(record);
   const requiresDate = table?.showDateColumn !== false;
 
-  return !record.taskName || !record.responsible || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
+  return !record.taskName || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
 }
 
 function getStageLabel(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
@@ -188,12 +188,52 @@ export function TaskDistributorPage() {
     });
   }
 
+  function getOpenHistoryRecords(item: TaskDistributionHistory) {
+    if (!moduleConfig) {
+      return [];
+    }
+
+    const usedIds = new Set<string>();
+
+    return item.targetTables
+      .map((targetTable, index) => {
+        const record = resolveHistoryRecord(item, targetTable, index, usedIds);
+        const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
+
+        return record && !record.deletedAt && !isCompletedRecord(table, record) ? record : null;
+      })
+      .filter((record): record is TaskTrackingRecord => Boolean(record));
+  }
+
+  function getEarliestOpenDate(item: TaskDistributionHistory) {
+    return getOpenHistoryRecords(item)
+      .map(getRowDate)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right))[0] ?? "";
+  }
+
   const activeHistory = useMemo(() => {
     const query = normalize(clientSearch).toLowerCase();
 
     return history
       .filter(historyHasOpenRecords)
-      .filter((item) => !query || normalize(item.clientName).toLowerCase().includes(query));
+      .filter((item) => !query || normalize(item.clientName).toLowerCase().includes(query))
+      .sort((left, right) => {
+        const leftDate = getEarliestOpenDate(left);
+        const rightDate = getEarliestOpenDate(right);
+
+        if (!leftDate && !rightDate) {
+          return left.createdAt.localeCompare(right.createdAt);
+        }
+        if (!leftDate) {
+          return 1;
+        }
+        if (!rightDate) {
+          return -1;
+        }
+
+        return leftDate.localeCompare(rightDate) || left.createdAt.localeCompare(right.createdAt);
+      });
   }, [clientSearch, history, moduleConfig, tableBySlug, trackingById, trackingRecords]);
 
   function resetCatalogForm() {
@@ -293,13 +333,6 @@ export function TaskDistributorPage() {
         )
       );
     }
-  }
-
-  async function handleDateChange(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined, value: string) {
-    await patchRecord(record, {
-      dueDate: value || null,
-      termDate: table?.termManagedDate ? value || null : record.termDate ?? null
-    });
   }
 
   async function handleAdvance(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
@@ -433,18 +466,17 @@ export function TaskDistributorPage() {
                     <th>Asunto</th>
                     <th>Proceso especifico</th>
                     <th>ID Asunto</th>
-                    <th>Tarea</th>
                     <th>Tablas / tareas</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={7} className="centered-inline-message">Cargando tareas activas...</td>
+                      <td colSpan={6} className="centered-inline-message">Cargando tareas activas...</td>
                     </tr>
                   ) : activeHistory.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="centered-inline-message">No hay tareas activas en este equipo.</td>
+                      <td colSpan={6} className="centered-inline-message">No hay tareas activas en este equipo.</td>
                     </tr>
                   ) : (
                     activeHistory.map((item) => {
@@ -458,14 +490,13 @@ export function TaskDistributorPage() {
                           <td><span className="tasks-legacy-process-pill">{item.specificProcess || "N/A"}</span></td>
                           <td>{item.matterIdentifier || item.matterNumber || "-"}</td>
                           <td>
-                            <strong>{item.eventName}</strong>
-                            <span className="tasks-distributor-date">{item.createdAt.slice(0, 10)}</span>
-                            <button type="button" className="danger-button tasks-distributor-small-button" onClick={() => void handleDeleteDistribution(item)}>
-                              Borrar todo
-                            </button>
-                          </td>
-                          <td>
                             <div className="tasks-active-target-list">
+                              <div className="tasks-active-target-toolbar">
+                                <span>Fecha más próxima: {getEarliestOpenDate(item) || "sin fecha"}</span>
+                                <button type="button" className="danger-button tasks-distributor-small-button" onClick={() => void handleDeleteDistribution(item)}>
+                                  Borrar todo
+                                </button>
+                              </div>
                               {item.targetTables.map((targetTable, index) => {
                                 const record = resolveHistoryRecord(item, targetTable, index, usedIds);
                                 const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
@@ -500,20 +531,10 @@ export function TaskDistributorPage() {
                                             onChange={(event) => void patchRecord(record, { taskName: event.target.value })}
                                             aria-label="Nombre de la tarea"
                                           />
-                                          <input
-                                            className="tasks-legacy-input"
-                                            value={record.responsible}
-                                            onChange={(event) => void patchRecord(record, { responsible: event.target.value })}
-                                            aria-label="Responsable"
-                                          />
                                           {table?.showDateColumn === false ? null : (
-                                            <input
-                                              className="tasks-legacy-input"
-                                              type="date"
-                                              value={getRowDate(record)}
-                                              onChange={(event) => void handleDateChange(record, table, event.target.value)}
-                                              aria-label={table?.dateLabel ?? "Fecha"}
-                                            />
+                                            <span className="tasks-active-target-date">
+                                              {getRowDate(record) || "Sin fecha límite"}
+                                            </span>
                                           )}
                                         </div>
                                         <div className="tasks-legacy-actions">
