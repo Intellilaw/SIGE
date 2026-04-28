@@ -19,7 +19,7 @@ export function EntryPage() {
             <p className="entry-brand-name">INTELLILAW</p>
           </div>
 
-          <h1 className="entry-title">Intranet</h1>
+          <h1 className="entry-title">SIGE_2</h1>
           <p className="entry-version">{APP_VERSION_TEXT}</p>
           <p className="entry-subtitle">Sistema Integral de Administracion Empresarial</p>
 
@@ -31,9 +31,9 @@ export function EntryPage() {
                 className="entry-button entry-button-disabled"
                 disabled
                 aria-disabled="true"
-                title="Intellilaw estara disponible proximamente."
+                title="El acceso de Intellilaw estara disponible proximamente."
               >
-                Intranet Intellilaw
+                Acceso Intellilaw
               </button>
             </div>
 
@@ -42,7 +42,7 @@ export function EntryPage() {
                 <img className="rusconi-logo entry-option-logo" src={rusconiLogo} alt="Rusconi Consulting" />
               </div>
               <Link to={activePath} className="entry-button entry-button-primary">
-                Intranet Rusconi Consulting
+                Acceso Rusconi Consulting
               </Link>
             </div>
           </div>

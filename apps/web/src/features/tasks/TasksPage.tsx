@@ -24,7 +24,7 @@ export function TasksPage() {
               <h2>Tareas</h2>
             </div>
           </div>
-          <p className="muted">Tu equipo actual no tiene acceso a modulos de tareas en esta version.</p>
+          <p className="muted">Tu equipo actual no tiene acceso a este modulo.</p>
         </header>
       </section>
     );
@@ -42,8 +42,8 @@ export function TasksPage() {
           </div>
         </div>
         <p className="muted">
-          Replica funcional del legado: seleccion por equipo, vista diaria por integrante y tablero con siguientes
-          tareas, historial y resaltado rojo cuando falta informacion o hay vencimientos.
+          Operacion por equipo con vista diaria por integrante, tablero de seguimiento e historial con resaltado rojo
+          cuando falta informacion o hay vencimientos.
         </p>
       </header>
 

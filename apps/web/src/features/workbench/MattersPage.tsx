@@ -91,6 +91,10 @@ function normalizeComparableText(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function getSearchWords(value?: string | null) {
+  return normalizeComparableText(value).split(/\s+/).filter(Boolean);
+}
+
 function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
 }
@@ -237,6 +241,52 @@ function getMatterReflection(matter: Matter, reflections: Map<string, MatterRefl
       nextActionSource: matter.nextActionSource
     }
   );
+}
+
+function matchesClientSearch(clientName: string | null | undefined, searchWords: string[]) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const normalizedClientName = normalizeComparableText(clientName);
+  return searchWords.every((word) => normalizedClientName.includes(word));
+}
+
+function matchesWordSearch(
+  matter: Matter,
+  quotes: Quote[],
+  clients: Client[],
+  reflection: MatterReflection,
+  searchWords: string[]
+) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const haystack = normalizeComparableText(
+    [
+      getEffectiveClientNumber(matter, clients),
+      matter.clientName,
+      matter.quoteNumber,
+      getMatterTypeLabel(getEffectiveMatterType(matter, quotes)),
+      matter.subject,
+      matter.specificProcess,
+      matter.matterIdentifier,
+      matter.notes,
+      matter.milestone,
+      matter.commissionAssignee,
+      matter.origin,
+      getTeamLabel(matter.responsibleTeam),
+      getChannelLabel(matter.communicationChannel),
+      reflection.nextAction,
+      reflection.nextActionSource,
+      toDateInput(reflection.nextActionDueAt)
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  return searchWords.every((word) => haystack.includes(word));
 }
 
 function sortActiveMatters(items: Matter[], clients: Client[]) {
@@ -874,6 +924,7 @@ export function MattersPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [teamFilter, setTeamFilter] = useState<string>("Todos");
   const [clientSearch, setClientSearch] = useState("");
+  const [wordSearch, setWordSearch] = useState("");
 
   const canDeleteReadOnlyRows = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
   const commissionOptions = useMemo(
@@ -1156,15 +1207,33 @@ export function MattersPage() {
     });
   }
 
-  const searchQuery = normalizeComparableText(clientSearch);
+  const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
+  const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
+  const reflections = useMemo(
+    () => buildMatterReflectionMap(taskItems, taskModules),
+    [taskItems, taskModules]
+  );
   const filteredItems = useMemo(
     () =>
       activeItems.filter((item) => {
         const teamMatches = teamFilter === "Todos" || item.responsibleTeam === teamFilter;
-        const clientMatches = !searchQuery || normalizeComparableText(item.clientName).includes(searchQuery);
-        return teamMatches && clientMatches;
+        const reflection = getMatterReflection(item, reflections);
+        const clientMatches = matchesClientSearch(item.clientName, clientSearchWords);
+        const wordMatches = matchesWordSearch(item, quotes, clients, reflection, wordSearchWords);
+        return teamMatches && clientMatches && wordMatches;
       }),
-    [activeItems, searchQuery, teamFilter]
+    [activeItems, clientSearchWords, wordSearchWords, teamFilter, reflections, quotes, clients]
+  );
+  const filteredDeletedItems = useMemo(
+    () =>
+      deletedItems.filter((item) => {
+        const teamMatches = teamFilter === "Todos" || item.responsibleTeam === teamFilter;
+        const reflection = getMatterReflection(item, reflections);
+        const clientMatches = matchesClientSearch(item.clientName, clientSearchWords);
+        const wordMatches = matchesWordSearch(item, quotes, clients, reflection, wordSearchWords);
+        return teamMatches && clientMatches && wordMatches;
+      }),
+    [deletedItems, clientSearchWords, wordSearchWords, teamFilter, reflections, quotes, clients]
   );
   const filteredUniqueItems = useMemo(
     () => filteredItems.filter((item) => item.matterType !== "RETAINER"),
@@ -1173,10 +1242,6 @@ export function MattersPage() {
   const filteredRetainerItems = useMemo(
     () => filteredItems.filter((item) => item.matterType === "RETAINER"),
     [filteredItems]
-  );
-  const reflections = useMemo(
-    () => buildMatterReflectionMap(taskItems, taskModules),
-    [taskItems, taskModules]
   );
 
   return (
@@ -1191,8 +1256,8 @@ export function MattersPage() {
           </div>
         </div>
         <p className="muted">
-          Replica funcional del modulo legado: tabla operativa de asuntos, separacion entre unicos e igualas, papelera,
-          autollenado desde cotizaciones y validacion visual en rojo cuando falta informacion clave.
+          Tabla operativa de asuntos con separacion entre unicos e igualas, papelera, autollenado desde cotizaciones y
+          validacion visual en rojo cuando falta informacion clave.
         </p>
       </header>
 
@@ -1204,7 +1269,7 @@ export function MattersPage() {
           <span>{filteredUniqueItems.length + filteredRetainerItems.length} registros</span>
         </div>
 
-        <div className="matters-toolbar">
+        <div className="matters-toolbar matters-active-toolbar">
           <div className="matters-toolbar-actions">
             <button type="button" className="primary-button" onClick={() => void handleAddRow()}>
               + Agregar fila
@@ -1214,10 +1279,13 @@ export function MattersPage() {
                 Borrar ({selectedIds.size})
               </button>
             ) : null}
+            <button type="button" className="secondary-button" onClick={() => void loadBoard()}>
+              Refrescar
+            </button>
           </div>
 
-          <div className="matters-filters">
-            <label className="form-field">
+          <div className="matters-filters leads-search-filters matters-active-search-filters">
+            <label className="form-field matters-team-field">
               <span>Equipo</span>
               <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>
                 <option value="Todos">Todos</option>
@@ -1229,19 +1297,25 @@ export function MattersPage() {
               </select>
             </label>
 
-            <label className="form-field">
-              <span>Cliente</span>
+            <label className="form-field matters-search-field">
+              <span>Buscar por palabra</span>
+              <input
+                type="text"
+                value={wordSearch}
+                onChange={(event) => setWordSearch(event.target.value)}
+                placeholder="ID, asunto, proceso, nota..."
+              />
+            </label>
+
+            <label className="form-field matters-search-field">
+              <span>Buscador por cliente</span>
               <input
                 type="text"
                 value={clientSearch}
                 onChange={(event) => setClientSearch(event.target.value)}
-                placeholder="Buscar cliente..."
+                placeholder="Buscar palabra del cliente..."
               />
             </label>
-
-            <button type="button" className="secondary-button" onClick={() => void loadBoard()}>
-              Refrescar
-            </button>
           </div>
         </div>
       </section>
@@ -1281,8 +1355,8 @@ export function MattersPage() {
           <span>{filteredRetainerItems.length} registros</span>
         </div>
         <p className="muted matter-table-caption">
-          Vista de solo lectura, como en la referencia. Los renglones siguen mostrando rojo cuando falta informacion
-          operativa o no estan vinculados a ejecucion.
+          Vista de solo lectura. Los renglones siguen mostrando rojo cuando falta informacion operativa o no estan
+          vinculados a ejecucion.
         </p>
 
         <MatterTable
@@ -1311,10 +1385,10 @@ export function MattersPage() {
       <section className="panel">
         <div className="panel-header">
           <h2>Papelera de Reciclaje</h2>
-          <span>{deletedItems.length} registros</span>
+          <span>{filteredDeletedItems.length} registros</span>
         </div>
         <p className="muted matter-table-caption">
-          Los asuntos eliminados desaparecen definitivamente despues de 30 dias, igual que en Intranet.
+          Los asuntos eliminados desaparecen definitivamente despues de 30 dias.
         </p>
 
         <div className="lead-table-shell">
@@ -1346,17 +1420,17 @@ export function MattersPage() {
                 {loading ? (
                   <tr>
                     <td colSpan={18} className="centered-inline-message">
-                      Cargando papelera...
-                    </td>
-                  </tr>
-                ) : deletedItems.length === 0 ? (
+                  Cargando papelera...
+                </td>
+              </tr>
+                ) : filteredDeletedItems.length === 0 ? (
                   <tr>
                     <td colSpan={18} className="centered-inline-message">
                       Papelera vacia.
                     </td>
                   </tr>
                 ) : (
-                  deletedItems.map((item) => (
+                  filteredDeletedItems.map((item) => (
                     <tr key={item.id}>
                       <td>{getEffectiveClientNumber(item, clients) || "-"}</td>
                       <td>{item.commissionAssignee || "-"}</td>

@@ -1044,7 +1044,7 @@ export function FinancesPage() {
             <h2>Finanzas</h2>
           </div>
         </div>
-        <p className="muted">Replica funcional del modulo legado: asuntos activos con envio a Finanzas, vista mensual operativa, copiado al siguiente mes, estampas historicas y validacion visual en rojo.</p>
+        <p className="muted">Asuntos activos con envio a Finanzas, vista mensual operativa, copiado al siguiente mes, estampas historicas y validacion visual en rojo.</p>
       </header>
 
       {error ? <div className="message-banner message-error">{error}</div> : null}

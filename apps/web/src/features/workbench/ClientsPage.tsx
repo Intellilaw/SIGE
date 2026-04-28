@@ -229,12 +229,12 @@ export function ClientsPage() {
       <header className="hero module-hero">
         <div className="module-hero-head">
           <div>
-            <h2>Directorio de Clientes</h2>
+            <h2>Clientes</h2>
           </div>
         </div>
         <p className="muted">
-          Replica funcional del modulo legado: busqueda por nombre o numero, alta operativa inmediata, edicion inline
-          y borrado cuando el cliente todavia no tiene cotizaciones, leads o asuntos vinculados.
+          Padron central para busqueda por nombre o numero, alta operativa inmediata, edicion directa y borrado cuando
+          el cliente todavia no tiene cotizaciones, leads o asuntos vinculados.
         </p>
       </header>
 

@@ -54,8 +54,19 @@ function toErrorMessage(error: unknown) {
   return "Ocurrio un error inesperado.";
 }
 
-function normalizeText(value?: string) {
+function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function normalizeComparableText(value?: string | null) {
+  return normalizeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getSearchWords(value?: string | null) {
+  return normalizeComparableText(value).split(/\s+/).filter(Boolean);
 }
 
 function toDateInput(value?: string) {
@@ -209,6 +220,35 @@ function evaluateLeadRow(lead: Lead) {
   };
 }
 
+function matchesLeadKeywordSearch(lead: Lead, searchWords: string[]) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const searchableText = normalizeComparableText([
+    lead.commissionAssignee,
+    lead.clientName,
+    lead.prospectName,
+    lead.quoteNumber,
+    lead.subject,
+    lead.notes,
+    lead.lastInteractionLabel,
+    lead.nextInteractionLabel,
+    channelLabel(lead.communicationChannel)
+  ].filter(Boolean).join(" "));
+
+  return searchWords.every((word) => searchableText.includes(word));
+}
+
+function matchesLeadClientSearch(lead: Lead, searchWords: string[]) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const clientText = normalizeComparableText([lead.clientName, lead.prospectName].filter(Boolean).join(" "));
+  return searchWords.every((word) => clientText.includes(word));
+}
+
 function buildLeadPatch(lead: Lead): LeadPatchPayload {
   return {
     clientId: lead.clientId ?? null,
@@ -240,6 +280,8 @@ export function LeadsPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [commissionShortNames, setCommissionShortNames] = useState<string[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -262,18 +304,46 @@ export function LeadsPage() {
     [commissionShortNames, user?.shortName]
   );
 
+  const searchWords = useMemo(() => getSearchWords(searchTerm), [searchTerm]);
+  const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
+  const hasActiveFilters = searchWords.length > 0 || clientSearchWords.length > 0;
+
+  const filteredActiveItems = useMemo(
+    () =>
+      activeItems.filter(
+        (lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)
+      ),
+    [activeItems, clientSearchWords, searchWords]
+  );
+
+  const filteredHistoryItems = useMemo(
+    () =>
+      historyItems.filter(
+        (lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)
+      ),
+    [historyItems, clientSearchWords, searchWords]
+  );
+
+  const filteredMonthlyItems = useMemo(
+    () =>
+      monthlyItems.filter(
+        (lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)
+      ),
+    [monthlyItems, clientSearchWords, searchWords]
+  );
+
   const sentMonthlyTotal = useMemo(
-    () => monthlyItems.reduce((sum, item) => sum + Number(item.amountMxn || 0), 0),
-    [monthlyItems]
+    () => filteredMonthlyItems.reduce((sum, item) => sum + Number(item.amountMxn || 0), 0),
+    [filteredMonthlyItems]
   );
 
   const contractedMonthlyTotal = useMemo(
     () =>
-      monthlyItems.reduce(
+      filteredMonthlyItems.reduce(
         (sum, item) => sum + (item.status === "MOVED_TO_MATTERS" ? Number(item.amountMxn || 0) : 0),
         0
       ),
-    [monthlyItems]
+    [filteredMonthlyItems]
   );
 
   const selectedYearOptions = useMemo(
@@ -620,8 +690,7 @@ export function LeadsPage() {
           </div>
         </div>
         <p className="muted">
-          Replica funcional del tablero de Intranet: seguimiento diario, historial de conversion a asuntos y vista mensual
-          de cotizaciones enviadas.
+          Seguimiento diario de leads, historial de conversion a asuntos y vista mensual de cotizaciones enviadas.
         </p>
       </header>
 
@@ -651,11 +720,11 @@ export function LeadsPage() {
           <section className="panel">
             <div className="panel-header">
               <h2>1. Leads Activos</h2>
-              <span>{activeItems.length} registros</span>
+              <span>{filteredActiveItems.length} registros</span>
             </div>
 
-            <div className="lead-toolbar">
-              <div className="lead-toolbar-actions">
+            <div className="matters-toolbar matters-active-toolbar">
+              <div className="matters-toolbar-actions">
                 <button type="button" className="primary-button" onClick={() => void handleAddRow()}>
                   + Agregar Fila
                 </button>
@@ -664,10 +733,39 @@ export function LeadsPage() {
                     Borrar ({selectedLeads.size})
                   </button>
                 ) : null}
+                <button type="button" className="secondary-button" onClick={() => void loadBoard()}>
+                  Refrescar
+                </button>
               </div>
-              <button type="button" className="secondary-button" onClick={() => void loadBoard()}>
-                Refrescar
-              </button>
+
+              <div className="matters-filters leads-search-filters matters-active-search-filters">
+                <label className="form-field matters-search-field">
+                  <span>Buscar por palabra</span>
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Cotizacion, asunto, nota, canal..."
+                  />
+                </label>
+
+                <label className="form-field matters-search-field">
+                  <span>Buscador por cliente</span>
+                  <input
+                    type="text"
+                    value={clientSearch}
+                    onChange={(event) => setClientSearch(event.target.value)}
+                    placeholder="Buscar palabra del cliente..."
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <h2>1. Leads Activos</h2>
+              <span>{filteredActiveItems.length} registros</span>
             </div>
 
             <div className="lead-table-shell">
@@ -678,14 +776,18 @@ export function LeadsPage() {
                       <th className="lead-table-checkbox">
                         <input
                           type="checkbox"
-                          checked={activeItems.length > 0 && selectedLeads.size === activeItems.length}
+                          checked={filteredActiveItems.length > 0 && filteredActiveItems.every((item) => selectedLeads.has(item.id))}
                           onChange={(event) => {
                             if (event.target.checked) {
-                              setSelectedLeads(new Set(activeItems.map((item) => item.id)));
+                              setSelectedLeads((current) => new Set([...current, ...filteredActiveItems.map((item) => item.id)]));
                               return;
                             }
 
-                            setSelectedLeads(new Set());
+                            setSelectedLeads((current) => {
+                              const next = new Set(current);
+                              filteredActiveItems.forEach((item) => next.delete(item.id));
+                              return next;
+                            });
                           }}
                         />
                       </th>
@@ -713,14 +815,14 @@ export function LeadsPage() {
                           Cargando leads...
                         </td>
                       </tr>
-                    ) : activeItems.length === 0 ? (
+                    ) : filteredActiveItems.length === 0 ? (
                       <tr>
                         <td colSpan={16} className="centered-inline-message">
-                          No hay leads activos.
+                          {hasActiveFilters ? "No hay leads que coincidan con la busqueda." : "No hay leads activos."}
                         </td>
                       </tr>
                     ) : (
-                      activeItems.map((item) => {
+                      filteredActiveItems.map((item) => {
                         const rowState = evaluateLeadRow(item);
                         const linkedQuote = findQuoteByNumber(item.quoteNumber);
 
@@ -930,10 +1032,10 @@ export function LeadsPage() {
           <section className="panel">
             <div className="panel-header">
               <h2>2. Historial (Enviados a Asuntos Activos)</h2>
-              <span>{historyItems.length} registros</span>
+              <span>{filteredHistoryItems.length} registros</span>
             </div>
             <p className="muted lead-panel-copy">
-              Los registros enviados se ocultan automaticamente despues de 30 dias, igual que en la referencia.
+              Los registros enviados se ocultan automaticamente despues de 30 dias.
             </p>
 
             <div className="lead-table-shell">
@@ -963,14 +1065,14 @@ export function LeadsPage() {
                           Cargando historial...
                         </td>
                       </tr>
-                    ) : historyItems.length === 0 ? (
+                    ) : filteredHistoryItems.length === 0 ? (
                       <tr>
                         <td colSpan={13} className="centered-inline-message">
-                          No hay historial reciente.
+                          {hasActiveFilters ? "No hay registros en historial con ese criterio." : "No hay historial reciente."}
                         </td>
                       </tr>
                     ) : (
-                      historyItems.map((item) => {
+                      filteredHistoryItems.map((item) => {
                         const linkedQuote = findQuoteByNumber(item.quoteNumber);
 
                         return (
@@ -1036,6 +1138,28 @@ export function LeadsPage() {
               </label>
             </div>
 
+            <div className="matters-filters leads-search-filters">
+              <label className="form-field">
+                <span>Buscar por palabra</span>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Cotizacion, asunto, nota, canal..."
+                />
+              </label>
+
+              <label className="form-field">
+                <span>Buscador por cliente</span>
+                <input
+                  type="text"
+                  value={clientSearch}
+                  onChange={(event) => setClientSearch(event.target.value)}
+                  placeholder="Buscar palabra del cliente..."
+                />
+              </label>
+            </div>
+
             <div className="lead-summary-grid">
               <article className="lead-summary-card is-sent">
                 <span>Total Enviado (Mes)</span>
@@ -1051,7 +1175,7 @@ export function LeadsPage() {
           <section className="panel">
             <div className="panel-header">
               <h2>Cotizaciones enviadas en {MONTH_NAMES[selectedMonth - 1]}</h2>
-              <span>{monthlyItems.length} registros</span>
+              <span>{filteredMonthlyItems.length} registros</span>
             </div>
 
             <div className="lead-table-shell">
@@ -1076,14 +1200,14 @@ export function LeadsPage() {
                           Cargando vista mensual...
                         </td>
                       </tr>
-                    ) : monthlyItems.length === 0 ? (
+                    ) : filteredMonthlyItems.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="centered-inline-message">
-                          No hay cotizaciones enviadas este mes.
+                          {hasActiveFilters ? "No hay cotizaciones mensuales con ese criterio." : "No hay cotizaciones enviadas este mes."}
                         </td>
                       </tr>
                     ) : (
-                      monthlyItems.map((item) => (
+                      filteredMonthlyItems.map((item) => (
                         <tr key={item.id} className={item.status === "MOVED_TO_MATTERS" ? "lead-row-contracted" : ""}>
                           <td>{item.commissionAssignee || "-"}</td>
                           <td>{item.clientName || item.prospectName || "-"}</td>

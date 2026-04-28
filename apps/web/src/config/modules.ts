@@ -196,7 +196,7 @@ export const appModules: AppModuleDefinition[] = [
     description: "Administracion de usuarios, acceso, equipos y gobierno de permisos internos.",
     phase: "Operativo",
     available: true,
-    coverage: ["Alta de usuarios intranet", "Edicion de nombre corto, equipo y rol especifico", "Permisos y acceso por metadata legacy"]
+    coverage: ["Alta de usuarios", "Edicion de nombre corto, equipo y rol especifico", "Permisos y acceso por equipo y perfil"]
   }
 ];
 

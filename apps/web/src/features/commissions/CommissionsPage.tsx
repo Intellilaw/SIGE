@@ -789,8 +789,8 @@ export function CommissionsPage() {
           </div>
         </div>
         <p className="muted">
-          Replica funcional del modulo legado: calculo por seccion, deduccion por gastos pagados, receptores editables,
-          estampas historicas y resaltado visual en rojo sobre filas derivadas de registros incompletos.
+          Calculo por seccion, deduccion por gastos pagados, receptores editables, estampas historicas y resaltado
+          visual en rojo sobre filas derivadas de registros incompletos.
         </p>
       </header>
 

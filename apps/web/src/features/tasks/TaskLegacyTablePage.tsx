@@ -175,8 +175,8 @@ export function TaskLegacyTablePage() {
         </div>
         <h2>{tableConfig.title}</h2>
         <p className="muted">
-          Tabla de seguimiento equivalente a Intranet. Las filas pendientes se marcan en rojo si falta tarea,
-          responsable, fecha requerida o si la fecha esta vencida.
+          Tabla de seguimiento operativa. Las filas pendientes se marcan en rojo si falta tarea, responsable, fecha
+          requerida o si la fecha esta vencida.
         </p>
       </header>
 

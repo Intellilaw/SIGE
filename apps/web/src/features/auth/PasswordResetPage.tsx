@@ -78,9 +78,9 @@ export function PasswordResetPage() {
     <main className="login-page">
       <section className="login-card auth-support-card">
         <p className="eyebrow">Acceso protegido</p>
-        <h1>{verification?.passwordResetRequired ? "Activar cuenta migrada" : "Definir nueva contrasena"}</h1>
+        <h1>{verification?.passwordResetRequired ? "Activar cuenta" : "Definir nueva contrasena"}</h1>
         <p className="muted">
-          Este paso reemplaza la contrasena heredada y abre una sesion nueva en SIGE_2.
+          Este paso define tu nueva contrasena y abre una sesion nueva en SIGE_2.
         </p>
         <p className="login-back-link">
           <Link to="/intranet-login">Volver al acceso RC</Link>

@@ -13,6 +13,7 @@ const CHANNEL_LABELS = {
     EMAIL: "Correo-e",
     PHONE: "Telefono"
 };
+const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "distribucion legacy"]);
 function normalizeText(value) {
     return (value ?? "").trim();
 }
@@ -21,6 +22,97 @@ function normalizeComparableText(value) {
         .toLowerCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
+}
+function getSearchWords(value) {
+    return normalizeComparableText(value).split(/\s+/).filter(Boolean);
+}
+function matchesClientSearch(matter, searchWords) {
+    if (searchWords.length === 0) {
+        return true;
+    }
+    const clientName = normalizeComparableText(matter.clientName);
+    return searchWords.every((word) => clientName.includes(word));
+}
+function matchesWordSearch(matter, clientNumber, tasks, searchWords) {
+    if (searchWords.length === 0) {
+        return true;
+    }
+    const haystack = normalizeComparableText([
+        clientNumber,
+        matter.clientName,
+        matter.quoteNumber,
+        matter.subject,
+        matter.specificProcess,
+        matter.matterIdentifier,
+        matter.executionPrompt,
+        matter.notes,
+        matter.milestone,
+        matter.nextAction,
+        matter.nextActionSource,
+        toDateInput(matter.nextActionDueAt),
+        getChannelLabel(matter.communicationChannel),
+        ...tasks.flatMap((task) => [
+            task.subject,
+            task.trackLabel,
+            task.sourceLabel,
+            task.responsible,
+            toDateInput(task.dueDate)
+        ])
+    ]
+        .filter(Boolean)
+        .join(" "));
+    return searchWords.every((word) => haystack.includes(word));
+}
+function hasMeaningfulTaskLabel(value) {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return false;
+    }
+    return !LEGACY_TASK_PLACEHOLDERS.has(normalizeComparableText(normalized));
+}
+function getLegacyDataText(data, key) {
+    const value = data?.[key];
+    return typeof value === "string" ? normalizeText(value) : "";
+}
+function buildDistributionHistoryTaskNameMap(histories) {
+    const taskNamesByRecordId = new Map();
+    histories.forEach((history) => {
+        Object.entries(history.createdIds ?? {}).forEach(([key, createdId]) => {
+            if (key.startsWith("term-")) {
+                return;
+            }
+            const createdIdText = normalizeText(String(createdId));
+            if (!createdIdText) {
+                return;
+            }
+            const match = key.match(/_(\d+)$/);
+            const index = match ? Number.parseInt(match[1] ?? "", 10) : Number.NaN;
+            const historyTaskName = Number.isNaN(index) ? undefined : history.eventNamesPerTable[index];
+            if (hasMeaningfulTaskLabel(historyTaskName)) {
+                taskNamesByRecordId.set(createdIdText, normalizeText(historyTaskName));
+            }
+        });
+    });
+    return taskNamesByRecordId;
+}
+function resolveTrackingRecordSubject(record, trackLabel, taskNamesByRecordId) {
+    const candidates = [
+        taskNamesByRecordId.get(record.id),
+        getLegacyDataText(record.data, "escrito"),
+        getLegacyDataText(record.data, "tarea"),
+        getLegacyDataText(record.data, "nombre_tarea"),
+        getLegacyDataText(record.data, "taskName"),
+        getLegacyDataText(record.data, "evento_nombre"),
+        getLegacyDataText(record.data, "evento"),
+        getLegacyDataText(record.data, "tramite"),
+        getLegacyDataText(record.data, "reporte"),
+        getLegacyDataText(record.data, "declaracion"),
+        getLegacyDataText(record.data, "entregable"),
+        record.taskName,
+        record.eventName,
+        record.subject
+    ];
+    return candidates.find((candidate) => hasMeaningfulTaskLabel(candidate)) ?? trackLabel;
 }
 function toDateInput(value) {
     return value ? value.slice(0, 10) : "";
@@ -102,7 +194,7 @@ function mergeTaskMaps(...maps) {
     });
     return merged;
 }
-function buildTrackingRecordTaskMap(records, trackLabels, sourcePrefix, includeCompleted = false) {
+function buildTrackingRecordTaskMap(records, trackLabels, sourcePrefix, taskNamesByRecordId, includeCompleted = false) {
     const taskMap = new Map();
     const filteredRecords = records
         .filter((record) => (includeCompleted ? true : record.status === "pendiente" && !record.deletedAt))
@@ -121,7 +213,7 @@ function buildTrackingRecordTaskMap(records, trackLabels, sourcePrefix, includeC
             clientName: record.clientName,
             matterId: record.matterId,
             matterNumber: record.matterNumber,
-            subject: record.taskName || record.eventName || record.subject || trackLabel,
+            subject: resolveTrackingRecordSubject(record, trackLabel, taskNamesByRecordId),
             responsible: record.responsible,
             dueDate: record.dueDate ?? record.termDate ?? "",
             state: record.status === "pendiente" ? "PENDING" : "COMPLETED",
@@ -217,7 +309,7 @@ function evaluateMatterRow(matter, clientNumber, tasks) {
         isNextBusinessDay
     };
 }
-export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPath = "/app/execution", titlePrefix = "", description = "Replica funcional del tablero legado: asunto por asunto, siguientes tareas, resaltado rojo por faltantes o vencimientos y separacion completa por equipo.", showHero = true }) {
+export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPath = "/app/execution", titlePrefix = "", description = "Tablero operativo asunto por asunto, con siguientes tareas, resaltado rojo por faltantes o vencimientos y separacion completa por equipo.", showHero = true }) {
     const { slug } = useParams();
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -230,8 +322,10 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const [trackingRecords, setTrackingRecords] = useState([]);
     const [terms, setTerms] = useState([]);
     const [distributionEvents, setDistributionEvents] = useState([]);
+    const [distributionHistory, setDistributionHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState(null);
+    const [wordSearch, setWordSearch] = useState("");
     const [clientSearch, setClientSearch] = useState("");
     const [panelMatter, setPanelMatter] = useState(null);
     const [panelMode, setPanelMode] = useState(null);
@@ -245,13 +339,14 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             setLoading(true);
             setErrorMessage(null);
             try {
-                const [loadedMatters, loadedDeleted, loadedClients, loadedTrackingRecords, loadedTerms, loadedDistributionEvents] = await Promise.all([
+                const [loadedMatters, loadedDeleted, loadedClients, loadedTrackingRecords, loadedTerms, loadedDistributionEvents, loadedDistributionHistory] = await Promise.all([
                     apiGet("/matters"),
                     apiGet("/matters/recycle-bin"),
                     apiGet("/clients"),
                     apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
                     apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`),
-                    apiGet(`/tasks/distribution-events?moduleId=${currentModule.moduleId}`)
+                    apiGet(`/tasks/distribution-events?moduleId=${currentModule.moduleId}`),
+                    apiGet(`/tasks/distributions?moduleId=${currentModule.moduleId}`)
                 ]);
                 const teamMatters = loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team);
                 const teamDeleted = loadedDeleted.filter((matter) => matter.responsibleTeam === currentModule.team);
@@ -259,6 +354,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                 setTrackingRecords(loadedTrackingRecords);
                 setTerms(loadedTerms);
                 setDistributionEvents(loadedDistributionEvents);
+                setDistributionHistory(loadedDistributionHistory);
                 setActiveMatters(sortActiveMatters(teamMatters, loadedClients));
                 setDeletedMatters(sortDeletedMatters(teamDeleted));
             }
@@ -273,25 +369,27 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     }, [module?.moduleId, module?.team, canAccess]);
     const trackLabels = useMemo(() => new Map(module?.definition.tracks.map((track) => [track.id, track.label]) ?? []), [module]);
     const sourcePrefix = module?.shortLabel ?? "Ejecucion";
-    const activeTrackingMap = useMemo(() => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix), [trackingRecords, trackLabels, sourcePrefix]);
-    const allTrackingMap = useMemo(() => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, true), [trackingRecords, trackLabels, sourcePrefix]);
+    const taskNamesByRecordId = useMemo(() => buildDistributionHistoryTaskNameMap(distributionHistory), [distributionHistory]);
+    const activeTrackingMap = useMemo(() => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId), [trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId]);
+    const allTrackingMap = useMemo(() => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId, true), [trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId]);
     const activeTermMap = useMemo(() => buildTermTaskMap(terms, sourcePrefix), [terms, sourcePrefix]);
     const allTermMap = useMemo(() => buildTermTaskMap(terms, sourcePrefix, true), [terms, sourcePrefix]);
     const activeTaskMap = useMemo(() => mergeTaskMaps(activeTermMap, activeTrackingMap), [activeTermMap, activeTrackingMap]);
     const allTaskMap = useMemo(() => mergeTaskMaps(allTermMap, allTrackingMap), [allTermMap, allTrackingMap]);
-    const searchQuery = normalizeComparableText(clientSearch);
+    const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
+    const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
     const filteredMatters = useMemo(() => activeMatters.filter((matter) => {
-        if (!searchQuery) {
-            return true;
-        }
-        return normalizeComparableText(matter.clientName).includes(searchQuery);
-    }), [activeMatters, searchQuery]);
+        const clientNumber = getEffectiveClientNumber(matter, clients);
+        const matterTasks = getMatterTasks(matter, activeTaskMap);
+        return (matchesClientSearch(matter, clientSearchWords) &&
+            matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords));
+    }), [activeMatters, activeTaskMap, clientSearchWords, clients, wordSearchWords]);
     const filteredDeletedMatters = useMemo(() => deletedMatters.filter((matter) => {
-        if (!searchQuery) {
-            return true;
-        }
-        return normalizeComparableText(matter.clientName).includes(searchQuery);
-    }), [deletedMatters, searchQuery]);
+        const clientNumber = getEffectiveClientNumber(matter, clients);
+        const matterTasks = getMatterTasks(matter, allTaskMap);
+        return (matchesClientSearch(matter, clientSearchWords) &&
+            matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords));
+    }), [allTaskMap, clientSearchWords, clients, deletedMatters, wordSearchWords]);
     if (!module || !canAccess || !legacyConfig) {
         return _jsx(Navigate, { to: fallbackPath, replace: true });
     }
@@ -389,10 +487,14 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                     };
                 })
             });
-            const loadedTrackingRecords = await apiGet(`/tasks/tracking-records?moduleId=${module.moduleId}`);
-            const loadedTerms = await apiGet(`/tasks/terms?moduleId=${module.moduleId}`);
+            const [loadedTrackingRecords, loadedTerms, loadedDistributionHistory] = await Promise.all([
+                apiGet(`/tasks/tracking-records?moduleId=${module.moduleId}`),
+                apiGet(`/tasks/terms?moduleId=${module.moduleId}`),
+                apiGet(`/tasks/distributions?moduleId=${module.moduleId}`)
+            ]);
             setTrackingRecords(loadedTrackingRecords);
             setTerms(loadedTerms);
+            setDistributionHistory(loadedDistributionHistory);
         }
         catch (error) {
             setErrorMessage(toErrorMessage(error));
@@ -436,7 +538,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
         }
     }
     const panelTasks = panelMatter ? getMatterTasks(panelMatter, allTaskMap) : [];
-    return (_jsxs("section", { className: "page-stack execution-page", children: [showHero ? (_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(backPath), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: `${titlePrefix}${module.label}` }) })] })] }), _jsx("p", { className: "muted", children: description })] })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar", children: [_jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente y abre cada asunto para crear o consultar tareas del equipo." }) }), _jsx("div", { className: "matters-filters", children: _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar cliente..." })] }) })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Enviar" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Origen" }), _jsx("th", { children: "Ir" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "Cargando ejecucion..." }) })) : filteredMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "No hay asuntos del equipo en esta vista." }) })) : (_jsxs(_Fragment, { children: [filteredMatters.map((matter) => {
+    return (_jsxs("section", { className: "page-stack execution-page", children: [showHero ? (_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(backPath), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: `${titlePrefix}${module.label}` }) })] })] }), _jsx("p", { className: "muted", children: description })] })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente y abre cada asunto para crear o consultar tareas del equipo." }) })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Enviar" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Origen" }), _jsx("th", { children: "Ir" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "Cargando ejecucion..." }) })) : filteredMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "No hay asuntos del equipo en esta vista." }) })) : (_jsxs(_Fragment, { children: [filteredMatters.map((matter) => {
                                                     const clientNumber = getEffectiveClientNumber(matter, clients);
                                                     const matterTasks = getMatterTasks(matter, activeTaskMap);
                                                     const validation = evaluateMatterRow(matter, clientNumber, matterTasks);
@@ -458,7 +560,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                                                                         setPanelMatter(matter);
                                                                         setPanelMode("history");
                                                                     }, children: "Ir" }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.executionPrompt || "", onChange: (event) => handleLocalChange(matter.id, "executionPrompt", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Prompt operativo..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.milestone || "", readOnly: true }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(matter.concluded), onChange: (event) => void handleToggleConcluded(matter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.notes || "", onChange: (event) => handleLocalChange(matter.id, "notes", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Comentarios del equipo..." }) })] }, matter.id));
-                                                }), _jsx("tr", { className: "execution-table-note", children: _jsx("td", { colSpan: 16, children: "Para agregar un nuevo asunto, se debe hacer desde el Distribuidor." }) })] })) })] }) }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsxs("span", { children: [filteredDeletedMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias, igual que en la referencia." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table execution-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente Tarea (Legacy)" }), _jsx("th", { children: "Fecha Sig. Tarea (Legacy)" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedMatters.map((matter) => {
+                                                }), _jsx("tr", { className: "execution-table-note", children: _jsx("td", { colSpan: 16, children: "Para agregar un nuevo asunto, se debe hacer desde el Distribuidor." }) })] })) })] }) }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsxs("span", { children: [filteredDeletedMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table execution-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedMatters.map((matter) => {
                                             const matterTasks = getMatterTasks(matter, allTaskMap);
                                             return (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(matter, clients) || "-" }), _jsx("td", { children: matter.clientName || "-" }), _jsx("td", { children: matter.quoteNumber || "-" }), _jsx("td", { children: matter.subject || "-" }), _jsx("td", { children: matter.matterIdentifier || "-" }), _jsx("td", { children: getChannelLabel(matter.communicationChannel) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, task.id)))) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, task.id)))) }), _jsx("td", { children: matter.executionPrompt || "-" }), _jsx("td", { children: matter.milestone || "-" }), _jsx("td", { children: matter.concluded ? "Si" : "No" }), _jsx("td", { children: matter.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(matter.id), children: "Regresar" }) })] }, matter.id));
                                         })) })] }) }) })] }), _jsx(ExecutionTaskPanel, { module: module, legacyConfig: legacyConfig, distributionEvents: distributionEvents, matter: panelMatter, clientNumber: panelMatter ? getEffectiveClientNumber(panelMatter, clients) : "", mode: panelMode, tasks: panelTasks, userShortName: user?.shortName, onClose: () => {

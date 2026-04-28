@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import type { Client, Matter, TaskDistributionEvent, TaskState, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import type {
+  Client,
+  Matter,
+  TaskDistributionEvent,
+  TaskDistributionHistory,
+  TaskState,
+  TaskTerm,
+  TaskTrackingRecord
+} from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -41,6 +49,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   EMAIL: "Correo-e",
   PHONE: "Telefono"
 };
+const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "distribucion legacy"]);
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
@@ -51,6 +60,125 @@ function normalizeComparableText(value?: string | null) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getSearchWords(value?: string | null) {
+  return normalizeComparableText(value).split(/\s+/).filter(Boolean);
+}
+
+function matchesClientSearch(matter: Matter, searchWords: string[]) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const clientName = normalizeComparableText(matter.clientName);
+  return searchWords.every((word) => clientName.includes(word));
+}
+
+function matchesWordSearch(
+  matter: Matter,
+  clientNumber: string,
+  tasks: MatterTaskView[],
+  searchWords: string[]
+) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const haystack = normalizeComparableText(
+    [
+      clientNumber,
+      matter.clientName,
+      matter.quoteNumber,
+      matter.subject,
+      matter.specificProcess,
+      matter.matterIdentifier,
+      matter.executionPrompt,
+      matter.notes,
+      matter.milestone,
+      matter.nextAction,
+      matter.nextActionSource,
+      toDateInput(matter.nextActionDueAt),
+      getChannelLabel(matter.communicationChannel),
+      ...tasks.flatMap((task) => [
+        task.subject,
+        task.trackLabel,
+        task.sourceLabel,
+        task.responsible,
+        toDateInput(task.dueDate)
+      ])
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  return searchWords.every((word) => haystack.includes(word));
+}
+
+function hasMeaningfulTaskLabel(value?: string | null) {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return false;
+  }
+
+  return !LEGACY_TASK_PLACEHOLDERS.has(normalizeComparableText(normalized));
+}
+
+function getLegacyDataText(data: TaskTrackingRecord["data"], key: string) {
+  const value = data?.[key];
+  return typeof value === "string" ? normalizeText(value) : "";
+}
+
+function buildDistributionHistoryTaskNameMap(histories: TaskDistributionHistory[]) {
+  const taskNamesByRecordId = new Map<string, string>();
+
+  histories.forEach((history) => {
+    Object.entries(history.createdIds ?? {}).forEach(([key, createdId]) => {
+      if (key.startsWith("term-")) {
+        return;
+      }
+
+      const createdIdText = normalizeText(String(createdId));
+      if (!createdIdText) {
+        return;
+      }
+
+      const match = key.match(/_(\d+)$/);
+      const index = match ? Number.parseInt(match[1] ?? "", 10) : Number.NaN;
+      const historyTaskName = Number.isNaN(index) ? undefined : history.eventNamesPerTable[index];
+
+      if (hasMeaningfulTaskLabel(historyTaskName)) {
+        taskNamesByRecordId.set(createdIdText, normalizeText(historyTaskName));
+      }
+    });
+  });
+
+  return taskNamesByRecordId;
+}
+
+function resolveTrackingRecordSubject(
+  record: TaskTrackingRecord,
+  trackLabel: string,
+  taskNamesByRecordId: Map<string, string>
+) {
+  const candidates = [
+    taskNamesByRecordId.get(record.id),
+    getLegacyDataText(record.data, "escrito"),
+    getLegacyDataText(record.data, "tarea"),
+    getLegacyDataText(record.data, "nombre_tarea"),
+    getLegacyDataText(record.data, "taskName"),
+    getLegacyDataText(record.data, "evento_nombre"),
+    getLegacyDataText(record.data, "evento"),
+    getLegacyDataText(record.data, "tramite"),
+    getLegacyDataText(record.data, "reporte"),
+    getLegacyDataText(record.data, "declaracion"),
+    getLegacyDataText(record.data, "entregable"),
+    record.taskName,
+    record.eventName,
+    record.subject
+  ];
+
+  return candidates.find((candidate) => hasMeaningfulTaskLabel(candidate)) ?? trackLabel;
 }
 
 function toDateInput(value?: string | null) {
@@ -158,6 +286,7 @@ function buildTrackingRecordTaskMap(
   records: TaskTrackingRecord[],
   trackLabels: Map<string, string>,
   sourcePrefix: string,
+  taskNamesByRecordId: Map<string, string>,
   includeCompleted = false
 ) {
   const taskMap = new Map<string, MatterTaskView[]>();
@@ -179,7 +308,7 @@ function buildTrackingRecordTaskMap(
       clientName: record.clientName,
       matterId: record.matterId,
       matterNumber: record.matterNumber,
-      subject: record.taskName || record.eventName || record.subject || trackLabel,
+      subject: resolveTrackingRecordSubject(record, trackLabel, taskNamesByRecordId),
       responsible: record.responsible,
       dueDate: record.dueDate ?? record.termDate ?? "",
       state: record.status === "pendiente" ? "PENDING" : "COMPLETED",
@@ -303,7 +432,7 @@ export function ExecutionTeamWorkspace({
   backPath = "/app/execution",
   fallbackPath = "/app/execution",
   titlePrefix = "",
-  description = "Replica funcional del tablero legado: asunto por asunto, siguientes tareas, resaltado rojo por faltantes o vencimientos y separacion completa por equipo.",
+  description = "Tablero operativo asunto por asunto, con siguientes tareas, resaltado rojo por faltantes o vencimientos y separacion completa por equipo.",
   showHero = true
 }: ExecutionTeamWorkspaceProps) {
   const { slug } = useParams();
@@ -319,8 +448,10 @@ export function ExecutionTeamWorkspace({
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [distributionEvents, setDistributionEvents] = useState<TaskDistributionEvent[]>([]);
+  const [distributionHistory, setDistributionHistory] = useState<TaskDistributionHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [wordSearch, setWordSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [panelMatter, setPanelMatter] = useState<Matter | null>(null);
   const [panelMode, setPanelMode] = useState<"create" | "history" | null>(null);
@@ -345,14 +476,16 @@ export function ExecutionTeamWorkspace({
           loadedClients,
           loadedTrackingRecords,
           loadedTerms,
-          loadedDistributionEvents
+          loadedDistributionEvents,
+          loadedDistributionHistory
         ] = await Promise.all([
           apiGet<Matter[]>("/matters"),
           apiGet<Matter[]>("/matters/recycle-bin"),
           apiGet<Client[]>("/clients"),
           apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
           apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`),
-          apiGet<TaskDistributionEvent[]>(`/tasks/distribution-events?moduleId=${currentModule.moduleId}`)
+          apiGet<TaskDistributionEvent[]>(`/tasks/distribution-events?moduleId=${currentModule.moduleId}`),
+          apiGet<TaskDistributionHistory[]>(`/tasks/distributions?moduleId=${currentModule.moduleId}`)
         ]);
 
         const teamMatters = loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team);
@@ -362,6 +495,7 @@ export function ExecutionTeamWorkspace({
         setTrackingRecords(loadedTrackingRecords);
         setTerms(loadedTerms);
         setDistributionEvents(loadedDistributionEvents);
+        setDistributionHistory(loadedDistributionHistory);
         setActiveMatters(sortActiveMatters(teamMatters, loadedClients));
         setDeletedMatters(sortDeletedMatters(teamDeleted));
       } catch (error) {
@@ -379,13 +513,17 @@ export function ExecutionTeamWorkspace({
     [module]
   );
   const sourcePrefix = module?.shortLabel ?? "Ejecucion";
+  const taskNamesByRecordId = useMemo(
+    () => buildDistributionHistoryTaskNameMap(distributionHistory),
+    [distributionHistory]
+  );
   const activeTrackingMap = useMemo(
-    () => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix),
-    [trackingRecords, trackLabels, sourcePrefix]
+    () => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId),
+    [trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId]
   );
   const allTrackingMap = useMemo(
-    () => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, true),
-    [trackingRecords, trackLabels, sourcePrefix]
+    () => buildTrackingRecordTaskMap(trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId, true),
+    [trackingRecords, trackLabels, sourcePrefix, taskNamesByRecordId]
   );
   const activeTermMap = useMemo(
     () => buildTermTaskMap(terms, sourcePrefix),
@@ -404,28 +542,31 @@ export function ExecutionTeamWorkspace({
     [allTermMap, allTrackingMap]
   );
 
-  const searchQuery = normalizeComparableText(clientSearch);
+  const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
+  const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
   const filteredMatters = useMemo(
     () =>
       activeMatters.filter((matter) => {
-        if (!searchQuery) {
-          return true;
-        }
-
-        return normalizeComparableText(matter.clientName).includes(searchQuery);
+        const clientNumber = getEffectiveClientNumber(matter, clients);
+        const matterTasks = getMatterTasks(matter, activeTaskMap);
+        return (
+          matchesClientSearch(matter, clientSearchWords) &&
+          matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords)
+        );
       }),
-    [activeMatters, searchQuery]
+    [activeMatters, activeTaskMap, clientSearchWords, clients, wordSearchWords]
   );
   const filteredDeletedMatters = useMemo(
     () =>
       deletedMatters.filter((matter) => {
-        if (!searchQuery) {
-          return true;
-        }
-
-        return normalizeComparableText(matter.clientName).includes(searchQuery);
+        const clientNumber = getEffectiveClientNumber(matter, clients);
+        const matterTasks = getMatterTasks(matter, allTaskMap);
+        return (
+          matchesClientSearch(matter, clientSearchWords) &&
+          matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords)
+        );
       }),
-    [deletedMatters, searchQuery]
+    [allTaskMap, clientSearchWords, clients, deletedMatters, wordSearchWords]
   );
 
   if (!module || !canAccess || !legacyConfig) {
@@ -549,12 +690,14 @@ export function ExecutionTeamWorkspace({
         })
       });
 
-      const loadedTrackingRecords = await apiGet<TaskTrackingRecord[]>(
-        `/tasks/tracking-records?moduleId=${module.moduleId}`
-      );
-      const loadedTerms = await apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${module.moduleId}`);
+      const [loadedTrackingRecords, loadedTerms, loadedDistributionHistory] = await Promise.all([
+        apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${module.moduleId}`),
+        apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${module.moduleId}`),
+        apiGet<TaskDistributionHistory[]>(`/tasks/distributions?moduleId=${module.moduleId}`)
+      ]);
       setTrackingRecords(loadedTrackingRecords);
       setTerms(loadedTerms);
+      setDistributionHistory(loadedDistributionHistory);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     }
@@ -634,24 +777,41 @@ export function ExecutionTeamWorkspace({
           <span>{filteredMatters.length} registros</span>
         </div>
 
-        <div className="matters-toolbar">
+        <div className="matters-toolbar execution-search-toolbar">
+          <div className="matters-filters leads-search-filters matters-active-search-filters execution-search-filters">
+            <label className="form-field matters-search-field">
+              <span>Buscar por palabra</span>
+              <input
+                type="text"
+                value={wordSearch}
+                onChange={(event) => setWordSearch(event.target.value)}
+                placeholder="ID, asunto, tarea, nota..."
+              />
+            </label>
+
+            <label className="form-field matters-search-field">
+              <span>Buscador por cliente</span>
+              <input
+                type="text"
+                value={clientSearch}
+                onChange={(event) => setClientSearch(event.target.value)}
+                placeholder="Buscar palabra del cliente..."
+              />
+            </label>
+          </div>
+
           <div className="matters-toolbar-actions">
             <span className="muted">
               Filtra por cliente y abre cada asunto para crear o consultar tareas del equipo.
             </span>
           </div>
+        </div>
+      </section>
 
-          <div className="matters-filters">
-            <label className="form-field">
-              <span>Cliente</span>
-              <input
-                type="text"
-                value={clientSearch}
-                onChange={(event) => setClientSearch(event.target.value)}
-                placeholder="Buscar cliente..."
-              />
-            </label>
-          </div>
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Asuntos en ejecucion</h2>
+          <span>{filteredMatters.length} registros</span>
         </div>
 
         <div className="lead-table-shell">
@@ -843,7 +1003,7 @@ export function ExecutionTeamWorkspace({
           <span>{filteredDeletedMatters.length} registros</span>
         </div>
         <p className="muted matter-table-caption">
-          Los asuntos eliminados desaparecen definitivamente despues de 30 dias, igual que en la referencia.
+          Los asuntos eliminados desaparecen definitivamente despues de 30 dias.
         </p>
 
         <div className="lead-table-shell">
@@ -857,8 +1017,8 @@ export function ExecutionTeamWorkspace({
                   <th>Asunto</th>
                   <th>ID Asunto</th>
                   <th>Canal</th>
-                  <th>Siguiente Tarea (Legacy)</th>
-                  <th>Fecha Sig. Tarea (Legacy)</th>
+                  <th>Siguiente tarea</th>
+                  <th>Fecha sig. tarea</th>
                   <th>Comentarios LLM</th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>

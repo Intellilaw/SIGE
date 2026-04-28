@@ -30,6 +30,31 @@ const EMPTY_FORM: UserFormState = {
   isActive: true
 };
 
+function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
+  return visible ? (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-4 4.8M6 6.2C3.8 7.7 2.5 10 2 12c0 0 3.5 7 10 7 1.7 0 3.2-.5 4.5-1.2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  ) : (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 function formatDateTime(value?: string) {
   return value ? new Date(value).toLocaleString() : "Nunca";
 }
@@ -39,7 +64,7 @@ function getLegacyRoleLabel(role: ManagedUser["legacyRole"]) {
     case "SUPERADMIN":
       return "superadmin";
     case "INTRANET":
-      return "intranet";
+      return "operativo";
     default:
       return "public";
   }
@@ -74,6 +99,7 @@ export function UsersPage() {
   const [flash, setFlash] = useState<FlashState>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState<UserFormState>(EMPTY_FORM);
 
   const canManageUsers = Boolean(user?.permissions.includes("*") || user?.permissions.includes("users:manage"));
@@ -114,6 +140,7 @@ export function UsersPage() {
   function resetForm() {
     setIsEditing(false);
     setEditingUserId(null);
+    setShowPassword(false);
     setForm(EMPTY_FORM);
   }
 
@@ -121,6 +148,7 @@ export function UsersPage() {
     setFlash(null);
     setIsEditing(true);
     setEditingUserId(target.id);
+    setShowPassword(false);
     setForm({
       username: target.username,
       password: "",
@@ -220,8 +248,8 @@ export function UsersPage() {
             </div>
           </div>
           <p className="muted">
-            Este modulo conserva el alcance sensible del legacy. Solo cuentas con perfil superadmin o equivalente
-            pueden administrar usuarios, equipos, nombre corto, rol especifico y onboarding.
+            Solo las cuentas con permisos de administracion pueden gestionar usuarios, equipos, nombre corto, rol
+            especifico y onboarding.
           </p>
         </header>
       </section>
@@ -240,9 +268,8 @@ export function UsersPage() {
           </div>
         </div>
         <p className="muted">
-          Este modulo replica la administracion de usuarios de Intranet sobre persistencia real. Conserva `username`,
-          `short_name`, `team`, `specific_role` y el acceso legacy `intranet/superadmin`, pero ahora incluye activacion
-          y reset seguro sin depender de Supabase Auth en cliente.
+          Administracion central de usuarios con activacion segura, reinicio de contrasena y control operativo sobre
+          `username`, `short_name`, `team`, `specific_role` y el tipo de acceso del sistema.
         </p>
       </header>
 
@@ -261,13 +288,13 @@ export function UsersPage() {
 
       <section className="panel">
         <div className="panel-header">
-          <h2>{isEditing ? "Editar usuario" : "Crear usuario intranet"}</h2>
+          <h2>{isEditing ? "Editar usuario" : "Crear usuario"}</h2>
           {isEditing ? (
             <button className="secondary-button" type="button" onClick={resetForm}>
               Cancelar edicion
             </button>
           ) : (
-            <span>Acceso operativo con metadata legacy</span>
+            <span>Acceso operativo y permisos</span>
           )}
         </div>
 
@@ -303,13 +330,25 @@ export function UsersPage() {
 
             <label className="form-field">
               <span>Contrasena</span>
-              <input
-                value={form.password}
-                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                placeholder={isEditing ? "Dejar en blanco para conservar la actual" : "Minimo 10 caracteres con simbolo"}
-                type="password"
-                required={!isEditing}
-              />
+              <span className="password-input-wrap">
+                <input
+                  autoComplete={isEditing ? "new-password" : "new-password"}
+                  value={form.password}
+                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  placeholder={isEditing ? "Dejar en blanco para conservar la actual" : "Minimo 10 caracteres con simbolo"}
+                  type={showPassword ? "text" : "password"}
+                  required={!isEditing}
+                />
+                <button
+                  aria-label={showPassword ? "Ocultar contrasena" : "Mostrar contrasena"}
+                  aria-pressed={showPassword}
+                  className="password-visibility-toggle"
+                  onClick={() => setShowPassword((current) => !current)}
+                  type="button"
+                >
+                  <PasswordVisibilityIcon visible={showPassword} />
+                </button>
+              </span>
             </label>
           </div>
 
@@ -383,7 +422,7 @@ export function UsersPage() {
               <tr>
                 <th>Usuario</th>
                 <th>Nombre corto</th>
-                <th>Acceso legacy</th>
+                <th>Tipo de acceso</th>
                 <th>Rol sistema</th>
                 <th>Equipo</th>
                 <th>Rol especifico</th>
@@ -452,7 +491,7 @@ export function UsersPage() {
       <section className="users-admin-grid">
         <article className="panel">
           <div className="panel-header">
-            <h2>Compatibilidad legacy</h2>
+            <h2>Datos operativos</h2>
             <span>Lista para SQL</span>
           </div>
           <div className="compatibility-list">
@@ -466,11 +505,11 @@ export function UsersPage() {
             </div>
             <div className="compatibility-item">
               <strong>team / specific_role</strong>
-              <span>Se guardan como metadata persistida para respetar el modelo de permisos de Intranet.</span>
+              <span>Se guardan como metadata persistida para sostener el modelo actual de permisos y asignaciones.</span>
             </div>
             <div className="compatibility-item">
               <strong>Onboarding seguro</strong>
-              <span>Los usuarios importados ya pueden recibir enlaces de activacion sin reutilizar contrasenas legacy.</span>
+              <span>Las cuentas pueden recibir enlaces de activacion y restablecimiento sin reutilizar contrasenas previas.</span>
             </div>
           </div>
         </article>

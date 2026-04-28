@@ -333,7 +333,7 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -412,16 +412,19 @@ textarea {
 
 .content {
   padding: 28px;
+  min-width: 0;
 }
 
 .page-stack {
   display: grid;
   gap: 24px;
+  min-width: 0;
 }
 
 .hero,
 .panel {
   padding: 24px;
+  min-width: 0;
 }
 
 .hero-copy {
@@ -1202,6 +1205,15 @@ textarea {
   flex-wrap: wrap;
 }
 
+.leads-search-filters {
+  flex: 1 1 540px;
+}
+
+.leads-search-filters .form-field {
+  flex: 1 1 240px;
+  min-width: min(240px, 100%);
+}
+
 .lead-summary-grid {
   margin-left: auto;
 }
@@ -1746,12 +1758,18 @@ textarea {
 
 .lead-table-shell {
   overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border-radius: 20px;
   border: 1px solid rgba(31, 41, 51, 0.08);
 }
 
 .lead-table-wrapper {
   overflow: auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   max-height: 70vh;
 }
 
@@ -1888,6 +1906,47 @@ textarea {
   gap: 12px;
   align-items: flex-end;
   flex-wrap: wrap;
+}
+
+.matters-active-toolbar {
+  align-items: flex-start;
+}
+
+.matters-active-search-filters {
+  flex: 1 1 760px;
+  justify-content: flex-end;
+}
+
+.matters-active-search-filters .form-field {
+  flex: 1 1 240px;
+  min-width: min(240px, 100%);
+}
+
+.matters-active-search-filters .matters-team-field {
+  flex: 0 0 205px;
+  min-width: 205px;
+}
+
+.matters-search-field {
+  flex: 1 1 240px;
+}
+
+.matters-search-field input {
+  width: 100%;
+}
+
+.execution-search-toolbar {
+  justify-content: flex-start;
+}
+
+.execution-search-filters {
+  flex: 1 1 760px;
+  justify-content: flex-start;
+}
+
+.execution-search-filters .form-field {
+  flex: 1 1 260px;
+  min-width: min(260px, 100%);
 }
 
 .matters-table {

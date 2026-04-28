@@ -102,8 +102,8 @@ export function TaskAdditionalTasksPage() {
         </div>
         <h2>Tareas adicionales ({moduleConfig.label})</h2>
         <p className="muted">
-          Equivalente a las tareas adicionales de Intranet: alta, modificacion, conclusion/reactivacion,
-          borrado y resaltado rojo por fecha limite vencida.
+          Gestion de tareas adicionales con alta, modificacion, conclusion o reactivacion, borrado y resaltado rojo
+          por fecha limite vencida.
         </p>
       </header>
 

@@ -40,8 +40,8 @@ export function PasswordAssistancePage() {
         <p className="eyebrow">Onboarding seguro</p>
         <h1>Activar o restablecer contrasena</h1>
         <p className="muted">
-          Si tu cuenta fue migrada desde Intranet o perdiste acceso, escribe tu usuario o correo. SIGE_2 generara el
-          flujo seguro definido para el ambiente actual sin reutilizar contrasenas legacy.
+          Si perdiste acceso o necesitas activar tu cuenta, escribe tu usuario o correo. SIGE_2 generara el flujo
+          seguro definido para el ambiente actual para que recuperes tu acceso.
         </p>
         <p className="login-back-link">
           <Link to="/intranet-login">Volver al acceso RC</Link>

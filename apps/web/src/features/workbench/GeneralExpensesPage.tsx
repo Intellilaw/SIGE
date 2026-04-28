@@ -693,8 +693,8 @@ export function GeneralExpensesPage() {
           </div>
         </div>
         <p className="muted">
-          Réplica funcional del módulo legado: registro mensual, distribución por equipo, bloqueo por aprobaciones y
-          resumen diario de gastos pagados por EMRT.
+          Registro mensual de gastos, distribucion por equipo, bloqueo por aprobaciones y resumen diario de gastos
+          pagados por EMRT.
         </p>
       </header>
 

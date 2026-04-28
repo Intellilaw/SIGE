@@ -409,7 +409,7 @@ export function TaskDistributorPage() {
         <h2>Distribuidor de tareas ({moduleConfig.label})</h2>
         <p className="muted">
           La pestaña de tareas activas es la fuente operativa: sus registros alimentan las tablas de seguimiento y
-          el modulo de ejecucion. La configuracion conserva el catalogo usado por el Selector de Tareas.
+          el modulo de ejecucion. La configuracion define el catalogo usado por el Selector de Tareas.
         </p>
       </header>
 
@@ -577,7 +577,7 @@ export function TaskDistributorPage() {
               <div>
                 <h2>Gestión de Catálogo de Tareas</h2>
                 <p className="muted">
-                  Define la tarea maestra y cuantas filas debe crear en cada tabla de seguimiento, igual que el catalogo de Intranet.
+                  Define la tarea maestra y cuantas filas debe crear en cada tabla de seguimiento.
                 </p>
               </div>
               <span>{events.length} configuradas</span>

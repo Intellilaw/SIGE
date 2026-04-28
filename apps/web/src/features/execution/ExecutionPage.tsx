@@ -24,7 +24,7 @@ export function ExecutionPage() {
               <h2>Ejecucion</h2>
             </div>
           </div>
-          <p className="muted">Tu equipo actual no tiene acceso a modulos de ejecucion en esta version.</p>
+          <p className="muted">Tu equipo actual no tiene acceso a este modulo.</p>
         </header>
       </section>
     );
@@ -42,8 +42,8 @@ export function ExecutionPage() {
           </div>
         </div>
         <p className="muted">
-          Replica funcional del modulo legado: entrada por equipo, tablero separado y visibilidad de siguientes tareas
-          con resaltado de renglones en rojo cuando falta informacion o hay vencimientos.
+          Operacion por equipo con tablero separado y visibilidad de siguientes tareas, con resaltado en rojo cuando
+          falta informacion o hay vencimientos.
         </p>
       </header>
 

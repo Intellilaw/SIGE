@@ -34,14 +34,14 @@ export function ModulePlaceholderPage({ moduleId }: ModulePlaceholderPageProps) 
             <span className={`status-pill ${module.available ? "status-live" : "status-migration"}`}>{module.phase}</span>
           </div>
           <p className="muted">
-            Este modulo ya forma parte del mapa de SIGE_2 y queda listo para reconstruirse sobre una arquitectura mas segura,
-            desacoplada y escalable que la aplicacion legacy.
+            Este modulo ya forma parte del mapa de SIGE_2 y cuenta con definicion funcional para seguir creciendo sobre
+            una arquitectura mas segura, desacoplada y escalable.
           </p>
         </article>
 
         <article className="panel">
           <div className="panel-header">
-            <h3>Alcance heredado</h3>
+            <h3>Cobertura</h3>
             <span>{module.coverage.length} frentes</span>
           </div>
           <div className="capability-list">

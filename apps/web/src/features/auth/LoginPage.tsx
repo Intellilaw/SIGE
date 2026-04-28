@@ -58,7 +58,7 @@ export function LoginPage() {
           <img className="rusconi-logo login-brand-logo" src={rusconiLogo} alt="Rusconi Consulting" />
         </div>
         <p className="eyebrow">Rusconi Consulting</p>
-        <h1>Intranet RC</h1>
+        <h1>SIGE_2</h1>
         <p className="muted">
           Accede al entorno operativo de SIGE_2 para continuar con clientes, cotizaciones, leads, asuntos y tareas.
         </p>
@@ -101,7 +101,7 @@ export function LoginPage() {
             </span>
           </label>
           {error ? <p className="error-text">{error}</p> : null}
-          <button type="submit">Entrar a Rusconi Consulting</button>
+          <button type="submit">Entrar a SIGE_2</button>
         </form>
       </section>
     </main>

@@ -288,7 +288,7 @@ export function TasksTeamPage() {
           </div>
         </div>
         <p className="muted">
-          Modulo de tareas separado por equipo: distribuidor, tablas de seguimiento, terminos y tareas adicionales.
+          Operacion de tareas por equipo con distribuidor, tablas de seguimiento, terminos y tareas adicionales.
         </p>
         <div className="tasks-legacy-toolbar">
           <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`)}>
