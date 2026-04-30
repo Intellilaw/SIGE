@@ -26,6 +26,15 @@ import { MatterCatalogPage } from "./features/workbench/MatterCatalogPage";
 import { CommissionsPage } from "./features/commissions/CommissionsPage";
 import { FinancesPage } from "./features/finances/FinancesPage";
 import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
+import {
+  MobileExecutionIndexPage,
+  MobileExecutionTeamPage,
+  MobileHomePage,
+  MobileProtectedLayout,
+  MobileTrackingIndexPage,
+  MobileTrackingModulePage,
+  MobileTrackingTablePage
+} from "./features/mobile/MobileApp";
 
 function ProtectedLayout() {
   const { user, loading } = useAuth();
@@ -51,6 +60,14 @@ export default function App() {
           <Route path="/intranet-password-help" element={<PasswordAssistancePage />} />
           <Route path="/intranet-reset-password" element={<PasswordResetPage />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/mobile" element={<MobileProtectedLayout />}>
+            <Route index element={<MobileHomePage />} />
+            <Route path="execution" element={<MobileExecutionIndexPage />} />
+            <Route path="execution/:slug" element={<MobileExecutionTeamPage />} />
+            <Route path="tracking" element={<MobileTrackingIndexPage />} />
+            <Route path="tracking/:slug" element={<MobileTrackingModulePage />} />
+            <Route path="tracking/:slug/:tableId" element={<MobileTrackingTablePage />} />
+          </Route>
           <Route path="/app" element={<ProtectedLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="clients" element={<ClientsPage />} />
