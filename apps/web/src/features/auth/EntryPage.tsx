@@ -19,7 +19,7 @@ export function EntryPage() {
             <p className="entry-brand-name">INTELLILAW</p>
           </div>
 
-          <h1 className="entry-title">SIGE_2</h1>
+          <h1 className="entry-title">SIGE</h1>
           <p className="entry-version">{APP_VERSION_TEXT}</p>
           <p className="entry-subtitle">Sistema Integral de Administracion Empresarial</p>
 

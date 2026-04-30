@@ -178,18 +178,35 @@ function getSortedTaskViews(tasks) {
         return leftDate.localeCompare(rightDate);
     });
 }
+function getTaskViewIdentity(task) {
+    return `${task.sourceType}:${task.moduleId}:${task.trackId}:${task.id}`;
+}
 function addTaskViewToMap(taskMap, keys, view) {
-    keys.map(normalizeText).filter(Boolean).forEach((key) => {
+    const uniqueKeys = [...new Set(keys.map(normalizeText).filter(Boolean))];
+    const viewIdentity = getTaskViewIdentity(view);
+    uniqueKeys.forEach((key) => {
         const current = taskMap.get(key) ?? [];
-        current.push(view);
-        taskMap.set(key, current);
+        if (current.some((task) => getTaskViewIdentity(task) === viewIdentity)) {
+            return;
+        }
+        taskMap.set(key, [...current, view]);
     });
 }
 function mergeTaskMaps(...maps) {
     const merged = new Map();
     maps.forEach((taskMap) => {
         taskMap.forEach((tasks, key) => {
-            merged.set(key, getSortedTaskViews([...(merged.get(key) ?? []), ...tasks]));
+            const current = merged.get(key) ?? [];
+            const knownTaskIds = new Set(current.map(getTaskViewIdentity));
+            const uniqueTasks = tasks.filter((task) => {
+                const taskIdentity = getTaskViewIdentity(task);
+                if (knownTaskIds.has(taskIdentity)) {
+                    return false;
+                }
+                knownTaskIds.add(taskIdentity);
+                return true;
+            });
+            merged.set(key, getSortedTaskViews([...current, ...uniqueTasks]));
         });
     });
     return merged;
@@ -453,6 +470,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             return;
         }
         try {
+            setErrorMessage(null);
             const eventName = payload.eventName.trim() || panelMatter.subject || "Tarea de ejecucion";
             await apiPost("/tasks/distributions", {
                 moduleId: module.moduleId,
@@ -498,6 +516,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
         }
         catch (error) {
             setErrorMessage(toErrorMessage(error));
+            throw error;
         }
     }
     async function handleUpdateTaskState(task, state) {
@@ -556,13 +575,13 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                                                     return (_jsxs("tr", { className: rowClassName, title: rowTitle, children: [_jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-derived", value: clientNumber || "-", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.clientName || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.quoteNumber || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.subject || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.specificProcess || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.matterIdentifier || "", readOnly: true }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "primary-button matter-inline-button", onClick: () => {
                                                                         setPanelMatter(matter);
                                                                         setPanelMode("create");
-                                                                    }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("div", { className: "matter-reflection-card", children: getChannelLabel(matter.communicationChannel) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, task.id)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, task.id)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: matterTasks.map((task) => (_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }, task.id))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => {
+                                                                    }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("div", { className: "matter-reflection-card", children: getChannelLabel(matter.communicationChannel) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:subject`)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, `${getTaskViewIdentity(task)}:due-date`)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: matterTasks.map((task) => (_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }, `${getTaskViewIdentity(task)}:origin`))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => {
                                                                         setPanelMatter(matter);
                                                                         setPanelMode("history");
                                                                     }, children: "Ir" }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.executionPrompt || "", onChange: (event) => handleLocalChange(matter.id, "executionPrompt", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Prompt operativo..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.milestone || "", readOnly: true }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(matter.concluded), onChange: (event) => void handleToggleConcluded(matter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.notes || "", onChange: (event) => handleLocalChange(matter.id, "notes", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Comentarios del equipo..." }) })] }, matter.id));
                                                 }), _jsx("tr", { className: "execution-table-note", children: _jsx("td", { colSpan: 16, children: "Para agregar un nuevo asunto, se debe hacer desde el Distribuidor." }) })] })) })] }) }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsxs("span", { children: [filteredDeletedMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table execution-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedMatters.map((matter) => {
                                             const matterTasks = getMatterTasks(matter, allTaskMap);
-                                            return (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(matter, clients) || "-" }), _jsx("td", { children: matter.clientName || "-" }), _jsx("td", { children: matter.quoteNumber || "-" }), _jsx("td", { children: matter.subject || "-" }), _jsx("td", { children: matter.matterIdentifier || "-" }), _jsx("td", { children: getChannelLabel(matter.communicationChannel) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, task.id)))) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, task.id)))) }), _jsx("td", { children: matter.executionPrompt || "-" }), _jsx("td", { children: matter.milestone || "-" }), _jsx("td", { children: matter.concluded ? "Si" : "No" }), _jsx("td", { children: matter.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(matter.id), children: "Regresar" }) })] }, matter.id));
+                                            return (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(matter, clients) || "-" }), _jsx("td", { children: matter.clientName || "-" }), _jsx("td", { children: matter.quoteNumber || "-" }), _jsx("td", { children: matter.subject || "-" }), _jsx("td", { children: matter.matterIdentifier || "-" }), _jsx("td", { children: getChannelLabel(matter.communicationChannel) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:recycle-subject`)))) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, `${getTaskViewIdentity(task)}:recycle-due-date`)))) }), _jsx("td", { children: matter.executionPrompt || "-" }), _jsx("td", { children: matter.milestone || "-" }), _jsx("td", { children: matter.concluded ? "Si" : "No" }), _jsx("td", { children: matter.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(matter.id), children: "Regresar" }) })] }, matter.id));
                                         })) })] }) }) })] }), _jsx(ExecutionTaskPanel, { module: module, legacyConfig: legacyConfig, distributionEvents: distributionEvents, matter: panelMatter, clientNumber: panelMatter ? getEffectiveClientNumber(panelMatter, clients) : "", mode: panelMode, tasks: panelTasks, userShortName: user?.shortName, onClose: () => {
                     setPanelMatter(null);
                     setPanelMode(null);

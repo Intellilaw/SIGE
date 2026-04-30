@@ -142,7 +142,10 @@ async function main() {
         }
 
         const result = await prisma.taskTrackingRecord.updateMany({
-          where: { id: { in: taskRecordCandidateIds(row) } },
+          where: {
+            id: { in: taskRecordCandidateIds(row) },
+            taskName: { in: ["", "Tarea legacy"] }
+          },
           data: { taskName }
         });
         counts.updatedTaskRecords += result.count;
@@ -162,7 +165,14 @@ async function main() {
       }
 
       const result = await prisma.taskTerm.updateMany({
-        where: { id: { in: termCandidateIds(row) } },
+        where: {
+          id: { in: termCandidateIds(row) },
+          OR: [
+            { eventName: { in: ["", "Termino legacy"] } },
+            { pendingTaskLabel: { in: ["", "Tarea legacy"] } },
+            { pendingTaskLabel: null }
+          ]
+        },
         data: {
           eventName,
           pendingTaskLabel

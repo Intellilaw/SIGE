@@ -1,14 +1,21 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, persistAuthTokens } from "../../api/http-client";
+import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, hasPersistedAuthSession, persistAuthTokens } from "../../api/http-client";
 const AuthContext = createContext(null);
 function persistSession(response) {
     persistAuthTokens();
+}
+function isClearedAuthStorageEvent(event) {
+    return event instanceof CustomEvent && event.detail?.reason === "cleared";
 }
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     useEffect(() => {
+        if (!hasPersistedAuthSession()) {
+            setLoading(false);
+            return;
+        }
         apiGet("/auth/me")
             .then((profile) => setUser(profile))
             .catch(() => {
@@ -18,8 +25,10 @@ export function AuthProvider({ children }) {
             .finally(() => setLoading(false));
     }, []);
     useEffect(() => {
-        const handleAuthStorageChange = () => {
-            setUser(null);
+        const handleAuthStorageChange = (event) => {
+            if (isClearedAuthStorageEvent(event)) {
+                setUser(null);
+            }
         };
         window.addEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
         return () => window.removeEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);

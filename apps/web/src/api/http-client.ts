@@ -1,15 +1,40 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const API_BASE_URL = configuredApiBaseUrl ?? "/api/v1";
+
+function isLoopbackHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+}
+
+function resolveApiBaseUrl(configuredBaseUrl?: string) {
+  if (!configuredBaseUrl || configuredBaseUrl.startsWith("/")) {
+    return configuredBaseUrl ?? "/api/v1";
+  }
+
+  const apiUrl = new URL(configuredBaseUrl);
+  const browserHostname = window.location.hostname;
+
+  if (isLoopbackHost(browserHostname) && isLoopbackHost(apiUrl.hostname)) {
+    apiUrl.hostname = browserHostname;
+  }
+
+  return apiUrl.toString().replace(/\/$/, "");
+}
+
+const API_BASE_URL = resolveApiBaseUrl(configuredApiBaseUrl);
 
 const ACCESS_TOKEN_STORAGE_KEY = "sige.accessToken";
 const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";
+const SESSION_HINT_STORAGE_KEY = "sige.hasSession";
 
 export const AUTH_STORAGE_EVENT = "sige-auth-storage-changed";
 
+export interface AuthStorageChangeDetail {
+  reason: "cleared" | "persisted";
+}
+
 let refreshRequest: Promise<boolean> | null = null;
 
-function notifyAuthStorageChanged() {
-  window.dispatchEvent(new Event(AUTH_STORAGE_EVENT));
+function notifyAuthStorageChanged(reason: AuthStorageChangeDetail["reason"]) {
+  window.dispatchEvent(new CustomEvent<AuthStorageChangeDetail>(AUTH_STORAGE_EVENT, { detail: { reason } }));
 }
 
 function clearLegacyAuthTokens() {
@@ -17,14 +42,20 @@ function clearLegacyAuthTokens() {
   window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
 }
 
+export function hasPersistedAuthSession() {
+  return window.localStorage.getItem(SESSION_HINT_STORAGE_KEY) === "true";
+}
+
 export function persistAuthTokens() {
   clearLegacyAuthTokens();
-  notifyAuthStorageChanged();
+  window.localStorage.setItem(SESSION_HINT_STORAGE_KEY, "true");
+  notifyAuthStorageChanged("persisted");
 }
 
 export function clearAuthTokens() {
   clearLegacyAuthTokens();
-  notifyAuthStorageChanged();
+  window.localStorage.removeItem(SESSION_HINT_STORAGE_KEY);
+  notifyAuthStorageChanged("cleared");
 }
 
 function withAuthHeaders(headers?: HeadersInit) {

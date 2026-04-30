@@ -31,7 +31,7 @@ function ProtectedLayout() {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return <div className="centered-message">Loading SIGE_2...</div>;
+    return <div className="centered-message">Loading SIGE...</div>;
   }
 
   if (!user) {

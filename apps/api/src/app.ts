@@ -39,11 +39,24 @@ import { PrismaDashboardRepository } from "./repositories/dashboard.repository";
 import { PrismaFinanceRepository } from "./repositories/finances.repository";
 import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses.repository";
 import { PrismaLeadsRepository } from "./repositories/leads.repository";
+import { LocalAuthRepository } from "./repositories/local-auth.repository";
+import {
+  LocalBusinessStore,
+  LocalClientsRepository,
+  LocalMattersRepository,
+  LocalTasksRepository
+} from "./repositories/local-business.repository";
 import { PrismaMattersRepository } from "./repositories/matters.repository";
 import { PrismaQuotesRepository } from "./repositories/quotes.repository";
+import { ResilientAuthRepository } from "./repositories/resilient-auth.repository";
+import {
+  ResilientClientsRepository,
+  ResilientMattersRepository,
+  ResilientTasksRepository
+} from "./repositories/resilient-business.repository";
 import { PrismaTasksRepository } from "./repositories/tasks.repository";
 import { PrismaUsersRepository } from "./repositories/users.repository";
-import type { AuthRepository } from "./repositories/types";
+import type { AuthRepository, ClientsRepository, MattersRepository, TasksRepository } from "./repositories/types";
 import { ACCESS_TOKEN_COOKIE_NAME } from "./core/auth/session-cookies";
 
 declare module "fastify" {
@@ -54,15 +67,15 @@ declare module "fastify" {
     };
     repositories: {
       auth: AuthRepository;
-      clients: PrismaClientsRepository;
+      clients: ClientsRepository;
       commissions: PrismaCommissionsRepository;
       dashboard: PrismaDashboardRepository;
       finances: PrismaFinanceRepository;
       generalExpenses: PrismaGeneralExpensesRepository;
       leads: PrismaLeadsRepository;
-      matters: PrismaMattersRepository;
+      matters: MattersRepository;
       quotes: PrismaQuotesRepository;
-      tasks: PrismaTasksRepository;
+      tasks: TasksRepository;
       users: PrismaUsersRepository;
     };
     services: {
@@ -87,6 +100,22 @@ export async function buildApp() {
     : [env.WEB_ORIGIN];
   const allowedOrigins = new Set(configuredWebOrigins);
 
+  if (env.APP_ENV === "development") {
+    for (const origin of configuredWebOrigins) {
+      try {
+        const parsedOrigin = new URL(origin);
+        if (parsedOrigin.hostname === "localhost") {
+          allowedOrigins.add(`${parsedOrigin.protocol}//127.0.0.1${parsedOrigin.port ? `:${parsedOrigin.port}` : ""}`);
+        }
+        if (parsedOrigin.hostname === "127.0.0.1") {
+          allowedOrigins.add(`${parsedOrigin.protocol}//localhost${parsedOrigin.port ? `:${parsedOrigin.port}` : ""}`);
+        }
+      } catch {
+        // Ignore invalid origins here; env validation already guards normal startup paths.
+      }
+    }
+  }
+
   const app = Fastify({
     logger: {
       transport: env.APP_ENV === "development"
@@ -99,17 +128,39 @@ export async function buildApp() {
 
   app.decorate("config", env);
   app.decorate("errors", { AppError });
+  const authRepository = new ResilientAuthRepository(
+    new PrismaAuthRepository(prisma),
+    env.APP_ENV === "development" && LocalAuthRepository.isAvailable()
+      ? new LocalAuthRepository()
+      : null,
+    app.log
+  );
+  const localBusinessStore = env.APP_ENV === "development" && LocalBusinessStore.isAvailable()
+    ? new LocalBusinessStore()
+    : null;
   app.decorate("repositories", {
-    auth: new PrismaAuthRepository(prisma),
-    clients: new PrismaClientsRepository(prisma),
+    auth: authRepository,
+    clients: new ResilientClientsRepository(
+      new PrismaClientsRepository(prisma),
+      localBusinessStore ? new LocalClientsRepository(localBusinessStore) : null,
+      app.log
+    ),
     commissions: new PrismaCommissionsRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
     finances: new PrismaFinanceRepository(prisma),
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
     leads: new PrismaLeadsRepository(prisma),
-    matters: new PrismaMattersRepository(prisma),
+    matters: new ResilientMattersRepository(
+      new PrismaMattersRepository(prisma),
+      localBusinessStore ? new LocalMattersRepository(localBusinessStore) : null,
+      app.log
+    ),
     quotes: new PrismaQuotesRepository(prisma),
-    tasks: new PrismaTasksRepository(prisma),
+    tasks: new ResilientTasksRepository(
+      new PrismaTasksRepository(prisma),
+      localBusinessStore ? new LocalTasksRepository(localBusinessStore) : null,
+      app.log
+    ),
     users: new PrismaUsersRepository(prisma)
   });
   app.decorate("services", {

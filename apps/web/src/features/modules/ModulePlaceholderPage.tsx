@@ -34,7 +34,7 @@ export function ModulePlaceholderPage({ moduleId }: ModulePlaceholderPageProps) 
             <span className={`status-pill ${module.available ? "status-live" : "status-migration"}`}>{module.phase}</span>
           </div>
           <p className="muted">
-            Este modulo ya forma parte del mapa de SIGE_2 y cuenta con definicion funcional para seguir creciendo sobre
+            Este modulo ya forma parte del mapa de SIGE y cuenta con definicion funcional para seguir creciendo sobre
             una arquitectura mas segura, desacoplada y escalable.
           </p>
         </article>

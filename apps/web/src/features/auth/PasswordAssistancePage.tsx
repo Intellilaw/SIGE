@@ -40,7 +40,7 @@ export function PasswordAssistancePage() {
         <p className="eyebrow">Onboarding seguro</p>
         <h1>Activar o restablecer contrasena</h1>
         <p className="muted">
-          Si perdiste acceso o necesitas activar tu cuenta, escribe tu usuario o correo. SIGE_2 generara el flujo
+          Si perdiste acceso o necesitas activar tu cuenta, escribe tu usuario o correo. SIGE generara el flujo
           seguro definido para el ambiente actual para que recuperes tu acceso.
         </p>
         <p className="login-back-link">

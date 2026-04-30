@@ -262,11 +262,22 @@ function getSortedTaskViews(tasks: MatterTaskView[]) {
   });
 }
 
+function getTaskViewIdentity(task: MatterTaskView) {
+  return `${task.sourceType}:${task.moduleId}:${task.trackId}:${task.id}`;
+}
+
 function addTaskViewToMap(taskMap: Map<string, MatterTaskView[]>, keys: string[], view: MatterTaskView) {
-  keys.map(normalizeText).filter(Boolean).forEach((key) => {
+  const uniqueKeys = [...new Set(keys.map(normalizeText).filter(Boolean))];
+  const viewIdentity = getTaskViewIdentity(view);
+
+  uniqueKeys.forEach((key) => {
     const current = taskMap.get(key) ?? [];
-    current.push(view);
-    taskMap.set(key, current);
+
+    if (current.some((task) => getTaskViewIdentity(task) === viewIdentity)) {
+      return;
+    }
+
+    taskMap.set(key, [...current, view]);
   });
 }
 
@@ -275,7 +286,19 @@ function mergeTaskMaps(...maps: Map<string, MatterTaskView[]>[]) {
 
   maps.forEach((taskMap) => {
     taskMap.forEach((tasks, key) => {
-      merged.set(key, getSortedTaskViews([...(merged.get(key) ?? []), ...tasks]));
+      const current = merged.get(key) ?? [];
+      const knownTaskIds = new Set(current.map(getTaskViewIdentity));
+      const uniqueTasks = tasks.filter((task) => {
+        const taskIdentity = getTaskViewIdentity(task);
+        if (knownTaskIds.has(taskIdentity)) {
+          return false;
+        }
+
+        knownTaskIds.add(taskIdentity);
+        return true;
+      });
+
+      merged.set(key, getSortedTaskViews([...current, ...uniqueTasks]));
     });
   });
 
@@ -653,6 +676,7 @@ export function ExecutionTeamWorkspace({
     }
 
     try {
+      setErrorMessage(null);
       const eventName = payload.eventName.trim() || panelMatter.subject || "Tarea de ejecucion";
 
       await apiPost("/tasks/distributions", {
@@ -700,6 +724,7 @@ export function ExecutionTeamWorkspace({
       setDistributionHistory(loadedDistributionHistory);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
+      throw error;
     }
   }
 
@@ -909,7 +934,7 @@ export function ExecutionTeamWorkspace({
                                 <span className="matter-cell-muted">Sin tareas</span>
                               ) : (
                                 matterTasks.map((task) => (
-                                  <div key={task.id} className="execution-inline-entry">
+                                  <div key={`${getTaskViewIdentity(task)}:subject`} className="execution-inline-entry">
                                     <strong>{"\u2022"}</strong> {task.subject || task.trackLabel}
                                   </div>
                                 ))
@@ -922,7 +947,7 @@ export function ExecutionTeamWorkspace({
                                 <span className="matter-cell-muted">-</span>
                               ) : (
                                 matterTasks.map((task) => (
-                                  <div key={task.id} className="execution-inline-entry">
+                                  <div key={`${getTaskViewIdentity(task)}:due-date`} className="execution-inline-entry">
                                     {toDateInput(task.dueDate) || "S/F"}
                                   </div>
                                 ))
@@ -935,7 +960,11 @@ export function ExecutionTeamWorkspace({
                             ) : (
                               <div className="execution-origin-stack">
                                 {matterTasks.map((task) => (
-                                  <span key={task.id} className="matter-origin-indicator" title={task.sourceLabel}>
+                                  <span
+                                    key={`${getTaskViewIdentity(task)}:origin`}
+                                    className="matter-origin-indicator"
+                                    title={task.sourceLabel}
+                                  >
                                     i
                                   </span>
                                 ))}
@@ -1056,7 +1085,7 @@ export function ExecutionTeamWorkspace({
                             <span className="matter-cell-muted">Sin tareas</span>
                           ) : (
                             matterTasks.map((task) => (
-                              <div key={task.id} className="execution-inline-entry">
+                              <div key={`${getTaskViewIdentity(task)}:recycle-subject`} className="execution-inline-entry">
                                 <strong>{"\u2022"}</strong> {task.subject || task.trackLabel}
                               </div>
                             ))
@@ -1067,7 +1096,7 @@ export function ExecutionTeamWorkspace({
                             <span className="matter-cell-muted">-</span>
                           ) : (
                             matterTasks.map((task) => (
-                              <div key={task.id} className="execution-inline-entry">
+                              <div key={`${getTaskViewIdentity(task)}:recycle-due-date`} className="execution-inline-entry">
                                 {toDateInput(task.dueDate) || "S/F"}
                               </div>
                             ))

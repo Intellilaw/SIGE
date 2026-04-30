@@ -67,7 +67,7 @@ const table = (config: Omit<LegacyTaskTableConfig, "tabs" | "mode" | "dateLabel"
 });
 
 const litigationTables: LegacyTaskTableConfig[] = [
-  table({ slug: "escritos-fondo", sourceTable: "escritos_fondo", title: "1. Escritos de fondo", tabs: statusTabs("1. Pendientes de enviar", "2. Historial de Enviados"), dateLabel: "Fecha debe presentarse" }),
+  table({ slug: "escritos-fondo", sourceTable: "escritos_fondo", title: "1. Escritos de fondo", mode: "workflow", tabs: workflowTabs(["1. Pendientes", "2. Terminados sin presentar", "3. Presentados"]), dateLabel: "Fecha debe presentarse" }),
   table({ slug: "escritos", sourceTable: "escritos_kpi", title: "2. Escritos que deben ser presentados", autoTerm: true, termManagedDate: true, dateLabel: "Fecha presentar" }),
   table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones", title: "3. Desahogo de Prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha Presentar" }),
   table({ slug: "jueces-magistrados", sourceTable: "hablar_jueces_magistrados", title: "4. Hablar con jueces y magistrados", tabs: statusTabs("1. Pendientes", "2. Historial"), dateLabel: "Fecha Estimada" }),

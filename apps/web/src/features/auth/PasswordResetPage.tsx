@@ -80,7 +80,7 @@ export function PasswordResetPage() {
         <p className="eyebrow">Acceso protegido</p>
         <h1>{verification?.passwordResetRequired ? "Activar cuenta" : "Definir nueva contrasena"}</h1>
         <p className="muted">
-          Este paso define tu nueva contrasena y abre una sesion nueva en SIGE_2.
+          Este paso define tu nueva contrasena y abre una sesion nueva en SIGE.
         </p>
         <p className="login-back-link">
           <Link to="/intranet-login">Volver al acceso RC</Link>
@@ -117,7 +117,7 @@ export function PasswordResetPage() {
               </label>
               <p className="muted password-hint">{PASSWORD_REQUIREMENTS}</p>
               {error ? <p className="error-text">{error}</p> : null}
-              <button type="submit">{isSubmitting ? "Guardando..." : "Entrar a SIGE_2"}</button>
+              <button type="submit">{isSubmitting ? "Guardando..." : "Entrar a SIGE"}</button>
             </form>
           </>
         ) : null}

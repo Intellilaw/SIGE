@@ -1,7 +1,15 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 
-import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, persistAuthTokens } from "../../api/http-client";
+import {
+  AUTH_STORAGE_EVENT,
+  apiGet,
+  apiPost,
+  clearAuthTokens,
+  hasPersistedAuthSession,
+  persistAuthTokens
+} from "../../api/http-client";
+import type { AuthStorageChangeDetail } from "../../api/http-client";
 
 interface SessionUser {
   id: string;
@@ -45,11 +53,20 @@ function persistSession(response: LoginResponse) {
   persistAuthTokens();
 }
 
+function isClearedAuthStorageEvent(event: Event) {
+  return event instanceof CustomEvent && (event.detail as AuthStorageChangeDetail | undefined)?.reason === "cleared";
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!hasPersistedAuthSession()) {
+      setLoading(false);
+      return;
+    }
+
     apiGet<SessionUser>("/auth/me")
       .then((profile) => setUser(profile))
       .catch(() => {
@@ -60,8 +77,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    const handleAuthStorageChange = () => {
-      setUser(null);
+    const handleAuthStorageChange = (event: Event) => {
+      if (isClearedAuthStorageEvent(event)) {
+        setUser(null);
+      }
     };
 
     window.addEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);

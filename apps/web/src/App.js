@@ -29,7 +29,7 @@ import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
 function ProtectedLayout() {
     const { user, loading } = useAuth();
     if (loading) {
-        return _jsx("div", { className: "centered-message", children: "Loading SIGE_2..." });
+        return _jsx("div", { className: "centered-message", children: "Loading SIGE..." });
     }
     if (!user) {
         return _jsx(Navigate, { to: "/", replace: true });

@@ -100,6 +100,14 @@ function getStateLabel(state: TaskState) {
   }
 }
 
+function normalizeEventSearch(value?: string | null) {
+  return (value ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 export function ExecutionTaskPanel({
   module,
   legacyConfig,
@@ -121,6 +129,7 @@ export function ExecutionTaskPanel({
   const [responsible, setResponsible] = useState(userShortName || module.defaultResponsible);
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -128,6 +137,15 @@ export function ExecutionTaskPanel({
     () => distributionEvents.find((event) => event.id === selectedEventId),
     [distributionEvents, selectedEventId]
   );
+  const exactSearchEvent = useMemo(() => {
+    const query = normalizeEventSearch(taskSearch);
+
+    if (!query) {
+      return undefined;
+    }
+
+    return distributionEvents.find((event) => normalizeEventSearch(event.name) === query);
+  }, [distributionEvents, taskSearch]);
   const filteredDistributionEvents = useMemo(() => {
     const query = taskSearch.trim().toLowerCase();
 
@@ -149,6 +167,7 @@ export function ExecutionTaskPanel({
     setSelectorTargets([]);
     setResponsible(userShortName || module.defaultResponsible);
     setDueDate(addBusinessDays(new Date(), 3));
+    setSuccessMessage(null);
   }, [matter?.id, mode, module.defaultResponsible, userShortName]);
 
   useEffect(() => {
@@ -177,12 +196,22 @@ export function ExecutionTaskPanel({
     };
   }, [taskSearchOpen]);
 
+  useEffect(() => {
+    if (selectedEventId || !exactSearchEvent) {
+      return;
+    }
+
+    setSelectedEventId(exactSearchEvent.id);
+    setSelectorTargets(getCatalogTargetEntries(exactSearchEvent, legacyConfig).map((target) => ({ ...target, reportedMonth: "" })));
+  }, [exactSearchEvent, legacyConfig, selectedEventId]);
+
   function handleEventSelect(eventId: string) {
     setSelectedEventId(eventId);
     const event = distributionEvents.find((candidate) => candidate.id === eventId);
     setTaskSearch(event?.name ?? "");
     setTaskSearchOpen(false);
     setSelectorTargets(event ? getCatalogTargetEntries(event, legacyConfig).map((target) => ({ ...target, reportedMonth: "" })) : []);
+    setSuccessMessage(null);
   }
 
   if (!matter || !mode) {
@@ -198,6 +227,7 @@ export function ExecutionTaskPanel({
     }
 
     setSubmitting(true);
+    setSuccessMessage(null);
     try {
       await onCreateTask({
         eventName: selectedEvent.name,
@@ -211,11 +241,13 @@ export function ExecutionTaskPanel({
           reportedMonth: target.reportedMonth
         }))
       });
-      onModeChange("history");
       setSelectedEventId("");
       setTaskSearch("");
       setTaskSearchOpen(false);
       setSelectorTargets([]);
+      setSuccessMessage("La tarea fue distribuida correctamente.");
+    } catch {
+      // The parent owns the visible error banner; keep the selector open without a false success state.
     } finally {
       setSubmitting(false);
     }
@@ -276,6 +308,7 @@ export function ExecutionTaskPanel({
                       onChange={(event) => {
                         setTaskSearch(event.target.value);
                         setTaskSearchOpen(true);
+                        setSuccessMessage(null);
                         if (selectedEventId) {
                           setSelectedEventId("");
                           setSelectorTargets([]);
@@ -318,6 +351,10 @@ export function ExecutionTaskPanel({
                 >
                   {submitting ? "Procesando..." : "Distribuir Tareas"}
                 </button>
+
+                {successMessage ? (
+                  <div className="message-banner message-success">{successMessage}</div>
+                ) : null}
 
                 <div className="execution-selector-matter">
                   <h4>Detalles del Asunto (Lectura)</h4>

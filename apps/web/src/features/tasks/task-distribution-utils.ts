@@ -3,6 +3,24 @@ import type { TaskDistributionEvent } from "@sige/contracts";
 import type { LegacyTaskModuleConfig, LegacyTaskTableConfig } from "./task-legacy-config";
 
 const ENCODED_TARGET_SEPARATOR = "::";
+const TABLE_LOOKUP_STOP_WORDS = new Set([
+  "a",
+  "al",
+  "de",
+  "debe",
+  "deben",
+  "del",
+  "e",
+  "el",
+  "en",
+  "la",
+  "las",
+  "los",
+  "por",
+  "que",
+  "ser",
+  "y"
+]);
 
 export interface CatalogTargetEntry {
   id: string;
@@ -12,6 +30,59 @@ export interface CatalogTargetEntry {
 
 function normalize(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function normalizeLookup(value?: string | null) {
+  return normalize(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^\d+\s*[\).-]?\s*/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function lookupTokens(value?: string | null) {
+  return normalizeLookup(value)
+    .split(" ")
+    .filter((token) => token && !TABLE_LOOKUP_STOP_WORDS.has(token));
+}
+
+function hasCompatibleToken(valueTokens: Set<string>, tableToken: string) {
+  if (valueTokens.has(tableToken)) {
+    return true;
+  }
+
+  return [...valueTokens].some((valueToken) => {
+    let commonPrefixLength = 0;
+    const comparableLength = Math.min(valueToken.length, tableToken.length);
+
+    while (commonPrefixLength < comparableLength && valueToken[commonPrefixLength] === tableToken[commonPrefixLength]) {
+      commonPrefixLength += 1;
+    }
+
+    return commonPrefixLength >= 6;
+  });
+}
+
+function tableMatchesValue(table: LegacyTaskTableConfig, value: string) {
+  const normalized = normalize(value);
+  if (table.slug === normalized || table.sourceTable === normalized || table.title === normalized) {
+    return true;
+  }
+
+  const valueLookup = normalizeLookup(value);
+  const tableLookups = [table.slug, table.sourceTable, table.title].map(normalizeLookup);
+  if (tableLookups.includes(valueLookup)) {
+    return true;
+  }
+
+  const valueTokens = new Set(lookupTokens(value));
+  const tableTokens = lookupTokens(table.title);
+
+  return tableTokens.length > 0 && tableTokens.every((token) => hasCompatibleToken(valueTokens, token));
 }
 
 function decodeTaskName(value: string) {
@@ -28,12 +99,7 @@ export function findLegacyTableByAnyName(moduleConfig: LegacyTaskModuleConfig, v
     return undefined;
   }
 
-  return moduleConfig.tables.find(
-    (table) =>
-      table.slug === normalized ||
-      table.sourceTable === normalized ||
-      table.title === normalized
-  );
+  return moduleConfig.tables.find((table) => tableMatchesValue(table, normalized));
 }
 
 export function encodeCatalogTarget(entry: Pick<CatalogTargetEntry, "tableSlug" | "taskName">) {
