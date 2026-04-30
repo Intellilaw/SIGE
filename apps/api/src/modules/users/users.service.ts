@@ -6,6 +6,7 @@ import {
   findTeamOptionByLabel,
   normalizeLegacyUsername,
   normalizeShortName,
+  type Team,
   type CreateManagedUserInput,
   type UpdateManagedUserInput
 } from "@sige/contracts";
@@ -20,6 +21,16 @@ export class UsersService {
 
   public list() {
     return this.repository.list();
+  }
+
+  public async listTeamShortNames(team: Team) {
+    const users = await this.repository.list();
+    const shortNames = users
+      .filter((user) => user.isActive && user.team === team)
+      .map((user) => normalizeShortName(user.shortName))
+      .filter((shortName): shortName is string => Boolean(shortName));
+
+    return Array.from(new Set(shortNames)).sort((left, right) => left.localeCompare(right));
   }
 
   public async create(payload: CreateManagedUserInput) {

@@ -3,6 +3,18 @@ import { z } from "zod";
 
 import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
 
+const teamSchema = z.enum([
+  "ADMIN",
+  "CLIENT_RELATIONS",
+  "FINANCE",
+  "LITIGATION",
+  "CORPORATE_LABOR",
+  "SETTLEMENTS",
+  "FINANCIAL_LAW",
+  "TAX_COMPLIANCE",
+  "ADMIN_OPERATIONS"
+]);
+
 const createUserSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(10).max(128),
@@ -31,6 +43,11 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.UsersService(app.repositories.users);
   const authService = new app.services.AuthService(app.repositories.auth);
   const adminGuards = [requireAuth, requireAnyPermissions(["users:manage"])];
+
+  app.get("/users/team-short-names", { preHandler: [requireAuth] }, async (request) => {
+    const query = z.object({ team: teamSchema }).parse(request.query);
+    return service.listTeamShortNames(query.team);
+  });
 
   app.get("/users", { preHandler: adminGuards }, async () => service.list());
 

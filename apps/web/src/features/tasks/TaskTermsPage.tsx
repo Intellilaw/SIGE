@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import type { TaskTerm } from "@sige/contracts";
+import type { TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
+import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import {
+  LEGACY_TASK_MODULE_BY_SLUG,
+  type LegacyTaskModuleConfig,
+  type LegacyTaskTableConfig
+} from "./task-legacy-config";
 
 function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
@@ -19,6 +23,125 @@ function isYes(value?: string) {
   return ["si", "sí", "yes"].includes((value ?? "").trim().toLowerCase());
 }
 
+type TermTableRow = {
+  key: string;
+  term: TaskTerm;
+  sourceRecord?: TaskTrackingRecord;
+  virtual: boolean;
+};
+
+function defaultVerification(moduleConfig: LegacyTaskModuleConfig) {
+  return Object.fromEntries(moduleConfig.verificationColumns.map((column) => [column.key, "No"]));
+}
+
+function withDefaultVerification(moduleConfig: LegacyTaskModuleConfig, term: TaskTerm): TaskTerm {
+  return {
+    ...term,
+    verification: {
+      ...defaultVerification(moduleConfig),
+      ...(term.verification ?? {})
+    }
+  };
+}
+
+function findTrackingTable(moduleConfig: LegacyTaskModuleConfig, record: TaskTrackingRecord) {
+  return moduleConfig.tables.find((table) => table.slug === record.tableCode || table.sourceTable === record.sourceTable);
+}
+
+function isEscritosFondoTable(table: LegacyTaskTableConfig | undefined) {
+  return table?.slug === "escritos-fondo";
+}
+
+function isCompletedRecord(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
+  if (record.status === "presentado" || record.status === "concluida") {
+    return true;
+  }
+
+  return table?.mode === "workflow" && record.workflowStage >= table.tabs.length;
+}
+
+function getManagerTermDate(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
+  const explicitTerm = toDateInput(record.termDate);
+  if (explicitTerm) {
+    return explicitTerm;
+  }
+
+  if (table && !isEscritosFondoTable(table) && (table.autoTerm || table.termManagedDate)) {
+    return toDateInput(record.dueDate);
+  }
+
+  return "";
+}
+
+function isManagerTermRecord(moduleConfig: LegacyTaskModuleConfig, record: TaskTrackingRecord) {
+  const table = findTrackingTable(moduleConfig, record);
+  if (!table) {
+    return false;
+  }
+
+  return !isCompletedRecord(table, record)
+    && Boolean(getManagerTermDate(table, record))
+    && Boolean(table.autoTerm || table.termManagedDate || isEscritosFondoTable(table));
+}
+
+function getLinkedTerm(terms: TaskTerm[], record: TaskTrackingRecord) {
+  return terms.find((term) => term.id === record.termId || term.sourceRecordId === record.id);
+}
+
+function termFromTrackingRecord(
+  moduleConfig: LegacyTaskModuleConfig,
+  record: TaskTrackingRecord,
+  linkedTerm: TaskTerm | undefined
+): TaskTerm {
+  const table = findTrackingTable(moduleConfig, record);
+
+  return withDefaultVerification(moduleConfig, {
+    ...(linkedTerm ?? {
+      id: `manager-term-${record.id}`,
+      verification: defaultVerification(moduleConfig),
+      data: record.data,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt
+    }),
+    moduleId: record.moduleId,
+    sourceTable: record.sourceTable,
+    sourceRecordId: record.id,
+    matterId: record.matterId,
+    matterNumber: record.matterNumber,
+    clientNumber: record.clientNumber,
+    clientName: record.clientName,
+    subject: record.subject,
+    specificProcess: record.specificProcess,
+    matterIdentifier: record.matterIdentifier,
+    eventName: record.eventName || record.taskName,
+    pendingTaskLabel: record.taskName,
+    responsible: record.responsible,
+    dueDate: record.dueDate,
+    termDate: getManagerTermDate(table, record),
+    status: record.status,
+    recurring: false,
+    reportedMonth: record.reportedMonth,
+    deletedAt: record.deletedAt
+  });
+}
+
+function sortTermRows(left: TermTableRow, right: TermTableRow) {
+  const leftDate = toDateInput(left.term.termDate);
+  const rightDate = toDateInput(right.term.termDate);
+
+  if (!leftDate && !rightDate) {
+    return left.term.clientName.localeCompare(right.term.clientName) || left.term.createdAt.localeCompare(right.term.createdAt);
+  }
+  if (!leftDate) {
+    return 1;
+  }
+  if (!rightDate) {
+    return -1;
+  }
+
+  return leftDate.localeCompare(rightDate) || left.term.clientName.localeCompare(right.term.clientName);
+}
+
 export function TaskTermsPage() {
   const { slug } = useParams();
   const location = useLocation();
@@ -26,6 +149,7 @@ export function TaskTermsPage() {
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
   const recurrentMode = location.pathname.endsWith("/terminos-recurrentes");
   const [terms, setTerms] = useState<TaskTerm[]>([]);
+  const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadTerms() {
@@ -35,8 +159,12 @@ export function TaskTermsPage() {
 
     setLoading(true);
     try {
-      const loaded = await apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${moduleConfig.moduleId}`);
-      setTerms(loaded);
+      const [loadedTerms, loadedTrackingRecords] = await Promise.all([
+        apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${moduleConfig.moduleId}`),
+        apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${moduleConfig.moduleId}`)
+      ]);
+      setTerms(loadedTerms);
+      setTrackingRecords(loadedTrackingRecords);
     } finally {
       setLoading(false);
     }
@@ -46,38 +174,101 @@ export function TaskTermsPage() {
     void loadTerms();
   }, [moduleConfig]);
 
-  const visibleTerms = useMemo(
-    () => terms.filter((term) => term.recurring === recurrentMode),
-    [recurrentMode, terms]
-  );
+  const visibleTermRows = useMemo<TermTableRow[]>(() => {
+    if (!moduleConfig) {
+      return [];
+    }
 
-  async function patchTerm(term: TaskTerm, patch: Partial<TaskTerm> & Record<string, unknown>) {
-    const updated = await apiPatch<TaskTerm>(`/tasks/terms/${term.id}`, patch);
-    setTerms((current) => current.map((candidate) => candidate.id === term.id ? updated : candidate));
+    const rows: TermTableRow[] = [];
+
+    if (!recurrentMode) {
+      trackingRecords.forEach((record) => {
+        if (!isManagerTermRecord(moduleConfig, record)) {
+          return;
+        }
+
+        const linkedTerm = getLinkedTerm(terms, record);
+        const term = termFromTrackingRecord(moduleConfig, record, linkedTerm);
+
+        rows.push({
+          key: `manager-${record.id}`,
+          term,
+          sourceRecord: record,
+          virtual: !linkedTerm
+        });
+      });
+
+      return rows.sort(sortTermRows);
+    }
+
+    terms.forEach((term) => {
+      if (term.recurring !== recurrentMode) {
+        return;
+      }
+
+      rows.push({
+        key: `term-${term.id}`,
+        term: withDefaultVerification(moduleConfig, term),
+        virtual: false
+      });
+    });
+
+    return rows.sort(sortTermRows);
+  }, [moduleConfig, recurrentMode, terms, trackingRecords]);
+
+  function buildTermCreatePayload(row: TermTableRow, patch: Partial<TaskTerm> & Record<string, unknown>) {
+    const term = {
+      ...row.term,
+      ...patch,
+      verification: patch.verification ?? row.term.verification
+    };
+    const sourceRecord = row.sourceRecord;
+    const table = sourceRecord && moduleConfig ? findTrackingTable(moduleConfig, sourceRecord) : undefined;
+
+    return {
+      moduleId: moduleConfig?.moduleId ?? term.moduleId,
+      sourceTable: sourceRecord?.sourceTable ?? term.sourceTable ?? null,
+      sourceRecordId: sourceRecord?.id ?? term.sourceRecordId ?? null,
+      matterId: sourceRecord?.matterId ?? term.matterId ?? null,
+      matterNumber: sourceRecord?.matterNumber ?? term.matterNumber ?? null,
+      clientNumber: sourceRecord?.clientNumber ?? term.clientNumber ?? null,
+      clientName: sourceRecord?.clientName ?? term.clientName ?? "",
+      subject: sourceRecord?.subject ?? term.subject ?? "",
+      specificProcess: sourceRecord?.specificProcess ?? term.specificProcess ?? null,
+      matterIdentifier: sourceRecord?.matterIdentifier ?? term.matterIdentifier ?? null,
+      eventName: sourceRecord?.eventName || sourceRecord?.taskName || term.eventName || "Termino",
+      pendingTaskLabel: sourceRecord?.taskName ?? term.pendingTaskLabel ?? null,
+      responsible: sourceRecord?.responsible ?? term.responsible ?? moduleConfig?.defaultResponsible ?? "",
+      dueDate: sourceRecord?.dueDate ?? term.dueDate ?? null,
+      termDate: sourceRecord ? (getManagerTermDate(table, sourceRecord) || term.termDate || null) : (term.termDate ?? null),
+      status: sourceRecord?.status ?? term.status ?? "pendiente",
+      recurring: false,
+      reportedMonth: sourceRecord?.reportedMonth ?? term.reportedMonth ?? null,
+      verification: term.verification ?? (moduleConfig ? defaultVerification(moduleConfig) : {}),
+      data: term.data ?? sourceRecord?.data ?? {}
+    };
   }
 
-  async function addTerm() {
-    if (!moduleConfig) {
+  async function patchTerm(row: TermTableRow, patch: Partial<TaskTerm> & Record<string, unknown>) {
+    if (row.virtual) {
+      const created = await apiPost<TaskTerm>("/tasks/terms", buildTermCreatePayload(row, patch));
+      setTerms((current) => [created, ...current.filter((candidate) => candidate.id !== created.id)]);
+
+      if (row.sourceRecord) {
+        const updatedRecord = await apiPatch<TaskTrackingRecord | null>(`/tasks/tracking-records/${row.sourceRecord.id}`, {
+          termId: created.id
+        });
+        if (updatedRecord) {
+          setTrackingRecords((current) =>
+            current.map((candidate) => candidate.id === updatedRecord.id ? updatedRecord : candidate)
+          );
+        }
+      }
       return;
     }
 
-    const verification = Object.fromEntries(moduleConfig.verificationColumns.map((column) => [column.key, "No"]));
-    const created = await apiPost<TaskTerm>("/tasks/terms", {
-      moduleId: moduleConfig.moduleId,
-      eventName: recurrentMode ? "Termino recurrente" : "Termino",
-      responsible: moduleConfig.defaultResponsible,
-      dueDate: todayInput(),
-      termDate: todayInput(),
-      status: "pendiente",
-      recurring: recurrentMode,
-      verification
-    });
-    setTerms((current) => [created, ...current]);
-  }
-
-  async function deleteTerm(term: TaskTerm) {
-    await apiDelete(`/tasks/terms/${term.id}`);
-    setTerms((current) => current.filter((candidate) => candidate.id !== term.id));
+    const updated = await apiPatch<TaskTerm>(`/tasks/terms/${row.term.id}`, patch);
+    setTerms((current) => current.map((candidate) => candidate.id === row.term.id ? updated : candidate));
   }
 
   if (!moduleConfig) {
@@ -92,98 +283,73 @@ export function TaskTermsPage() {
             Volver al dashboard
           </button>
           <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/distribuidor`)}>
-            Abrir distribuidor
+            Abrir Manager de tareas
           </button>
         </div>
         <h2>{recurrentMode ? "Terminos recurrentes" : "Terminos"} ({moduleConfig.label})</h2>
         <p className="muted">
-          Tabla maestra de terminos. La fila queda en rojo si falta responsable, falta fecha limite,
-          la fecha esta vencida o falta alguna verificacion.
+          Tabla maestra de terminos. Refleja los terminos activos del Manager de tareas; las filas quedan en rojo si falta responsable,
+          falta fecha de termino, la fecha esta vencida o falta alguna verificacion. Solo las columnas de verificacion se pueden actualizar.
         </p>
       </header>
 
       <section className="panel">
-        <div className="tasks-legacy-toolbar">
-          <button type="button" className="primary-action-button" onClick={addTerm}>
-            Agregar termino
-          </button>
-          {moduleConfig.hasRecurringTerms && !recurrentMode ? (
+        {moduleConfig.hasRecurringTerms && !recurrentMode ? (
+          <div className="tasks-legacy-toolbar">
             <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/terminos-recurrentes`)}>
               Ver terminos recurrentes
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         <div className="table-scroll tasks-legacy-table-wrap">
           <table className="data-table tasks-legacy-table tasks-terms-table">
             <thead>
               <tr>
-                <th>No. Cliente</th>
                 <th>Cliente</th>
                 <th>Asunto</th>
                 <th>Proceso especifico</th>
                 <th>ID Asunto</th>
                 <th>{moduleConfig.termEventLabel}</th>
                 <th>Responsable</th>
-                <th>Fecha Presentar</th>
                 <th>{moduleConfig.termDateLabel}</th>
                 {moduleConfig.verificationColumns.map((column) => <th key={column.key}>{column.label}</th>)}
-                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="centered-inline-message">Cargando terminos...</td>
+                  <td colSpan={7 + moduleConfig.verificationColumns.length} className="centered-inline-message">Cargando terminos...</td>
                 </tr>
-              ) : visibleTerms.length === 0 ? (
+              ) : visibleTermRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="centered-inline-message">No hay terminos en esta seccion.</td>
+                  <td colSpan={7 + moduleConfig.verificationColumns.length} className="centered-inline-message">No hay terminos en esta seccion.</td>
                 </tr>
               ) : (
-                visibleTerms.map((term) => {
+                visibleTermRows.map((row) => {
+                  const { term } = row;
                   const missingVerification = moduleConfig.verificationColumns.some((column) => !isYes(term.verification[column.key]));
-                  const date = toDateInput(term.termDate || term.dueDate);
+                  const date = toDateInput(term.termDate);
                   const completed = term.status === "concluida" || term.status === "presentado";
                   const red = !completed && (!term.responsible || !date || date <= todayInput() || missingVerification);
                   const green = !red && moduleConfig.verificationColumns.every((column) => isYes(term.verification[column.key]));
 
                   return (
-                    <tr key={term.id} className={red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined}>
-                      <td>{term.clientNumber || "-"}</td>
+                    <tr key={row.key} className={red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined}>
                       <td>{term.clientName || "-"}</td>
                       <td>{term.subject || "-"}</td>
                       <td><span className="tasks-legacy-process-pill">{term.specificProcess || "N/A"}</span></td>
                       <td>{term.matterIdentifier || term.matterNumber || "-"}</td>
                       <td>
-                        <textarea
-                          className="tasks-legacy-textarea"
-                          value={`${term.recurring ? "[Recurrente] " : ""}${term.eventName}`}
-                          onChange={(event) => void patchTerm(term, { eventName: event.target.value.replace("[Recurrente] ", "") })}
-                        />
+                        <div className="tasks-legacy-task-readonly">
+                          {term.recurring ? "[Recurrente] " : ""}{term.eventName || "-"}
+                        </div>
                       </td>
                       <td>
-                        <input
-                          className="tasks-legacy-input"
-                          value={term.responsible}
-                          onChange={(event) => void patchTerm(term, { responsible: event.target.value })}
-                        />
+                        <div className="tasks-legacy-readonly-value">{term.responsible || "-"}</div>
                       </td>
                       <td>
-                        <input
-                          className="tasks-legacy-input"
-                          type="date"
-                          value={toDateInput(term.dueDate)}
-                          onChange={(event) => void patchTerm(term, { dueDate: event.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="tasks-legacy-input"
-                          type="date"
-                          value={toDateInput(term.termDate || term.dueDate)}
-                          onChange={(event) => void patchTerm(term, { termDate: event.target.value })}
-                        />
+                        <div className="tasks-legacy-readonly-value tasks-legacy-date-readonly">{toDateInput(term.termDate) || "-"}</div>
                       </td>
                       {moduleConfig.verificationColumns.map((column) => (
                         <td key={column.key}>
@@ -191,7 +357,7 @@ export function TaskTermsPage() {
                             className="tasks-legacy-input"
                             value={term.verification[column.key] ?? "No"}
                             onChange={(event) =>
-                              void patchTerm(term, {
+                              void patchTerm(row, {
                                 verification: {
                                   ...term.verification,
                                   [column.key]: event.target.value
@@ -204,20 +370,6 @@ export function TaskTermsPage() {
                           </select>
                         </td>
                       ))}
-                      <td>
-                        <div className="tasks-legacy-actions">
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={() => void patchTerm(term, { status: completed ? "pendiente" : "concluida" })}
-                          >
-                            {completed ? "Reabrir" : "Concluir"}
-                          </button>
-                          <button type="button" className="danger-button" onClick={() => void deleteTerm(term)}>
-                            Borrar
-                          </button>
-                        </div>
-                      </td>
                     </tr>
                   );
                 })

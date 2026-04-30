@@ -124,6 +124,7 @@ export const LEGACY_TASK_MODULES = [
     {
         slug: "litigio",
         moduleId: "litigation",
+        team: "LITIGATION",
         label: "Litigio",
         defaultResponsible: "LAMR",
         termEventLabel: "Escrito",
@@ -140,6 +141,7 @@ export const LEGACY_TASK_MODULES = [
     {
         slug: "corporativo",
         moduleId: "corporate-labor",
+        team: "CORPORATE_LABOR",
         label: "Corporativo y laboral",
         defaultResponsible: "CRV/CAGC",
         termEventLabel: "Evento corporativo",
@@ -154,6 +156,7 @@ export const LEGACY_TASK_MODULES = [
     {
         slug: "convenios",
         moduleId: "settlements",
+        team: "SETTLEMENTS",
         label: "Convenios",
         defaultResponsible: "MLDM/CAOG",
         termEventLabel: "Evento convenios",
@@ -168,6 +171,7 @@ export const LEGACY_TASK_MODULES = [
     {
         slug: "financiero",
         moduleId: "financial-law",
+        team: "FINANCIAL_LAW",
         label: "Derecho financiero",
         defaultResponsible: "RJVO/HKMG",
         termEventLabel: "Evento financiero",
@@ -182,6 +186,7 @@ export const LEGACY_TASK_MODULES = [
     {
         slug: "compliance",
         moduleId: "tax-compliance",
+        team: "TAX_COMPLIANCE",
         label: "Compliance fiscal",
         defaultResponsible: "MPC/YMAH",
         termEventLabel: "Evento compliance",

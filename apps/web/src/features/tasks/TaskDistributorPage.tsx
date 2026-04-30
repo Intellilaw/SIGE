@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { TaskDistributionEvent, TaskDistributionHistory, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
 import {
   LEGACY_TASK_MODULE_BY_SLUG,
+  type LegacyTaskTab,
   type LegacyTaskTableConfig
 } from "./task-legacy-config";
 import {
@@ -19,14 +20,59 @@ import {
 
 type DistributorTab = "active" | "config";
 
-type TrackingRecordPatch = Partial<Omit<TaskTrackingRecord, "dueDate" | "termDate" | "completedAt">> & {
+type TrackingRecordPatch = Partial<Omit<TaskTrackingRecord, "dueDate" | "termDate" | "completedAt" | "deletedAt">> & {
   dueDate?: string | null;
   termDate?: string | null;
   completedAt?: string | null;
+  deletedAt?: string | null;
+};
+
+type RecycleTaskRow = {
+  record: TaskTrackingRecord;
+  table?: LegacyTaskTableConfig;
+  reason: "deleted" | "completed";
+  date: string;
 };
 
 function normalize(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function normalizeResponsibleOption(value?: string | null) {
+  return normalize(value).toUpperCase();
+}
+
+function splitResponsibleOptions(value?: string | null) {
+  return normalize(value)
+    .split(/[\/,;]/)
+    .map(normalizeResponsibleOption)
+    .filter(Boolean);
+}
+
+function dedupeResponsibleOptions(values: Array<string | undefined | null>) {
+  return Array.from(new Set(values.map(normalizeResponsibleOption).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right)
+  );
+}
+
+function normalizeComparableText(value?: string | null) {
+  return normalize(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getSearchWords(value?: string | null) {
+  return normalizeComparableText(value).split(/\s+/).filter(Boolean);
+}
+
+function matchesSearchWords(value: string, searchWords: string[]) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const haystack = normalizeComparableText(value);
+  return searchWords.every((word) => haystack.includes(word));
 }
 
 function toDateInput(value?: string | null) {
@@ -39,8 +85,37 @@ function todayInput() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function toDisplayDate(value?: string | null) {
+  const date = toDateInput(value);
+  if (!date) {
+    return "-";
+  }
+
+  const [year, month, day] = date.split("-");
+  return `${day}/${month}/${year}`;
+}
+
 function getRowDate(record: TaskTrackingRecord) {
   return toDateInput(record.dueDate || record.termDate);
+}
+
+function getRecycleDate(record: TaskTrackingRecord) {
+  return toDateInput(record.deletedAt || record.completedAt || record.updatedAt);
+}
+
+function isWithinRecycleWindow(record: TaskTrackingRecord) {
+  const date = getRecycleDate(record);
+  if (!date) {
+    return false;
+  }
+
+  const recycleTime = new Date(`${date}T12:00:00`).getTime();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  return Number.isFinite(recycleTime) && Date.now() - recycleTime <= thirtyDaysMs;
+}
+
+function isEscritosFondoTable(table: LegacyTaskTableConfig | undefined) {
+  return table?.slug === "escritos-fondo";
 }
 
 function isCompletedRecord(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
@@ -59,7 +134,19 @@ function isTrackingRecordRed(table: LegacyTaskTableConfig | undefined, record: T
   const dueDate = getRowDate(record);
   const requiresDate = table?.showDateColumn !== false;
 
-  return !record.taskName || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
+  if (isEscritosFondoTable(table)) {
+    const presentationDate = toDateInput(record.dueDate);
+    const termDate = toDateInput(record.termDate);
+
+    return !record.taskName
+      || !record.responsible
+      || !presentationDate
+      || !termDate
+      || presentationDate <= todayInput()
+      || termDate <= todayInput();
+  }
+
+  return !record.taskName || !record.responsible || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
 }
 
 function getStageLabel(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
@@ -74,6 +161,42 @@ function getStageLabel(table: LegacyTaskTableConfig | undefined, record: TaskTra
   return table.tabs.find((tab) => tab.status === record.status)?.label ?? record.status;
 }
 
+function getRecordTabKey(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
+  if (!table) {
+    return "";
+  }
+
+  if (table.mode === "workflow") {
+    const completedStage = table.tabs.find((tab) => tab.isCompleted)?.stage;
+    const currentStage = record.status === "presentado" && completedStage ? completedStage : record.workflowStage || 1;
+
+    return table.tabs.find((tab) => Number(tab.stage) === Number(currentStage))?.key ?? "";
+  }
+
+  return table.tabs.find((tab) => tab.status === record.status)?.key ?? "";
+}
+
+function getPreviousActivePatch(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord): TrackingRecordPatch {
+  if (table?.mode === "workflow") {
+    const completedStage = table.tabs.find((tab) => tab.isCompleted)?.stage ?? table.tabs.length;
+    const previousStage = Math.max(1, completedStage - 1);
+
+    return {
+      workflowStage: previousStage,
+      status: "pendiente",
+      completedAt: null,
+      deletedAt: null
+    };
+  }
+
+  return {
+    workflowStage: record.workflowStage,
+    status: "pendiente",
+    completedAt: null,
+    deletedAt: null
+  };
+}
+
 function getLinkedTerm(terms: TaskTerm[], record: TaskTrackingRecord) {
   return terms.find((term) => term.id === record.termId || term.sourceRecordId === record.id);
 }
@@ -81,9 +204,12 @@ function getLinkedTerm(terms: TaskTerm[], record: TaskTrackingRecord) {
 export function TaskDistributorPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
   const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const [activeTab, setActiveTab] = useState<DistributorTab>("active");
+  const [activeTab, setActiveTab] = useState<DistributorTab>(
+    searchParams.get("tab") === "config" ? "config" : "active"
+  );
   const [events, setEvents] = useState<TaskDistributionEvent[]>([]);
   const [history, setHistory] = useState<TaskDistributionHistory[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
@@ -91,7 +217,9 @@ export function TaskDistributorPage() {
   const [catalogName, setCatalogName] = useState("");
   const [catalogEntries, setCatalogEntries] = useState<CatalogTargetEntry[]>([]);
   const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
-  const [clientSearch, setClientSearch] = useState("");
+  const [wordSearch, setWordSearch] = useState("");
+  const [clientSearch, setClientSearch] = useState(searchParams.get("client") ?? "");
+  const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadDistributor() {
@@ -104,7 +232,7 @@ export function TaskDistributorPage() {
       const [loadedEvents, loadedHistory, loadedTrackingRecords, loadedTerms] = await Promise.all([
         apiGet<TaskDistributionEvent[]>(`/tasks/distribution-events?moduleId=${moduleConfig.moduleId}`),
         apiGet<TaskDistributionHistory[]>(`/tasks/distributions?moduleId=${moduleConfig.moduleId}`),
-        apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${moduleConfig.moduleId}`),
+        apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${moduleConfig.moduleId}&includeDeleted=true`),
         apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${moduleConfig.moduleId}`)
       ]);
       setEvents(loadedEvents);
@@ -119,6 +247,47 @@ export function TaskDistributorPage() {
   useEffect(() => {
     void loadDistributor();
   }, [moduleConfig]);
+
+  useEffect(() => {
+    if (!moduleConfig) {
+      setResponsibleOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const team = moduleConfig.team;
+    const fallbackOptions = splitResponsibleOptions(moduleConfig.defaultResponsible);
+
+    async function loadResponsibleOptions() {
+      try {
+        const loaded = await apiGet<string[]>(`/users/team-short-names?team=${encodeURIComponent(team)}`);
+        const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions]);
+        if (!cancelled) {
+          setResponsibleOptions(nextOptions.length > 0 ? nextOptions : fallbackOptions);
+        }
+      } catch {
+        if (!cancelled) {
+          setResponsibleOptions(fallbackOptions);
+        }
+      }
+    }
+
+    void loadResponsibleOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleConfig]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    setActiveTab(requestedTab === "config" ? "config" : "active");
+
+    const requestedClient = searchParams.get("client");
+    if (requestedClient !== null) {
+      setClientSearch(requestedClient);
+    }
+  }, [searchParams]);
 
   const tableBySlug = useMemo(
     () => new Map(moduleConfig?.tables.map((table) => [table.slug, table]) ?? []),
@@ -178,11 +347,15 @@ export function TaskDistributorPage() {
   }
 
   function historyHasOpenRecords(item: TaskDistributionHistory) {
+    if (!moduleConfig) {
+      return false;
+    }
+
     const usedIds = new Set<string>();
 
     return item.targetTables.some((targetTable, index) => {
       const record = resolveHistoryRecord(item, targetTable, index, usedIds);
-      const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig!, targetTable);
+      const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
 
       return Boolean(record && !record.deletedAt && !isCompletedRecord(table, record));
     });
@@ -212,12 +385,73 @@ export function TaskDistributorPage() {
       .sort((left, right) => left.localeCompare(right))[0] ?? "";
   }
 
-  const activeHistory = useMemo(() => {
-    const query = normalize(clientSearch).toLowerCase();
+  function matchesDistributorClientSearch(item: TaskDistributionHistory, searchWords: string[]) {
+    return matchesSearchWords([item.clientName, item.clientNumber].join(" "), searchWords);
+  }
 
+  function matchesDistributorWordSearch(
+    item: TaskDistributionHistory,
+    openRecords: TaskTrackingRecord[],
+    searchWords: string[]
+  ) {
+    if (searchWords.length === 0) {
+      return true;
+    }
+
+    const recordText = openRecords.flatMap((record) => {
+      const table = tableBySlug.get(record.tableCode);
+
+      return [
+        record.taskName,
+        record.eventName,
+        record.tableCode,
+        record.sourceTable,
+        record.status,
+        record.matterIdentifier,
+        record.matterNumber,
+        getStageLabel(table, record),
+        table?.title,
+        record.dueDate,
+        record.termDate,
+        getRowDate(record)
+      ];
+    });
+
+    return matchesSearchWords(
+      [
+        item.clientNumber,
+        item.clientName,
+        item.subject,
+        item.specificProcess,
+        item.matterIdentifier,
+        item.matterNumber,
+        item.eventName,
+        item.eventNamesPerTable.join(" "),
+        item.targetTables.join(" "),
+        item.createdAt,
+        getEarliestOpenDate(item),
+        ...recordText
+      ].join(" "),
+      searchWords
+    );
+  }
+
+  const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
+  const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
+  const fallbackResponsibleOptions = useMemo(
+    () => splitResponsibleOptions(moduleConfig?.defaultResponsible),
+    [moduleConfig]
+  );
+  const moduleResponsibleOptions = useMemo(
+    () => dedupeResponsibleOptions([...responsibleOptions, ...fallbackResponsibleOptions]),
+    [responsibleOptions, fallbackResponsibleOptions]
+  );
+
+  const activeHistory = useMemo(() => {
     return history
       .filter(historyHasOpenRecords)
-      .filter((item) => !query || normalize(item.clientName).toLowerCase().includes(query))
+      .filter((item) => matchesDistributorClientSearch(item, clientSearchWords))
+      .filter((item) => matchesDistributorWordSearch(item, getOpenHistoryRecords(item), wordSearchWords))
       .sort((left, right) => {
         const leftDate = getEarliestOpenDate(left);
         const rightDate = getEarliestOpenDate(right);
@@ -234,7 +468,27 @@ export function TaskDistributorPage() {
 
         return leftDate.localeCompare(rightDate) || left.createdAt.localeCompare(right.createdAt);
       });
-  }, [clientSearch, history, moduleConfig, tableBySlug, trackingById, trackingRecords]);
+  }, [clientSearchWords, history, moduleConfig, tableBySlug, trackingById, trackingRecords, wordSearchWords]);
+
+  const recycleRows = useMemo<RecycleTaskRow[]>(() => {
+    if (!moduleConfig) {
+      return [];
+    }
+
+    return trackingRecords
+      .reduce<RecycleTaskRow[]>((rows, record) => {
+        const table = tableBySlug.get(record.tableCode);
+        const reason: RecycleTaskRow["reason"] | null = record.deletedAt ? "deleted" : isCompletedRecord(table, record) ? "completed" : null;
+        const date = getRecycleDate(record);
+
+        if (reason && isWithinRecycleWindow(record)) {
+          rows.push({ record, table, reason, date });
+        }
+
+        return rows;
+      }, [])
+      .sort((left, right) => right.date.localeCompare(left.date) || left.record.clientName.localeCompare(right.record.clientName));
+  }, [moduleConfig, tableBySlug, trackingRecords]);
 
   function resetCatalogForm() {
     setCatalogName("");
@@ -335,48 +589,35 @@ export function TaskDistributorPage() {
     }
   }
 
-  async function handleAdvance(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
-    if (table?.mode === "workflow") {
-      const finalStage = table.tabs.length;
-      const nextStage = Math.min((record.workflowStage || 1) + 1, finalStage);
-      await patchRecord(record, {
-        workflowStage: nextStage,
-        status: nextStage >= finalStage ? "presentado" : "pendiente",
-        completedAt: nextStage >= finalStage ? new Date().toISOString() : undefined
-      });
+  function getResponsibleSelectOptions(record: TaskTrackingRecord) {
+    return dedupeResponsibleOptions([
+      ...moduleResponsibleOptions,
+      record.responsible
+    ]);
+  }
+
+  async function handleMoveToTab(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined, tab: LegacyTaskTab) {
+    if (!table) {
       return;
     }
 
+    const completed = tab.isCompleted || tab.status === "presentado";
+
     await patchRecord(record, {
-      status: "presentado",
-      completedAt: new Date().toISOString()
+      workflowStage: table.mode === "workflow" ? tab.stage ?? record.workflowStage : record.workflowStage,
+      status: tab.status ?? (completed ? "presentado" : "pendiente"),
+      completedAt: completed ? record.completedAt ?? new Date().toISOString() : null
     });
   }
 
-  async function handleStepBack(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
-    await patchRecord(record, {
-      workflowStage: table?.mode === "workflow" ? Math.max(1, (record.workflowStage || 1) - 1) : record.workflowStage,
-      status: "pendiente",
-      completedAt: null
-    });
+  async function handleRestoreDeletedRecord(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
+    await patchRecord(record, record.status === "presentado" || record.status === "concluida"
+      ? getPreviousActivePatch(table, record)
+      : { deletedAt: null });
   }
 
-  async function handleReopen(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
-    await patchRecord(record, {
-      status: "pendiente",
-      completedAt: null,
-      workflowStage: table?.mode === "workflow" ? Math.max(1, table.tabs.length - 1) : record.workflowStage
-    });
-  }
-
-  async function handleDeleteRecord(record: TaskTrackingRecord) {
-    if (!window.confirm("Quitar este registro de seguimiento?")) {
-      return;
-    }
-
-    await apiDelete(`/tasks/tracking-records/${record.id}`);
-    setTrackingRecords((current) => current.filter((candidate) => candidate.id !== record.id));
-    setTerms((current) => current.filter((term) => term.id !== record.termId && term.sourceRecordId !== record.id));
+  async function handleReturnCompletedRecord(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
+    await patchRecord(record, getPreviousActivePatch(table, record));
   }
 
   async function handleDeleteDistribution(item: TaskDistributionHistory) {
@@ -389,9 +630,14 @@ export function TaskDistributorPage() {
       .map((targetTable, index) => resolveHistoryRecord(item, targetTable, index, usedIds))
       .filter((record): record is TaskTrackingRecord => Boolean(record));
 
+    const deletedAt = new Date().toISOString();
     await Promise.all(records.map((record) => apiDelete(`/tasks/tracking-records/${record.id}`)));
-    setTrackingRecords((current) => current.filter((record) => !records.some((deleted) => deleted.id === record.id)));
-    setTerms((current) => current.filter((term) => !records.some((record) => term.id === record.termId || term.sourceRecordId === record.id)));
+    setTrackingRecords((current) =>
+      current.map((record) => records.some((deleted) => deleted.id === record.id) ? { ...record, deletedAt } : record)
+    );
+    setTerms((current) =>
+      current.map((term) => records.some((record) => term.id === record.termId || term.sourceRecordId === record.id) ? { ...term, deletedAt } : term)
+    );
   }
 
   if (!moduleConfig) {
@@ -406,7 +652,7 @@ export function TaskDistributorPage() {
             Volver al dashboard
           </button>
         </div>
-        <h2>Distribuidor de tareas ({moduleConfig.label})</h2>
+        <h2>Manager de tareas ({moduleConfig.label})</h2>
         <p className="muted">
           La pestaña de tareas activas es la fuente operativa: sus registros alimentan las tablas de seguimiento y
           el modulo de ejecucion. La configuracion define el catalogo usado por el Selector de Tareas.
@@ -443,18 +689,44 @@ export function TaskDistributorPage() {
               <span>{activeHistory.length} activas</span>
             </div>
 
-            <div className="tasks-legacy-toolbar">
-              <input
-                className="tasks-legacy-input tasks-distributor-search"
-                value={clientSearch}
-                onChange={(event) => setClientSearch(event.target.value)}
-                placeholder="Buscar cliente..."
-              />
-              {executionModule ? (
-                <button type="button" className="secondary-button" onClick={() => navigate(`/app/execution/${executionModule.slug}`)}>
-                  Ir a Ejecución
-                </button>
-              ) : null}
+            <div className="tasks-distributor-search-panel">
+              <div className="matters-toolbar execution-search-toolbar">
+                <div className="matters-filters leads-search-filters matters-active-search-filters execution-search-filters">
+                  <label className="form-field matters-search-field">
+                    <span>Buscar por palabra</span>
+                    <input
+                      type="text"
+                      value={wordSearch}
+                      onChange={(event) => setWordSearch(event.target.value)}
+                      placeholder="ID, asunto, tarea, tabla..."
+                    />
+                  </label>
+
+                  <label className="form-field matters-search-field">
+                    <span>Buscador por cliente</span>
+                    <input
+                      type="text"
+                      value={clientSearch}
+                      onChange={(event) => setClientSearch(event.target.value)}
+                      placeholder="Buscar palabra del cliente..."
+                    />
+                  </label>
+                </div>
+
+                <div className="matters-toolbar-actions tasks-distributor-search-actions">
+                  <span className="muted">
+                    Filtra las tareas activas por cliente o por cualquier dato del asunto, tarea, tabla o vencimiento.
+                  </span>
+                  {executionModule ? (
+                    <button type="button" className="secondary-button" onClick={() => navigate(`/app/execution/${executionModule.slug}`)}>
+                      Ir a Ejecución
+                    </button>
+                  ) : null}
+                  <button type="button" className="secondary-button" onClick={() => document.getElementById("tasks-recycle-bin")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                    Ir a papelera
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="table-scroll tasks-legacy-table-wrap">
@@ -494,7 +766,7 @@ export function TaskDistributorPage() {
                               <div className="tasks-active-target-toolbar">
                                 <span>Fecha más próxima: {getEarliestOpenDate(item) || "sin fecha"}</span>
                                 <button type="button" className="danger-button tasks-distributor-small-button" onClick={() => void handleDeleteDistribution(item)}>
-                                  Borrar todo
+                                  Borrar tarea completamente
                                 </button>
                               </div>
                               {item.targetTables.map((targetTable, index) => {
@@ -502,7 +774,12 @@ export function TaskDistributorPage() {
                                 const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
                                 const completed = record ? isCompletedRecord(table, record) : false;
                                 const danger = record ? isTrackingRecordRed(table, record) : true;
-                                const canStepBack = Boolean(record && table?.mode === "workflow" && !completed && (record.workflowStage || 1) > 1);
+                                const currentTabKey = record ? getRecordTabKey(table, record) : "";
+                                const showEscritosFondoDates = isEscritosFondoTable(table);
+
+                                if (!record || record.deletedAt || completed) {
+                                  return null;
+                                }
 
                                 return (
                                   <article
@@ -517,44 +794,86 @@ export function TaskDistributorPage() {
                                       </div>
                                       {record && table ? (
                                         <button type="button" className="secondary-button tasks-distributor-small-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/${table.slug}`)}>
-                                          Ir
+                                          Ir a tabla de seguimiento
                                         </button>
                                       ) : null}
                                     </div>
 
                                     {record ? (
                                       <>
-                                        <div className="tasks-active-target-fields">
-                                          <input
+                                        <div className={`tasks-active-target-fields${showEscritosFondoDates ? " tasks-active-target-fields-with-term" : ""}`}>
+                                          <label className="tasks-active-target-field">
+                                            <span>Tarea</span>
+                                            <input
                                             className="tasks-legacy-input"
                                             value={record.taskName}
                                             onChange={(event) => void patchRecord(record, { taskName: event.target.value })}
                                             aria-label="Nombre de la tarea"
-                                          />
-                                          {table?.showDateColumn === false ? null : (
+                                            />
+                                          </label>
+                                          <label className="tasks-active-target-field">
+                                            <span>Responsable</span>
+                                            <select
+                                              className="tasks-legacy-input"
+                                              value={record.responsible}
+                                              onChange={(event) => void patchRecord(record, { responsible: event.target.value })}
+                                              aria-label="Responsable"
+                                            >
+                                              <option value="">Seleccionar responsable</option>
+                                              {getResponsibleSelectOptions(record).map((responsible) => (
+                                                <option key={responsible} value={responsible}>
+                                                  {responsible}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                          {showEscritosFondoDates ? (
+                                            <>
+                                              <label className="tasks-active-target-field">
+                                                <span>Fecha debe presentarse</span>
+                                                <input
+                                                  className="tasks-legacy-input"
+                                                  type="date"
+                                                  value={toDateInput(record.dueDate)}
+                                                  onChange={(event) => void patchRecord(record, { dueDate: event.target.value || null })}
+                                                  aria-label="Fecha debe presentarse"
+                                                />
+                                              </label>
+                                              <label className="tasks-active-target-field">
+                                                <span>Término</span>
+                                                <input
+                                                  className="tasks-legacy-input"
+                                                  type="date"
+                                                  value={toDateInput(record.termDate)}
+                                                  onChange={(event) => void patchRecord(record, { termDate: event.target.value || null })}
+                                                  aria-label="Término"
+                                                />
+                                              </label>
+                                            </>
+                                          ) : null}
+                                          {showEscritosFondoDates || table?.showDateColumn === false ? null : (
                                             <span className="tasks-active-target-date">
                                               {getRowDate(record) || "Sin fecha límite"}
                                             </span>
                                           )}
                                         </div>
-                                        <div className="tasks-legacy-actions">
-                                          {completed ? (
-                                            <button type="button" className="secondary-button tasks-distributor-small-button" onClick={() => void handleReopen(record, table)}>
-                                              Reabrir
-                                            </button>
-                                          ) : (
-                                            <button type="button" className="secondary-button tasks-distributor-small-button" onClick={() => void handleAdvance(record, table)}>
-                                              {table?.mode === "workflow" ? "Avanzar" : "Completar"}
-                                            </button>
-                                          )}
-                                          {canStepBack ? (
-                                            <button type="button" className="secondary-button tasks-distributor-small-button" onClick={() => void handleStepBack(record, table)}>
-                                              Regresar
-                                            </button>
-                                          ) : null}
-                                          <button type="button" className="danger-button tasks-distributor-small-button" onClick={() => void handleDeleteRecord(record)}>
-                                            Quitar
-                                          </button>
+                                        <div className="tasks-active-stage-actions" aria-label="Mover tarea entre pestañas">
+                                          {table?.tabs.map((tab) => {
+                                            const current = tab.key === currentTabKey;
+
+                                            return (
+                                              <button
+                                                key={tab.key}
+                                                type="button"
+                                                className={`secondary-button tasks-distributor-small-button tasks-active-stage-button ${current ? "is-current" : ""}`}
+                                                onClick={() => void handleMoveToTab(record, table, tab)}
+                                                disabled={current}
+                                                aria-pressed={current}
+                                              >
+                                                {tab.label}
+                                              </button>
+                                            );
+                                          })}
                                         </div>
                                       </>
                                     ) : null}
@@ -570,6 +889,78 @@ export function TaskDistributorPage() {
                 </tbody>
               </table>
             </div>
+
+            <section id="tasks-recycle-bin" className="tasks-recycle-section">
+              <div className="panel-header">
+                <div>
+                  <h2>Papelera de reciclaje</h2>
+                  <p className="muted">
+                    Muestra tareas borradas o completadas durante los ultimos 30 dias. Desde aqui puedes recuperarlas
+                    al flujo activo del Manager de tareas.
+                  </p>
+                </div>
+                <span>{recycleRows.length} disponibles</span>
+              </div>
+
+              <div className="table-scroll tasks-legacy-table-wrap">
+                <table className="data-table tasks-recycle-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Estado</th>
+                      <th>Cliente</th>
+                      <th>Asunto</th>
+                      <th>ID Asunto</th>
+                      <th>Tabla</th>
+                      <th>Tarea</th>
+                      <th>Accion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recycleRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="centered-inline-message">No hay tareas en la papelera de los ultimos 30 dias.</td>
+                      </tr>
+                    ) : (
+                      recycleRows.map(({ record, table, reason, date }) => (
+                        <tr key={`${reason}-${record.id}`}>
+                          <td>{toDisplayDate(date)}</td>
+                          <td>
+                            <span className={`tasks-recycle-status ${reason === "deleted" ? "is-deleted" : "is-completed"}`}>
+                              {reason === "deleted" ? "Borrada" : "Completada"}
+                            </span>
+                          </td>
+                          <td>{record.clientName || "-"}</td>
+                          <td>{record.subject || "-"}</td>
+                          <td>{record.matterIdentifier || record.matterNumber || "-"}</td>
+                          <td>{table?.title ?? record.tableCode}</td>
+                          <td>{record.taskName || "-"}</td>
+                          <td>
+                            {reason === "deleted" ? (
+                              <button
+                                type="button"
+                                className="secondary-button tasks-distributor-small-button"
+                                onClick={() => void handleRestoreDeletedRecord(record, table)}
+                              >
+                                Recuperar
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="secondary-button tasks-distributor-small-button"
+                                onClick={() => void handleReturnCompletedRecord(record, table)}
+                              >
+                                Regresar a penultima pestana
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
         ) : (
           <div className="tasks-distributor-config">

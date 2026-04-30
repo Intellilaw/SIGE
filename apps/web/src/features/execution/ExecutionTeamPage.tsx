@@ -405,6 +405,24 @@ function getMatterTasks(matter: Matter, taskMap: Map<string, MatterTaskView[]>) 
   return linkedTasks;
 }
 
+function getTaskDistributorPath(teamSlug: string, matter: Matter) {
+  const params = new URLSearchParams({ tab: "active" });
+  const clientName = normalizeText(matter.clientName);
+  if (clientName) {
+    params.set("client", clientName);
+  }
+
+  return `/app/tasks/${teamSlug}/distribuidor?${params.toString()}`;
+}
+
+function getTaskSourcePath(teamSlug: string, task: MatterTaskView) {
+  if (task.sourceType === "term") {
+    return `/app/tasks/${teamSlug}/terminos`;
+  }
+
+  return `/app/tasks/${teamSlug}/${task.trackId}`;
+}
+
 function getNextBusinessDate() {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -855,7 +873,7 @@ export function ExecutionTeamWorkspace({
                   <th>Siguiente tarea</th>
                   <th>Fecha sig. tarea</th>
                   <th>Origen</th>
-                  <th>Ir</th>
+                  <th>Ir a tareas activas</th>
                   <th>Comentarios LLM</th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
@@ -962,10 +980,19 @@ export function ExecutionTeamWorkspace({
                                 {matterTasks.map((task) => (
                                   <span
                                     key={`${getTaskViewIdentity(task)}:origin`}
-                                    className="matter-origin-indicator"
-                                    title={task.sourceLabel}
+                                    className="execution-origin-entry"
                                   >
-                                    i
+                                    <span className="matter-origin-indicator" title={task.sourceLabel}>
+                                      i
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="secondary-button execution-origin-link"
+                                      onClick={() => navigate(getTaskSourcePath(legacyConfig.slug, task))}
+                                      title={`Abrir ${task.sourceLabel}`}
+                                    >
+                                      Ir
+                                    </button>
                                   </span>
                                 ))}
                               </div>
@@ -975,12 +1002,9 @@ export function ExecutionTeamWorkspace({
                             <button
                               type="button"
                               className="secondary-button matter-inline-button"
-                              onClick={() => {
-                                setPanelMatter(matter);
-                                setPanelMode("history");
-                              }}
+                              onClick={() => navigate(getTaskDistributorPath(legacyConfig.slug, matter))}
                             >
-                              Ir
+                              Ir a tareas activas
                             </button>
                           </td>
                           <td>
@@ -1016,7 +1040,7 @@ export function ExecutionTeamWorkspace({
                     })}
 
                     <tr className="execution-table-note">
-                      <td colSpan={16}>Para agregar un nuevo asunto, se debe hacer desde el Distribuidor.</td>
+                      <td colSpan={16}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
                     </tr>
                   </>
                 )}

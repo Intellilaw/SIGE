@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import type { TaskTrackingRecord } from "@sige/contracts";
 
-import { apiDelete, apiGet, apiPatch } from "../../api/http-client";
+import { apiGet, apiPatch } from "../../api/http-client";
 import {
   getAdjacentLegacyTaskTable,
   getLegacyTaskTable,
   LEGACY_TASK_MODULE_BY_SLUG,
-  type LegacyTaskTab
+  type LegacyTaskTab,
+  type LegacyTaskTableConfig
 } from "./task-legacy-config";
 
 function toDateInput(value?: string | null) {
@@ -20,13 +21,55 @@ function todayInput() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function currentMonthInput() {
+  return todayInput().slice(0, 7);
+}
+
 function getRowDate(record: TaskTrackingRecord) {
   return toDateInput(record.dueDate || record.termDate);
 }
 
-function isRowRed(record: TaskTrackingRecord, tab: LegacyTaskTab, showDateColumn: boolean) {
+function getCompletionDate(record: TaskTrackingRecord) {
+  return toDateInput(record.completedAt || record.updatedAt);
+}
+
+function getCompletionMonth(record: TaskTrackingRecord) {
+  return getCompletionDate(record).slice(0, 7);
+}
+
+function hasCompletedStatus(record: TaskTrackingRecord) {
+  return record.status === "presentado" || record.status === "concluida";
+}
+
+function isEscritosFondoTable(table: LegacyTaskTableConfig | undefined) {
+  return table?.slug === "escritos-fondo";
+}
+
+function formatDisplayDate(value?: string | null) {
+  const date = toDateInput(value);
+  if (!date) {
+    return "-";
+  }
+
+  const [year, month, day] = date.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function isRowRed(record: TaskTrackingRecord, tab: LegacyTaskTab, showDateColumn: boolean, table: LegacyTaskTableConfig | undefined) {
   if (tab.isCompleted) {
     return false;
+  }
+
+  if (isEscritosFondoTable(table)) {
+    const presentationDate = toDateInput(record.dueDate);
+    const termDate = toDateInput(record.termDate);
+
+    return !record.taskName
+      || !record.responsible
+      || !presentationDate
+      || !termDate
+      || presentationDate <= todayInput()
+      || termDate <= todayInput();
   }
 
   const dueDate = getRowDate(record);
@@ -47,6 +90,7 @@ export function TaskLegacyTablePage() {
   const [records, setRecords] = useState<TaskTrackingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTabKey, setActiveTabKey] = useState<string | null>(null);
+  const [completedMonth, setCompletedMonth] = useState(currentMonthInput());
   const activeTab = tableConfig?.tabs.find((tab) => tab.key === activeTabKey) ?? tableConfig?.tabs[0];
 
   useEffect(() => {
@@ -85,15 +129,20 @@ export function TaskLegacyTablePage() {
     return records.filter((record) => {
       if (activeTab.stage) {
         if (activeTab.isCompleted) {
-          return record.workflowStage === activeTab.stage || record.status === "presentado";
+          const isCompleted = record.workflowStage === activeTab.stage || hasCompletedStatus(record);
+          return isCompleted && getCompletionMonth(record) === completedMonth;
         }
 
         return record.status !== "presentado" && record.workflowStage === activeTab.stage;
       }
 
+      if (activeTab.isCompleted) {
+        return hasCompletedStatus(record) && getCompletionMonth(record) === completedMonth;
+      }
+
       return record.status === (activeTab.status ?? "pendiente");
     });
-  }, [activeTab, records, tableConfig]);
+  }, [activeTab, completedMonth, records, tableConfig]);
 
   async function patchRecord(record: TaskTrackingRecord, patch: TrackingRecordPatch) {
     const updated = await apiPatch<TaskTrackingRecord>(`/tasks/tracking-records/${record.id}`, patch);
@@ -108,49 +157,6 @@ export function TaskLegacyTablePage() {
     }
   }
 
-  async function handleDateChange(record: TaskTrackingRecord, value: string) {
-    await patchRecord(record, {
-      dueDate: value || null,
-      termDate: tableConfig?.termManagedDate ? value || null : record.termDate ?? null
-    });
-  }
-
-  async function handleAdvance(record: TaskTrackingRecord) {
-    if (!tableConfig) {
-      return;
-    }
-
-    if (tableConfig.mode === "workflow") {
-      const finalStage = tableConfig.tabs.length;
-      const nextStage = Math.min((record.workflowStage || 1) + 1, finalStage);
-      await patchRecord(record, {
-        workflowStage: nextStage,
-        status: nextStage >= finalStage ? "presentado" : "pendiente",
-        completedAt: nextStage >= finalStage ? new Date().toISOString() : undefined
-      });
-      return;
-    }
-
-    await patchRecord(record, {
-      status: "presentado",
-      completedAt: new Date().toISOString()
-    });
-  }
-
-  async function handleReopen(record: TaskTrackingRecord) {
-    const finalStage = tableConfig?.tabs.length ?? 1;
-    await patchRecord(record, {
-      status: "pendiente",
-      completedAt: null,
-      workflowStage: tableConfig?.mode === "workflow" ? Math.max(1, finalStage - 1) : record.workflowStage
-    });
-  }
-
-  async function handleDelete(record: TaskTrackingRecord) {
-    await apiDelete(`/tasks/tracking-records/${record.id}`);
-    setRecords((current) => current.filter((candidate) => candidate.id !== record.id));
-  }
-
   if (!moduleConfig || !tableConfig || !activeTab) {
     return <Navigate to="/app/tasks" replace />;
   }
@@ -158,6 +164,10 @@ export function TaskLegacyTablePage() {
   const previous = getAdjacentLegacyTaskTable(moduleConfig, tableConfig.slug, -1);
   const next = getAdjacentLegacyTaskTable(moduleConfig, tableConfig.slug, 1);
   const showDateColumn = tableConfig.showDateColumn !== false;
+  const showTermColumn = isEscritosFondoTable(tableConfig);
+  const isCompletedMonthView = activeTab.isCompleted;
+  const tableColumnCount =
+    7 + (showDateColumn ? 1 : 0) + (tableConfig.showReportedPeriod ? 1 : 0) + (showTermColumn ? 1 : 0);
 
   return (
     <section className="page-stack tasks-legacy-page">
@@ -183,14 +193,14 @@ export function TaskLegacyTablePage() {
       <section className="panel">
         <div className="tasks-legacy-toolbar">
           <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/distribuidor`)}>
-            Abrir distribuidor
+            Abrir Manager de tareas
           </button>
           <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/terminos`)}>
             Ver terminos
           </button>
         </div>
         <p className="muted matter-table-caption">
-          Los registros nuevos se crean desde el Selector de Tareas en Ejecucion; esta tabla edita el mismo registro activo.
+          Los registros nuevos se crean desde el Selector de Tareas en Ejecucion; las etapas y bajas se controlan desde Tareas activas del Manager de tareas.
         </p>
 
         <div className="tasks-legacy-tabs">
@@ -206,8 +216,24 @@ export function TaskLegacyTablePage() {
           ))}
         </div>
 
+        {isCompletedMonthView ? (
+          <div className="tasks-legacy-month-filter">
+            <label className="form-field tasks-legacy-month-field">
+              <span>Mes calendario</span>
+              <input
+                type="month"
+                value={completedMonth}
+                onChange={(event) => setCompletedMonth(event.target.value || currentMonthInput())}
+              />
+            </label>
+            <p className="muted">
+              Vista historica mensual: muestra los registros concluidos durante el mes seleccionado.
+            </p>
+          </div>
+        ) : null}
+
         <div className="table-scroll tasks-legacy-table-wrap">
-          <table className="data-table tasks-legacy-table">
+          <table className={`data-table tasks-legacy-table${showTermColumn ? " tasks-legacy-table-with-term" : ""}`}>
             <thead>
               <tr>
                 <th>No. Cliente</th>
@@ -215,25 +241,27 @@ export function TaskLegacyTablePage() {
                 <th>Asunto</th>
                 <th>Proceso especifico</th>
                 <th>ID Asunto</th>
-                <th>Tarea</th>
+                <th className="tasks-legacy-task-column">Tarea</th>
                 <th>Responsable</th>
                 {showDateColumn ? <th>{activeTab.isCompleted ? "Fecha completada" : tableConfig.dateLabel}</th> : null}
                 {tableConfig.showReportedPeriod ? <th>{tableConfig.reportedPeriodLabel ?? "Mes reportado"}</th> : null}
-                <th>Acciones</th>
+                {showTermColumn ? <th>Término</th> : null}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="centered-inline-message">Cargando registros...</td>
+                  <td colSpan={tableColumnCount} className="centered-inline-message">Cargando registros...</td>
                 </tr>
               ) : visibleRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="centered-inline-message">No hay registros en esta seccion.</td>
+                  <td colSpan={tableColumnCount} className="centered-inline-message">
+                    {isCompletedMonthView ? "No hay registros concluidos en el mes seleccionado." : "No hay registros en esta seccion."}
+                  </td>
                 </tr>
               ) : (
                 visibleRecords.map((record) => {
-                  const red = isRowRed(record, activeTab, showDateColumn);
+                  const red = isRowRed(record, activeTab, showDateColumn, tableConfig);
                   const green = !red && !activeTab.isCompleted;
 
                   return (
@@ -243,32 +271,21 @@ export function TaskLegacyTablePage() {
                       <td>{record.subject || "-"}</td>
                       <td><span className="tasks-legacy-process-pill">{record.specificProcess || "N/A"}</span></td>
                       <td>{record.matterIdentifier || record.matterNumber || "-"}</td>
-                      <td>
-                        <textarea
-                          className="tasks-legacy-textarea"
-                          value={record.taskName}
-                          onChange={(event) => void patchRecord(record, { taskName: event.target.value })}
-                        />
+                      <td className="tasks-legacy-task-cell">
+                        <div className="tasks-legacy-task-readonly">
+                          {record.taskName || "-"}
+                        </div>
                       </td>
-                      <td>
-                        <input
-                          className="tasks-legacy-input"
-                          value={record.responsible}
-                          onChange={(event) => void patchRecord(record, { responsible: event.target.value })}
-                        />
+                      <td className="tasks-legacy-responsible-cell">
+                        <div className="tasks-legacy-readonly-value">
+                          {record.responsible || "-"}
+                        </div>
                       </td>
                       {showDateColumn ? (
                         <td>
-                          {activeTab.isCompleted ? (
-                            toDateInput(record.completedAt || record.updatedAt)
-                          ) : (
-                            <input
-                              className="tasks-legacy-input"
-                              type="date"
-                              value={getRowDate(record)}
-                              onChange={(event) => void handleDateChange(record, event.target.value)}
-                            />
-                          )}
+                          <div className="tasks-legacy-readonly-value tasks-legacy-date-readonly">
+                            {formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : getRowDate(record))}
+                          </div>
                         </td>
                       ) : null}
                       {tableConfig.showReportedPeriod ? (
@@ -281,22 +298,13 @@ export function TaskLegacyTablePage() {
                           />
                         </td>
                       ) : null}
-                      <td>
-                        <div className="tasks-legacy-actions">
-                          {activeTab.isCompleted ? (
-                            <button type="button" className="secondary-button" onClick={() => void handleReopen(record)}>
-                              Reabrir
-                            </button>
-                          ) : (
-                            <button type="button" className="secondary-button" onClick={() => void handleAdvance(record)}>
-                              {tableConfig.mode === "workflow" ? "Avanzar" : "Marcar completada"}
-                            </button>
-                          )}
-                          <button type="button" className="danger-button" onClick={() => void handleDelete(record)}>
-                            Borrar
-                          </button>
-                        </div>
-                      </td>
+                      {showTermColumn ? (
+                        <td>
+                          <div className="tasks-legacy-readonly-value tasks-legacy-date-readonly">
+                            {formatDisplayDate(record.termDate)}
+                          </div>
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })

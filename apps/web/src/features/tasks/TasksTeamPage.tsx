@@ -288,11 +288,11 @@ export function TasksTeamPage() {
           </div>
         </div>
         <p className="muted">
-          Operacion de tareas por equipo con distribuidor, tablas de seguimiento, terminos y tareas adicionales.
+          Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales.
         </p>
         <div className="tasks-legacy-toolbar">
           <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`)}>
-            Distribuidor de tareas
+            Manager de tareas
           </button>
           <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos`)}>
             Terminos

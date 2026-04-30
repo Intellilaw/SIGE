@@ -2465,6 +2465,22 @@ textarea {
   align-items: center;
 }
 
+.execution-origin-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.execution-origin-link {
+  min-width: 0;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .execution-textarea {
   min-width: 220px;
   min-height: 52px;
@@ -2990,6 +3006,29 @@ textarea {
   align-items: center;
 }
 
+.tasks-distributor-search-panel {
+  margin: 18px 0 22px;
+  padding: 24px 28px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(31, 41, 51, 0.08);
+}
+
+.tasks-distributor-search-panel .execution-search-filters {
+  flex: 1 1 100%;
+}
+
+.tasks-distributor-search-actions {
+  flex: 1 1 100%;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tasks-distributor-search-actions .muted {
+  max-width: 780px;
+}
+
 .tasks-legacy-page .module-hero {
   gap: 18px;
 }
@@ -3021,6 +3060,25 @@ textarea {
   box-shadow: 0 14px 28px rgba(37, 99, 235, 0.18);
 }
 
+.tasks-legacy-month-filter {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.tasks-legacy-month-field {
+  min-width: 220px;
+}
+
+.tasks-legacy-month-filter p {
+  margin: 0 0 10px;
+}
+
 .tasks-legacy-table-wrap {
   border-radius: 18px;
   border: 1px solid rgba(31, 41, 51, 0.08);
@@ -3028,13 +3086,57 @@ textarea {
 }
 
 .tasks-legacy-table {
-  min-width: 1500px;
+  min-width: 1900px;
+}
+
+.tasks-legacy-table-with-term {
+  min-width: 2050px;
 }
 
 .tasks-legacy-table th {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.78rem;
+}
+
+.tasks-legacy-task-column,
+.tasks-legacy-task-cell {
+  min-width: 520px;
+  width: 520px;
+}
+
+.tasks-legacy-task-readonly {
+  width: 100%;
+  min-height: 58px;
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.9);
+  color: #0f172a;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tasks-legacy-responsible-cell {
+  min-width: 170px;
+}
+
+.tasks-legacy-readonly-value {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.9);
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.tasks-legacy-date-readonly {
+  min-width: 180px;
 }
 
 .tasks-legacy-row-red td {
@@ -3238,6 +3340,37 @@ textarea {
   min-width: 1320px;
 }
 
+.tasks-recycle-section {
+  display: grid;
+  gap: 16px;
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+}
+
+.tasks-recycle-table {
+  min-width: 1500px;
+}
+
+.tasks-recycle-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.tasks-recycle-status.is-deleted {
+  background: #fee2e2;
+  color: #b42318;
+}
+
+.tasks-recycle-status.is-completed {
+  background: #dcfce7;
+  color: #047857;
+}
+
 .tasks-distributor-date {
   display: block;
   color: #64748b;
@@ -3308,8 +3441,20 @@ textarea {
 }
 
 .tasks-active-target-fields {
-  grid-template-columns: minmax(220px, 1fr) minmax(130px, 0.38fr);
-  align-items: center;
+  grid-template-columns: minmax(240px, 1.15fr) minmax(150px, 0.45fr) minmax(130px, 0.38fr);
+  align-items: end;
+}
+
+.tasks-active-target-fields-with-term {
+  grid-template-columns: minmax(260px, 1.1fr) minmax(140px, 0.36fr) minmax(180px, 0.42fr) minmax(150px, 0.34fr);
+}
+
+.tasks-active-target-field {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .tasks-active-target-date {
@@ -3323,6 +3468,25 @@ textarea {
   background: #f8fafc;
   color: #24364b;
   font-weight: 800;
+}
+
+.tasks-active-stage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tasks-active-stage-button {
+  text-align: left;
+}
+
+.tasks-active-stage-button.is-current {
+  border: 2px solid rgba(180, 125, 0, 0.78);
+  background: linear-gradient(135deg, #b77900, #f2c94c);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(180, 125, 0, 0.28);
+  transform: translateY(-1px);
+  cursor: default;
 }
 
 .tasks-distributor-table-count-grid {
