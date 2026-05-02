@@ -104,6 +104,19 @@ function normalizeComparableText(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function getSearchWords(value?: string | null) {
+  return normalizeComparableText(value).split(/\s+/).filter(Boolean);
+}
+
+function matchesAllSearchWords(haystack: string, searchWords: string[]) {
+  if (searchWords.length === 0) {
+    return true;
+  }
+
+  const normalizedHaystack = normalizeComparableText(haystack);
+  return searchWords.every((word) => normalizedHaystack.includes(word));
+}
+
 const SPANISH_TO_ENGLISH_TERMS: Array<[string, string]> = [
   ["prestacion de servicios", "provision of services"],
   ["prestación de servicios", "provision of services"],
@@ -346,6 +359,88 @@ function getTeamLabel(team?: Team | "" | null) {
     TEAM_OPTIONS.find((option) => option.key === team)?.label ??
     "Sin equipo"
   );
+}
+
+function getTemplateSearchText(template: QuoteTemplate) {
+  const rowText = template.tableRows.flatMap((row) => [
+    row.conceptDescription,
+    ...row.amountCells.map((cell) => cell.value),
+    row.paymentMoment.value,
+    row.notesCell.value
+  ]);
+
+  return [
+    template.templateNumber,
+    template.name,
+    template.subject,
+    template.services,
+    template.milestone,
+    template.notes,
+    getTeamLabel(template.team),
+    getQuoteTypeLabel(template.quoteType),
+    getTemplateAmountPreview(template),
+    ...template.amountColumns.flatMap((column) => [column.title, getAmountModeLabel(column.mode)]),
+    ...rowText
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getQuoteSearchText(quote: Quote, clientNumber?: string) {
+  const tableRows = quote.tableRows ?? [];
+  const rowText = tableRows.flatMap((row) => [
+    row.conceptDescription,
+    ...row.amountCells.map((cell) => cell.value),
+    row.paymentMoment.value,
+    row.notesCell.value
+  ]);
+
+  return [
+    clientNumber,
+    quote.clientName,
+    quote.quoteNumber,
+    getQuoteDisplayDate(quote),
+    formatDate(getQuoteDisplayDate(quote)),
+    getQuoteTypeLabel(quote.quoteType),
+    getTeamLabel(quote.responsibleTeam),
+    quote.subject,
+    quote.milestone,
+    quote.notes,
+    quote.language,
+    formatCurrency(quote.totalMxn),
+    ...quote.lineItems.flatMap((item) => [item.concept, String(item.amountMxn)]),
+    ...rowText
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function filterTemplatesForSearch(templates: QuoteTemplate[], wordSearch: string, teamSearch: string) {
+  const wordSearchWords = getSearchWords(wordSearch);
+  const teamSearchWords = getSearchWords(teamSearch);
+
+  return templates.filter((template) => {
+    const templateText = getTemplateSearchText(template);
+    const teamText = `${template.team} ${getTeamLabel(template.team)}`;
+    return matchesAllSearchWords(templateText, wordSearchWords) && matchesAllSearchWords(teamText, teamSearchWords);
+  });
+}
+
+function filterQuotesForSearch(quotes: Quote[], clients: Client[], wordSearch: string, clientSearch: string) {
+  const wordSearchWords = getSearchWords(wordSearch);
+  const clientSearchWords = getSearchWords(clientSearch);
+  const clientNumberById = new Map(clients.map((client) => [client.id, client.clientNumber]));
+  const clientNumberByName = new Map(
+    clients.map((client) => [normalizeComparableText(client.name), client.clientNumber])
+  );
+
+  return quotes.filter((quote) => {
+    const clientNumber =
+      clientNumberById.get(quote.clientId) ?? clientNumberByName.get(normalizeComparableText(quote.clientName));
+    const quoteText = getQuoteSearchText(quote, clientNumber);
+    const clientText = [clientNumber, quote.clientName].filter(Boolean).join(" ");
+    return matchesAllSearchWords(quoteText, wordSearchWords) && matchesAllSearchWords(clientText, clientSearchWords);
+  });
 }
 
 function resolveDefaultTeam(userTeam?: string) {
@@ -1504,6 +1599,10 @@ export function QuotesPage() {
   const [templateForm, setTemplateForm] = useState<QuoteTemplateFormState>(() => buildEmptyTemplateForm(user?.team));
   const [quoteForm, setQuoteForm] = useState<QuoteFormState>(() => buildEmptyQuoteForm(user?.team));
   const [quoteTemplateDraft, setQuoteTemplateDraft] = useState<QuoteTemplateDraftState | null>(null);
+  const [templateWordSearch, setTemplateWordSearch] = useState("");
+  const [templateTeamSearch, setTemplateTeamSearch] = useState("");
+  const [quoteWordSearch, setQuoteWordSearch] = useState("");
+  const [quoteClientSearch, setQuoteClientSearch] = useState("");
 
   useEffect(() => {
     void loadBoard();
@@ -2028,8 +2127,10 @@ export function QuotesPage() {
     }
   }
 
-  const templateGroups = groupTemplatesByTeam(templates);
-  const quoteGroups = groupQuotesByClient(quotes, clients);
+  const filteredTemplates = filterTemplatesForSearch(templates, templateWordSearch, templateTeamSearch);
+  const filteredQuotes = filterQuotesForSearch(quotes, clients, quoteWordSearch, quoteClientSearch);
+  const templateGroups = groupTemplatesByTeam(filteredTemplates);
+  const quoteGroups = groupQuotesByClient(filteredQuotes, clients);
   const editingQuote = quotes.find((item) => item.id === editingQuoteId);
   const selectedTemplate = templates.find((item) => item.id === selectedTemplateId);
   const editingTemplate = templates.find((item) => item.id === editingTemplateId);
@@ -2086,9 +2187,48 @@ export function QuotesPage() {
 
       {!loading && activeTab === "templates" ? (
         <>
-          {templateGroups.length === 0 ? (
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Cotizaciones tipo</h2>
+              <span>{filteredTemplates.length} plantillas</span>
+            </div>
+
+            <div className="matters-toolbar execution-search-toolbar">
+              <div className="matters-filters leads-search-filters matters-active-search-filters execution-search-filters">
+                <label className="form-field matters-search-field">
+                  <span>Buscar por palabra</span>
+                  <input
+                    type="text"
+                    value={templateWordSearch}
+                    onChange={(event) => setTemplateWordSearch(event.target.value)}
+                    placeholder="No., servicios, concepto, hito..."
+                  />
+                </label>
+
+                <label className="form-field matters-search-field">
+                  <span>Buscador por equipo</span>
+                  <input
+                    type="text"
+                    value={templateTeamSearch}
+                    onChange={(event) => setTemplateTeamSearch(event.target.value)}
+                    placeholder="Buscar palabra del equipo..."
+                  />
+                </label>
+              </div>
+
+              <div className="matters-toolbar-actions">
+                <span className="muted">Filtra por equipo o por contenido para encontrar una plantilla reutilizable.</span>
+              </div>
+            </div>
+          </section>
+
+          {templates.length === 0 ? (
             <section className="panel">
               <div className="centered-inline-message">Aun no hay cotizaciones tipo guardadas.</div>
+            </section>
+          ) : templateGroups.length === 0 ? (
+            <section className="panel">
+              <div className="centered-inline-message">No hay cotizaciones tipo que coincidan con la busqueda.</div>
             </section>
           ) : (
             templateGroups.map((group) => (
@@ -2333,9 +2473,48 @@ export function QuotesPage() {
 
       {!loading && activeTab === "quotes" ? (
         <>
-          {quoteGroups.length === 0 ? (
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Cotizaciones por cliente</h2>
+              <span>{filteredQuotes.length} registros</span>
+            </div>
+
+            <div className="matters-toolbar execution-search-toolbar">
+              <div className="matters-filters leads-search-filters matters-active-search-filters execution-search-filters">
+                <label className="form-field matters-search-field">
+                  <span>Buscar por palabra</span>
+                  <input
+                    type="text"
+                    value={quoteWordSearch}
+                    onChange={(event) => setQuoteWordSearch(event.target.value)}
+                    placeholder="No., asunto, equipo, hito, concepto..."
+                  />
+                </label>
+
+                <label className="form-field matters-search-field">
+                  <span>Buscador por cliente</span>
+                  <input
+                    type="text"
+                    value={quoteClientSearch}
+                    onChange={(event) => setQuoteClientSearch(event.target.value)}
+                    placeholder="Buscar palabra del cliente..."
+                  />
+                </label>
+              </div>
+
+              <div className="matters-toolbar-actions">
+                <span className="muted">Filtra por cliente y por contenido de la cotizacion antes de abrirla o descargarla.</span>
+              </div>
+            </div>
+          </section>
+
+          {quotes.length === 0 ? (
             <section className="panel">
               <div className="centered-inline-message">Todavia no hay cotizaciones guardadas.</div>
+            </section>
+          ) : quoteGroups.length === 0 ? (
+            <section className="panel">
+              <div className="centered-inline-message">No hay cotizaciones que coincidan con la busqueda.</div>
             </section>
           ) : (
             quoteGroups.map((group) => (
