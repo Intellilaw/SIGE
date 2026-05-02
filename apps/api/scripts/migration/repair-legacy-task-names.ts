@@ -18,6 +18,7 @@ const LEGACY_TASK_NAME_KEYS = [
   "tarea",
   "task_name",
   "nombre",
+  "nombre_tarea",
   "escrito",
   "evento_escrito",
   "evento_nombre",
@@ -84,12 +85,12 @@ function pickFirst(row: LegacyRow, keys: string[]) {
   return undefined;
 }
 
-function legacyTaskName(row: LegacyRow) {
-  return normalizeText(pickFirst(row, LEGACY_TASK_NAME_KEYS)) || "Tarea legacy";
+function legacyTaskName(row: LegacyRow, fallbackName = "Tarea") {
+  return normalizeText(pickFirst(row, LEGACY_TASK_NAME_KEYS)) || fallbackName;
 }
 
 function legacyTermEventName(row: LegacyRow) {
-  return legacyTaskName(row).replace(/^Tarea legacy$/, "Termino legacy");
+  return legacyTaskName(row, "Termino");
 }
 
 function legacyPendingTaskLabel(row: LegacyRow) {
@@ -131,10 +132,7 @@ async function main() {
   for (const module of LEGACY_EXECUTION_MODULES) {
     for (const sourceTable of module.sourceTables) {
       for (const row of payload.tables[sourceTable.sourceTable] ?? []) {
-        const taskName = legacyTaskName(row);
-        if (taskName === "Tarea legacy") {
-          continue;
-        }
+        const taskName = legacyTaskName(row, sourceTable.title);
 
         counts.plannedTaskRecords += 1;
         if (!apply) {
@@ -155,7 +153,7 @@ async function main() {
     for (const row of payload.tables[module.termsTable] ?? []) {
       const eventName = legacyTermEventName(row);
       const pendingTaskLabel = legacyPendingTaskLabel(row);
-      if (eventName === "Termino legacy" && !pendingTaskLabel) {
+      if (!eventName && !pendingTaskLabel) {
         continue;
       }
 

@@ -536,6 +536,7 @@ export class LocalBusinessStore {
         responsible: text(row.responsable) || text(row.responsable2) || module.defaultResponsible || "",
         responsible2: optionalText(row.responsable2),
         dueDate: isoDate(row.fecha_limite),
+        recurring: booleanValue(row.termino_recurrente) || booleanValue(row.es_recurrente) || booleanValue(row.recurring),
         status: legacyStatus(row.status),
         deletedAt: isoDate(row.deleted_at),
         createdAt: isoDate(row.created_at) ?? new Date(0).toISOString(),

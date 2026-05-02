@@ -83,6 +83,8 @@ function buildQuoteData(payload: QuoteWriteRecord) {
     subject: payload.subject,
     status: payload.status,
     quoteType: payload.quoteType,
+    language: payload.language ?? "es",
+    quoteDate: payload.quoteDate ? new Date(payload.quoteDate) : new Date(),
     amountColumns: payload.amountColumns as unknown as import("@prisma/client").Prisma.InputJsonValue,
     tableRows: payload.tableRows as unknown as import("@prisma/client").Prisma.InputJsonValue,
     lineItems: payload.lineItems as unknown as import("@prisma/client").Prisma.InputJsonValue,
@@ -128,7 +130,7 @@ export class PrismaQuotesRepository implements QuotesRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async list() {
-    const records = await this.prisma.quote.findMany({ orderBy: { createdAt: "desc" } });
+    const records = await this.prisma.quote.findMany({ orderBy: [{ quoteDate: "desc" }, { createdAt: "desc" }] });
     return records.map(mapQuote);
   }
 

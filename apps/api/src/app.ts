@@ -10,6 +10,7 @@ import { AppError } from "./core/errors/app-error";
 import { registerErrorHandler } from "./core/http/error-handler";
 import { prisma } from "./lib/prisma";
 import { AuthService } from "./modules/auth/auth.service";
+import { BudgetPlanningService } from "./modules/budget-planning/budget-planning.service";
 import { ClientsService } from "./modules/clients/clients.service";
 import { CommissionsService } from "./modules/commissions/commissions.service";
 import { DashboardService } from "./modules/dashboard/dashboard.service";
@@ -22,6 +23,7 @@ import { TasksService } from "./modules/tasks/tasks.service";
 import { UsersService } from "./modules/users/users.service";
 import { healthRoutes } from "./modules/health/health.routes";
 import { authRoutes } from "./modules/auth/auth.routes";
+import { budgetPlanningRoutes } from "./modules/budget-planning/budget-planning.routes";
 import { commissionsRoutes } from "./modules/commissions/commissions.routes";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes";
 import { financesRoutes } from "./modules/finances/finances.routes";
@@ -33,6 +35,7 @@ import { leadsRoutes } from "./modules/leads/leads.routes";
 import { mattersRoutes } from "./modules/matters/matters.routes";
 import { tasksRoutes } from "./modules/tasks/tasks.routes";
 import { PrismaAuthRepository } from "./repositories/auth.repository";
+import { PrismaBudgetPlanningRepository } from "./repositories/budget-planning.repository";
 import { PrismaClientsRepository } from "./repositories/clients.repository";
 import { PrismaCommissionsRepository } from "./repositories/commissions.repository";
 import { PrismaDashboardRepository } from "./repositories/dashboard.repository";
@@ -67,6 +70,7 @@ declare module "fastify" {
     };
     repositories: {
       auth: AuthRepository;
+      budgetPlanning: PrismaBudgetPlanningRepository;
       clients: ClientsRepository;
       commissions: PrismaCommissionsRepository;
       dashboard: PrismaDashboardRepository;
@@ -80,6 +84,7 @@ declare module "fastify" {
     };
     services: {
       AuthService: typeof AuthService;
+      BudgetPlanningService: typeof BudgetPlanningService;
       ClientsService: typeof ClientsService;
       CommissionsService: typeof CommissionsService;
       DashboardService: typeof DashboardService;
@@ -140,6 +145,7 @@ export async function buildApp() {
     : null;
   app.decorate("repositories", {
     auth: authRepository,
+    budgetPlanning: new PrismaBudgetPlanningRepository(prisma),
     clients: new ResilientClientsRepository(
       new PrismaClientsRepository(prisma),
       localBusinessStore ? new LocalClientsRepository(localBusinessStore) : null,
@@ -165,6 +171,7 @@ export async function buildApp() {
   });
   app.decorate("services", {
     AuthService,
+    BudgetPlanningService,
     ClientsService,
     CommissionsService,
     DashboardService,
@@ -207,6 +214,7 @@ export async function buildApp() {
   await app.register(async (api) => {
     await api.register(healthRoutes);
     await api.register(authRoutes);
+    await api.register(budgetPlanningRoutes);
     await api.register(commissionsRoutes);
     await api.register(dashboardRoutes);
     await api.register(financesRoutes);

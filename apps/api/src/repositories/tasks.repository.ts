@@ -498,6 +498,7 @@ export class PrismaTasksRepository implements TasksRepository {
         responsible: normalizeRequiredText(payload.responsible),
         responsible2: normalizeOptionalText(payload.responsible2),
         dueDate: parseOptionalDateValue(payload.dueDate),
+        recurring: payload.recurring ?? false,
         status: payload.status ?? "pendiente",
         deletedAt: parseOptionalDateValue(payload.deletedAt)
       }
@@ -515,6 +516,7 @@ export class PrismaTasksRepository implements TasksRepository {
         responsible: payload.responsible,
         responsible2: normalizeOptionalText(payload.responsible2),
         dueDate: parseOptionalDateValue(payload.dueDate),
+        recurring: payload.recurring,
         status: payload.status,
         deletedAt: parseOptionalDateValue(payload.deletedAt)
       }

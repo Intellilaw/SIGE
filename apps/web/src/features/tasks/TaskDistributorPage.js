@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
+import { buildDistributionHistoryTaskNameMap, getTermEnabledRecordData, isTrackingTermEnabled, resolveTrackingTaskName, usesOptionalTermToggle, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { encodeCatalogTarget, findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName, makeCatalogTargetEntry } from "./task-distribution-utils";
 function normalize(value) {
@@ -53,7 +54,9 @@ function toDisplayDate(value) {
     return `${day}/${month}/${year}`;
 }
 function getRowDate(record) {
-    return toDateInput(record.dueDate || record.termDate);
+    return [toDateInput(record.dueDate), toDateInput(record.termDate)]
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right))[0] ?? "";
 }
 function getRecycleDate(record) {
     return toDateInput(record.deletedAt || record.completedAt || record.updatedAt);
@@ -67,8 +70,24 @@ function isWithinRecycleWindow(record) {
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
     return Number.isFinite(recycleTime) && Date.now() - recycleTime <= thirtyDaysMs;
 }
-function isEscritosFondoTable(table) {
-    return table?.slug === "escritos-fondo";
+function isYes(value) {
+    return ["si", "yes"].includes((value ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+}
+function defaultVerification(moduleConfig) {
+    return Object.fromEntries(moduleConfig.verificationColumns.map((column) => [column.key, "No"]));
+}
+function getTermVerification(moduleConfig, term) {
+    return {
+        ...defaultVerification(moduleConfig),
+        ...(term?.verification ?? {})
+    };
+}
+function shouldShowTermVerification(table, record) {
+    return isTrackingTermEnabled(record, table);
+}
+function hasIncompleteTermVerification(moduleConfig, term) {
+    const verification = getTermVerification(moduleConfig, term);
+    return moduleConfig.verificationColumns.some((column) => !isYes(verification[column.key]));
 }
 function isCompletedRecord(table, record) {
     if (record.status === "presentado" || record.status === "concluida") {
@@ -76,23 +95,24 @@ function isCompletedRecord(table, record) {
     }
     return table?.mode === "workflow" && record.workflowStage >= table.tabs.length;
 }
-function isTrackingRecordRed(table, record) {
+function isTrackingRecordRed(table, record, taskNamesByRecordId) {
     if (isCompletedRecord(table, record)) {
         return false;
     }
+    const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId);
     const dueDate = getRowDate(record);
     const requiresDate = table?.showDateColumn !== false;
-    if (isEscritosFondoTable(table)) {
+    if (usesPresentationAndTermDates(table)) {
         const presentationDate = toDateInput(record.dueDate);
         const termDate = toDateInput(record.termDate);
-        return !record.taskName
+        const termEnabled = isTrackingTermEnabled(record, table);
+        return !taskName
             || !record.responsible
             || !presentationDate
-            || !termDate
             || presentationDate <= todayInput()
-            || termDate <= todayInput();
+            || (termEnabled && (!termDate || termDate <= todayInput()));
     }
-    return !record.taskName || !record.responsible || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
+    return !taskName || !record.responsible || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
 }
 function getStageLabel(table, record) {
     if (!table) {
@@ -212,7 +232,13 @@ export function TaskDistributorPage() {
             setClientSearch(requestedClient);
         }
     }, [searchParams]);
-    const tableBySlug = useMemo(() => new Map(moduleConfig?.tables.map((table) => [table.slug, table]) ?? []), [moduleConfig]);
+    function resolveRecordTable(record) {
+        if (!moduleConfig) {
+            return undefined;
+        }
+        return findLegacyTableByAnyName(moduleConfig, record.tableCode)
+            ?? findLegacyTableByAnyName(moduleConfig, record.sourceTable);
+    }
     const trackingById = useMemo(() => new Map(trackingRecords.map((record) => [record.id, record])), [trackingRecords]);
     function resolveHistoryRecord(item, tableValue, index, usedIds) {
         if (!moduleConfig) {
@@ -244,7 +270,8 @@ export function TaskDistributorPage() {
             const sameMatter = candidate.matterId === item.matterId ||
                 candidate.matterNumber === item.matterNumber ||
                 candidate.matterIdentifier === item.matterIdentifier;
-            const sameTask = !expectedName || candidate.taskName === expectedName || candidate.eventName === item.eventName;
+            const candidateTaskName = normalize(resolveTrackingTaskName(candidate, table, undefined, item.eventNamesPerTable[index] || item.eventName));
+            const sameTask = !expectedName || candidateTaskName === expectedName || candidate.eventName === item.eventName;
             return sameTable && sameMatter && sameTask;
         });
         if (record) {
@@ -259,7 +286,7 @@ export function TaskDistributorPage() {
         const usedIds = new Set();
         return item.targetTables.some((targetTable, index) => {
             const record = resolveHistoryRecord(item, targetTable, index, usedIds);
-            const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
+            const table = record ? resolveRecordTable(record) : findLegacyTableByAnyName(moduleConfig, targetTable);
             return Boolean(record && !record.deletedAt && !isCompletedRecord(table, record));
         });
     }
@@ -271,10 +298,51 @@ export function TaskDistributorPage() {
         return item.targetTables
             .map((targetTable, index) => {
             const record = resolveHistoryRecord(item, targetTable, index, usedIds);
-            const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
+            const table = record ? resolveRecordTable(record) : findLegacyTableByAnyName(moduleConfig, targetTable);
             return record && !record.deletedAt && !isCompletedRecord(table, record) ? record : null;
         })
             .filter((record) => Boolean(record));
+    }
+    function makeVirtualHistory(record, table) {
+        const tableKey = table?.slug ?? record.tableCode;
+        const sourceKey = table?.sourceTable ?? record.sourceTable;
+        const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId, record.eventName);
+        return {
+            id: `tracking-${record.id}`,
+            moduleId: record.moduleId,
+            matterId: record.matterId,
+            matterNumber: record.matterNumber,
+            clientNumber: record.clientNumber,
+            clientName: record.clientName,
+            subject: record.subject,
+            specificProcess: record.specificProcess,
+            matterIdentifier: record.matterIdentifier,
+            eventName: taskName || record.eventName || table?.title || "Tarea",
+            targetTables: [tableKey],
+            eventNamesPerTable: [taskName || record.eventName || table?.title || "Tarea"],
+            createdIds: {
+                [`${tableKey}_0`]: record.id,
+                [`${sourceKey}_0`]: record.id,
+                [tableKey]: record.id,
+                [sourceKey]: record.id
+            },
+            data: record.data ?? {},
+            createdAt: record.createdAt,
+            updatedAt: record.updatedAt
+        };
+    }
+    function getHistoryRecordIds(items) {
+        const ids = new Set();
+        items.forEach((item) => {
+            const usedIds = new Set();
+            item.targetTables.forEach((targetTable, index) => {
+                const record = resolveHistoryRecord(item, targetTable, index, usedIds);
+                if (record) {
+                    ids.add(record.id);
+                }
+            });
+        });
+        return ids;
     }
     function getEarliestOpenDate(item) {
         return getOpenHistoryRecords(item)
@@ -290,8 +358,10 @@ export function TaskDistributorPage() {
             return true;
         }
         const recordText = openRecords.flatMap((record) => {
-            const table = tableBySlug.get(record.tableCode);
+            const table = resolveRecordTable(record);
+            const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId);
             return [
+                taskName,
                 record.taskName,
                 record.eventName,
                 record.tableCode,
@@ -323,10 +393,24 @@ export function TaskDistributorPage() {
     }
     const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
     const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
+    const taskNamesByRecordId = useMemo(() => buildDistributionHistoryTaskNameMap(history), [history]);
     const fallbackResponsibleOptions = useMemo(() => splitResponsibleOptions(moduleConfig?.defaultResponsible), [moduleConfig]);
     const moduleResponsibleOptions = useMemo(() => dedupeResponsibleOptions([...responsibleOptions, ...fallbackResponsibleOptions]), [responsibleOptions, fallbackResponsibleOptions]);
+    const managerHistory = useMemo(() => {
+        if (!moduleConfig) {
+            return history;
+        }
+        const historyRecordIds = getHistoryRecordIds(history);
+        const virtualHistory = trackingRecords
+            .filter((record) => {
+            const table = resolveRecordTable(record);
+            return !historyRecordIds.has(record.id) && !record.deletedAt && !isCompletedRecord(table, record);
+        })
+            .map((record) => makeVirtualHistory(record, resolveRecordTable(record)));
+        return [...history, ...virtualHistory];
+    }, [history, moduleConfig, taskNamesByRecordId, trackingRecords]);
     const activeHistory = useMemo(() => {
-        return history
+        return managerHistory
             .filter(historyHasOpenRecords)
             .filter((item) => matchesDistributorClientSearch(item, clientSearchWords))
             .filter((item) => matchesDistributorWordSearch(item, getOpenHistoryRecords(item), wordSearchWords))
@@ -344,14 +428,14 @@ export function TaskDistributorPage() {
             }
             return leftDate.localeCompare(rightDate) || left.createdAt.localeCompare(right.createdAt);
         });
-    }, [clientSearchWords, history, moduleConfig, tableBySlug, trackingById, trackingRecords, wordSearchWords]);
+    }, [clientSearchWords, managerHistory, moduleConfig, taskNamesByRecordId, trackingById, trackingRecords, wordSearchWords]);
     const recycleRows = useMemo(() => {
         if (!moduleConfig) {
             return [];
         }
         return trackingRecords
             .reduce((rows, record) => {
-            const table = tableBySlug.get(record.tableCode);
+            const table = resolveRecordTable(record);
             const reason = record.deletedAt ? "deleted" : isCompletedRecord(table, record) ? "completed" : null;
             const date = getRecycleDate(record);
             if (reason && isWithinRecycleWindow(record)) {
@@ -360,7 +444,7 @@ export function TaskDistributorPage() {
             return rows;
         }, [])
             .sort((left, right) => right.date.localeCompare(left.date) || left.record.clientName.localeCompare(right.record.clientName));
-    }, [moduleConfig, tableBySlug, trackingRecords]);
+    }, [moduleConfig, trackingRecords]);
     function resetCatalogForm() {
         setCatalogName("");
         setCatalogEntries([]);
@@ -442,11 +526,82 @@ export function TaskDistributorPage() {
                 : term));
         }
     }
+    async function patchTermEnabled(record, enabled) {
+        const patch = {
+            data: getTermEnabledRecordData(record, enabled),
+            ...(enabled ? {} : { termDate: null })
+        };
+        await patchRecord(record, patch);
+        if (enabled || !moduleConfig) {
+            return;
+        }
+        const linkedTerm = getLinkedTerm(terms, record);
+        if (!linkedTerm) {
+            return;
+        }
+        const updated = await apiPatch(`/tasks/terms/${linkedTerm.id}`, {
+            termDate: null,
+            verification: defaultVerification(moduleConfig)
+        });
+        setTerms((current) => current.map((term) => term.id === updated.id ? updated : term));
+    }
     function getResponsibleSelectOptions(record) {
         return dedupeResponsibleOptions([
             ...moduleResponsibleOptions,
             record.responsible
         ]);
+    }
+    async function patchTermVerification(record, table, taskName, key, value) {
+        if (!moduleConfig) {
+            return;
+        }
+        const linkedTerm = getLinkedTerm(terms, record);
+        const verification = {
+            ...getTermVerification(moduleConfig, linkedTerm),
+            [key]: value
+        };
+        if (linkedTerm) {
+            const updated = await apiPatch(`/tasks/terms/${linkedTerm.id}`, { verification });
+            setTerms((current) => current.map((term) => term.id === updated.id ? updated : term));
+            return;
+        }
+        const created = await apiPost("/tasks/terms", {
+            moduleId: moduleConfig.moduleId,
+            sourceTable: record.sourceTable,
+            sourceRecordId: record.id,
+            matterId: record.matterId ?? null,
+            matterNumber: record.matterNumber ?? null,
+            clientNumber: record.clientNumber ?? null,
+            clientName: record.clientName,
+            subject: record.subject,
+            specificProcess: record.specificProcess ?? null,
+            matterIdentifier: record.matterIdentifier ?? null,
+            eventName: taskName || record.eventName || table?.title || "Termino",
+            pendingTaskLabel: taskName || null,
+            responsible: record.responsible || moduleConfig.defaultResponsible,
+            dueDate: record.dueDate ?? null,
+            termDate: record.termDate ?? record.dueDate ?? null,
+            status: record.status,
+            recurring: false,
+            reportedMonth: record.reportedMonth ?? null,
+            verification,
+            data: record.data ?? {}
+        });
+        setTerms((current) => [created, ...current.filter((term) => term.id !== created.id)]);
+        const updatedRecord = await apiPatch(`/tasks/tracking-records/${record.id}`, {
+            termId: created.id
+        });
+        if (updatedRecord) {
+            setTrackingRecords((current) => current.map((candidate) => candidate.id === updatedRecord.id ? updatedRecord : candidate));
+        }
+    }
+    function renderTermVerificationControls(record, table, taskName) {
+        if (!moduleConfig || !shouldShowTermVerification(table, record)) {
+            return null;
+        }
+        const linkedTerm = getLinkedTerm(terms, record);
+        const verification = getTermVerification(moduleConfig, linkedTerm);
+        return (_jsx("div", { className: "tasks-active-term-verifications", "aria-label": "Verificaciones del termino", children: moduleConfig.verificationColumns.map((column) => (_jsxs("label", { className: "tasks-active-term-verification", children: [_jsx("span", { children: column.label }), _jsxs("select", { className: "tasks-active-term-verification-select", value: verification[column.key] ?? "No", onChange: (event) => void patchTermVerification(record, table, taskName, column.key, event.target.value), children: [_jsx("option", { value: "No", children: "No" }), _jsx("option", { value: "Si", children: "Si" })] })] }, column.key))) }));
     }
     async function handleMoveToTab(record, table, tab) {
         if (!table) {
@@ -487,20 +642,33 @@ export function TaskDistributorPage() {
                                                 const usedIds = new Set();
                                                 return (_jsxs("tr", { children: [_jsx("td", { children: item.clientNumber || "-" }), _jsx("td", { children: item.clientName || "-" }), _jsx("td", { children: item.subject || "-" }), _jsx("td", { children: _jsx("span", { className: "tasks-legacy-process-pill", children: item.specificProcess || "N/A" }) }), _jsx("td", { children: item.matterIdentifier || item.matterNumber || "-" }), _jsx("td", { children: _jsxs("div", { className: "tasks-active-target-list", children: [_jsxs("div", { className: "tasks-active-target-toolbar", children: [_jsxs("span", { children: ["Fecha m\u00E1s pr\u00F3xima: ", getEarliestOpenDate(item) || "sin fecha"] }), _jsx("button", { type: "button", className: "danger-button tasks-distributor-small-button", onClick: () => void handleDeleteDistribution(item), children: "Borrar tarea completamente" })] }), item.targetTables.map((targetTable, index) => {
                                                                         const record = resolveHistoryRecord(item, targetTable, index, usedIds);
-                                                                        const table = record ? tableBySlug.get(record.tableCode) : findLegacyTableByAnyName(moduleConfig, targetTable);
+                                                                        const table = record ? resolveRecordTable(record) : findLegacyTableByAnyName(moduleConfig, targetTable);
                                                                         const completed = record ? isCompletedRecord(table, record) : false;
-                                                                        const danger = record ? isTrackingRecordRed(table, record) : true;
                                                                         const currentTabKey = record ? getRecordTabKey(table, record) : "";
-                                                                        const showEscritosFondoDates = isEscritosFondoTable(table);
+                                                                        const showPresentationAndTermDates = usesPresentationAndTermDates(table);
+                                                                        const taskName = record
+                                                                            ? resolveTrackingTaskName(record, table, taskNamesByRecordId, item.eventNamesPerTable[index] || item.eventName)
+                                                                            : item.eventNamesPerTable[index] || item.eventName;
+                                                                        const linkedTerm = record ? getLinkedTerm(terms, record) : undefined;
+                                                                        const termEnabled = record ? isTrackingTermEnabled(record, table) : false;
+                                                                        const showTermToggle = usesOptionalTermToggle(table);
+                                                                        const showTermVerification = record ? shouldShowTermVerification(table, record) : false;
+                                                                        const danger = record
+                                                                            ? isTrackingRecordRed(table, record, taskNamesByRecordId)
+                                                                                || (showTermVerification && hasIncompleteTermVerification(moduleConfig, linkedTerm))
+                                                                            : true;
                                                                         if (!record || record.deletedAt || completed) {
                                                                             return null;
                                                                         }
-                                                                        return (_jsxs("article", { className: `tasks-active-target-card ${danger ? "is-danger" : completed ? "is-completed" : ""}`, children: [_jsxs("div", { className: "tasks-active-target-head", children: [_jsxs("div", { children: [_jsx("strong", { children: record?.taskName || item.eventNamesPerTable[index] || item.eventName }), _jsx("span", { children: table?.title ?? getTableDisplayName(moduleConfig, targetTable) }), record ? _jsx("small", { children: getStageLabel(table, record) }) : _jsx("small", { children: "Registro no encontrado" })] }), record && table ? (_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/${table.slug}`), children: "Ir a tabla de seguimiento" })) : null] }), record ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: `tasks-active-target-fields${showEscritosFondoDates ? " tasks-active-target-fields-with-term" : ""}`, children: [_jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: "Tarea" }), _jsx("input", { className: "tasks-legacy-input", value: record.taskName, onChange: (event) => void patchRecord(record, { taskName: event.target.value }), "aria-label": "Nombre de la tarea" })] }), _jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: "Responsable" }), _jsxs("select", { className: "tasks-legacy-input", value: record.responsible, onChange: (event) => void patchRecord(record, { responsible: event.target.value }), "aria-label": "Responsable", children: [_jsx("option", { value: "", children: "Seleccionar responsable" }), getResponsibleSelectOptions(record).map((responsible) => (_jsx("option", { value: responsible, children: responsible }, responsible)))] })] }), showEscritosFondoDates ? (_jsxs(_Fragment, { children: [_jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: "Fecha debe presentarse" }), _jsx("input", { className: "tasks-legacy-input", type: "date", value: toDateInput(record.dueDate), onChange: (event) => void patchRecord(record, { dueDate: event.target.value || null }), "aria-label": "Fecha debe presentarse" })] }), _jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: "T\u00E9rmino" }), _jsx("input", { className: "tasks-legacy-input", type: "date", value: toDateInput(record.termDate), onChange: (event) => void patchRecord(record, { termDate: event.target.value || null }), "aria-label": "T\u00E9rmino" })] })] })) : null, showEscritosFondoDates || table?.showDateColumn === false ? null : (_jsx("span", { className: "tasks-active-target-date", children: getRowDate(record) || "Sin fecha límite" }))] }), _jsx("div", { className: "tasks-active-stage-actions", "aria-label": "Mover tarea entre pesta\u00F1as", children: table?.tabs.map((tab) => {
-                                                                                                const current = tab.key === currentTabKey;
-                                                                                                return (_jsx("button", { type: "button", className: `secondary-button tasks-distributor-small-button tasks-active-stage-button ${current ? "is-current" : ""}`, onClick: () => void handleMoveToTab(record, table, tab), disabled: current, "aria-pressed": current, children: tab.label }, tab.key));
-                                                                                            }) })] })) : null] }, `${item.id}-${targetTable}-${index}`));
+                                                                        return (_jsxs("article", { className: `tasks-active-target-card ${danger ? "is-danger" : completed ? "is-completed" : ""}`, children: [_jsxs("div", { className: "tasks-active-target-head", children: [_jsx("div", { children: _jsx("strong", { children: taskName || "-" }) }), record && table ? (_jsxs("div", { className: "tasks-active-target-link-panel", children: [_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/${table.slug}`), children: "Ir a tabla de seguimiento" }), _jsx("strong", { children: table.title })] })) : null] }), record ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: `tasks-active-target-fields${showPresentationAndTermDates ? " tasks-active-target-fields-with-term" : ""}${showPresentationAndTermDates && !showTermToggle ? " tasks-active-target-fields-required-term" : ""}`, children: [_jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: "Tarea" }), _jsx("input", { className: "tasks-legacy-input", value: taskName, onChange: (event) => void patchRecord(record, { taskName: event.target.value }), "aria-label": "Nombre de la tarea" })] }), _jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: "Responsable" }), _jsxs("select", { className: "tasks-legacy-input", value: record.responsible, onChange: (event) => void patchRecord(record, { responsible: event.target.value }), "aria-label": "Responsable", children: [_jsx("option", { value: "", children: "Seleccionar responsable" }), getResponsibleSelectOptions(record).map((responsible) => (_jsx("option", { value: responsible, children: responsible }, responsible)))] })] }), table?.showReportedPeriod ? (_jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: table.reportedPeriodLabel ?? "Mes reportado" }), _jsx("input", { className: "tasks-legacy-input", type: "month", value: record.reportedMonth ?? "", onChange: (event) => void patchRecord(record, { reportedMonth: event.target.value || null }), "aria-label": table.reportedPeriodLabel ?? "Mes reportado" })] })) : null, showPresentationAndTermDates ? (_jsxs(_Fragment, { children: [_jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: table?.dateLabel ?? "Fecha debe presentarse" }), _jsx("input", { className: "tasks-legacy-input", type: "date", value: toDateInput(record.dueDate), onChange: (event) => void patchRecord(record, { dueDate: event.target.value || null }), "aria-label": "Fecha debe presentarse" })] }), showTermToggle ? (_jsxs("label", { className: "tasks-active-target-field tasks-active-term-toggle-field", children: [_jsx("span", { children: "Es t\u00E9rmino" }), _jsx("input", { className: "tasks-active-term-toggle-input", type: "checkbox", checked: termEnabled, onChange: (event) => void patchTermEnabled(record, event.target.checked), "aria-label": "Habilitar t\u00E9rmino" })] })) : null, _jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: table?.termDateLabel ?? "Término" }), _jsx("input", { className: "tasks-legacy-input", type: "date", value: toDateInput(record.termDate), onChange: (event) => void patchRecord(record, { termDate: event.target.value || null }), disabled: showTermToggle && !termEnabled, "aria-label": table?.termDateLabel ?? "Término" })] }), _jsx("div", { className: "tasks-active-term-verification-row", children: renderTermVerificationControls(record, table, taskName) })] })) : null, showPresentationAndTermDates || table?.showDateColumn === false ? null : (_jsxs(_Fragment, { children: [_jsxs("label", { className: "tasks-active-target-field", children: [_jsx("span", { children: table?.dateLabel ?? "Fecha límite" }), _jsx("input", { className: "tasks-legacy-input", type: "date", value: toDateInput(record.dueDate) || getRowDate(record), onChange: (event) => void patchRecord(record, {
+                                                                                                                        dueDate: event.target.value || null,
+                                                                                                                        termDate: null
+                                                                                                                    }), "aria-label": table?.dateLabel ?? "Fecha límite" })] }), _jsx("div", { className: "tasks-active-term-verification-row tasks-active-term-verification-row-date-only", children: renderTermVerificationControls(record, table, taskName) })] }))] }), _jsxs("div", { className: "tasks-active-stage-field", children: [_jsx("span", { className: "tasks-active-stage-label", children: "Pesta\u00F1a en tabla de seguimiento" }), _jsx("div", { className: "tasks-active-stage-actions", "aria-label": "Mover tarea entre pesta\u00F1as", children: table?.tabs.map((tab) => {
+                                                                                                        const current = tab.key === currentTabKey;
+                                                                                                        return (_jsx("button", { type: "button", className: `secondary-button tasks-distributor-small-button tasks-active-stage-button ${current ? "is-current" : ""}`, onClick: () => void handleMoveToTab(record, table, tab), disabled: current, "aria-pressed": current, children: tab.label }, tab.key));
+                                                                                                    }) })] })] })) : null] }, `${item.id}-${targetTable}-${index}`));
                                                                     })] }) })] }, item.id));
-                                            })) })] }) }), _jsxs("section", { id: "tasks-recycle-bin", className: "tasks-recycle-section", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsx("p", { className: "muted", children: "Muestra tareas borradas o completadas durante los ultimos 30 dias. Desde aqui puedes recuperarlas al flujo activo del Manager de tareas." })] }), _jsxs("span", { children: [recycleRows.length, " disponibles"] })] }), _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: "data-table tasks-recycle-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Fecha" }), _jsx("th", { children: "Estado" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Tabla" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: recycleRows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 8, className: "centered-inline-message", children: "No hay tareas en la papelera de los ultimos 30 dias." }) })) : (recycleRows.map(({ record, table, reason, date }) => (_jsxs("tr", { children: [_jsx("td", { children: toDisplayDate(date) }), _jsx("td", { children: _jsx("span", { className: `tasks-recycle-status ${reason === "deleted" ? "is-deleted" : "is-completed"}`, children: reason === "deleted" ? "Borrada" : "Completada" }) }), _jsx("td", { children: record.clientName || "-" }), _jsx("td", { children: record.subject || "-" }), _jsx("td", { children: record.matterIdentifier || record.matterNumber || "-" }), _jsx("td", { children: table?.title ?? record.tableCode }), _jsx("td", { children: record.taskName || "-" }), _jsx("td", { children: reason === "deleted" ? (_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => void handleRestoreDeletedRecord(record, table), children: "Recuperar" })) : (_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => void handleReturnCompletedRecord(record, table), children: "Regresar a penultima pestana" })) })] }, `${reason}-${record.id}`)))) })] }) })] })] })) : (_jsxs("div", { className: "tasks-distributor-config", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Gesti\u00F3n de Cat\u00E1logo de Tareas" }), _jsx("p", { className: "muted", children: "Define la tarea maestra y cuantas filas debe crear en cada tabla de seguimiento." })] }), _jsxs("span", { children: [events.length, " configuradas"] })] }), _jsxs("div", { className: "tasks-distributor-config-layout", children: [_jsxs("article", { className: "tasks-distributor-card", children: [_jsxs("label", { children: ["Nombre de la Tarea", _jsx("input", { className: "tasks-legacy-input", value: catalogName, onChange: (event) => setCatalogName(event.target.value), placeholder: "Ej. Desahogar prevenci\u00F3n" })] }), _jsx("div", { className: "tasks-distributor-table-count-grid", children: moduleConfig.tables.map((table) => {
+                                            })) })] }) }), _jsxs("section", { id: "tasks-recycle-bin", className: "tasks-recycle-section", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsx("p", { className: "muted", children: "Muestra tareas borradas o completadas durante los ultimos 30 dias. Desde aqui puedes recuperarlas al flujo activo del Manager de tareas." })] }), _jsxs("span", { children: [recycleRows.length, " disponibles"] })] }), _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: "data-table tasks-recycle-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Fecha" }), _jsx("th", { children: "Estado" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Tabla" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: recycleRows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 8, className: "centered-inline-message", children: "No hay tareas en la papelera de los ultimos 30 dias." }) })) : (recycleRows.map(({ record, table, reason, date }) => (_jsxs("tr", { children: [_jsx("td", { children: toDisplayDate(date) }), _jsx("td", { children: _jsx("span", { className: `tasks-recycle-status ${reason === "deleted" ? "is-deleted" : "is-completed"}`, children: reason === "deleted" ? "Borrada" : "Completada" }) }), _jsx("td", { children: record.clientName || "-" }), _jsx("td", { children: record.subject || "-" }), _jsx("td", { children: record.matterIdentifier || record.matterNumber || "-" }), _jsx("td", { children: table?.title ?? record.tableCode }), _jsx("td", { children: resolveTrackingTaskName(record, table, taskNamesByRecordId) || "-" }), _jsx("td", { children: reason === "deleted" ? (_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => void handleRestoreDeletedRecord(record, table), children: "Recuperar" })) : (_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => void handleReturnCompletedRecord(record, table), children: "Regresar a penultima pestana" })) })] }, `${reason}-${record.id}`)))) })] }) })] })] })) : (_jsxs("div", { className: "tasks-distributor-config", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Gesti\u00F3n de Cat\u00E1logo de Tareas" }), _jsx("p", { className: "muted", children: "Define la tarea maestra y cuantas filas debe crear en cada tabla de seguimiento." })] }), _jsxs("span", { children: [events.length, " configuradas"] })] }), _jsxs("div", { className: "tasks-distributor-config-layout", children: [_jsxs("article", { className: "tasks-distributor-card", children: [_jsxs("label", { children: ["Nombre de la Tarea", _jsx("input", { className: "tasks-legacy-input", value: catalogName, onChange: (event) => setCatalogName(event.target.value), placeholder: "Ej. Desahogar prevenci\u00F3n" })] }), _jsx("div", { className: "tasks-distributor-table-count-grid", children: moduleConfig.tables.map((table) => {
                                                     const entries = catalogEntries.filter((entry) => entry.tableSlug === table.slug);
                                                     return (_jsxs("div", { className: "tasks-distributor-table-count-card", children: [_jsxs("div", { className: "tasks-distributor-target-head", children: [_jsx("strong", { children: table.title }), _jsxs("div", { className: "tasks-distributor-count-controls", children: [_jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => removeCatalogEntry(table), children: "-" }), _jsx("span", { children: entries.length }), _jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => addCatalogEntry(table), children: "+" })] })] }), entries.length > 0 ? (_jsx("div", { className: "tasks-distributor-entry-name-list", children: entries.map((entry) => (_jsx("input", { className: "tasks-legacy-input", value: entry.taskName, onChange: (event) => setCatalogEntries((current) => current.map((candidate) => candidate.id === entry.id ? { ...candidate, taskName: event.target.value } : candidate)), placeholder: "Nombre para esta tabla" }, entry.id))) })) : null] }, table.slug));
                                                 }) }), _jsxs("div", { className: "tasks-legacy-actions", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => void saveCatalogEvent(), disabled: !catalogName.trim() || catalogEntries.length === 0, children: editingCatalogId ? "Guardar cambios" : "Guardar tarea" }), editingCatalogId ? (_jsx("button", { type: "button", className: "secondary-button", onClick: resetCatalogForm, children: "Cancelar" })) : null] })] }), _jsxs("article", { className: "tasks-distributor-card", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h3", { children: "Cat\u00E1logo guardado" }), _jsx("span", { children: events.length })] }), _jsx("div", { className: "tasks-distributor-event-list", children: events.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Aun no hay tareas configuradas." })) : (events.map((event) => {

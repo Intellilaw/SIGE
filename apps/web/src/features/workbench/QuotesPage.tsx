@@ -3,6 +3,7 @@ import {
   TEAM_OPTIONS,
   type Client,
   type Quote,
+  type QuoteLanguage,
   type QuoteLineItem,
   type QuoteStatus,
   type QuoteTemplate,
@@ -17,8 +18,9 @@ import {
 import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 
-type ActiveTab = "templates" | "new-template" | "quotes" | "new-quote";
+type ActiveTab = "new-template" | "templates" | "quotes" | "new-quote-template" | "new-quote-generic";
 type QuoteSourceMode = "template" | "generic";
+type QuoteTemplateLanguage = "es" | "en";
 type FlashTone = "success" | "error";
 type MergeTargetKind = "amount" | "payment" | "notes";
 type QuoteDownloadFormat = "pdf" | "word";
@@ -26,6 +28,10 @@ type SavedQuoteDownloadState = {
   quoteId: string;
   format: QuoteDownloadFormat;
 } | null;
+
+type QuoteTemplateTranslationResponse = {
+  template: QuoteTemplate;
+};
 
 type FlashState = {
   tone: FlashTone;
@@ -44,6 +50,8 @@ type QuoteFormState = {
   responsibleTeam: Team | "";
   status: QuoteStatus;
   quoteType: QuoteType;
+  language: QuoteLanguage;
+  quoteDate: string;
   subject: string;
   milestone: string;
   notes: string;
@@ -96,6 +104,172 @@ function normalizeComparableText(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+const SPANISH_TO_ENGLISH_TERMS: Array<[string, string]> = [
+  ["prestacion de servicios", "provision of services"],
+  ["prestación de servicios", "provision of services"],
+  ["momento de pago", "time of payment"],
+  ["asunto unico", "one-time matter"],
+  ["asunto único", "one-time matter"],
+  ["porcentaje de exito", "success fee"],
+  ["porcentaje de éxito", "success fee"],
+  ["honorarios", "fees"],
+  ["servicios", "services"],
+  ["servicio", "service"],
+  ["cotizacion", "quotation"],
+  ["cotización", "quotation"],
+  ["conceptos", "concepts"],
+  ["concepto", "concept"],
+  ["monto", "amount"],
+  ["fijo", "fixed"],
+  ["variable", "variable"],
+  ["notas", "notes"],
+  ["nota", "note"],
+  ["pago", "payment"],
+  ["pagos", "payments"],
+  ["anticipo", "advance payment"],
+  ["contra entrega", "upon delivery"],
+  ["firma", "signature"],
+  ["entrega", "delivery"],
+  ["cierre", "closing"],
+  ["aprobacion", "approval"],
+  ["aprobación", "approval"],
+  ["contratacion", "engagement"],
+  ["contratación", "engagement"],
+  ["cliente", "client"],
+  ["clientes", "clients"],
+  ["despacho", "firm"],
+  ["demanda", "lawsuit"],
+  ["juicio", "proceeding"],
+  ["procedimiento", "proceeding"],
+  ["mediacion", "mediation"],
+  ["mediación", "mediation"],
+  ["contrato", "agreement"],
+  ["contratos", "agreements"],
+  ["convenio", "agreement"],
+  ["convenios", "agreements"],
+  ["cumplimiento", "compliance"],
+  ["laboral", "labor"],
+  ["fiscal", "tax"],
+  ["financiero", "financial"],
+  ["corporativo", "corporate"],
+  ["litigio", "litigation"],
+  ["asesoria", "advisory"],
+  ["asesoría", "advisory"],
+  ["revision", "review"],
+  ["revisión", "review"],
+  ["redaccion", "drafting"],
+  ["redacción", "drafting"],
+  ["elaboracion", "preparation"],
+  ["elaboración", "preparation"],
+  ["negociacion", "negotiation"],
+  ["negociación", "negotiation"],
+  ["acompanamiento", "support"],
+  ["acompañamiento", "support"],
+  ["tramite", "filing"],
+  ["trámite", "filing"],
+  ["tramites", "filings"],
+  ["trámites", "filings"],
+  ["mensual", "monthly"],
+  ["recuperado", "recovered"],
+  ["recuperacion", "recovery"],
+  ["recuperación", "recovery"],
+  ["redes sociales", "social media"],
+  ["impuestos", "taxes"],
+  ["derechos", "government fees"],
+  ["gastos", "expenses"],
+  ["copias", "copies"],
+  ["transportacion", "transportation"],
+  ["transportación", "transportation"],
+  ["ciudad de mexico", "Mexico City"],
+  ["Ciudad de Mexico", "Mexico City"],
+  ["Ciudad de México", "Mexico City"],
+  ["sin titulo", "untitled"],
+  ["sin título", "untitled"],
+  ["sin definir", "to be defined"],
+  ["y", "and"],
+  ["o", "or"],
+  ["con", "with"],
+  ["para", "for"],
+  ["por", "by"],
+  ["del", "of the"],
+  ["de", "of"],
+  ["la", "the"],
+  ["el", "the"],
+  ["los", "the"],
+  ["las", "the"]
+];
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchReplacementCase(original: string, replacement: string) {
+  if (original === original.toUpperCase()) {
+    return replacement.toUpperCase();
+  }
+
+  if (original[0] === original[0]?.toUpperCase()) {
+    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+
+  return replacement;
+}
+
+function replaceSpanishTerm(source: string, spanish: string, english: string) {
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(spanish)})(?=$|[^\\p{L}\\p{N}])`, "giu");
+  return source.replace(pattern, (_match, prefix: string, term: string) => `${prefix}${matchReplacementCase(term, english)}`);
+}
+
+function translateTextToEnglish(value?: string | null) {
+  let translated = normalizeText(value);
+  if (!translated) {
+    return "";
+  }
+
+  SPANISH_TO_ENGLISH_TERMS.forEach(([spanish, english]) => {
+    translated = replaceSpanishTerm(translated, spanish, english);
+  });
+
+  return translated.replace(/\s+/g, " ").trim();
+}
+
+function translateTemplateCellToEnglish(cell: QuoteTemplateCell): QuoteTemplateCell {
+  return {
+    ...cell,
+    value: translateTextToEnglish(cell.value)
+  };
+}
+
+function translateTemplateRowsToEnglish(rows: QuoteTemplateTableRow[]) {
+  return (structuredClone(rows) as QuoteTemplateTableRow[]).map((row) => ({
+    ...row,
+    conceptDescription: translateTextToEnglish(row.conceptDescription),
+    amountCells: row.amountCells.map(translateTemplateCellToEnglish),
+    paymentMoment: translateTemplateCellToEnglish(row.paymentMoment),
+    notesCell: translateTemplateCellToEnglish(row.notesCell)
+  }));
+}
+
+function translateQuoteTemplateToEnglish(template: QuoteTemplate): QuoteTemplate {
+  return {
+    ...template,
+    name: translateTextToEnglish(template.name) || template.name,
+    subject: translateTextToEnglish(template.subject),
+    services: translateTextToEnglish(template.services),
+    milestone: template.milestone ? translateTextToEnglish(template.milestone) : undefined,
+    notes: template.notes ? translateTextToEnglish(template.notes) : undefined,
+    amountColumns: template.amountColumns.map((column) => ({
+      ...column,
+      title: translateTextToEnglish(column.title) || column.title
+    })),
+    tableRows: translateTemplateRowsToEnglish(template.tableRows),
+    lineItems: template.lineItems.map((item) => ({
+      ...item,
+      concept: translateTextToEnglish(item.concept)
+    }))
+  };
+}
+
 function parseAmountInput(value: string) {
   const parsed = Number.parseFloat(value.replace(/,/g, ""));
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -118,12 +292,37 @@ function formatDate(value?: string) {
     return "-";
   }
 
-  const date = new Date(value);
+  const dateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const date = dateMatch
+    ? new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]))
+    : new Date(value);
+
   if (Number.isNaN(date.getTime())) {
     return "-";
   }
 
   return date.toLocaleDateString("es-MX");
+}
+
+function getTodayDateInputValue() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toDateInputValue(value?: string) {
+  const dateMatch = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dateMatch) {
+    return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+  }
+
+  return getTodayDateInputValue();
+}
+
+function getQuoteDisplayDate(quote: Quote) {
+  return quote.quoteDate ?? quote.createdAt;
 }
 
 function downloadBlobFile(blob: Blob, filename: string) {
@@ -187,10 +386,15 @@ function createTemplateRow(): QuoteTemplateTableRow {
   };
 }
 
-function createDefaultAmountColumns(): [QuoteTemplateAmountColumn, QuoteTemplateAmountColumn] {
+function getDefaultAmountColumnTitle(index: number, language: QuoteLanguage = "es") {
+  const amountLabel = language === "en" ? "Amount" : "Monto";
+  return `${amountLabel} ${index + 1}`;
+}
+
+function createDefaultAmountColumns(language: QuoteLanguage = "es"): [QuoteTemplateAmountColumn, QuoteTemplateAmountColumn] {
   return [
-    { id: "primary", title: "Monto 1", enabled: true, mode: "FIXED" },
-    { id: "secondary", title: "Monto 2", enabled: false, mode: "FIXED" }
+    { id: "primary", title: getDefaultAmountColumnTitle(0, language), enabled: true, mode: "FIXED" },
+    { id: "secondary", title: getDefaultAmountColumnTitle(1, language), enabled: false, mode: "FIXED" }
   ];
 }
 
@@ -205,13 +409,15 @@ function buildEmptyTemplateForm(defaultTeam?: string): QuoteTemplateFormState {
   };
 }
 
-function buildEmptyQuoteForm(defaultTeam?: string): QuoteFormState {
+function buildEmptyQuoteForm(defaultTeam?: string, language: QuoteLanguage = "es"): QuoteFormState {
   return {
     clientId: "",
     clientName: "",
     responsibleTeam: resolveDefaultTeam(defaultTeam),
     status: "DRAFT",
     quoteType: "ONE_TIME",
+    language,
+    quoteDate: getTodayDateInputValue(),
     subject: "",
     milestone: "",
     notes: "",
@@ -219,9 +425,9 @@ function buildEmptyQuoteForm(defaultTeam?: string): QuoteFormState {
   };
 }
 
-function buildEmptyQuoteTemplateDraft(): QuoteTemplateDraftState {
+function buildEmptyQuoteTemplateDraft(language: QuoteLanguage = "es"): QuoteTemplateDraftState {
   return {
-    amountColumns: createDefaultAmountColumns(),
+    amountColumns: createDefaultAmountColumns(language),
     tableRows: [createTemplateRow()]
   };
 }
@@ -253,11 +459,11 @@ function buildQuoteTemplateDraftFromQuote(quote: Quote): QuoteTemplateDraftState
   }
 
   if (!quote.lineItems.length) {
-    return buildEmptyQuoteTemplateDraft();
+    return buildEmptyQuoteTemplateDraft(quote.language ?? "es");
   }
 
   return {
-    amountColumns: createDefaultAmountColumns(),
+    amountColumns: createDefaultAmountColumns(quote.language ?? "es"),
     tableRows: quote.lineItems.map((item, index) => ({
       id: `quote-row-${index + 1}`,
       conceptDescription: item.concept,
@@ -271,13 +477,15 @@ function buildQuoteTemplateDraftFromQuote(quote: Quote): QuoteTemplateDraftState
   };
 }
 
-function buildQuoteFormFromTemplate(template: QuoteTemplate, defaultTeam?: string): QuoteFormState {
+function buildQuoteFormFromTemplate(template: QuoteTemplate, defaultTeam?: string, language: QuoteLanguage = "es"): QuoteFormState {
   return {
     clientId: "",
     clientName: "",
     responsibleTeam: resolveDefaultTeam(template.team ?? defaultTeam),
     status: "DRAFT",
     quoteType: template.quoteType,
+    language,
+    quoteDate: getTodayDateInputValue(),
     subject: normalizeText(template.subject) || normalizeText(template.services).slice(0, 120),
     milestone: template.milestone ?? "",
     notes: normalizeText(template.services),
@@ -292,6 +500,8 @@ function buildQuoteFormFromQuote(quote: Quote): QuoteFormState {
     responsibleTeam: quote.responsibleTeam ?? "",
     status: quote.status,
     quoteType: quote.quoteType,
+    language: quote.language ?? "es",
+    quoteDate: toDateInputValue(quote.quoteDate ?? quote.createdAt),
     subject: quote.subject,
     milestone: quote.milestone ?? "",
     notes: quote.notes ?? "",
@@ -364,6 +574,11 @@ function buildLineItemsFromTemplateDraft(draft: QuoteTemplateDraftState) {
 
 function sortQuotes(items: Quote[]) {
   return [...items].sort((left, right) => {
+    const quoteDateDelta = getQuoteDisplayDate(right).localeCompare(getQuoteDisplayDate(left));
+    if (quoteDateDelta !== 0) {
+      return quoteDateDelta;
+    }
+
     const createdDelta = (right.createdAt ?? "").localeCompare(left.createdAt ?? "");
     if (createdDelta !== 0) {
       return createdDelta;
@@ -1263,7 +1478,7 @@ function TemplateConceptCard(props: {
 
 export function QuotesPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<ActiveTab>("templates");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("new-template");
   const [sourceMode, setSourceMode] = useState<QuoteSourceMode>("template");
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [templates, setTemplates] = useState<QuoteTemplate[]>([]);
@@ -1275,6 +1490,7 @@ export function QuotesPage() {
   const [savedQuoteDownload, setSavedQuoteDownload] = useState<SavedQuoteDownloadState>(null);
   const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
+  const [translatingTemplateId, setTranslatingTemplateId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
@@ -1367,11 +1583,41 @@ export function QuotesPage() {
     setActiveTab("new-template");
   }
 
-  function applyTemplateToQuoteForm(template: QuoteTemplate) {
+  function applyTemplateToQuoteForm(template: QuoteTemplate, language: QuoteTemplateLanguage = "es") {
     setSourceMode("template");
     setSelectedTemplateId(template.id);
-    updateQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
+    updateQuoteForm(buildQuoteFormFromTemplate(template, user?.team, language));
     updateQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
+  }
+
+  async function handleTemplateUse(template: QuoteTemplate, language: QuoteTemplateLanguage) {
+    setFlash(null);
+    setEditingQuoteId(null);
+    setPreparedQuote(null);
+
+    if (language === "en") {
+      setTranslatingTemplateId(template.id);
+
+      try {
+        const response = await apiPost<QuoteTemplateTranslationResponse>("/quotes/templates/translate", { template });
+        window.alert("La plantilla fue traducida exitosamente.");
+        applyTemplateToQuoteForm(response.template, "en");
+        setActiveTab("new-quote-template");
+      } catch (error) {
+        window.alert("La plantilla no pudo ser traducida.");
+        setFlash({
+          tone: "error",
+          text: `La plantilla no pudo ser traducida. ${toErrorMessage(error)}`
+        });
+      } finally {
+        setTranslatingTemplateId(null);
+      }
+
+      return;
+    }
+
+    applyTemplateToQuoteForm(template, language);
+    setActiveTab("new-quote-template");
   }
 
   function handleTemplateEdit(template: QuoteTemplate) {
@@ -1398,7 +1644,7 @@ export function QuotesPage() {
     setSelectedTemplateId("");
     setQuoteForm(buildQuoteFormFromQuote(quote));
     setQuoteTemplateDraft(buildQuoteTemplateDraftFromQuote(quote));
-    setActiveTab("new-quote");
+    setActiveTab("new-quote-generic");
   }
 
   function handleQuoteDeleteRequest(quote: Quote) {
@@ -1511,6 +1757,18 @@ export function QuotesPage() {
     setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
   }
 
+  function handleQuoteComposerTab(nextMode: QuoteSourceMode) {
+    handleSourceModeChange(nextMode);
+    setActiveTab(nextMode === "template" ? "new-quote-template" : "new-quote-generic");
+  }
+
+  function handleGenericQuoteLanguageChange(language: QuoteLanguage) {
+    updateQuoteForm((current) => ({
+      ...current,
+      language
+    }));
+  }
+
   function handleTemplateSelection(templateId: string) {
     setSelectedTemplateId(templateId);
     setEditingQuoteId(null);
@@ -1601,6 +1859,8 @@ export function QuotesPage() {
       subject: normalizeText(quoteForm.subject),
       status: quoteForm.status,
       quoteType: quoteForm.quoteType,
+      language: quoteForm.language,
+      quoteDate: quoteForm.quoteDate || getTodayDateInputValue(),
       amountColumns: quoteTemplateDraft?.amountColumns,
       tableRows: quoteTemplateDraft?.tableRows,
       lineItems,
@@ -1797,17 +2057,20 @@ export function QuotesPage() {
 
       <section className="panel">
         <div className="leads-tabs" role="tablist" aria-label="Vistas de cotizaciones">
-          <button type="button" className={`lead-tab ${activeTab === "templates" ? "is-active" : ""}`} onClick={() => setActiveTab("templates")}>
-            1. Cotizaciones tipo
-          </button>
           <button type="button" className={`lead-tab ${activeTab === "new-template" ? "is-active" : ""}`} onClick={startNewTemplate}>
-            2. Guardar nueva tipo
+            1. Guardar nueva tipo
+          </button>
+          <button type="button" className={`lead-tab ${activeTab === "templates" ? "is-active" : ""}`} onClick={() => setActiveTab("templates")}>
+            2. Cotizaciones tipo
           </button>
           <button type="button" className={`lead-tab ${activeTab === "quotes" ? "is-active" : ""}`} onClick={() => setActiveTab("quotes")}>
             3. Cotizaciones por cliente
           </button>
-          <button type="button" className={`lead-tab ${activeTab === "new-quote" ? "is-active" : ""}`} onClick={() => setActiveTab("new-quote")}>
-            4. Generar nueva
+          <button type="button" className={`lead-tab ${activeTab === "new-quote-template" ? "is-active" : ""}`} onClick={() => handleQuoteComposerTab("template")}>
+            4. Generar nueva desde plantilla
+          </button>
+          <button type="button" className={`lead-tab ${activeTab === "new-quote-generic" ? "is-active" : ""}`} onClick={() => handleQuoteComposerTab("generic")}>
+            5. Generar nueva desde plantilla en blanco (no se guarda la plantilla)
           </button>
         </div>
       </section>
@@ -1888,13 +2151,18 @@ export function QuotesPage() {
                             <button
                               type="button"
                               className="primary-button"
-                              onClick={() => {
-                                setSourceMode("template");
-                                applyTemplateToQuoteForm(template);
-                                setActiveTab("new-quote");
-                              }}
+                              disabled={translatingTemplateId === template.id}
+                              onClick={() => void handleTemplateUse(template, "es")}
                             >
-                              Usar plantilla
+                              Usar plantilla en español
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={translatingTemplateId === template.id}
+                              onClick={() => void handleTemplateUse(template, "en")}
+                            >
+                              {translatingTemplateId === template.id ? "Traduciendo..." : "Usar plantilla en inglés"}
                             </button>
                           </div>
                         </div>
@@ -2103,7 +2371,7 @@ export function QuotesPage() {
                         return (
                           <tr key={quote.id}>
                             <td>{quote.quoteNumber}</td>
-                            <td>{formatDate(quote.createdAt)}</td>
+                            <td>{formatDate(getQuoteDisplayDate(quote))}</td>
                             <td>{getQuoteTypeLabel(quote.quoteType)}</td>
                             <td>{getTeamLabel(quote.responsibleTeam)}</td>
                             <td>{quote.subject}</td>
@@ -2155,11 +2423,17 @@ export function QuotesPage() {
         </>
       ) : null}
 
-      {!loading && activeTab === "new-quote" ? (
+      {!loading && (activeTab === "new-quote-template" || activeTab === "new-quote-generic") ? (
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>{editingQuote ? `Editar cotizacion ${editingQuote.quoteNumber}` : "Generar nueva cotizacion"}</h2>
+              <h2>
+                {editingQuote
+                  ? `Editar cotizacion ${editingQuote.quoteNumber}`
+                  : sourceMode === "template"
+                    ? "Generar nueva desde plantilla"
+                    : "Generar nueva desde plantilla en blanco"}
+              </h2>
               {editingQuote ? <p className="muted">Los cambios se guardaran sobre la cotizacion existente.</p> : null}
             </div>
             {editingQuote ? (
@@ -2183,15 +2457,6 @@ export function QuotesPage() {
                 Reiniciar captura
               </button>
             )}
-          </div>
-
-          <div className="quotes-source-switcher">
-            <button type="button" className={sourceMode === "template" ? "primary-button" : "secondary-button"} onClick={() => handleSourceModeChange("template")}>
-              Desde cotizacion tipo
-            </button>
-            <button type="button" className={sourceMode === "generic" ? "primary-button" : "secondary-button"} onClick={() => handleSourceModeChange("generic")}>
-              Desde layout generico
-            </button>
           </div>
 
           {sourceMode === "template" ? (
@@ -2252,9 +2517,33 @@ export function QuotesPage() {
                 </select>
               </label>
 
+              {sourceMode === "generic" ? (
+                <div className="form-field quote-language-field">
+                  <span>Idioma de la cotización</span>
+                  <label className="quote-language-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={quoteForm.language === "en"}
+                      onChange={(event) => handleGenericQuoteLanguageChange(event.target.checked ? "en" : "es")}
+                    />
+                    <span>{quoteForm.language === "en" ? "Inglés" : "Español"}</span>
+                  </label>
+                  <small>Desmarcado: español. Marcado: inglés.</small>
+                </div>
+              ) : null}
+
               <label className="form-field">
                 <span>Numero de cotizacion</span>
                 <input type="text" value={suggestedQuoteNumber} readOnly />
+              </label>
+
+              <label className="form-field">
+                <span>Fecha</span>
+                <input
+                  type="date"
+                  value={quoteForm.quoteDate}
+                  onChange={(event) => updateQuoteForm((current) => ({ ...current, quoteDate: event.target.value }))}
+                />
               </label>
 
               <label className="form-field">
@@ -2398,7 +2687,7 @@ export function QuotesPage() {
               </div>
               <div className="quotes-detail-block">
                 <strong>Fecha</strong>
-                <p>{formatDate(viewingQuote.createdAt)}</p>
+                <p>{formatDate(getQuoteDisplayDate(viewingQuote))}</p>
               </div>
               <div className="quotes-detail-block">
                 <strong>Tipo</strong>

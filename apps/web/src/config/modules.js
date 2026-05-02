@@ -77,6 +77,17 @@ export const appModules = [
         coverage: ["Asuntos activos con envio a Finanzas", "Vista mensual con comisiones", "Copiado al mes siguiente", "Snapshots historicos"]
     },
     {
+        id: "budget-planning",
+        path: "/app/budget-planning",
+        label: "Planeaci\u00f3n presupuestal",
+        shortLabel: "Planeaci\u00f3n",
+        icon: "\u{1F4CB}",
+        description: "Planeaci\u00f3n y seguimiento presupuestal del despacho con control de metas, partidas y variaciones.",
+        phase: "Operativo",
+        available: true,
+        coverage: ["Vista mensual", "Ingresos y gastos esperados", "Comparativo real contra Finanzas y Gastos generales"]
+    },
+    {
         id: "general-expenses",
         path: "/app/general-expenses",
         label: "Gastos generales",

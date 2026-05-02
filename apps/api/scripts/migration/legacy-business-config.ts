@@ -121,6 +121,7 @@ export const LEGACY_EXECUTION_MODULES = LEGACY_TASK_MODULES.map((module) => {
     verificationKeys: module.verificationColumns.map((column) => column.key),
     sourceTables: module.tables.map((table) => ({
       slug: table.slug,
+      title: table.title,
       sourceTable: table.sourceTable,
       mode: table.mode,
       autoTerm: table.autoTerm ?? false,

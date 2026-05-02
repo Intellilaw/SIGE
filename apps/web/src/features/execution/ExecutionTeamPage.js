@@ -13,7 +13,7 @@ const CHANNEL_LABELS = {
     EMAIL: "Correo-e",
     PHONE: "Telefono"
 };
-const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "distribucion legacy"]);
+const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "termino legacy", "distribucion legacy", "evento legacy"]);
 function normalizeText(value) {
     return (value ?? "").trim();
 }

@@ -29,6 +29,160 @@ function normalizeComparableText(value) {
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
 }
+const SPANISH_TO_ENGLISH_TERMS = [
+    ["prestacion de servicios", "provision of services"],
+    ["prestación de servicios", "provision of services"],
+    ["momento de pago", "time of payment"],
+    ["asunto unico", "one-time matter"],
+    ["asunto único", "one-time matter"],
+    ["porcentaje de exito", "success fee"],
+    ["porcentaje de éxito", "success fee"],
+    ["honorarios", "fees"],
+    ["servicios", "services"],
+    ["servicio", "service"],
+    ["cotizacion", "quotation"],
+    ["cotización", "quotation"],
+    ["conceptos", "concepts"],
+    ["concepto", "concept"],
+    ["monto", "amount"],
+    ["fijo", "fixed"],
+    ["variable", "variable"],
+    ["notas", "notes"],
+    ["nota", "note"],
+    ["pago", "payment"],
+    ["pagos", "payments"],
+    ["anticipo", "advance payment"],
+    ["contra entrega", "upon delivery"],
+    ["firma", "signature"],
+    ["entrega", "delivery"],
+    ["cierre", "closing"],
+    ["aprobacion", "approval"],
+    ["aprobación", "approval"],
+    ["contratacion", "engagement"],
+    ["contratación", "engagement"],
+    ["cliente", "client"],
+    ["clientes", "clients"],
+    ["despacho", "firm"],
+    ["demanda", "lawsuit"],
+    ["juicio", "proceeding"],
+    ["procedimiento", "proceeding"],
+    ["mediacion", "mediation"],
+    ["mediación", "mediation"],
+    ["contrato", "agreement"],
+    ["contratos", "agreements"],
+    ["convenio", "agreement"],
+    ["convenios", "agreements"],
+    ["cumplimiento", "compliance"],
+    ["laboral", "labor"],
+    ["fiscal", "tax"],
+    ["financiero", "financial"],
+    ["corporativo", "corporate"],
+    ["litigio", "litigation"],
+    ["asesoria", "advisory"],
+    ["asesoría", "advisory"],
+    ["revision", "review"],
+    ["revisión", "review"],
+    ["redaccion", "drafting"],
+    ["redacción", "drafting"],
+    ["elaboracion", "preparation"],
+    ["elaboración", "preparation"],
+    ["negociacion", "negotiation"],
+    ["negociación", "negotiation"],
+    ["acompanamiento", "support"],
+    ["acompañamiento", "support"],
+    ["tramite", "filing"],
+    ["trámite", "filing"],
+    ["tramites", "filings"],
+    ["trámites", "filings"],
+    ["mensual", "monthly"],
+    ["recuperado", "recovered"],
+    ["recuperacion", "recovery"],
+    ["recuperación", "recovery"],
+    ["redes sociales", "social media"],
+    ["impuestos", "taxes"],
+    ["derechos", "government fees"],
+    ["gastos", "expenses"],
+    ["copias", "copies"],
+    ["transportacion", "transportation"],
+    ["transportación", "transportation"],
+    ["ciudad de mexico", "Mexico City"],
+    ["Ciudad de Mexico", "Mexico City"],
+    ["Ciudad de México", "Mexico City"],
+    ["sin titulo", "untitled"],
+    ["sin título", "untitled"],
+    ["sin definir", "to be defined"],
+    ["y", "and"],
+    ["o", "or"],
+    ["con", "with"],
+    ["para", "for"],
+    ["por", "by"],
+    ["del", "of the"],
+    ["de", "of"],
+    ["la", "the"],
+    ["el", "the"],
+    ["los", "the"],
+    ["las", "the"]
+];
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function matchReplacementCase(original, replacement) {
+    if (original === original.toUpperCase()) {
+        return replacement.toUpperCase();
+    }
+    if (original[0] === original[0]?.toUpperCase()) {
+        return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+    }
+    return replacement;
+}
+function replaceSpanishTerm(source, spanish, english) {
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(spanish)})(?=$|[^\\p{L}\\p{N}])`, "giu");
+    return source.replace(pattern, (_match, prefix, term) => `${prefix}${matchReplacementCase(term, english)}`);
+}
+function translateTextToEnglish(value) {
+    let translated = normalizeText(value);
+    if (!translated) {
+        return "";
+    }
+    SPANISH_TO_ENGLISH_TERMS.forEach(([spanish, english]) => {
+        translated = replaceSpanishTerm(translated, spanish, english);
+    });
+    return translated.replace(/\s+/g, " ").trim();
+}
+function translateTemplateCellToEnglish(cell) {
+    return {
+        ...cell,
+        value: translateTextToEnglish(cell.value)
+    };
+}
+function translateTemplateRowsToEnglish(rows) {
+    return structuredClone(rows).map((row) => ({
+        ...row,
+        conceptDescription: translateTextToEnglish(row.conceptDescription),
+        amountCells: row.amountCells.map(translateTemplateCellToEnglish),
+        paymentMoment: translateTemplateCellToEnglish(row.paymentMoment),
+        notesCell: translateTemplateCellToEnglish(row.notesCell)
+    }));
+}
+function translateQuoteTemplateToEnglish(template) {
+    return {
+        ...template,
+        name: translateTextToEnglish(template.name) || template.name,
+        subject: translateTextToEnglish(template.subject),
+        services: translateTextToEnglish(template.services),
+        milestone: template.milestone ? translateTextToEnglish(template.milestone) : undefined,
+        notes: template.notes ? translateTextToEnglish(template.notes) : undefined,
+        amountColumns: template.amountColumns.map((column) => ({
+            ...column,
+            title: translateTextToEnglish(column.title) || column.title
+        })),
+        tableRows: translateTemplateRowsToEnglish(template.tableRows),
+        lineItems: template.lineItems.map((item) => ({
+            ...item,
+            concept: translateTextToEnglish(item.concept)
+        }))
+    };
+}
 function parseAmountInput(value) {
     const parsed = Number.parseFloat(value.replace(/,/g, ""));
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -47,11 +201,31 @@ function formatDate(value) {
     if (!value) {
         return "-";
     }
-    const date = new Date(value);
+    const dateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const date = dateMatch
+        ? new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]))
+        : new Date(value);
     if (Number.isNaN(date.getTime())) {
         return "-";
     }
     return date.toLocaleDateString("es-MX");
+}
+function getTodayDateInputValue() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+function toDateInputValue(value) {
+    const dateMatch = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+        return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    }
+    return getTodayDateInputValue();
+}
+function getQuoteDisplayDate(quote) {
+    return quote.quoteDate ?? quote.createdAt;
 }
 function downloadBlobFile(blob, filename) {
     const url = window.URL.createObjectURL(blob);
@@ -103,10 +277,14 @@ function createTemplateRow() {
         notesCell: createTemplateCell()
     };
 }
-function createDefaultAmountColumns() {
+function getDefaultAmountColumnTitle(index, language = "es") {
+    const amountLabel = language === "en" ? "Amount" : "Monto";
+    return `${amountLabel} ${index + 1}`;
+}
+function createDefaultAmountColumns(language = "es") {
     return [
-        { id: "primary", title: "Monto 1", enabled: true, mode: "FIXED" },
-        { id: "secondary", title: "Monto 2", enabled: false, mode: "FIXED" }
+        { id: "primary", title: getDefaultAmountColumnTitle(0, language), enabled: true, mode: "FIXED" },
+        { id: "secondary", title: getDefaultAmountColumnTitle(1, language), enabled: false, mode: "FIXED" }
     ];
 }
 function buildEmptyTemplateForm(defaultTeam) {
@@ -119,22 +297,24 @@ function buildEmptyTemplateForm(defaultTeam) {
         tableRows: [createTemplateRow()]
     };
 }
-function buildEmptyQuoteForm(defaultTeam) {
+function buildEmptyQuoteForm(defaultTeam, language = "es") {
     return {
         clientId: "",
         clientName: "",
         responsibleTeam: resolveDefaultTeam(defaultTeam),
         status: "DRAFT",
         quoteType: "ONE_TIME",
+        language,
+        quoteDate: getTodayDateInputValue(),
         subject: "",
         milestone: "",
         notes: "",
         lineItems: [createEditableLineItem()]
     };
 }
-function buildEmptyQuoteTemplateDraft() {
+function buildEmptyQuoteTemplateDraft(language = "es") {
     return {
-        amountColumns: createDefaultAmountColumns(),
+        amountColumns: createDefaultAmountColumns(language),
         tableRows: [createTemplateRow()]
     };
 }
@@ -162,10 +342,10 @@ function buildQuoteTemplateDraftFromQuote(quote) {
         };
     }
     if (!quote.lineItems.length) {
-        return buildEmptyQuoteTemplateDraft();
+        return buildEmptyQuoteTemplateDraft(quote.language ?? "es");
     }
     return {
-        amountColumns: createDefaultAmountColumns(),
+        amountColumns: createDefaultAmountColumns(quote.language ?? "es"),
         tableRows: quote.lineItems.map((item, index) => ({
             id: `quote-row-${index + 1}`,
             conceptDescription: item.concept,
@@ -178,13 +358,15 @@ function buildQuoteTemplateDraftFromQuote(quote) {
         }))
     };
 }
-function buildQuoteFormFromTemplate(template, defaultTeam) {
+function buildQuoteFormFromTemplate(template, defaultTeam, language = "es") {
     return {
         clientId: "",
         clientName: "",
         responsibleTeam: resolveDefaultTeam(template.team ?? defaultTeam),
         status: "DRAFT",
         quoteType: template.quoteType,
+        language,
+        quoteDate: getTodayDateInputValue(),
         subject: normalizeText(template.subject) || normalizeText(template.services).slice(0, 120),
         milestone: template.milestone ?? "",
         notes: normalizeText(template.services),
@@ -198,6 +380,8 @@ function buildQuoteFormFromQuote(quote) {
         responsibleTeam: quote.responsibleTeam ?? "",
         status: quote.status,
         quoteType: quote.quoteType,
+        language: quote.language ?? "es",
+        quoteDate: toDateInputValue(quote.quoteDate ?? quote.createdAt),
         subject: quote.subject,
         milestone: quote.milestone ?? "",
         notes: quote.notes ?? "",
@@ -254,6 +438,10 @@ function buildLineItemsFromTemplateDraft(draft) {
 }
 function sortQuotes(items) {
     return [...items].sort((left, right) => {
+        const quoteDateDelta = getQuoteDisplayDate(right).localeCompare(getQuoteDisplayDate(left));
+        if (quoteDateDelta !== 0) {
+            return quoteDateDelta;
+        }
         const createdDelta = (right.createdAt ?? "").localeCompare(left.createdAt ?? "");
         if (createdDelta !== 0) {
             return createdDelta;
@@ -603,7 +791,7 @@ function TemplateConceptCard(props) {
 }
 export function QuotesPage() {
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState("templates");
+    const [activeTab, setActiveTab] = useState("new-template");
     const [sourceMode, setSourceMode] = useState("template");
     const [quotes, setQuotes] = useState([]);
     const [templates, setTemplates] = useState([]);
@@ -615,6 +803,7 @@ export function QuotesPage() {
     const [savedQuoteDownload, setSavedQuoteDownload] = useState(null);
     const [deletingQuoteId, setDeletingQuoteId] = useState(null);
     const [deletingTemplateId, setDeletingTemplateId] = useState(null);
+    const [translatingTemplateId, setTranslatingTemplateId] = useState(null);
     const [errorMessage, setErrorMessage] = useState(null);
     const [flash, setFlash] = useState(null);
     const [editingQuoteId, setEditingQuoteId] = useState(null);
@@ -690,11 +879,38 @@ export function QuotesPage() {
         setTemplateForm(buildEmptyTemplateForm(user?.team));
         setActiveTab("new-template");
     }
-    function applyTemplateToQuoteForm(template) {
+    function applyTemplateToQuoteForm(template, language = "es") {
         setSourceMode("template");
         setSelectedTemplateId(template.id);
-        updateQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
+        updateQuoteForm(buildQuoteFormFromTemplate(template, user?.team, language));
         updateQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
+    }
+    async function handleTemplateUse(template, language) {
+        setFlash(null);
+        setEditingQuoteId(null);
+        setPreparedQuote(null);
+        if (language === "en") {
+            setTranslatingTemplateId(template.id);
+            try {
+                const response = await apiPost("/quotes/templates/translate", { template });
+                window.alert("La plantilla fue traducida exitosamente.");
+                applyTemplateToQuoteForm(response.template, "en");
+                setActiveTab("new-quote-template");
+            }
+            catch (error) {
+                window.alert("La plantilla no pudo ser traducida.");
+                setFlash({
+                    tone: "error",
+                    text: `La plantilla no pudo ser traducida. ${toErrorMessage(error)}`
+                });
+            }
+            finally {
+                setTranslatingTemplateId(null);
+            }
+            return;
+        }
+        applyTemplateToQuoteForm(template, language);
+        setActiveTab("new-quote-template");
     }
     function handleTemplateEdit(template) {
         setFlash(null);
@@ -717,7 +933,7 @@ export function QuotesPage() {
         setSelectedTemplateId("");
         setQuoteForm(buildQuoteFormFromQuote(quote));
         setQuoteTemplateDraft(buildQuoteTemplateDraftFromQuote(quote));
-        setActiveTab("new-quote");
+        setActiveTab("new-quote-generic");
     }
     function handleQuoteDeleteRequest(quote) {
         setFlash(null);
@@ -816,6 +1032,16 @@ export function QuotesPage() {
         setQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
         setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
     }
+    function handleQuoteComposerTab(nextMode) {
+        handleSourceModeChange(nextMode);
+        setActiveTab(nextMode === "template" ? "new-quote-template" : "new-quote-generic");
+    }
+    function handleGenericQuoteLanguageChange(language) {
+        updateQuoteForm((current) => ({
+            ...current,
+            language
+        }));
+    }
     function handleTemplateSelection(templateId) {
         setSelectedTemplateId(templateId);
         setEditingQuoteId(null);
@@ -892,6 +1118,8 @@ export function QuotesPage() {
             subject: normalizeText(quoteForm.subject),
             status: quoteForm.status,
             quoteType: quoteForm.quoteType,
+            language: quoteForm.language,
+            quoteDate: quoteForm.quoteDate || getTodayDateInputValue(),
             amountColumns: quoteTemplateDraft?.amountColumns,
             tableRows: quoteTemplateDraft?.tableRows,
             lineItems,
@@ -1047,13 +1275,9 @@ export function QuotesPage() {
     const suggestedQuoteNumber = editingQuote?.quoteNumber ?? preparedQuote?.quoteNumber ?? buildNextQuoteNumber(quotes);
     const suggestedTemplateNumber = buildNextTemplateNumber(templates);
     const templateFormNumber = editingTemplate?.templateNumber ?? suggestedTemplateNumber;
-    return (_jsxs("section", { className: "page-stack quotes-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Cot" }), _jsx("div", { children: _jsx("h2", { children: "Cotizaciones" }) })] }), _jsx("p", { className: "muted", children: "El modulo ahora separa cotizaciones tipo por equipo, permite guardarlas como plantillas reutilizables y mantiene la consulta de cotizaciones guardadas por cliente." })] }), _jsx("section", { className: "panel", children: _jsxs("div", { className: "leads-tabs", role: "tablist", "aria-label": "Vistas de cotizaciones", children: [_jsx("button", { type: "button", className: `lead-tab ${activeTab === "templates" ? "is-active" : ""}`, onClick: () => setActiveTab("templates"), children: "1. Cotizaciones tipo" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "new-template" ? "is-active" : ""}`, onClick: startNewTemplate, children: "2. Guardar nueva tipo" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "quotes" ? "is-active" : ""}`, onClick: () => setActiveTab("quotes"), children: "3. Cotizaciones por cliente" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "new-quote" ? "is-active" : ""}`, onClick: () => setActiveTab("new-quote"), children: "4. Generar nueva" })] }) }), flash ? _jsx("div", { className: `message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`, children: flash.text }) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, loading ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando modulo de cotizaciones..." }) })) : null, !loading && activeTab === "templates" ? (_jsx(_Fragment, { children: templateGroups.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Aun no hay cotizaciones tipo guardadas." }) })) : (templateGroups.map((group) => (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: group.label }), _jsxs("span", { children: [group.items.length, " plantillas"] })] }), _jsx("div", { className: "quotes-template-list", children: group.items.map((template) => {
+    return (_jsxs("section", { className: "page-stack quotes-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Cot" }), _jsx("div", { children: _jsx("h2", { children: "Cotizaciones" }) })] }), _jsx("p", { className: "muted", children: "El modulo ahora separa cotizaciones tipo por equipo, permite guardarlas como plantillas reutilizables y mantiene la consulta de cotizaciones guardadas por cliente." })] }), _jsx("section", { className: "panel", children: _jsxs("div", { className: "leads-tabs", role: "tablist", "aria-label": "Vistas de cotizaciones", children: [_jsx("button", { type: "button", className: `lead-tab ${activeTab === "new-template" ? "is-active" : ""}`, onClick: startNewTemplate, children: "1. Guardar nueva tipo" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "templates" ? "is-active" : ""}`, onClick: () => setActiveTab("templates"), children: "2. Cotizaciones tipo" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "quotes" ? "is-active" : ""}`, onClick: () => setActiveTab("quotes"), children: "3. Cotizaciones por cliente" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "new-quote-template" ? "is-active" : ""}`, onClick: () => handleQuoteComposerTab("template"), children: "4. Generar nueva desde plantilla" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "new-quote-generic" ? "is-active" : ""}`, onClick: () => handleQuoteComposerTab("generic"), children: "5. Generar nueva desde plantilla en blanco (no se guarda la plantilla)" })] }) }), flash ? _jsx("div", { className: `message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`, children: flash.text }) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, loading ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando modulo de cotizaciones..." }) })) : null, !loading && activeTab === "templates" ? (_jsx(_Fragment, { children: templateGroups.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Aun no hay cotizaciones tipo guardadas." }) })) : (templateGroups.map((group) => (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: group.label }), _jsxs("span", { children: [group.items.length, " plantillas"] })] }), _jsx("div", { className: "quotes-template-list", children: group.items.map((template) => {
                                 const isExpanded = expandedTemplateId === template.id;
-                                return (_jsxs("article", { className: `quotes-template-list-item ${isExpanded ? "is-expanded" : ""}`, children: [_jsxs("div", { className: "quotes-template-list-row", children: [_jsxs("div", { className: "quotes-template-list-main", children: [_jsxs("div", { className: "quotes-template-list-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Cotizacion tipo" }), _jsx("h3", { children: template.templateNumber })] }), _jsx("span", { className: `lead-type-pill ${template.quoteType === "RETAINER" ? "is-retainer" : ""}`, children: getQuoteTypeLabel(template.quoteType) })] }), _jsx("p", { className: "quotes-template-list-subject", children: normalizeText(template.subject) || "Sin titulo" }), _jsx("p", { className: "quotes-template-list-summary", children: summarizeTemplateServices(template.services) }), _jsxs("div", { className: "quotes-template-list-meta", children: [_jsxs("span", { children: [template.tableRows.length, " conceptos"] }), _jsxs("span", { children: ["Total: ", getTemplateAmountPreview(template)] }), _jsxs("span", { children: ["Hito: ", template.milestone || "-"] }), _jsxs("span", { children: ["Actualizada: ", formatDate(template.updatedAt)] })] })] }), _jsxs("div", { className: "quotes-template-list-actions", children: [_jsx("button", { type: "button", className: "secondary-button", "aria-expanded": isExpanded, "aria-controls": `template-preview-${template.id}`, onClick: () => setExpandedTemplateId((current) => (current === template.id ? null : template.id)), children: isExpanded ? "Ocultar" : "Ver" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => handleTemplateEdit(template), children: "Editar" }), _jsx("button", { type: "button", className: "danger-button", disabled: deletingTemplateId === template.id, onClick: () => handleTemplateDeleteRequest(template), children: "Borrar" }), _jsx("button", { type: "button", className: "primary-button", onClick: () => {
-                                                                setSourceMode("template");
-                                                                applyTemplateToQuoteForm(template);
-                                                                setActiveTab("new-quote");
-                                                            }, children: "Usar plantilla" })] })] }), isExpanded ? (_jsx("div", { id: `template-preview-${template.id}`, className: "quotes-template-detail", children: _jsx(TemplateVisualPreview, { heading: "Vista previa", templateNumber: template.templateNumber, team: template.team, quoteType: template.quoteType, milestone: template.milestone, services: template.services, amountColumns: template.amountColumns, tableRows: template.tableRows }) })) : null] }, template.id));
+                                return (_jsxs("article", { className: `quotes-template-list-item ${isExpanded ? "is-expanded" : ""}`, children: [_jsxs("div", { className: "quotes-template-list-row", children: [_jsxs("div", { className: "quotes-template-list-main", children: [_jsxs("div", { className: "quotes-template-list-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Cotizacion tipo" }), _jsx("h3", { children: template.templateNumber })] }), _jsx("span", { className: `lead-type-pill ${template.quoteType === "RETAINER" ? "is-retainer" : ""}`, children: getQuoteTypeLabel(template.quoteType) })] }), _jsx("p", { className: "quotes-template-list-subject", children: normalizeText(template.subject) || "Sin titulo" }), _jsx("p", { className: "quotes-template-list-summary", children: summarizeTemplateServices(template.services) }), _jsxs("div", { className: "quotes-template-list-meta", children: [_jsxs("span", { children: [template.tableRows.length, " conceptos"] }), _jsxs("span", { children: ["Total: ", getTemplateAmountPreview(template)] }), _jsxs("span", { children: ["Hito: ", template.milestone || "-"] }), _jsxs("span", { children: ["Actualizada: ", formatDate(template.updatedAt)] })] })] }), _jsxs("div", { className: "quotes-template-list-actions", children: [_jsx("button", { type: "button", className: "secondary-button", "aria-expanded": isExpanded, "aria-controls": `template-preview-${template.id}`, onClick: () => setExpandedTemplateId((current) => (current === template.id ? null : template.id)), children: isExpanded ? "Ocultar" : "Ver" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => handleTemplateEdit(template), children: "Editar" }), _jsx("button", { type: "button", className: "danger-button", disabled: deletingTemplateId === template.id, onClick: () => handleTemplateDeleteRequest(template), children: "Borrar" }), _jsx("button", { type: "button", className: "primary-button", disabled: translatingTemplateId === template.id, onClick: () => void handleTemplateUse(template, "es"), children: "Usar plantilla en espa\u00F1ol" }), _jsx("button", { type: "button", className: "secondary-button", disabled: translatingTemplateId === template.id, onClick: () => void handleTemplateUse(template, "en"), children: translatingTemplateId === template.id ? "Traduciendo..." : "Usar plantilla en inglés" })] })] }), isExpanded ? (_jsx("div", { id: `template-preview-${template.id}`, className: "quotes-template-detail", children: _jsx(TemplateVisualPreview, { heading: "Vista previa", templateNumber: template.templateNumber, team: template.team, quoteType: template.quoteType, milestone: template.milestone, services: template.services, amountColumns: template.amountColumns, tableRows: template.tableRows }) })) : null] }, template.id));
                             }) })] }, group.team)))) })) : null, !loading && activeTab === "new-template" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: editingTemplate ? `Editar cotizacion tipo ${editingTemplate.templateNumber}` : "Guardar nueva cotizacion tipo" }), editingTemplate ? _jsx("p", { className: "muted", children: "Los cambios se guardaran sobre la plantilla existente." }) : null] }), _jsx("button", { type: "button", className: "secondary-button", onClick: startNewTemplate, children: editingTemplate ? "Cancelar edicion" : "Limpiar formulario" })] }), _jsxs("form", { className: "quotes-form", onSubmit: handleTemplateSubmit, children: [_jsxs("div", { className: "quotes-form-grid quote-template-meta-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo" }), _jsxs("select", { value: templateForm.team, onChange: (event) => setTemplateForm((current) => ({ ...current, team: event.target.value })), children: [_jsx("option", { value: "", children: "Seleccionar..." }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: templateFormNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: templateForm.quoteType, onChange: (event) => setTemplateForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: templateForm.milestone, onChange: (event) => setTemplateForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Servicios" }), _jsx("textarea", { rows: 4, value: templateForm.services, onChange: (event) => setTemplateForm((current) => ({ ...current, services: event.target.value })), placeholder: "Texto libre para describir el servicio o alcance de la cotizacion tipo" })] }), _jsxs("section", { className: "quote-template-sheet", children: [_jsx("div", { className: "panel-header quote-template-sheet-head", children: _jsxs("div", { children: [_jsx("h3", { children: "Sin titulo" }), _jsx("p", { className: "muted", children: "Los conceptos se capturan como bloques independientes. Puedes fusionar monto, momento de pago y notas entre conceptos contiguos." })] }) }), _jsxs("div", { className: "quote-template-amount-config-grid", children: [_jsx(TemplateAmountColumnConfig, { column: templateForm.amountColumns[0], onModeChange: (mode) => setTemplateForm((current) => ({
                                                     ...current,
                                                     amountColumns: [{ ...current.amountColumns[0], mode }, current.amountColumns[1]]
@@ -1075,8 +1299,12 @@ export function QuotesPage() {
                                                 tableRows: removeTemplateRow(current.tableRows, index)
                                             })), onMerge: handleMerge, onUnmerge: handleUnmerge }, row.id))) }), _jsx(TemplateSummaryGrid, { amountColumns: templateForm.amountColumns, tableRows: templateForm.tableRows })] }), _jsx(TemplateVisualPreview, { heading: "Preview visual", templateNumber: templateFormNumber, team: templateForm.team, quoteType: templateForm.quoteType, milestone: templateForm.milestone, services: templateForm.services, amountColumns: templateForm.amountColumns, tableRows: templateForm.tableRows }), _jsx("div", { className: "form-actions", children: _jsx("button", { type: "submit", className: "primary-button", disabled: savingTemplate, children: savingTemplate ? "Guardando..." : editingTemplate ? "Guardar cambios" : "Guardar cotizacion tipo" }) })] })] })) : null, !loading && activeTab === "quotes" ? (_jsx(_Fragment, { children: quoteGroups.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Todavia no hay cotizaciones guardadas." }) })) : (quoteGroups.map((group) => (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: group.clientName }), _jsx("p", { className: "muted", children: group.clientNumber ? `No. cliente ${group.clientNumber}` : "Cliente sin numero ligado" })] }), _jsxs("span", { children: [group.items.length, " cotizaciones | ", formatCurrency(group.totalMxn)] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. cotizacion" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Tipo de cotizacion" }), _jsx("th", { children: "Equipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Hito de conclusion" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: group.items.map((quote) => {
                                             const isDownloadingSavedQuote = savedQuoteDownload?.quoteId === quote.id;
-                                            return (_jsxs("tr", { children: [_jsx("td", { children: quote.quoteNumber }), _jsx("td", { children: formatDate(quote.createdAt) }), _jsx("td", { children: getQuoteTypeLabel(quote.quoteType) }), _jsx("td", { children: getTeamLabel(quote.responsibleTeam) }), _jsx("td", { children: quote.subject }), _jsx("td", { children: formatCurrency(quote.totalMxn) }), _jsx("td", { children: quote.milestone || "-" }), _jsx("td", { children: _jsxs("div", { className: "quotes-table-actions", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteView(quote), children: "Ver" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "pdf"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "pdf" ? "PDF..." : "PDF" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "word"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "word" ? "Word..." : "Word" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteEdit(quote), children: "Editar" }), _jsx("button", { type: "button", className: "danger-button", disabled: deletingQuoteId === quote.id, onClick: () => handleQuoteDeleteRequest(quote), children: "Borrar" })] }) })] }, quote.id));
-                                        }) })] }) })] }, group.clientId ?? group.clientName)))) })) : null, !loading && activeTab === "new-quote" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: editingQuote ? `Editar cotizacion ${editingQuote.quoteNumber}` : "Generar nueva cotizacion" }), editingQuote ? _jsx("p", { className: "muted", children: "Los cambios se guardaran sobre la cotizacion existente." }) : null] }), editingQuote ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => {
+                                            return (_jsxs("tr", { children: [_jsx("td", { children: quote.quoteNumber }), _jsx("td", { children: formatDate(getQuoteDisplayDate(quote)) }), _jsx("td", { children: getQuoteTypeLabel(quote.quoteType) }), _jsx("td", { children: getTeamLabel(quote.responsibleTeam) }), _jsx("td", { children: quote.subject }), _jsx("td", { children: formatCurrency(quote.totalMxn) }), _jsx("td", { children: quote.milestone || "-" }), _jsx("td", { children: _jsxs("div", { className: "quotes-table-actions", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteView(quote), children: "Ver" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "pdf"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "pdf" ? "PDF..." : "PDF" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "word"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "word" ? "Word..." : "Word" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteEdit(quote), children: "Editar" }), _jsx("button", { type: "button", className: "danger-button", disabled: deletingQuoteId === quote.id, onClick: () => handleQuoteDeleteRequest(quote), children: "Borrar" })] }) })] }, quote.id));
+                                        }) })] }) })] }, group.clientId ?? group.clientName)))) })) : null, !loading && (activeTab === "new-quote-template" || activeTab === "new-quote-generic") ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: editingQuote
+                                            ? `Editar cotizacion ${editingQuote.quoteNumber}`
+                                            : sourceMode === "template"
+                                                ? "Generar nueva desde plantilla"
+                                                : "Generar nueva desde plantilla en blanco" }), editingQuote ? _jsx("p", { className: "muted", children: "Los cambios se guardaran sobre la cotizacion existente." }) : null] }), editingQuote ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => {
                                     setEditingQuoteId(null);
                                     setPreparedQuote(null);
                                     setSourceMode("template");
@@ -1084,9 +1312,9 @@ export function QuotesPage() {
                                     setQuoteForm(buildEmptyQuoteForm(user?.team));
                                     setQuoteTemplateDraft(null);
                                     setActiveTab("quotes");
-                                }, children: "Cancelar edicion" })) : (_jsx("button", { type: "button", className: "secondary-button", onClick: () => resetQuoteComposer(), children: "Reiniciar captura" }))] }), _jsxs("div", { className: "quotes-source-switcher", children: [_jsx("button", { type: "button", className: sourceMode === "template" ? "primary-button" : "secondary-button", onClick: () => handleSourceModeChange("template"), children: "Desde cotizacion tipo" }), _jsx("button", { type: "button", className: sourceMode === "generic" ? "primary-button" : "secondary-button", onClick: () => handleSourceModeChange("generic"), children: "Desde layout generico" })] }), sourceMode === "template" ? (_jsxs("div", { className: "quotes-template-picker", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cotizacion tipo base" }), _jsxs("select", { value: selectedTemplateId, onChange: (event) => handleTemplateSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar plantilla..." }), templates.map((template) => (_jsxs("option", { value: template.id, children: [template.templateNumber, " - ", getTeamLabel(template.team)] }, template.id)))] })] }), _jsx("p", { className: "muted", children: selectedTemplate
+                                }, children: "Cancelar edicion" })) : (_jsx("button", { type: "button", className: "secondary-button", onClick: () => resetQuoteComposer(), children: "Reiniciar captura" }))] }), sourceMode === "template" ? (_jsxs("div", { className: "quotes-template-picker", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cotizacion tipo base" }), _jsxs("select", { value: selectedTemplateId, onChange: (event) => handleTemplateSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar plantilla..." }), templates.map((template) => (_jsxs("option", { value: template.id, children: [template.templateNumber, " - ", getTeamLabel(template.team)] }, template.id)))] })] }), _jsx("p", { className: "muted", children: selectedTemplate
                                     ? "La tabla editable de esta cotizacion tipo aparece debajo de los campos de captura."
-                                    : "Selecciona una cotizacion tipo para precargar el layout y mostrar su tabla editable debajo de los campos." })] })) : (_jsx("p", { className: "muted", children: "El layout generico empieza en blanco para capturar una propuesta desde cero." })), _jsxs("form", { className: "quotes-form", onSubmit: handleQuoteSubmit, children: [_jsxs("div", { className: "quotes-form-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsxs("select", { value: quoteForm.clientId, onChange: (event) => handleClientSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar cliente..." }), clients.map((client) => (_jsxs("option", { value: client.id, children: [client.clientNumber, " - ", client.name] }, client.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo responsable" }), _jsxs("select", { value: quoteForm.responsibleTeam, onChange: (event) => updateQuoteForm((current) => ({ ...current, responsibleTeam: event.target.value })), children: [_jsx("option", { value: "", children: "Sin equipo" }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: quoteForm.quoteType, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: suggestedQuoteNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { type: "text", value: quoteForm.subject, onChange: (event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value })), placeholder: "Describe el alcance de la propuesta" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: quoteForm.milestone, onChange: (event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), sourceMode === "template" && !selectedTemplate ? (_jsx("section", { className: "quote-template-editor-shell", children: _jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: "Tabla de cotizacion tipo" }), _jsx("p", { className: "muted", children: "Selecciona una cotizacion tipo base para cargar aqui su tabla editable." })] }) }) })) : null, quoteTemplateDraft ? (_jsxs("section", { className: "quote-template-editor-shell", children: [_jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: sourceMode === "template" ? "Tabla de cotizacion tipo" : "Tabla de cotizacion" }), _jsx("p", { className: "muted", children: sourceMode === "template"
+                                    : "Selecciona una cotizacion tipo para precargar el layout y mostrar su tabla editable debajo de los campos." })] })) : (_jsx("p", { className: "muted", children: "El layout generico empieza en blanco para capturar una propuesta desde cero." })), _jsxs("form", { className: "quotes-form", onSubmit: handleQuoteSubmit, children: [_jsxs("div", { className: "quotes-form-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsxs("select", { value: quoteForm.clientId, onChange: (event) => handleClientSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar cliente..." }), clients.map((client) => (_jsxs("option", { value: client.id, children: [client.clientNumber, " - ", client.name] }, client.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo responsable" }), _jsxs("select", { value: quoteForm.responsibleTeam, onChange: (event) => updateQuoteForm((current) => ({ ...current, responsibleTeam: event.target.value })), children: [_jsx("option", { value: "", children: "Sin equipo" }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: quoteForm.quoteType, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), sourceMode === "generic" ? (_jsxs("div", { className: "form-field quote-language-field", children: [_jsx("span", { children: "Idioma de la cotizaci\u00F3n" }), _jsxs("label", { className: "quote-language-checkbox", children: [_jsx("input", { type: "checkbox", checked: quoteForm.language === "en", onChange: (event) => handleGenericQuoteLanguageChange(event.target.checked ? "en" : "es") }), _jsx("span", { children: quoteForm.language === "en" ? "Inglés" : "Español" })] }), _jsx("small", { children: "Desmarcado: espa\u00F1ol. Marcado: ingl\u00E9s." })] })) : null, _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: suggestedQuoteNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: quoteForm.quoteDate, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { type: "text", value: quoteForm.subject, onChange: (event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value })), placeholder: "Describe el alcance de la propuesta" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: quoteForm.milestone, onChange: (event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), sourceMode === "template" && !selectedTemplate ? (_jsx("section", { className: "quote-template-editor-shell", children: _jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: "Tabla de cotizacion tipo" }), _jsx("p", { className: "muted", children: "Selecciona una cotizacion tipo base para cargar aqui su tabla editable." })] }) }) })) : null, quoteTemplateDraft ? (_jsxs("section", { className: "quote-template-editor-shell", children: [_jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: sourceMode === "template" ? "Tabla de cotizacion tipo" : "Tabla de cotizacion" }), _jsx("p", { className: "muted", children: sourceMode === "template"
                                                         ? "Puedes editar la misma tabla de la plantilla antes de guardar la cotizacion."
                                                         : "Configura desde cero la cotizacion del cliente usando la misma tabla avanzada de las cotizaciones tipo." })] }) }), _jsxs("div", { className: "quote-template-amount-config-grid", children: [_jsx(TemplateAmountColumnConfig, { column: quoteTemplateDraft.amountColumns[0], onModeChange: (mode) => updateQuoteTemplateDraft((current) => ({
                                                     ...current,
@@ -1107,5 +1335,5 @@ export function QuotesPage() {
                                             })), onRemove: (index) => updateQuoteTemplateDraft((current) => ({
                                                 ...current,
                                                 tableRows: removeTemplateRow(current.tableRows, index)
-                                            })), onMerge: handleQuoteTemplateMerge, onUnmerge: handleQuoteTemplateUnmerge }, row.id))) }), _jsx(TemplateSummaryGrid, { amountColumns: quoteTemplateDraft.amountColumns, tableRows: quoteTemplateDraft.tableRows })] })) : null, _jsxs("div", { className: "form-actions", children: [_jsx("button", { type: "submit", className: "primary-button", disabled: savingQuote || Boolean(exportingFormat), children: savingQuote ? "Guardando..." : editingQuote ? "Guardar cambios" : "Guardar cotizacion" }), _jsx("button", { type: "button", className: "secondary-button", disabled: savingQuote || Boolean(exportingFormat), onClick: () => void handleQuoteDownload("pdf"), children: exportingFormat === "pdf" ? "Generando PDF..." : "Descargar en PDF" }), _jsx("button", { type: "button", className: "secondary-button", disabled: savingQuote || Boolean(exportingFormat), onClick: () => void handleQuoteDownload("word"), children: exportingFormat === "word" ? "Generando Word..." : "Descargar en Word" })] })] })] })) : null, viewingQuote ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => setViewingQuote(null), children: _jsxs("div", { className: "finance-modal finance-modal-wide quotes-detail-modal", role: "dialog", "aria-modal": "true", "aria-label": "Detalle de cotizacion guardada", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Cotizacion guardada" }), _jsx("h3", { children: viewingQuote.quoteNumber })] }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => setViewingQuote(null), children: "Cerrar" })] }), _jsxs("div", { className: "quotes-detail-grid", children: [_jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Cliente" }), _jsx("p", { children: viewingQuote.clientName })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Fecha" }), _jsx("p", { children: formatDate(viewingQuote.createdAt) })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Tipo" }), _jsx("p", { children: getQuoteTypeLabel(viewingQuote.quoteType) })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Equipo" }), _jsx("p", { children: getTeamLabel(viewingQuote.responsibleTeam) })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Hito" }), _jsx("p", { children: normalizeText(viewingQuote.milestone) || "-" })] })] }), viewingQuoteDraft ? (_jsx(TemplateVisualPreview, { heading: "Preview visual", templateNumber: viewingQuote.quoteNumber, team: viewingQuote.responsibleTeam, quoteType: viewingQuote.quoteType, milestone: viewingQuote.milestone, services: viewingQuote.subject, servicesLabel: "Asunto", emptyServicesText: "Sin asunto capturado.", amountColumns: viewingQuoteDraft.amountColumns, tableRows: viewingQuoteDraft.tableRows })) : null] }) })) : null, quotePendingDelete ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => (deletingQuoteId ? undefined : setQuotePendingDelete(null)), children: _jsxs("div", { className: "finance-modal", role: "dialog", "aria-modal": "true", "aria-label": "Confirmar borrado de cotizacion guardada", onClick: (event) => event.stopPropagation(), children: [_jsx("h3", { children: "Borrar cotizacion guardada" }), _jsxs("p", { children: ["Vas a borrar ", _jsx("strong", { children: quotePendingDelete.quoteNumber }), ". Esta cotizacion dejara de aparecer en el historial del cliente."] }), _jsx("p", { className: "muted", children: normalizeText(quotePendingDelete.subject) || "Sin asunto capturado." }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: Boolean(deletingQuoteId), onClick: () => setQuotePendingDelete(null), children: "Cancelar" }), _jsx("button", { className: "danger-button", type: "button", disabled: Boolean(deletingQuoteId), onClick: () => void handleQuoteDeleteConfirm(), children: deletingQuoteId ? "Borrando..." : "Confirmar borrado" })] })] }) })) : null, templatePendingDelete ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => (deletingTemplateId ? undefined : setTemplatePendingDelete(null)), children: _jsxs("div", { className: "finance-modal", role: "dialog", "aria-modal": "true", "aria-label": "Confirmar borrado de cotizacion tipo", onClick: (event) => event.stopPropagation(), children: [_jsx("h3", { children: "Borrar cotizacion tipo" }), _jsxs("p", { children: ["Vas a borrar ", _jsx("strong", { children: templatePendingDelete.templateNumber }), ". Esta plantilla dejara de estar disponible para reutilizarse."] }), _jsx("p", { className: "muted", children: summarizeTemplateServices(templatePendingDelete.services, 120) }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: Boolean(deletingTemplateId), onClick: () => setTemplatePendingDelete(null), children: "Cancelar" }), _jsx("button", { className: "danger-button", type: "button", disabled: Boolean(deletingTemplateId), onClick: () => void handleTemplateDeleteConfirm(), children: deletingTemplateId ? "Borrando..." : "Confirmar borrado" })] })] }) })) : null] }));
+                                            })), onMerge: handleQuoteTemplateMerge, onUnmerge: handleQuoteTemplateUnmerge }, row.id))) }), _jsx(TemplateSummaryGrid, { amountColumns: quoteTemplateDraft.amountColumns, tableRows: quoteTemplateDraft.tableRows })] })) : null, _jsxs("div", { className: "form-actions", children: [_jsx("button", { type: "submit", className: "primary-button", disabled: savingQuote || Boolean(exportingFormat), children: savingQuote ? "Guardando..." : editingQuote ? "Guardar cambios" : "Guardar cotizacion" }), _jsx("button", { type: "button", className: "secondary-button", disabled: savingQuote || Boolean(exportingFormat), onClick: () => void handleQuoteDownload("pdf"), children: exportingFormat === "pdf" ? "Generando PDF..." : "Descargar en PDF" }), _jsx("button", { type: "button", className: "secondary-button", disabled: savingQuote || Boolean(exportingFormat), onClick: () => void handleQuoteDownload("word"), children: exportingFormat === "word" ? "Generando Word..." : "Descargar en Word" })] })] })] })) : null, viewingQuote ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => setViewingQuote(null), children: _jsxs("div", { className: "finance-modal finance-modal-wide quotes-detail-modal", role: "dialog", "aria-modal": "true", "aria-label": "Detalle de cotizacion guardada", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Cotizacion guardada" }), _jsx("h3", { children: viewingQuote.quoteNumber })] }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => setViewingQuote(null), children: "Cerrar" })] }), _jsxs("div", { className: "quotes-detail-grid", children: [_jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Cliente" }), _jsx("p", { children: viewingQuote.clientName })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Fecha" }), _jsx("p", { children: formatDate(getQuoteDisplayDate(viewingQuote)) })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Tipo" }), _jsx("p", { children: getQuoteTypeLabel(viewingQuote.quoteType) })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Equipo" }), _jsx("p", { children: getTeamLabel(viewingQuote.responsibleTeam) })] }), _jsxs("div", { className: "quotes-detail-block", children: [_jsx("strong", { children: "Hito" }), _jsx("p", { children: normalizeText(viewingQuote.milestone) || "-" })] })] }), viewingQuoteDraft ? (_jsx(TemplateVisualPreview, { heading: "Preview visual", templateNumber: viewingQuote.quoteNumber, team: viewingQuote.responsibleTeam, quoteType: viewingQuote.quoteType, milestone: viewingQuote.milestone, services: viewingQuote.subject, servicesLabel: "Asunto", emptyServicesText: "Sin asunto capturado.", amountColumns: viewingQuoteDraft.amountColumns, tableRows: viewingQuoteDraft.tableRows })) : null] }) })) : null, quotePendingDelete ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => (deletingQuoteId ? undefined : setQuotePendingDelete(null)), children: _jsxs("div", { className: "finance-modal", role: "dialog", "aria-modal": "true", "aria-label": "Confirmar borrado de cotizacion guardada", onClick: (event) => event.stopPropagation(), children: [_jsx("h3", { children: "Borrar cotizacion guardada" }), _jsxs("p", { children: ["Vas a borrar ", _jsx("strong", { children: quotePendingDelete.quoteNumber }), ". Esta cotizacion dejara de aparecer en el historial del cliente."] }), _jsx("p", { className: "muted", children: normalizeText(quotePendingDelete.subject) || "Sin asunto capturado." }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: Boolean(deletingQuoteId), onClick: () => setQuotePendingDelete(null), children: "Cancelar" }), _jsx("button", { className: "danger-button", type: "button", disabled: Boolean(deletingQuoteId), onClick: () => void handleQuoteDeleteConfirm(), children: deletingQuoteId ? "Borrando..." : "Confirmar borrado" })] })] }) })) : null, templatePendingDelete ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => (deletingTemplateId ? undefined : setTemplatePendingDelete(null)), children: _jsxs("div", { className: "finance-modal", role: "dialog", "aria-modal": "true", "aria-label": "Confirmar borrado de cotizacion tipo", onClick: (event) => event.stopPropagation(), children: [_jsx("h3", { children: "Borrar cotizacion tipo" }), _jsxs("p", { children: ["Vas a borrar ", _jsx("strong", { children: templatePendingDelete.templateNumber }), ". Esta plantilla dejara de estar disponible para reutilizarse."] }), _jsx("p", { className: "muted", children: summarizeTemplateServices(templatePendingDelete.services, 120) }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: Boolean(deletingTemplateId), onClick: () => setTemplatePendingDelete(null), children: "Cancelar" }), _jsx("button", { className: "danger-button", type: "button", disabled: Boolean(deletingTemplateId), onClick: () => void handleTemplateDeleteConfirm(), children: deletingTemplateId ? "Borrando..." : "Confirmar borrado" })] })] }) })) : null] }));
 }

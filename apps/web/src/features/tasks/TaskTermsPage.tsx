@@ -2,12 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
-import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiGet } from "../../api/http-client";
+import {
+  hasMeaningfulTaskLabel,
+  isTrackingTermEnabled,
+  resolveTrackingTaskName,
+  usesPresentationAndTermDates
+} from "./task-display-utils";
 import {
   LEGACY_TASK_MODULE_BY_SLUG,
   type LegacyTaskModuleConfig,
   type LegacyTaskTableConfig
 } from "./task-legacy-config";
+import { findLegacyTableByAnyName } from "./task-distribution-utils";
 
 function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
@@ -19,10 +26,6 @@ function todayInput() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function isYes(value?: string) {
-  return ["si", "sí", "yes"].includes((value ?? "").trim().toLowerCase());
-}
-
 type TermTableRow = {
   key: string;
   term: TaskTerm;
@@ -30,26 +33,9 @@ type TermTableRow = {
   virtual: boolean;
 };
 
-function defaultVerification(moduleConfig: LegacyTaskModuleConfig) {
-  return Object.fromEntries(moduleConfig.verificationColumns.map((column) => [column.key, "No"]));
-}
-
-function withDefaultVerification(moduleConfig: LegacyTaskModuleConfig, term: TaskTerm): TaskTerm {
-  return {
-    ...term,
-    verification: {
-      ...defaultVerification(moduleConfig),
-      ...(term.verification ?? {})
-    }
-  };
-}
-
 function findTrackingTable(moduleConfig: LegacyTaskModuleConfig, record: TaskTrackingRecord) {
-  return moduleConfig.tables.find((table) => table.slug === record.tableCode || table.sourceTable === record.sourceTable);
-}
-
-function isEscritosFondoTable(table: LegacyTaskTableConfig | undefined) {
-  return table?.slug === "escritos-fondo";
+  return findLegacyTableByAnyName(moduleConfig, record.tableCode)
+    ?? findLegacyTableByAnyName(moduleConfig, record.sourceTable);
 }
 
 function isCompletedRecord(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
@@ -62,11 +48,15 @@ function isCompletedRecord(table: LegacyTaskTableConfig | undefined, record: Tas
 
 function getManagerTermDate(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
   const explicitTerm = toDateInput(record.termDate);
+  if (usesPresentationAndTermDates(table)) {
+    return isTrackingTermEnabled(record, table) ? explicitTerm : "";
+  }
+
   if (explicitTerm) {
     return explicitTerm;
   }
 
-  if (table && !isEscritosFondoTable(table) && (table.autoTerm || table.termManagedDate)) {
+  if (table && !usesPresentationAndTermDates(table) && (table.autoTerm || table.termManagedDate)) {
     return toDateInput(record.dueDate);
   }
 
@@ -79,9 +69,13 @@ function isManagerTermRecord(moduleConfig: LegacyTaskModuleConfig, record: TaskT
     return false;
   }
 
+  if (usesPresentationAndTermDates(table)) {
+    return !isCompletedRecord(table, record) && isTrackingTermEnabled(record, table);
+  }
+
   return !isCompletedRecord(table, record)
     && Boolean(getManagerTermDate(table, record))
-    && Boolean(table.autoTerm || table.termManagedDate || isEscritosFondoTable(table));
+    && Boolean(table.autoTerm || table.termManagedDate);
 }
 
 function getLinkedTerm(terms: TaskTerm[], record: TaskTrackingRecord) {
@@ -94,11 +88,12 @@ function termFromTrackingRecord(
   linkedTerm: TaskTerm | undefined
 ): TaskTerm {
   const table = findTrackingTable(moduleConfig, record);
+  const taskName = resolveTrackingTaskName(record, table, undefined, record.eventName);
 
-  return withDefaultVerification(moduleConfig, {
+  return {
     ...(linkedTerm ?? {
       id: `manager-term-${record.id}`,
-      verification: defaultVerification(moduleConfig),
+      verification: {},
       data: record.data,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt
@@ -113,8 +108,8 @@ function termFromTrackingRecord(
     subject: record.subject,
     specificProcess: record.specificProcess,
     matterIdentifier: record.matterIdentifier,
-    eventName: record.eventName || record.taskName,
-    pendingTaskLabel: record.taskName,
+    eventName: taskName || record.eventName || "Termino",
+    pendingTaskLabel: taskName || undefined,
     responsible: record.responsible,
     dueDate: record.dueDate,
     termDate: getManagerTermDate(table, record),
@@ -122,7 +117,7 @@ function termFromTrackingRecord(
     recurring: false,
     reportedMonth: record.reportedMonth,
     deletedAt: record.deletedAt
-  });
+  };
 }
 
 function sortTermRows(left: TermTableRow, right: TermTableRow) {
@@ -208,68 +203,13 @@ export function TaskTermsPage() {
 
       rows.push({
         key: `term-${term.id}`,
-        term: withDefaultVerification(moduleConfig, term),
+        term,
         virtual: false
       });
     });
 
     return rows.sort(sortTermRows);
   }, [moduleConfig, recurrentMode, terms, trackingRecords]);
-
-  function buildTermCreatePayload(row: TermTableRow, patch: Partial<TaskTerm> & Record<string, unknown>) {
-    const term = {
-      ...row.term,
-      ...patch,
-      verification: patch.verification ?? row.term.verification
-    };
-    const sourceRecord = row.sourceRecord;
-    const table = sourceRecord && moduleConfig ? findTrackingTable(moduleConfig, sourceRecord) : undefined;
-
-    return {
-      moduleId: moduleConfig?.moduleId ?? term.moduleId,
-      sourceTable: sourceRecord?.sourceTable ?? term.sourceTable ?? null,
-      sourceRecordId: sourceRecord?.id ?? term.sourceRecordId ?? null,
-      matterId: sourceRecord?.matterId ?? term.matterId ?? null,
-      matterNumber: sourceRecord?.matterNumber ?? term.matterNumber ?? null,
-      clientNumber: sourceRecord?.clientNumber ?? term.clientNumber ?? null,
-      clientName: sourceRecord?.clientName ?? term.clientName ?? "",
-      subject: sourceRecord?.subject ?? term.subject ?? "",
-      specificProcess: sourceRecord?.specificProcess ?? term.specificProcess ?? null,
-      matterIdentifier: sourceRecord?.matterIdentifier ?? term.matterIdentifier ?? null,
-      eventName: sourceRecord?.eventName || sourceRecord?.taskName || term.eventName || "Termino",
-      pendingTaskLabel: sourceRecord?.taskName ?? term.pendingTaskLabel ?? null,
-      responsible: sourceRecord?.responsible ?? term.responsible ?? moduleConfig?.defaultResponsible ?? "",
-      dueDate: sourceRecord?.dueDate ?? term.dueDate ?? null,
-      termDate: sourceRecord ? (getManagerTermDate(table, sourceRecord) || term.termDate || null) : (term.termDate ?? null),
-      status: sourceRecord?.status ?? term.status ?? "pendiente",
-      recurring: false,
-      reportedMonth: sourceRecord?.reportedMonth ?? term.reportedMonth ?? null,
-      verification: term.verification ?? (moduleConfig ? defaultVerification(moduleConfig) : {}),
-      data: term.data ?? sourceRecord?.data ?? {}
-    };
-  }
-
-  async function patchTerm(row: TermTableRow, patch: Partial<TaskTerm> & Record<string, unknown>) {
-    if (row.virtual) {
-      const created = await apiPost<TaskTerm>("/tasks/terms", buildTermCreatePayload(row, patch));
-      setTerms((current) => [created, ...current.filter((candidate) => candidate.id !== created.id)]);
-
-      if (row.sourceRecord) {
-        const updatedRecord = await apiPatch<TaskTrackingRecord | null>(`/tasks/tracking-records/${row.sourceRecord.id}`, {
-          termId: created.id
-        });
-        if (updatedRecord) {
-          setTrackingRecords((current) =>
-            current.map((candidate) => candidate.id === updatedRecord.id ? updatedRecord : candidate)
-          );
-        }
-      }
-      return;
-    }
-
-    const updated = await apiPatch<TaskTerm>(`/tasks/terms/${row.term.id}`, patch);
-    setTerms((current) => current.map((candidate) => candidate.id === row.term.id ? updated : candidate));
-  }
 
   if (!moduleConfig) {
     return <Navigate to="/app/tasks" replace />;
@@ -289,7 +229,7 @@ export function TaskTermsPage() {
         <h2>{recurrentMode ? "Terminos recurrentes" : "Terminos"} ({moduleConfig.label})</h2>
         <p className="muted">
           Tabla maestra de terminos. Refleja los terminos activos del Manager de tareas; las filas quedan en rojo si falta responsable,
-          falta fecha de termino, la fecha esta vencida o falta alguna verificacion. Solo las columnas de verificacion se pueden actualizar.
+          falta fecha de termino o la fecha esta vencida. Las verificaciones se actualizan exclusivamente desde el Manager de tareas.
         </p>
       </header>
 
@@ -313,26 +253,29 @@ export function TaskTermsPage() {
                 <th>{moduleConfig.termEventLabel}</th>
                 <th>Responsable</th>
                 <th>{moduleConfig.termDateLabel}</th>
-                {moduleConfig.verificationColumns.map((column) => <th key={column.key}>{column.label}</th>)}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7 + moduleConfig.verificationColumns.length} className="centered-inline-message">Cargando terminos...</td>
+                  <td colSpan={7} className="centered-inline-message">Cargando terminos...</td>
                 </tr>
               ) : visibleTermRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7 + moduleConfig.verificationColumns.length} className="centered-inline-message">No hay terminos en esta seccion.</td>
+                  <td colSpan={7} className="centered-inline-message">No hay terminos en esta seccion.</td>
                 </tr>
               ) : (
                 visibleTermRows.map((row) => {
                   const { term } = row;
-                  const missingVerification = moduleConfig.verificationColumns.some((column) => !isYes(term.verification[column.key]));
+                  const eventName = hasMeaningfulTaskLabel(term.eventName)
+                    ? term.eventName
+                    : hasMeaningfulTaskLabel(term.pendingTaskLabel)
+                      ? term.pendingTaskLabel
+                      : "Termino";
                   const date = toDateInput(term.termDate);
                   const completed = term.status === "concluida" || term.status === "presentado";
-                  const red = !completed && (!term.responsible || !date || date <= todayInput() || missingVerification);
-                  const green = !red && moduleConfig.verificationColumns.every((column) => isYes(term.verification[column.key]));
+                  const red = !completed && (!term.responsible || !date || date <= todayInput());
+                  const green = !red && completed;
 
                   return (
                     <tr key={row.key} className={red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined}>
@@ -342,7 +285,7 @@ export function TaskTermsPage() {
                       <td>{term.matterIdentifier || term.matterNumber || "-"}</td>
                       <td>
                         <div className="tasks-legacy-task-readonly">
-                          {term.recurring ? "[Recurrente] " : ""}{term.eventName || "-"}
+                          {term.recurring ? "[Recurrente] " : ""}{eventName}
                         </div>
                       </td>
                       <td>
@@ -351,25 +294,6 @@ export function TaskTermsPage() {
                       <td>
                         <div className="tasks-legacy-readonly-value tasks-legacy-date-readonly">{toDateInput(term.termDate) || "-"}</div>
                       </td>
-                      {moduleConfig.verificationColumns.map((column) => (
-                        <td key={column.key}>
-                          <select
-                            className="tasks-legacy-input"
-                            value={term.verification[column.key] ?? "No"}
-                            onChange={(event) =>
-                              void patchTerm(row, {
-                                verification: {
-                                  ...term.verification,
-                                  [column.key]: event.target.value
-                                }
-                              })
-                            }
-                          >
-                            <option value="No">No</option>
-                            <option value="Si">Si</option>
-                          </select>
-                        </td>
-                      ))}
                     </tr>
                   );
                 })

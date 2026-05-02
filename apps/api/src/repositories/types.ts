@@ -1,5 +1,7 @@
 import type {
   AuthUser,
+  BudgetPlan,
+  BudgetPlanSnapshot,
   Client,
   CommissionReceiver,
   CommissionSnapshot,
@@ -119,6 +121,8 @@ export interface QuoteWriteRecord {
   subject: string;
   status: Quote["status"];
   quoteType: Quote["quoteType"];
+  language?: Quote["language"];
+  quoteDate?: string;
   amountColumns?: Quote["amountColumns"];
   tableRows?: Quote["tableRows"];
   lineItems: Quote["lineItems"];
@@ -262,6 +266,24 @@ export interface GeneralExpensesRepository {
     month: number;
     copied: number;
   }>;
+}
+
+export interface BudgetPlanUpdateRecord {
+  expectedIncomeMxn?: number;
+  expectedExpenseMxn?: number;
+  notes?: string | null;
+}
+
+export interface BudgetPlanningOverviewRecord {
+  plan: BudgetPlan;
+  financeRecords: FinanceRecord[];
+  generalExpenses: GeneralExpense[];
+}
+
+export interface BudgetPlanningRepository {
+  getOverview(year: number, month: number): Promise<BudgetPlanningOverviewRecord>;
+  updatePlan(year: number, month: number, payload: BudgetPlanUpdateRecord): Promise<BudgetPlan>;
+  listSnapshotsBefore(year: number, month: number): Promise<BudgetPlanSnapshot[]>;
 }
 
 export interface FinanceRecordWriteRecord {
@@ -462,6 +484,7 @@ export interface TaskAdditionalTaskWriteRecord {
   responsible?: string;
   responsible2?: string | null;
   dueDate?: string | null;
+  recurring?: boolean;
   status?: TaskAdditionalTask["status"];
   deletedAt?: string | null;
 }

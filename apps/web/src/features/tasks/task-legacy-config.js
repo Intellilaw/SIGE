@@ -10,28 +10,35 @@ const workflowTabs = (labels) => labels.map((label, index) => ({
 }));
 const table = (config) => ({
     mode: config.mode ?? "status",
-    dateLabel: config.dateLabel ?? "Fecha en la que la tarea debe ser realizada",
+    dateLabel: config.dateLabel ?? (config.autoTerm || config.termManagedDate ? "Fecha limite" : "Fecha en la que la tarea debe ser realizada"),
     showDateColumn: config.showDateColumn ?? true,
     tabs: config.tabs ?? statusTabs(),
     ...config
 });
 const litigationTables = [
     table({ slug: "escritos-fondo", sourceTable: "escritos_fondo", title: "1. Escritos de fondo", mode: "workflow", tabs: workflowTabs(["1. Pendientes", "2. Terminados sin presentar", "3. Presentados"]), dateLabel: "Fecha debe presentarse" }),
-    table({ slug: "escritos", sourceTable: "escritos_kpi", title: "2. Escritos que deben ser presentados", autoTerm: true, termManagedDate: true, dateLabel: "Fecha presentar" }),
-    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones", title: "3. Desahogo de Prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha Presentar" }),
-    table({ slug: "jueces-magistrados", sourceTable: "hablar_jueces_magistrados", title: "4. Hablar con jueces y magistrados", tabs: statusTabs("1. Pendientes", "2. Historial"), dateLabel: "Fecha Estimada" }),
+    table({ slug: "escritos", sourceTable: "escritos_kpi", title: "2. Escritos que deben ser presentados", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
+    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones", title: "3. Desahogo de Prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
+    table({ slug: "jueces-magistrados", sourceTable: "hablar_jueces_magistrados", title: "4. Hablar con jueces y magistrados", tabs: statusTabs("1. Pendientes", "2. Hecho"), dateLabel: "Fecha en que la tarea debe ser realizada" }),
     table({ slug: "sentencias", sourceTable: "sentencias_pendientes", title: "5. Sentencias pendientes", dateLabel: "Fecha Esperada" }),
     table({ slug: "audiencias", sourceTable: "audiencias_citas_oficiales", title: "6. Audiencias y citas oficiales", dateLabel: "Fecha de la audiencia/cita" }),
-    table({ slug: "citas-actuarios", sourceTable: "citas_actuarios", title: "7. Citas con actuarios", dateLabel: "Fecha en la que la cita debe realizarse" }),
+    table({ slug: "citas-actuarios", sourceTable: "citas_actuarios", title: "7. Citas con actuarios", dateLabel: "Fecha de la cita" }),
     table({ slug: "notificaciones", sourceTable: "notificaciones_emplazamientos_pendientes", title: "8. Notificaciones y emplazamientos", dateLabel: "Fecha en la que la tarea debe ser realizada" }),
-    table({ slug: "apelaciones-preventiva", sourceTable: "apelaciones_tramitacion_preventiva", title: "9. Apelaciones de tramitacion preventiva" }),
-    table({ slug: "amparos", sourceTable: "apelaciones_recursos_amparos_pendientes", title: "10. Apelaciones, recursos y amparos pendientes de ser radicados", dateLabel: "Fecha Limite" }),
+    table({ slug: "apelaciones-preventiva", sourceTable: "apelaciones_tramitacion_preventiva", title: "9. Apelaciones de tramitacion preventiva", dateLabel: "Fecha en la que se espera la sentencia" }),
+    table({ slug: "amparos", sourceTable: "apelaciones_recursos_amparos_pendientes", title: "10. Apelaciones, recursos y amparos pendientes de ser radicados", dateLabel: "Fecha en la que se espera que la instancia esté radicada" }),
     table({ slug: "copias", sourceTable: "copias_pendientes", title: "11. Copias pendientes", dateLabel: "Fecha Limite" }),
-    table({ slug: "oficios", sourceTable: "oficios_exhortos_pendientes", title: "12. Oficios y exhortos pendientes", dateLabel: "Fecha Limite" }),
-    table({ slug: "pruebas", sourceTable: "pruebas_pendientes", title: "13. Pruebas pendientes", dateLabel: "Fecha Pruebas" }),
+    table({ slug: "oficios", sourceTable: "oficios_exhortos_pendientes", title: "12. Oficios y exhortos pendientes", dateLabel: "Fecha en la que la tarea debe ser realizada" }),
+    table({ slug: "pruebas", sourceTable: "pruebas_pendientes", title: "13. Pruebas pendientes", dateLabel: "Fecha en la que la prueba debe ser presentada" }),
     table({ slug: "publicaciones", sourceTable: "publicaciones", title: "14. Publicaciones", dateLabel: "Fecha de la publicacion" }),
     table({ slug: "esperar-resolucion", sourceTable: "esperar_resolucion", title: "15. Esperar resolucion", dateLabel: "Fecha esperada" }),
-    table({ slug: "albacea", sourceTable: "fechas_aceptacion_albacea", title: "16. Fechas de aceptacion del cargo de albacea", dateLabel: "Fecha en que se acepto el cargo" }),
+    table({
+        slug: "albacea",
+        sourceTable: "fechas_aceptacion_albacea",
+        title: "16. Fechas de aceptacion del cargo de albacea",
+        tabs: statusTabs("1. Pendientes", "2. Sucesiones finalizadas"),
+        dateLabel: "Fecha en que se acepto el cargo",
+        termDateLabel: "Término de próx. rendición de cuentas anual"
+    }),
     table({ slug: "archivo-judicial", sourceTable: "expedientes_devueltos_archivo", title: "17. Expedientes devueltos del Archivo Judicial", dateLabel: "Fecha esperada" }),
     table({ slug: "devoluciones", sourceTable: "devoluciones_documentos_pendientes", title: "18. Devoluciones de documentos", tabs: statusTabs("1. Pendientes", "2. Devueltos / Concluidos") }),
     table({ slug: "escaneados", sourceTable: "expedientes_escaneados", title: "19. Expedientes a escanear", tabs: statusTabs("1. Pendientes", "2. Escaneados / Concluidos") }),
@@ -49,7 +56,7 @@ const corporateTables = [
     table({ slug: "tramites-administrativos", sourceTable: "otros_tramites_administrativos", title: "7. Otros tramites administrativos", dateEditable: true }),
     table({ slug: "citas-audiencias", sourceTable: "citas_audiencias_corporativo", title: "8. Citas y audiencias", dateLabel: "Fecha Evento", dateEditable: true }),
     table({ slug: "cambio-accionistas", sourceTable: "avisos_sat_cambio_accionistas", title: "9. Avisos SAT cambio de accionistas", autoTerm: true, termManagedDate: true, dateLabel: "Fecha limite" }),
-    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones_corporativo", title: "10. Desahogo de prevenciones", autoTerm: true, termManagedDate: true, dateLabel: "Fecha limite" }),
+    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones_corporativo", title: "10. Desahogo de prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
     table({ slug: "esperar-resolucion", sourceTable: "esperar_resolucion_corporativo", title: "11. Esperar resolucion", dateEditable: true }),
     table({ slug: "registro-instrumento", sourceTable: "registro_instrumento_rpp_rpm_rpc", title: "12. Registro de instrumento en RPP, RPM o RPC", dateEditable: true }),
     table({ slug: "entrega-instrumento-clientes", sourceTable: "entrega_instrumento_clientes", title: "13. Entrega de instrumento a clientes", dateEditable: true }),
@@ -58,7 +65,7 @@ const corporateTables = [
 const conveniosTables = [
     table({ slug: "contratos-no-mediacion", sourceTable: "convenios_contratos_no_mediacion", title: "1. Convenios o contratos (no de mediacion)", mode: "workflow", tabs: workflowTabs(["1. Convenios o contratos (no de mediacion) en proceso", "2. Convenios o contratos (no de mediacion) enviados al cliente", "3. Convenios o contratos (no de mediacion) aprobados por el cliente"]), dateEditable: true }),
     table({ slug: "convenios-mediacion", sourceTable: "convenios_mediacion", title: "2. Convenios de mediacion", mode: "workflow", tabs: workflowTabs(["1. Pendientes de firma", "2. Pendiente de registro CJA", "3. Pendiente de entrega a cliente tras CJA", "4. Pendiente RPP, RPM o RPC", "5. Pendiente de entrega a cliente tras RPP, RPM o RPC", "6. Ya procesados de manera completa"]), dateEditable: true }),
-    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones_convenios", title: "3. Desahogo de prevenciones", autoTerm: true, termManagedDate: true, dateLabel: "Fecha limite" }),
+    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones_convenios", title: "3. Desahogo de prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
     table({ slug: "investigacion-antecedentes-registrales", sourceTable: "investigacion_antecedentes_registrales", title: "4. Investigacion de antecedentes registrales", dateEditable: true })
 ];
 const financieroTables = [

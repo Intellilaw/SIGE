@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireAuth } from "../../core/auth/guards";
 import { exportQuoteDocument } from "./quote-export";
+import { translateQuoteTemplateWithLlm } from "./quote-template-translator";
 
 const teamSchema = z.enum([
   "ADMIN",
@@ -49,6 +50,8 @@ const quoteSchema = z.object({
   subject: z.string().min(3),
   status: z.enum(["DRAFT", "SENT", "APPROVED", "REJECTED"]),
   quoteType: z.enum(["ONE_TIME", "RETAINER"]),
+  language: z.enum(["es", "en"]).optional(),
+  quoteDate: z.string().optional(),
   amountColumns: z.array(amountColumnSchema).length(2).optional(),
   tableRows: z.array(tableRowSchema).min(1).optional(),
   lineItems: z.array(lineItemSchema).min(1),
@@ -64,6 +67,31 @@ const quoteTemplateSchema = z.object({
   tableRows: z.array(tableRowSchema).min(1),
   milestone: z.string().optional(),
   notes: z.string().optional()
+});
+
+const quoteTemplateLineItemSchema = z.object({
+  concept: z.string(),
+  amountMxn: z.number().nonnegative()
+});
+
+const quoteTemplateTranslationSchema = z.object({
+  template: z.object({
+    id: z.string().min(1),
+    templateNumber: z.string().min(1),
+    name: z.string(),
+    team: teamSchema,
+    subject: z.string(),
+    services: z.string(),
+    quoteType: z.enum(["ONE_TIME", "RETAINER"]),
+    amountColumns: z.array(amountColumnSchema).length(2),
+    tableRows: z.array(tableRowSchema).min(1),
+    lineItems: z.array(quoteTemplateLineItemSchema),
+    totalMxn: z.number().nonnegative(),
+    milestone: z.string().optional(),
+    notes: z.string().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string()
+  })
 });
 
 const quoteTemplateIdParamsSchema = z.object({
@@ -119,6 +147,14 @@ export const quotesRoutes: FastifyPluginAsync = async (app) => {
   app.post("/quotes/templates", { preHandler: [requireAuth] }, async (request) => {
     const payload = quoteTemplateSchema.parse(request.body);
     return service.createTemplate(payload);
+  });
+  app.post("/quotes/templates/translate", { preHandler: [requireAuth] }, async (request) => {
+    const payload = quoteTemplateTranslationSchema.parse(request.body);
+    const translatedTemplate = await translateQuoteTemplateWithLlm(payload.template);
+
+    return {
+      template: translatedTemplate
+    };
   });
   app.patch("/quotes/templates/:templateId", { preHandler: [requireAuth] }, async (request) => {
     const params = quoteTemplateIdParamsSchema.parse(request.params);

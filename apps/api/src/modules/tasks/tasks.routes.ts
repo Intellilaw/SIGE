@@ -118,6 +118,7 @@ const additionalTaskSchema = z.object({
   responsible: z.string().min(1),
   responsible2: z.string().nullable().optional(),
   dueDate: z.string().nullable().optional(),
+  recurring: z.boolean().optional(),
   status: legacyStatusSchema.optional(),
   deletedAt: z.string().nullable().optional()
 });

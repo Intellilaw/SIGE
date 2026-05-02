@@ -71,6 +71,7 @@ export interface QuoteTemplateTableRow {
 
 export type QuoteStatus = "DRAFT" | "SENT" | "APPROVED" | "REJECTED";
 export type QuoteType = "ONE_TIME" | "RETAINER";
+export type QuoteLanguage = "es" | "en";
 
 export interface Quote {
   id: string;
@@ -81,6 +82,8 @@ export interface Quote {
   subject: string;
   status: QuoteStatus;
   quoteType: QuoteType;
+  language: QuoteLanguage;
+  quoteDate?: string;
   amountColumns?: QuoteTemplateAmountColumn[];
   tableRows?: QuoteTemplateTableRow[];
   lineItems: QuoteLineItem[];
@@ -371,6 +374,33 @@ export interface GeneralExpense {
   updatedAt: string;
 }
 
+export interface BudgetPlan {
+  id: string;
+  year: number;
+  month: number;
+  expectedIncomeMxn: number;
+  expectedExpenseMxn: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetPlanSnapshot {
+  id: string;
+  year: number;
+  month: number;
+  expectedIncomeMxn: number;
+  expectedExpenseMxn: number;
+  actualIncomeMxn: number;
+  actualExpenseMxn: number;
+  expectedResultMxn: number;
+  actualResultMxn: number;
+  financeRecordCount: number;
+  generalExpenseCount: number;
+  notes?: string;
+  createdAt: string;
+}
+
 export type TaskState = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "MONTHLY_VIEW";
 export type TaskMode = "STATUS" | "WORKFLOW";
 
@@ -511,6 +541,7 @@ export interface TaskAdditionalTask {
   responsible: string;
   responsible2?: string;
   dueDate?: string;
+  recurring: boolean;
   status: LegacyTaskStatus;
   deletedAt?: string;
   createdAt: string;

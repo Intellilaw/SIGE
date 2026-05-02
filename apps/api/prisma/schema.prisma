@@ -79,6 +79,8 @@ model Quote {
   subject     String
   status      String
   quoteType   String
+  language    String   @default("es")
+  quoteDate   DateTime @default(now()) @db.Date
   amountColumns Json?
   tableRows   Json?
   lineItems   Json
@@ -214,6 +216,39 @@ model GeneralExpense {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  @@index([year, month, createdAt])
+}
+
+model BudgetPlan {
+  id                 String   @id @default(uuid())
+  year               Int
+  month              Int
+  expectedIncomeMxn  Decimal  @default(0)
+  expectedExpenseMxn Decimal  @default(0)
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([year, month])
+  @@index([year, month])
+}
+
+model BudgetPlanSnapshot {
+  id                  String   @id @default(uuid())
+  year                Int
+  month               Int
+  expectedIncomeMxn   Decimal  @default(0)
+  expectedExpenseMxn  Decimal  @default(0)
+  actualIncomeMxn     Decimal  @default(0)
+  actualExpenseMxn    Decimal  @default(0)
+  expectedResultMxn   Decimal  @default(0)
+  actualResultMxn     Decimal  @default(0)
+  financeRecordCount  Int      @default(0)
+  generalExpenseCount Int      @default(0)
+  notes               String?
+  createdAt           DateTime @default(now())
+
+  @@unique([year, month])
   @@index([year, month, createdAt])
 }
 
@@ -447,6 +482,7 @@ model TaskAdditionalTask {
   responsible  String
   responsible2 String?
   dueDate      DateTime? @db.Date
+  recurring    Boolean  @default(false)
   status       String   @default("pendiente")
   deletedAt    DateTime?
   createdAt    DateTime @default(now())

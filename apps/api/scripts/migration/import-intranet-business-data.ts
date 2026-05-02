@@ -215,6 +215,7 @@ const LEGACY_TASK_NAME_KEYS = [
   "tarea",
   "task_name",
   "nombre",
+  "nombre_tarea",
   "escrito",
   "evento_escrito",
   "evento_nombre",
@@ -228,12 +229,12 @@ const LEGACY_TASK_NAME_KEYS = [
   "detalle"
 ];
 
-function legacyTaskName(row: LegacyRow) {
-  return normalizeText(pickFirst(row, LEGACY_TASK_NAME_KEYS)) || "Tarea legacy";
+function legacyTaskName(row: LegacyRow, fallbackName = "Tarea") {
+  return normalizeText(pickFirst(row, LEGACY_TASK_NAME_KEYS)) || fallbackName;
 }
 
 function legacyTermEventName(row: LegacyRow) {
-  return legacyTaskName(row).replace(/^Tarea legacy$/, "Termino legacy");
+  return legacyTaskName(row, "Termino");
 }
 
 function legacyPendingTaskLabel(row: LegacyRow) {
@@ -1456,7 +1457,7 @@ async function main() {
             matterIdentifier: normalizeOptionalText(
               pickFirst(row, ["matter_identifier", "id_asunto"])
             ),
-            taskName: legacyTaskName(row),
+            taskName: legacyTaskName(row, sourceTable.title),
             eventName: normalizeOptionalText(
               pickFirst(row, ["evento_escrito", "event_name", "evento"])
             ),
@@ -1504,7 +1505,7 @@ async function main() {
             matterIdentifier: normalizeOptionalText(
               pickFirst(row, ["matter_identifier", "id_asunto"])
             ),
-            taskName: legacyTaskName(row),
+            taskName: legacyTaskName(row, sourceTable.title),
             eventName: normalizeOptionalText(
               pickFirst(row, ["evento_escrito", "event_name", "evento"])
             ),

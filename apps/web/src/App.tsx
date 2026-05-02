@@ -23,10 +23,13 @@ import { QuotesPage } from "./features/workbench/QuotesPage";
 import { LeadsPage } from "./features/workbench/LeadsPage";
 import { MattersPage } from "./features/workbench/MattersPage";
 import { MatterCatalogPage } from "./features/workbench/MatterCatalogPage";
+import { BudgetPlanningPage } from "./features/budget-planning/BudgetPlanningPage";
 import { CommissionsPage } from "./features/commissions/CommissionsPage";
 import { FinancesPage } from "./features/finances/FinancesPage";
 import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
 import {
+  MobileDashboardIndexPage,
+  MobileDashboardModulePage,
   MobileExecutionIndexPage,
   MobileExecutionTeamPage,
   MobileHomePage,
@@ -62,6 +65,8 @@ export default function App() {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/mobile" element={<MobileProtectedLayout />}>
             <Route index element={<MobileHomePage />} />
+            <Route path="dashboard" element={<MobileDashboardIndexPage />} />
+            <Route path="dashboard/:slug" element={<MobileDashboardModulePage />} />
             <Route path="execution" element={<MobileExecutionIndexPage />} />
             <Route path="execution/:slug" element={<MobileExecutionTeamPage />} />
             <Route path="tracking" element={<MobileTrackingIndexPage />} />
@@ -85,6 +90,7 @@ export default function App() {
             <Route path="tasks/:slug" element={<TasksTeamPage />} />
             <Route path="kpis" element={<ModulePlaceholderPage moduleId="kpis" />} />
             <Route path="finances" element={<FinancesPage />} />
+            <Route path="budget-planning" element={<BudgetPlanningPage />} />
             <Route path="general-expenses" element={<GeneralExpensesPage />} />
             <Route path="commissions" element={<CommissionsPage />} />
             <Route path="general-supervision" element={<ModulePlaceholderPage moduleId="general-supervision" />} />

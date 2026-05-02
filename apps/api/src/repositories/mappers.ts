@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import type {
   AuthUser,
+  BudgetPlan,
+  BudgetPlanSnapshot,
   Client,
   CommissionReceiver,
   CommissionSnapshot,
@@ -268,6 +270,8 @@ export function mapQuote(record: {
   subject: string;
   status: string;
   quoteType: string;
+  language: string | null;
+  quoteDate: Date;
   amountColumns: Prisma.JsonValue | null;
   tableRows: Prisma.JsonValue | null;
   lineItems: Prisma.JsonValue;
@@ -286,6 +290,8 @@ export function mapQuote(record: {
     subject: record.subject,
     status: record.status as Quote["status"],
     quoteType: record.quoteType as Quote["quoteType"],
+    language: record.language === "en" ? "en" : "es",
+    quoteDate: record.quoteDate.toISOString(),
     amountColumns: record.amountColumns ? asQuoteTemplateAmountColumns(record.amountColumns) : undefined,
     tableRows: record.tableRows ? asQuoteTemplateRows(record.tableRows, ((Array.isArray(record.lineItems) ? record.lineItems : []) as unknown as Quote["lineItems"])) : undefined,
     lineItems: ((Array.isArray(record.lineItems) ? record.lineItems : []) as unknown as Quote["lineItems"]),
@@ -638,6 +644,60 @@ export function mapGeneralExpense(record: {
   };
 }
 
+export function mapBudgetPlan(record: {
+  id: string;
+  year: number;
+  month: number;
+  expectedIncomeMxn: Prisma.Decimal;
+  expectedExpenseMxn: Prisma.Decimal;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): BudgetPlan {
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    expectedIncomeMxn: Number(record.expectedIncomeMxn),
+    expectedExpenseMxn: Number(record.expectedExpenseMxn),
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapBudgetPlanSnapshot(record: {
+  id: string;
+  year: number;
+  month: number;
+  expectedIncomeMxn: Prisma.Decimal;
+  expectedExpenseMxn: Prisma.Decimal;
+  actualIncomeMxn: Prisma.Decimal;
+  actualExpenseMxn: Prisma.Decimal;
+  expectedResultMxn: Prisma.Decimal;
+  actualResultMxn: Prisma.Decimal;
+  financeRecordCount: number;
+  generalExpenseCount: number;
+  notes: string | null;
+  createdAt: Date;
+}): BudgetPlanSnapshot {
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    expectedIncomeMxn: Number(record.expectedIncomeMxn),
+    expectedExpenseMxn: Number(record.expectedExpenseMxn),
+    actualIncomeMxn: Number(record.actualIncomeMxn),
+    actualExpenseMxn: Number(record.actualExpenseMxn),
+    expectedResultMxn: Number(record.expectedResultMxn),
+    actualResultMxn: Number(record.actualResultMxn),
+    financeRecordCount: record.financeRecordCount,
+    generalExpenseCount: record.generalExpenseCount,
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString()
+  };
+}
+
 export function mapCommissionSnapshot(record: {
   id: string;
   year: number;
@@ -867,6 +927,7 @@ export function mapTaskAdditionalTask(record: {
   responsible: string;
   responsible2: string | null;
   dueDate: Date | null;
+  recurring: boolean;
   status: string;
   deletedAt: Date | null;
   createdAt: Date;
@@ -879,6 +940,7 @@ export function mapTaskAdditionalTask(record: {
     responsible: record.responsible,
     responsible2: record.responsible2 ?? undefined,
     dueDate: record.dueDate?.toISOString(),
+    recurring: record.recurring,
     status: record.status as TaskAdditionalTask["status"],
     deletedAt: record.deletedAt?.toISOString(),
     createdAt: record.createdAt.toISOString(),
