@@ -1,0 +1,13 @@
+ALTER TABLE "Quote" ADD COLUMN IF NOT EXISTS "language" TEXT;
+UPDATE "Quote"
+SET "language" = 'es'
+WHERE "language" IS NULL;
+ALTER TABLE "Quote" ALTER COLUMN "language" SET DEFAULT 'es';
+ALTER TABLE "Quote" ALTER COLUMN "language" SET NOT NULL;
+
+ALTER TABLE "Quote" ADD COLUMN IF NOT EXISTS "quoteDate" DATE;
+UPDATE "Quote"
+SET "quoteDate" = COALESCE("createdAt"::date, CURRENT_DATE)
+WHERE "quoteDate" IS NULL;
+ALTER TABLE "Quote" ALTER COLUMN "quoteDate" SET DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "Quote" ALTER COLUMN "quoteDate" SET NOT NULL;
