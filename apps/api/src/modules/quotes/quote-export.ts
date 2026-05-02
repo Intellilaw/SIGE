@@ -1,20 +1,74 @@
 import { Buffer } from "node:buffer";
-import { execFile } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { inflateRawSync } from "node:zlib";
 
 import type { Quote, QuoteTemplateAmountColumn, QuoteTemplateTableRow } from "@sige/contracts";
+import {
+  AlignmentType,
+  BorderStyle,
+  Document as DocxDocument,
+  Footer,
+  Header,
+  HeightRule,
+  HorizontalPositionRelativeFrom,
+  ImageRun,
+  Packer,
+  PageNumber,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableLayoutType,
+  TableRow,
+  TextRun,
+  TextWrappingType,
+  VerticalAlignTable,
+  VerticalMergeType,
+  VerticalPositionRelativeFrom,
+  WidthType,
+  convertInchesToTwip
+} from "docx";
+import PDFDocument from "pdfkit";
 
 import { AppError } from "../../core/errors/app-error";
 
-const execFileAsync = promisify(execFile);
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const exportScriptPath = path.resolve(currentDir, "../../../scripts/quotes/export-quote.ps1");
 const templatePath = path.resolve(currentDir, "../../../runtime-assets/quotes/quote-letterhead-template.docx");
+const letterheadImageEntryName = "word/media/image1.jpg";
+
+const pdfPageWidth = 612;
+const pdfPageHeight = 792;
+const pdfMarginX = 54;
+const pdfContentWidth = pdfPageWidth - pdfMarginX * 2;
+const pdfContentTop = 76;
+const pdfContentBottom = 704;
+const pdfNavy = "#0b1f33";
+const pdfBlue = "#d8e2f0";
+const pdfPaleBlue = "#c2d2e8";
+const pdfPaleAmount = "#ebf0f7";
+const pdfConceptFill = "#f4f7fa";
+const pdfBorder = "#22364f";
+const pdfText = "#1a2330";
+const pdfMuted = "#4f5e70";
+const wordPageWidthTwip = convertInchesToTwip(8.5);
+const wordPageHeightTwip = convertInchesToTwip(11);
+const wordContentWidthTwip = convertInchesToTwip(7);
+const wordContentMarginXTwip = convertInchesToTwip(0.75);
+const wordContentMarginTopTwip = convertInchesToTwip(1.08);
+const wordContentMarginBottomTwip = convertInchesToTwip(1.18);
+const wordBorder = "22364F";
+const wordNavy = "0B1F33";
+const wordHeaderFill = "D8E2F0";
+const wordTitleFill = "0F3052";
+const wordConceptFill = "F4F7FA";
+const wordTotalLabelFill = "C2D2E8";
+const wordTotalAmountFill = "EBF0F7";
+const wordText = "1A2330";
+const wordMuted = "4F5E70";
+
+let letterheadImageBufferPromise: Promise<Buffer | null> | null = null;
 
 export type QuoteExportFormat = "pdf" | "word";
 
@@ -178,6 +232,1090 @@ function getExtension(format: QuoteExportFormat) {
   return format === "pdf" ? "pdf" : "docx";
 }
 
+function extractZipEntryBuffer(archive: Buffer, entryName: string) {
+  const endOfCentralDirectorySignature = 0x06054b50;
+  const centralDirectorySignature = 0x02014b50;
+  const localFileHeaderSignature = 0x04034b50;
+  const maxCommentLength = 0xffff;
+  const minimumEndOfCentralDirectoryLength = 22;
+  const searchStart = Math.max(0, archive.length - minimumEndOfCentralDirectoryLength - maxCommentLength);
+
+  let endOfCentralDirectoryOffset = -1;
+  for (let index = archive.length - minimumEndOfCentralDirectoryLength; index >= searchStart; index -= 1) {
+    if (archive.readUInt32LE(index) === endOfCentralDirectorySignature) {
+      endOfCentralDirectoryOffset = index;
+      break;
+    }
+  }
+
+  if (endOfCentralDirectoryOffset < 0) {
+    return null;
+  }
+
+  const centralDirectoryOffset = archive.readUInt32LE(endOfCentralDirectoryOffset + 16);
+  const centralDirectoryEntries = archive.readUInt16LE(endOfCentralDirectoryOffset + 10);
+  let entryOffset = centralDirectoryOffset;
+
+  for (let entryIndex = 0; entryIndex < centralDirectoryEntries; entryIndex += 1) {
+    if (archive.readUInt32LE(entryOffset) !== centralDirectorySignature) {
+      return null;
+    }
+
+    const compressionMethod = archive.readUInt16LE(entryOffset + 10);
+    const compressedSize = archive.readUInt32LE(entryOffset + 20);
+    const fileNameLength = archive.readUInt16LE(entryOffset + 28);
+    const extraFieldLength = archive.readUInt16LE(entryOffset + 30);
+    const fileCommentLength = archive.readUInt16LE(entryOffset + 32);
+    const localHeaderOffset = archive.readUInt32LE(entryOffset + 42);
+    const fileName = archive
+      .subarray(entryOffset + 46, entryOffset + 46 + fileNameLength)
+      .toString("utf8");
+
+    if (fileName === entryName) {
+      if (archive.readUInt32LE(localHeaderOffset) !== localFileHeaderSignature) {
+        return null;
+      }
+
+      const localFileNameLength = archive.readUInt16LE(localHeaderOffset + 26);
+      const localExtraFieldLength = archive.readUInt16LE(localHeaderOffset + 28);
+      const dataStart = localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength;
+      const compressedData = archive.subarray(dataStart, dataStart + compressedSize);
+
+      if (compressionMethod === 0) {
+        return Buffer.from(compressedData);
+      }
+
+      if (compressionMethod === 8) {
+        return inflateRawSync(compressedData);
+      }
+
+      return null;
+    }
+
+    entryOffset += 46 + fileNameLength + extraFieldLength + fileCommentLength;
+  }
+
+  return null;
+}
+
+function getLetterheadImageBuffer() {
+  letterheadImageBufferPromise ??= readFile(templatePath)
+    .then((templateBuffer) => extractZipEntryBuffer(templateBuffer, letterheadImageEntryName))
+    .catch(() => null);
+
+  return letterheadImageBufferPromise;
+}
+
+function addPdfLetterheadPage(doc: PDFKit.PDFDocument, letterheadImage: Buffer | null) {
+  doc.addPage({ size: "LETTER", margin: 0 });
+
+  if (letterheadImage) {
+    doc.image(letterheadImage, 0, 0, { width: pdfPageWidth, height: pdfPageHeight });
+    return;
+  }
+
+  doc
+    .font("Times-Roman")
+    .fontSize(28)
+    .fillColor("#000000")
+    .text("RUSCONI", pdfPageWidth - 170, 34, { width: 130, align: "right" });
+  doc.rect(pdfPageWidth - 37, 38, 20, 24).fill("#0f77bd");
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(6)
+    .fillColor("#ffffff")
+    .text("CON\nSUL\nTING", pdfPageWidth - 34, 40, { width: 14, align: "center", lineGap: -1 });
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(6)
+    .fillColor(pdfNavy)
+    .text("L E G A L  |  T A X  |  A I  S Y S T E M S", 22, pdfPageHeight - 53);
+  doc
+    .font("Helvetica")
+    .fontSize(6.5)
+    .fillColor(pdfText)
+    .text("Yacatas 215, Col. Narvarte Poniente, Alc. Benito Juarez, 03020, CDMX", 22, pdfPageHeight - 34);
+}
+
+function formatExportCurrency(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 2
+  }).format(Number(value || 0));
+}
+
+function getPdfPlainCellText(value: string, fallback: string) {
+  return normalizeText(value) || fallback;
+}
+
+function getPdfAmountCellText(value: string, mode: ExportAmountColumn["mode"], fallback: string) {
+  const text = normalizeText(value);
+  if (!text) {
+    return fallback;
+  }
+
+  if (mode === "FIXED") {
+    const parsed = Number.parseFloat(text.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? formatExportCurrency(parsed) : fallback;
+  }
+
+  return text;
+}
+
+function measurePdfTextHeight(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  width: number,
+  fontSize: number,
+  bold = false,
+  align: PDFKit.Mixins.TextOptions["align"] = "center"
+) {
+  doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
+  return doc.heightOfString(text || " ", { width, align, lineGap: 1 });
+}
+
+function writePdfTextBlock(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  options: {
+    fontSize?: number;
+    bold?: boolean;
+    color?: string;
+    align?: PDFKit.Mixins.TextOptions["align"];
+    lineGap?: number;
+    characterSpacing?: number;
+    spaceAfter?: number;
+  } = {}
+) {
+  const fontSize = options.fontSize ?? 10;
+  const align = options.align ?? "left";
+  const lineGap = options.lineGap ?? 2;
+
+  doc
+    .font(options.bold ? "Helvetica-Bold" : "Helvetica")
+    .fontSize(fontSize)
+    .fillColor(options.color ?? pdfText);
+
+  const height = doc.heightOfString(text, {
+    width,
+    align,
+    lineGap,
+    characterSpacing: options.characterSpacing
+  });
+
+  doc.text(text, x, y, {
+    width,
+    align,
+    lineGap,
+    characterSpacing: options.characterSpacing
+  });
+
+  return y + height + (options.spaceAfter ?? 10);
+}
+
+function drawPdfCell(
+  doc: PDFKit.PDFDocument,
+  options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    text?: string;
+    fill?: string;
+    color?: string;
+    bold?: boolean;
+    fontSize?: number;
+    align?: PDFKit.Mixins.TextOptions["align"];
+    padding?: number;
+  }
+) {
+  const padding = options.padding ?? 6;
+  const fontSize = options.fontSize ?? 8.5;
+  const fill = options.fill ?? "#ffffff";
+  const text = options.text ?? "";
+  const align = options.align ?? "center";
+
+  doc.lineWidth(0.55).strokeColor(pdfBorder).rect(options.x, options.y, options.width, options.height).fillAndStroke(fill, pdfBorder);
+
+  if (!text) {
+    return;
+  }
+
+  doc
+    .font(options.bold ? "Helvetica-Bold" : "Helvetica")
+    .fontSize(fontSize)
+    .fillColor(options.color ?? pdfText);
+
+  const textWidth = Math.max(1, options.width - padding * 2);
+  const textHeight = doc.heightOfString(text, { width: textWidth, align, lineGap: 1 });
+  const textY = options.y + Math.max(3, (options.height - textHeight) / 2);
+  doc.text(text, options.x + padding, textY, {
+    width: textWidth,
+    align,
+    lineGap: 1
+  });
+}
+
+function getPdfTableColumns(payload: QuoteExportPayload) {
+  const amountColumnCount = Math.max(1, payload.amountColumns.length);
+  const widthRatios = amountColumnCount >= 2
+    ? [0.3, 0.15, 0.15, 0.2, 0.2]
+    : [0.34, 0.2, 0.23, 0.23];
+  const widths = widthRatios.map((ratio) => Math.floor(pdfContentWidth * ratio));
+  widths[widths.length - 1] += pdfContentWidth - widths.reduce((sum, width) => sum + width, 0);
+
+  const columns: Array<{ key: string; header: string; width: number; amountIndex?: number }> = [
+    { key: "concept", header: payload.conceptHeader, width: widths[0] ?? 170 }
+  ];
+
+  payload.amountColumns.forEach((column, index) => {
+    columns.push({
+      key: `amount-${index}`,
+      header: column.title,
+      width: widths[index + 1] ?? 80,
+      amountIndex: index
+    });
+  });
+
+  columns.push(
+    { key: "payment", header: payload.paymentHeader, width: widths[amountColumnCount + 1] ?? 110 },
+    { key: "notes", header: payload.notesHeader, width: widths[amountColumnCount + 2] ?? 110 }
+  );
+
+  let x = pdfMarginX;
+  return columns.map((column) => {
+    const positioned = { ...column, x };
+    x += column.width;
+    return positioned;
+  });
+}
+
+function drawPdfTableHeader(
+  doc: PDFKit.PDFDocument,
+  payload: QuoteExportPayload,
+  columns: ReturnType<typeof getPdfTableColumns>,
+  y: number
+) {
+  drawPdfCell(doc, {
+    x: pdfMarginX,
+    y,
+    width: pdfContentWidth,
+    height: 30,
+    text: payload.language === "en" ? "SERVICES" : "SERVICIOS",
+    fill: pdfNavy,
+    color: "#ffffff",
+    bold: true,
+    fontSize: 9.5,
+    padding: 8
+  });
+
+  const headerY = y + 30;
+  columns.forEach((column) => {
+    drawPdfCell(doc, {
+      x: column.x,
+      y: headerY,
+      width: column.width,
+      height: 30,
+      text: column.header.toUpperCase(),
+      fill: pdfBlue,
+      color: pdfNavy,
+      bold: true,
+      fontSize: 7.8,
+      padding: 5
+    });
+  });
+
+  return headerY + 30;
+}
+
+function getCellSpanHeight(rowHeights: number[], rowIndex: number, rowSpan: number) {
+  return rowHeights
+    .slice(rowIndex, Math.min(rowHeights.length, rowIndex + Math.max(1, rowSpan)))
+    .reduce((sum, height) => sum + height, 0);
+}
+
+function getPdfRowHeights(
+  doc: PDFKit.PDFDocument,
+  payload: QuoteExportPayload,
+  columns: ReturnType<typeof getPdfTableColumns>
+) {
+  const rowHeights = payload.tableRows.map((row) => {
+    const conceptColumn = columns[0];
+    const conceptHeight = measurePdfTextHeight(doc, row.conceptDescription, conceptColumn.width - 12, 8.5, false, "left");
+    return Math.max(38, Math.ceil(conceptHeight + 14));
+  });
+
+  const spanRequirements: Array<{ rowIndex: number; rowSpan: number; requiredHeight: number }> = [];
+
+  payload.tableRows.forEach((row, rowIndex) => {
+    row.amountCells.forEach((cell, amountIndex) => {
+      if (cell.hidden) {
+        return;
+      }
+
+      const column = columns.find((candidate) => candidate.key === `amount-${amountIndex}`);
+      const text = getPdfAmountCellText(cell.value, payload.amountColumns[amountIndex]?.mode ?? "FIXED", payload.emptyCellLabel);
+      const requiredHeight = measurePdfTextHeight(doc, text, (column?.width ?? 80) - 12, 8.3, true) + 14;
+
+      if (cell.rowSpan > 1) {
+        spanRequirements.push({ rowIndex, rowSpan: cell.rowSpan, requiredHeight });
+      }
+      else {
+        rowHeights[rowIndex] = Math.max(rowHeights[rowIndex] ?? 38, Math.ceil(requiredHeight));
+      }
+    });
+
+    [
+      { key: "payment", cell: row.paymentMoment },
+      { key: "notes", cell: row.notesCell }
+    ].forEach(({ key, cell }) => {
+      if (cell.hidden) {
+        return;
+      }
+
+      const column = columns.find((candidate) => candidate.key === key);
+      const text = getPdfPlainCellText(cell.value, payload.emptyCellLabel);
+      const requiredHeight = measurePdfTextHeight(doc, text, (column?.width ?? 100) - 12, 8.1) + 14;
+
+      if (cell.rowSpan > 1) {
+        spanRequirements.push({ rowIndex, rowSpan: cell.rowSpan, requiredHeight });
+      }
+      else {
+        rowHeights[rowIndex] = Math.max(rowHeights[rowIndex] ?? 38, Math.ceil(requiredHeight));
+      }
+    });
+  });
+
+  spanRequirements.forEach(({ rowIndex, rowSpan, requiredHeight }) => {
+    const currentHeight = getCellSpanHeight(rowHeights, rowIndex, rowSpan);
+    if (currentHeight >= requiredHeight) {
+      return;
+    }
+
+    const extraByRow = Math.ceil((requiredHeight - currentHeight) / rowSpan);
+    for (let index = rowIndex; index < Math.min(rowHeights.length, rowIndex + rowSpan); index += 1) {
+      rowHeights[index] = (rowHeights[index] ?? 38) + extraByRow;
+    }
+  });
+
+  return rowHeights;
+}
+
+function getPdfRowBlockHeight(payload: QuoteExportPayload, rowHeights: number[], rowIndex: number) {
+  let blockEndIndex = rowIndex;
+
+  for (let index = rowIndex; index <= blockEndIndex && index < payload.tableRows.length; index += 1) {
+    const row = payload.tableRows[index];
+    [
+      ...row.amountCells,
+      row.paymentMoment,
+      row.notesCell
+    ].forEach((cell) => {
+      if (!cell.hidden) {
+        blockEndIndex = Math.max(blockEndIndex, index + Math.max(1, cell.rowSpan) - 1);
+      }
+    });
+  }
+
+  return getCellSpanHeight(rowHeights, rowIndex, blockEndIndex - rowIndex + 1);
+}
+
+function drawPdfQuoteTable(
+  doc: PDFKit.PDFDocument,
+  payload: QuoteExportPayload,
+  y: number,
+  letterheadImage: Buffer | null
+) {
+  const columns = getPdfTableColumns(payload);
+  const rowHeights = getPdfRowHeights(doc, payload, columns);
+  let currentY = drawPdfTableHeader(doc, payload, columns, y);
+
+  payload.tableRows.forEach((row, rowIndex) => {
+    const blockHeight = getPdfRowBlockHeight(payload, rowHeights, rowIndex);
+    if (currentY + blockHeight > pdfContentBottom && currentY > pdfContentTop + 70) {
+      addPdfLetterheadPage(doc, letterheadImage);
+      currentY = drawPdfTableHeader(doc, payload, columns, pdfContentTop);
+    }
+
+    const rowHeight = rowHeights[rowIndex] ?? 38;
+    drawPdfCell(doc, {
+      x: columns[0].x,
+      y: currentY,
+      width: columns[0].width,
+      height: rowHeight,
+      text: getPdfPlainCellText(row.conceptDescription, payload.emptyCellLabel),
+      fill: pdfConceptFill,
+      color: pdfText,
+      fontSize: 8.2,
+      align: "left"
+    });
+
+    row.amountCells.forEach((cell, amountIndex) => {
+      if (cell.hidden) {
+        return;
+      }
+
+      const column = columns.find((candidate) => candidate.key === `amount-${amountIndex}`);
+      if (!column) {
+        return;
+      }
+
+      drawPdfCell(doc, {
+        x: column.x,
+        y: currentY,
+        width: column.width,
+        height: getCellSpanHeight(rowHeights, rowIndex, cell.rowSpan),
+        text: getPdfAmountCellText(cell.value, payload.amountColumns[amountIndex]?.mode ?? "FIXED", payload.emptyCellLabel),
+        fill: "#ffffff",
+        color: pdfNavy,
+        bold: true,
+        fontSize: 8.2
+      });
+    });
+
+    [
+      { key: "payment", cell: row.paymentMoment },
+      { key: "notes", cell: row.notesCell }
+    ].forEach(({ key, cell }) => {
+      if (cell.hidden) {
+        return;
+      }
+
+      const column = columns.find((candidate) => candidate.key === key);
+      if (!column) {
+        return;
+      }
+
+      drawPdfCell(doc, {
+        x: column.x,
+        y: currentY,
+        width: column.width,
+        height: getCellSpanHeight(rowHeights, rowIndex, cell.rowSpan),
+        text: getPdfPlainCellText(cell.value, payload.emptyCellLabel),
+        fill: "#ffffff",
+        color: pdfText,
+        fontSize: 8.1
+      });
+    });
+
+    currentY += rowHeight;
+  });
+
+  const summaryHeight = 26;
+  if (currentY + summaryHeight > pdfContentBottom) {
+    addPdfLetterheadPage(doc, letterheadImage);
+    currentY = drawPdfTableHeader(doc, payload, columns, pdfContentTop);
+  }
+
+  drawPdfCell(doc, {
+    x: columns[0].x,
+    y: currentY,
+    width: columns[0].width,
+    height: summaryHeight,
+    text: payload.totalLabel,
+    fill: pdfPaleBlue,
+    color: pdfNavy,
+    bold: true,
+    fontSize: 8.2
+  });
+
+  payload.amountColumns.forEach((_column, amountIndex) => {
+    const column = columns.find((candidate) => candidate.key === `amount-${amountIndex}`);
+    if (!column) {
+      return;
+    }
+
+    const summary = payload.amountSummaries[amountIndex];
+    drawPdfCell(doc, {
+      x: column.x,
+      y: currentY,
+      width: column.width,
+      height: summaryHeight,
+      text: summary == null ? payload.emptyCellLabel : formatExportCurrency(summary),
+      fill: pdfPaleAmount,
+      color: pdfNavy,
+      bold: true,
+      fontSize: 8.2
+    });
+  });
+
+  ["payment", "notes"].forEach((key) => {
+    const column = columns.find((candidate) => candidate.key === key);
+    if (!column) {
+      return;
+    }
+
+    drawPdfCell(doc, {
+      x: column.x,
+      y: currentY,
+      width: column.width,
+      height: summaryHeight,
+      text: "",
+      fill: "#000000",
+      color: "#ffffff"
+    });
+  });
+
+  return currentY + summaryHeight + 24;
+}
+
+function ensurePdfSpace(
+  doc: PDFKit.PDFDocument,
+  y: number,
+  requiredHeight: number,
+  letterheadImage: Buffer | null
+) {
+  if (y + requiredHeight <= pdfContentBottom) {
+    return y;
+  }
+
+  addPdfLetterheadPage(doc, letterheadImage);
+  return pdfContentTop;
+}
+
+async function renderPdfQuoteDocument(payload: QuoteExportPayload) {
+  const letterheadImage = await getLetterheadImageBuffer();
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const doc = new PDFDocument({ autoFirstPage: false, bufferPages: true, margin: 0, size: "LETTER" });
+
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    addPdfLetterheadPage(doc, letterheadImage);
+
+    let y = 82;
+    y = writePdfTextBlock(doc, payload.formattedDate, pdfPageWidth - 252, y, 200, {
+      align: "right",
+      color: pdfMuted,
+      fontSize: 9,
+      spaceAfter: 5
+    });
+    y = writePdfTextBlock(
+      doc,
+      `${payload.quoteNumberLabel.toUpperCase()}: ${payload.quoteNumber}`,
+      pdfPageWidth - 302,
+      y,
+      250,
+      {
+        align: "right",
+        bold: true,
+        color: pdfNavy,
+        fontSize: 11,
+        spaceAfter: 30
+      }
+    );
+
+    y = Math.max(y, 150);
+    y = writePdfTextBlock(doc, payload.clientName.toUpperCase(), pdfMarginX, y, pdfContentWidth, {
+      bold: true,
+      color: pdfNavy,
+      fontSize: 11.2,
+      spaceAfter: payload.presentText ? 5 : 18
+    });
+
+    if (payload.presentText) {
+      y = writePdfTextBlock(doc, payload.presentText, pdfMarginX, y, pdfContentWidth, {
+        color: pdfText,
+        fontSize: 10,
+        characterSpacing: 1.2,
+        spaceAfter: 18
+      });
+    }
+
+    y = writePdfTextBlock(doc, payload.introText, pdfMarginX, y, pdfContentWidth, {
+      align: "justify",
+      color: pdfText,
+      fontSize: 10,
+      lineGap: 2,
+      spaceAfter: 18
+    });
+
+    y = drawPdfQuoteTable(doc, payload, y, letterheadImage);
+
+    const disclaimerHeight = measurePdfTextHeight(doc, payload.disclaimerText, pdfContentWidth, 9.6, false, "justify") + 14;
+    y = ensurePdfSpace(doc, y, disclaimerHeight, letterheadImage);
+    y = writePdfTextBlock(doc, payload.disclaimerText, pdfMarginX, y, pdfContentWidth, {
+      align: "justify",
+      color: pdfText,
+      fontSize: 9.6,
+      lineGap: 2,
+      spaceAfter: 14
+    });
+
+    const closingHeight = measurePdfTextHeight(doc, payload.closingText, pdfContentWidth, 9.6, false, "justify") + 18;
+    y = ensurePdfSpace(doc, y, closingHeight, letterheadImage);
+    y = writePdfTextBlock(doc, payload.closingText, pdfMarginX, y, pdfContentWidth, {
+      align: "justify",
+      color: pdfText,
+      fontSize: 9.6,
+      lineGap: 2,
+      spaceAfter: 22
+    });
+
+    y = ensurePdfSpace(doc, y, 48, letterheadImage);
+    y = writePdfTextBlock(doc, payload.signatureText, pdfMarginX, y, pdfContentWidth, {
+      align: "center",
+      color: pdfText,
+      fontSize: 10,
+      spaceAfter: 10
+    });
+    writePdfTextBlock(doc, payload.signatureFirm, pdfMarginX, y, pdfContentWidth, {
+      align: "center",
+      bold: true,
+      color: pdfNavy,
+      fontSize: 10,
+      spaceAfter: 0
+    });
+
+    const pageRange = doc.bufferedPageRange();
+    for (let pageIndex = pageRange.start; pageIndex < pageRange.start + pageRange.count; pageIndex += 1) {
+      doc.switchToPage(pageIndex);
+      const currentPage = pageIndex - pageRange.start + 1;
+      const label = payload.language === "en"
+        ? `${currentPage} of ${pageRange.count}`
+        : `${currentPage} de ${pageRange.count}`;
+      doc
+        .font("Helvetica")
+        .fontSize(7.5)
+        .fillColor(pdfMuted)
+        .text(label, 0, pdfPageHeight - 58, { width: pdfPageWidth, align: "center" });
+    }
+
+    doc.end();
+  });
+}
+
+function createWordParagraph(
+  text: string,
+  options: {
+    align?: (typeof AlignmentType)[keyof typeof AlignmentType];
+    bold?: boolean;
+    color?: string;
+    size?: number;
+    spacingAfter?: number;
+    spacingBefore?: number;
+    characterSpacing?: number;
+  } = {}
+) {
+  return new Paragraph({
+    alignment: options.align ?? AlignmentType.START,
+    spacing: {
+      after: options.spacingAfter ?? 160,
+      before: options.spacingBefore ?? 0
+    },
+    children: [
+      new TextRun({
+        text,
+        bold: options.bold,
+        color: options.color ?? wordText,
+        size: options.size ?? 20,
+        font: "Aptos",
+        characterSpacing: options.characterSpacing
+      })
+    ]
+  });
+}
+
+function createWordFooter(payload: QuoteExportPayload) {
+  return new Footer({
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({ children: [PageNumber.CURRENT], color: wordMuted, size: 15, font: "Aptos" }),
+          new TextRun({ text: payload.language === "en" ? " of " : " de ", color: wordMuted, size: 15, font: "Aptos" }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], color: wordMuted, size: 15, font: "Aptos" })
+        ]
+      })
+    ]
+  });
+}
+
+function createWordHeader(letterheadImage: Buffer | null) {
+  if (!letterheadImage) {
+    return new Header({
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.END,
+          children: [
+            new TextRun({ text: "RUSCONI", font: "Times New Roman", size: 48, color: "000000" }),
+            new TextRun({ text: " CONSULTING", font: "Aptos", size: 10, color: "0F77BD", bold: true })
+          ]
+        })
+      ]
+    });
+  }
+
+  return new Header({
+    children: [
+      new Paragraph({
+        spacing: { after: 0 },
+        children: [
+          new ImageRun({
+            type: "jpg",
+            data: letterheadImage,
+            transformation: { width: 816, height: 1056 },
+            floating: {
+              horizontalPosition: {
+                relative: HorizontalPositionRelativeFrom.PAGE,
+                offset: 0
+              },
+              verticalPosition: {
+                relative: VerticalPositionRelativeFrom.PAGE,
+                offset: 0
+              },
+              behindDocument: true,
+              allowOverlap: true,
+              lockAnchor: true,
+              wrap: { type: TextWrappingType.NONE }
+            }
+          })
+        ]
+      })
+    ]
+  });
+}
+
+function createWordBorders(color = wordBorder, size = 6) {
+  const border = { style: BorderStyle.SINGLE, color, size };
+  return {
+    top: border,
+    bottom: border,
+    left: border,
+    right: border,
+    insideHorizontal: border,
+    insideVertical: border
+  };
+}
+
+function createWordCell(
+  text: string,
+  options: {
+    width?: number;
+    fill?: string;
+    color?: string;
+    bold?: boolean;
+    size?: number;
+    align?: (typeof AlignmentType)[keyof typeof AlignmentType];
+    columnSpan?: number;
+    verticalMerge?: (typeof VerticalMergeType)[keyof typeof VerticalMergeType];
+  } = {}
+) {
+  return new TableCell({
+    width: options.width ? { size: options.width, type: WidthType.DXA } : undefined,
+    columnSpan: options.columnSpan,
+    verticalMerge: options.verticalMerge,
+    verticalAlign: VerticalAlignTable.CENTER,
+    margins: {
+      top: 90,
+      bottom: 90,
+      left: 110,
+      right: 110
+    },
+    shading: {
+      type: ShadingType.CLEAR,
+      fill: options.fill ?? "FFFFFF",
+      color: "auto"
+    },
+    borders: createWordBorders(),
+    children: [
+      new Paragraph({
+        alignment: options.align ?? AlignmentType.CENTER,
+        spacing: { before: 0, after: 0 },
+        children: [
+          new TextRun({
+            text,
+            bold: options.bold,
+            color: options.color ?? wordText,
+            size: options.size ?? 17,
+            font: "Aptos"
+          })
+        ]
+      })
+    ]
+  });
+}
+
+function getWordTableColumns(payload: QuoteExportPayload) {
+  const amountColumnCount = Math.max(1, payload.amountColumns.length);
+  const widthRatios = amountColumnCount >= 2
+    ? [0.3, 0.15, 0.15, 0.2, 0.2]
+    : [0.34, 0.2, 0.23, 0.23];
+  const widths = widthRatios.map((ratio) => Math.floor(wordContentWidthTwip * ratio));
+  widths[widths.length - 1] += wordContentWidthTwip - widths.reduce((sum, width) => sum + width, 0);
+
+  return widths;
+}
+
+function createWordQuoteTable(payload: QuoteExportPayload) {
+  const widths = getWordTableColumns(payload);
+  const columnCount = 1 + payload.amountColumns.length + 2;
+  const rows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      height: { value: 440, rule: HeightRule.ATLEAST },
+      children: [
+        createWordCell(payload.language === "en" ? "SERVICES" : "SERVICIOS", {
+          columnSpan: columnCount,
+          fill: wordTitleFill,
+          color: "FFFFFF",
+          bold: true,
+          size: 19
+        })
+      ]
+    }),
+    new TableRow({
+      tableHeader: true,
+      height: { value: 420, rule: HeightRule.ATLEAST },
+      children: [
+        createWordCell(payload.conceptHeader.toUpperCase(), {
+          width: widths[0],
+          fill: wordHeaderFill,
+          color: wordNavy,
+          bold: true,
+          size: 16
+        }),
+        ...payload.amountColumns.map((column, index) =>
+          createWordCell(column.title.toUpperCase(), {
+            width: widths[index + 1],
+            fill: wordHeaderFill,
+            color: wordNavy,
+            bold: true,
+            size: 16
+          })
+        ),
+        createWordCell(payload.paymentHeader.toUpperCase(), {
+          width: widths[payload.amountColumns.length + 1],
+          fill: wordHeaderFill,
+          color: wordNavy,
+          bold: true,
+          size: 16
+        }),
+        createWordCell(payload.notesHeader.toUpperCase(), {
+          width: widths[payload.amountColumns.length + 2],
+          fill: wordHeaderFill,
+          color: wordNavy,
+          bold: true,
+          size: 16
+        })
+      ]
+    })
+  ];
+
+  payload.tableRows.forEach((row) => {
+    rows.push(
+      new TableRow({
+        cantSplit: true,
+        height: { value: 520, rule: HeightRule.ATLEAST },
+        children: [
+          createWordCell(getPdfPlainCellText(row.conceptDescription, payload.emptyCellLabel), {
+            width: widths[0],
+            fill: wordConceptFill,
+            align: AlignmentType.START,
+            size: 16
+          }),
+          ...row.amountCells.map((cell, amountIndex) =>
+            createWordCell(
+              cell.hidden
+                ? ""
+                : getPdfAmountCellText(
+                    cell.value,
+                    payload.amountColumns[amountIndex]?.mode ?? "FIXED",
+                    payload.emptyCellLabel
+                  ),
+              {
+                width: widths[amountIndex + 1],
+                bold: !cell.hidden,
+                color: wordNavy,
+                size: 16,
+                verticalMerge: cell.hidden
+                  ? VerticalMergeType.CONTINUE
+                  : cell.rowSpan > 1
+                    ? VerticalMergeType.RESTART
+                    : undefined
+              }
+            )
+          ),
+          createWordCell(row.paymentMoment.hidden ? "" : getPdfPlainCellText(row.paymentMoment.value, payload.emptyCellLabel), {
+            width: widths[payload.amountColumns.length + 1],
+            size: 16,
+            verticalMerge: row.paymentMoment.hidden
+              ? VerticalMergeType.CONTINUE
+              : row.paymentMoment.rowSpan > 1
+                ? VerticalMergeType.RESTART
+                : undefined
+          }),
+          createWordCell(row.notesCell.hidden ? "" : getPdfPlainCellText(row.notesCell.value, payload.emptyCellLabel), {
+            width: widths[payload.amountColumns.length + 2],
+            size: 16,
+            verticalMerge: row.notesCell.hidden
+              ? VerticalMergeType.CONTINUE
+              : row.notesCell.rowSpan > 1
+                ? VerticalMergeType.RESTART
+                : undefined
+          })
+        ]
+      })
+    );
+  });
+
+  rows.push(
+    new TableRow({
+      cantSplit: true,
+      height: { value: 420, rule: HeightRule.ATLEAST },
+      children: [
+        createWordCell(payload.totalLabel, {
+          width: widths[0],
+          fill: wordTotalLabelFill,
+          color: wordNavy,
+          bold: true,
+          size: 16
+        }),
+        ...payload.amountColumns.map((_column, amountIndex) =>
+          createWordCell(
+            payload.amountSummaries[amountIndex] == null
+              ? payload.emptyCellLabel
+              : formatExportCurrency(payload.amountSummaries[amountIndex] ?? 0),
+            {
+              width: widths[amountIndex + 1],
+              fill: wordTotalAmountFill,
+              color: wordNavy,
+              bold: true,
+              size: 16
+            }
+          )
+        ),
+        createWordCell("", {
+          width: widths[payload.amountColumns.length + 1],
+          fill: "000000"
+        }),
+        createWordCell("", {
+          width: widths[payload.amountColumns.length + 2],
+          fill: "000000"
+        })
+      ]
+    })
+  );
+
+  return new Table({
+    rows,
+    width: { size: wordContentWidthTwip, type: WidthType.DXA },
+    columnWidths: widths,
+    layout: TableLayoutType.FIXED,
+    alignment: AlignmentType.CENTER,
+    borders: createWordBorders()
+  });
+}
+
+async function renderWordQuoteDocument(payload: QuoteExportPayload) {
+  const letterheadImage = await getLetterheadImageBuffer();
+  const children = [
+    createWordParagraph(payload.formattedDate, {
+      align: AlignmentType.END,
+      color: wordMuted,
+      size: 19,
+      spacingAfter: 80
+    }),
+    createWordParagraph(`${payload.quoteNumberLabel.toUpperCase()}: ${payload.quoteNumber}`, {
+      align: AlignmentType.END,
+      bold: true,
+      color: wordNavy,
+      size: 23,
+      spacingAfter: 460
+    }),
+    createWordParagraph(payload.clientName.toUpperCase(), {
+      bold: true,
+      color: wordNavy,
+      size: 23,
+      spacingAfter: payload.presentText ? 70 : 260,
+      characterSpacing: 4
+    }),
+    ...(payload.presentText
+      ? [
+          createWordParagraph(payload.presentText, {
+            size: 21,
+            spacingAfter: 280,
+            characterSpacing: 26
+          })
+        ]
+      : []),
+    createWordParagraph(payload.introText, {
+      align: AlignmentType.BOTH,
+      size: 21,
+      spacingAfter: 280
+    }),
+    createWordQuoteTable(payload),
+    createWordParagraph(payload.disclaimerText, {
+      align: AlignmentType.BOTH,
+      size: 20,
+      spacingBefore: 380,
+      spacingAfter: 220
+    }),
+    createWordParagraph(payload.closingText, {
+      align: AlignmentType.BOTH,
+      size: 20,
+      spacingAfter: 380
+    }),
+    createWordParagraph(payload.signatureText, {
+      align: AlignmentType.CENTER,
+      size: 21,
+      spacingAfter: 140
+    }),
+    createWordParagraph(payload.signatureFirm, {
+      align: AlignmentType.CENTER,
+      bold: true,
+      color: wordNavy,
+      size: 21,
+      spacingAfter: 0
+    })
+  ];
+
+  const doc = new DocxDocument({
+    title: payload.quoteNumber,
+    creator: "Rusconi Consulting",
+    description: `Cotizacion ${payload.quoteNumber}`,
+    features: {
+      updateFields: true
+    },
+    sections: [
+      {
+        headers: {
+          default: createWordHeader(letterheadImage)
+        },
+        footers: {
+          default: createWordFooter(payload)
+        },
+        properties: {
+          page: {
+            size: {
+              width: wordPageWidthTwip,
+              height: wordPageHeightTwip
+            },
+            margin: {
+              top: wordContentMarginTopTwip,
+              right: wordContentMarginXTwip,
+              bottom: wordContentMarginBottomTwip,
+              left: wordContentMarginXTwip,
+              header: 0,
+              footer: convertInchesToTwip(0.32)
+            }
+          }
+        },
+        children
+      }
+    ]
+  });
+
+  return Packer.toBuffer(doc);
+}
+
 function buildLegacyExportTable(quote: Quote, language: Quote["language"]) {
   const amountColumns: QuoteTemplateAmountColumn[] = [
     { id: "primary", title: getDefaultAmountColumnTitle(0, language), enabled: true, mode: "FIXED" },
@@ -297,57 +1435,16 @@ export async function exportQuoteDocument(
   quote: Quote,
   format: QuoteExportFormat
 ): Promise<QuoteExportResult> {
-  if (process.platform !== "win32") {
-    throw new AppError(
-      500,
-      "QUOTE_EXPORT_UNAVAILABLE",
-      "La exportacion de cotizaciones con hoja membretada solo esta disponible en Windows."
-    );
-  }
-
-  await access(exportScriptPath, fsConstants.F_OK);
-  await access(templatePath, fsConstants.F_OK);
-
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "sige-quote-export-"));
-  const payloadPath = path.join(tempDir, "quote.json");
-  const wordOutputPath = path.join(tempDir, `${quote.quoteNumber}.docx`);
-  const pdfOutputPath = path.join(tempDir, `${quote.quoteNumber}.pdf`);
+  const filename = `${sanitizeFileSegment(quote.quoteNumber)}_${sanitizeFileSegment(
+    quote.clientName.toUpperCase()
+  )}.${getExtension(format)}`;
+  const payload = buildPayload(quote);
 
   try {
-    await writeFile(payloadPath, JSON.stringify(buildPayload(quote), null, 2), "utf8");
-
-    const args = [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      exportScriptPath,
-      "-TemplatePath",
-      templatePath,
-      "-QuoteJsonPath",
-      payloadPath,
-      "-WordOutputPath",
-      wordOutputPath
-    ];
-
-    if (format === "pdf") {
-      args.push("-PdfOutputPath", pdfOutputPath);
-    }
-
-    await execFileAsync("powershell.exe", args, {
-      timeout: 180_000,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024
-    });
-
-    const outputPath = format === "pdf" ? pdfOutputPath : wordOutputPath;
-    const buffer = await readFile(outputPath);
-    const filename = `${sanitizeFileSegment(quote.quoteNumber)}_${sanitizeFileSegment(
-      quote.clientName.toUpperCase()
-    )}.${getExtension(format)}`;
-
     return {
-      buffer,
+      buffer: format === "pdf"
+        ? await renderPdfQuoteDocument(payload)
+        : await renderWordQuoteDocument(payload),
       contentType: getContentType(format),
       filename
     };
@@ -357,7 +1454,5 @@ export async function exportQuoteDocument(
       : "No se pudo generar el archivo de la cotizacion.";
 
     throw new AppError(500, "QUOTE_EXPORT_FAILED", message);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
   }
 }
