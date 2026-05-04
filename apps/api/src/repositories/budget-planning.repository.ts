@@ -34,6 +34,16 @@ function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
 }
 
+function calculateExpectedIncomeFromFinance(records: Array<{
+  conceptFeesMxn: Prisma.Decimal;
+  previousPaymentsMxn: Prisma.Decimal;
+}>) {
+  return records.reduce(
+    (sum, record) => sum + Number(record.conceptFeesMxn || 0) - Number(record.previousPaymentsMxn || 0),
+    0
+  );
+}
+
 function getMonthKey(year: number, month: number) {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
@@ -73,7 +83,10 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
     ]);
 
     return {
-      plan,
+      plan: {
+        ...plan,
+        expectedIncomeMxn: calculateExpectedIncomeFromFinance(financeRecords)
+      },
       financeRecords: financeRecords.map(mapFinanceRecord),
       generalExpenses: generalExpenses.map(mapGeneralExpense)
     };
@@ -110,7 +123,18 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       update: data
     });
 
-    return mapBudgetPlan(plan);
+    const financeRecords = await this.prisma.financeRecord.findMany({
+      where: { year, month },
+      select: {
+        conceptFeesMxn: true,
+        previousPaymentsMxn: true
+      }
+    });
+
+    return {
+      ...mapBudgetPlan(plan),
+      expectedIncomeMxn: calculateExpectedIncomeFromFinance(financeRecords)
+    };
   }
 
   public async listSnapshotsBefore(year: number, month: number) {
@@ -209,7 +233,7 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       })
     ]);
 
-    const expectedIncomeMxn = Number(plan?.expectedIncomeMxn ?? 0);
+    const expectedIncomeMxn = calculateExpectedIncomeFromFinance(financeRecords);
     const expectedExpenseMxn = Number(plan?.expectedExpenseMxn ?? 0);
     const actualIncomeMxn = financeRecords.reduce(
       (sum, record) =>

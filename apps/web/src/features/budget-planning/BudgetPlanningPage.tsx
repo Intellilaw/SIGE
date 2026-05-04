@@ -25,7 +25,7 @@ interface BudgetPlanningOverview {
   generalExpenses: GeneralExpense[];
 }
 
-type BudgetPlanPatch = Partial<Pick<BudgetPlan, "expectedIncomeMxn" | "expectedExpenseMxn" | "notes">>;
+type BudgetPlanPatch = Partial<Pick<BudgetPlan, "expectedExpenseMxn" | "notes">>;
 type BudgetPlanningTab = "current" | "snapshots";
 
 function toErrorMessage(error: unknown) {
@@ -73,8 +73,8 @@ export function BudgetPlanningPage() {
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [generalExpenses, setGeneralExpenses] = useState<GeneralExpense[]>([]);
   const [snapshots, setSnapshots] = useState<BudgetPlanSnapshot[]>([]);
-  const [draftExpectedIncome, setDraftExpectedIncome] = useState("0");
   const [draftExpectedExpense, setDraftExpectedExpense] = useState("0");
+  const [editingExpectedExpense, setEditingExpectedExpense] = useState(false);
   const [draftNotes, setDraftNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
@@ -89,7 +89,6 @@ export function BudgetPlanningPage() {
       setPlan(overview.plan);
       setFinanceRecords(overview.financeRecords);
       setGeneralExpenses(overview.generalExpenses);
-      setDraftExpectedIncome(formatEditableNumber(overview.plan.expectedIncomeMxn));
       setDraftExpectedExpense(formatEditableNumber(overview.plan.expectedExpenseMxn));
       setDraftNotes(overview.plan.notes ?? "");
     } catch (error) {
@@ -126,7 +125,6 @@ export function BudgetPlanningPage() {
     try {
       const updated = await apiPatch<BudgetPlan>(`/budget-planning?year=${selectedYear}&month=${selectedMonth}`, patch);
       setPlan(updated);
-      setDraftExpectedIncome(formatEditableNumber(updated.expectedIncomeMxn));
       setDraftExpectedExpense(formatEditableNumber(updated.expectedExpenseMxn));
       setDraftNotes(updated.notes ?? "");
     } catch (error) {
@@ -217,17 +215,10 @@ export function BudgetPlanningPage() {
                 <strong>{Math.round(totals.incomeProgress)}%</strong>
               </div>
               <div className="budget-pair-grid">
-                <label className="form-field budget-expected-field">
+                <div className="budget-reported-field budget-readonly-field">
                   <span>Esperados</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={draftExpectedIncome}
-                    onChange={(event) => setDraftExpectedIncome(event.target.value)}
-                    onBlur={() => void persistPlanPatch({ expectedIncomeMxn: Math.max(0, Number(draftExpectedIncome || 0)) })}
-                  />
-                </label>
+                  <strong>{formatCurrency(totals.expectedIncomeMxn)}</strong>
+                </div>
                 <div className="budget-reported-field">
                   <span>Reportados</span>
                   <strong>{formatCurrency(totals.actualIncomeMxn)}</strong>
@@ -250,12 +241,15 @@ export function BudgetPlanningPage() {
                 <label className="form-field budget-expected-field">
                   <span>Esperados</span>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={draftExpectedExpense}
+                    type="text"
+                    inputMode="decimal"
+                    value={editingExpectedExpense ? draftExpectedExpense : formatCurrency(Number(draftExpectedExpense || 0))}
+                    onFocus={() => setEditingExpectedExpense(true)}
                     onChange={(event) => setDraftExpectedExpense(event.target.value)}
-                    onBlur={() => void persistPlanPatch({ expectedExpenseMxn: Math.max(0, Number(draftExpectedExpense || 0)) })}
+                    onBlur={() => {
+                      setEditingExpectedExpense(false);
+                      void persistPlanPatch({ expectedExpenseMxn: Math.max(0, Number(draftExpectedExpense || 0)) });
+                    }}
                   />
                 </label>
                 <div className="budget-reported-field">

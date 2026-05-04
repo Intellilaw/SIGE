@@ -3,6 +3,55 @@ import { useEffect, useMemo, useState } from "react";
 import { TEAM_OPTIONS } from "@sige/contracts";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+const MONTHLY_COLUMN_WIDTHS = [
+    "56px",
+    "120px",
+    "240px",
+    "140px",
+    "110px",
+    "360px",
+    "170px",
+    "220px",
+    "150px",
+    "300px",
+    "170px",
+    "170px",
+    "150px",
+    "170px",
+    "280px",
+    "180px",
+    "180px",
+    "160px",
+    "170px",
+    "190px",
+    "220px",
+    "190px",
+    "220px",
+    "220px",
+    "96px",
+    "96px",
+    "96px",
+    "96px",
+    "96px",
+    "100px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "230px",
+    "190px",
+    "190px",
+    "180px",
+    "220px",
+    "110px",
+    "320px",
+    "110px"
+];
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
         return error.message;
@@ -168,6 +217,7 @@ function MonthSummaryCards({ records }) {
             return {
                 income: acc.income + stats.totalPaidMxn,
                 expenses: acc.expenses + stats.totalExpensesMxn,
+                remainingExpectedThisMonth: acc.remainingExpectedThisMonth + stats.remainingMxn,
                 netBeforeCommissions: acc.netBeforeCommissions + stats.netFeesMxn,
                 commissions: acc.commissions +
                     stats.clientCommissionMxn +
@@ -187,6 +237,7 @@ function MonthSummaryCards({ records }) {
         }, {
             income: 0,
             expenses: 0,
+            remainingExpectedThisMonth: 0,
             netBeforeCommissions: 0,
             commissions: 0,
             netAfterCommissions: 0
@@ -194,7 +245,7 @@ function MonthSummaryCards({ records }) {
     }, [records]);
     const cards = [
         { label: "Ingresos cobrados", value: totals.income, accent: "finance-card-green" },
-        { label: "Gastos totales", value: totals.expenses, accent: "finance-card-red" },
+        { label: "Remanente esperado este mes", value: totals.remainingExpectedThisMonth, accent: "finance-card-red" },
         { label: "Neto antes comisiones", value: totals.netBeforeCommissions, accent: "finance-card-blue" },
         { label: "Comisiones totales", value: totals.commissions, accent: "finance-card-orange" },
         { label: "Neto despues comisiones", value: totals.netAfterCommissions, accent: "finance-card-rose" }
@@ -578,7 +629,7 @@ export function FinancesPage() {
             financeCommissionMxn: 0,
             netProfitMxn: 0
         });
-        return (_jsx("div", { className: "finance-table-shell", children: _jsxs("table", { className: "finance-table finance-table-monthly", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: _jsx("input", { type: "checkbox", checked: records.length > 0 && selectedIds.size === records.length, onChange: toggleAllRecords }) }), _jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Contrato firmado" }), _jsx("th", { children: "Equipo Responsable" }), _jsx("th", { children: "Total Asunto" }), _jsx("th", { children: "Conceptos trabajando" }), _jsx("th", { children: "Honorarios conceptos" }), _jsx("th", { children: "Pagos previos" }), _jsx("th", { children: "Remanente" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Detalle Fecha" }), _jsx("th", { children: "Pagado este mes" }), _jsx("th", { children: "Fecha Pago Real" }), _jsx("th", { children: "Adeudado hoy" }), _jsx("th", { children: "Honorarios netos" }), _jsx("th", { children: "Comision cliente 20%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Comision cierre 10%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Ingresos menos 20% y 10%" }), _jsx("th", { children: "% Litigio" }), _jsx("th", { children: "% Corp-Lab" }), _jsx("th", { children: "% Convenios" }), _jsx("th", { children: "% Der Fin" }), _jsx("th", { children: "% Compl. Fis." }), _jsx("th", { children: "SUM %" }), _jsx("th", { children: "COM. EJEC. LITIGIO (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. LITIGIO (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (LIDER 10%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (COLAB 1%)" }), _jsx("th", { children: "Com. Com. Cliente (1% Neto)" }), _jsx("th", { children: "Com. Finanzas (1% Neto)" }), _jsx("th", { children: "Utilidad neta" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" }), _jsx("th", { children: "Accion" })] }) }), _jsxs("tbody", { children: [records.map((record) => {
+        return (_jsx("div", { className: "finance-table-shell", children: _jsxs("table", { className: "finance-table finance-table-monthly", children: [_jsx("colgroup", { children: MONTHLY_COLUMN_WIDTHS.map((width, index) => (_jsx("col", { style: { width } }, `finance-monthly-col-${index}`))) }), _jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: _jsx("input", { type: "checkbox", checked: records.length > 0 && selectedIds.size === records.length, onChange: toggleAllRecords }) }), _jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Contrato firmado" }), _jsx("th", { children: "Equipo Responsable" }), _jsx("th", { children: "Total Asunto" }), _jsx("th", { children: "Conceptos trabajando" }), _jsx("th", { children: "Honorarios conceptos" }), _jsx("th", { children: "Pagos previos" }), _jsx("th", { children: "Remanente esperado este mes" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Detalle Fecha" }), _jsx("th", { children: "Pagado este mes" }), _jsx("th", { children: "Fecha Pago Real" }), _jsx("th", { children: "Adeudado hoy" }), _jsx("th", { children: "Honorarios netos" }), _jsx("th", { children: "Comision cliente 20%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Comision cierre 10%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Ingresos menos 20% y 10%" }), _jsx("th", { children: "% Litigio" }), _jsx("th", { children: "% Corp-Lab" }), _jsx("th", { children: "% Convenios" }), _jsx("th", { children: "% Der Fin" }), _jsx("th", { children: "% Compl. Fis." }), _jsx("th", { children: "SUM %" }), _jsx("th", { children: "COM. EJEC. LITIGIO (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. LITIGIO (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (LIDER 10%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (COLAB 1%)" }), _jsx("th", { children: "Com. Com. Cliente (1% Neto)" }), _jsx("th", { children: "Com. Finanzas (1% Neto)" }), _jsx("th", { children: "Utilidad neta" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" }), _jsx("th", { children: "Accion" })] }) }), _jsxs("tbody", { children: [records.map((record) => {
                                 const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
                                 const isSelected = selectedIds.has(record.id);
                                 const rowClassName = `${shouldHighlight ? "finance-row-danger" : ""} ${isSelected ? "finance-row-selected" : ""}`.trim();

@@ -52,6 +52,56 @@ type CopyResult = {
   copied: number;
 };
 
+const MONTHLY_COLUMN_WIDTHS = [
+  "56px",
+  "120px",
+  "240px",
+  "140px",
+  "110px",
+  "360px",
+  "170px",
+  "220px",
+  "150px",
+  "300px",
+  "170px",
+  "170px",
+  "150px",
+  "170px",
+  "280px",
+  "180px",
+  "180px",
+  "160px",
+  "170px",
+  "190px",
+  "220px",
+  "190px",
+  "220px",
+  "220px",
+  "96px",
+  "96px",
+  "96px",
+  "96px",
+  "96px",
+  "100px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "230px",
+  "190px",
+  "190px",
+  "180px",
+  "220px",
+  "110px",
+  "320px",
+  "110px"
+] as const;
+
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -239,6 +289,7 @@ function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
         return {
           income: acc.income + stats.totalPaidMxn,
           expenses: acc.expenses + stats.totalExpensesMxn,
+          remainingExpectedThisMonth: acc.remainingExpectedThisMonth + stats.remainingMxn,
           netBeforeCommissions: acc.netBeforeCommissions + stats.netFeesMxn,
           commissions:
             acc.commissions +
@@ -260,6 +311,7 @@ function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
       {
         income: 0,
         expenses: 0,
+        remainingExpectedThisMonth: 0,
         netBeforeCommissions: 0,
         commissions: 0,
         netAfterCommissions: 0
@@ -269,7 +321,7 @@ function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
 
   const cards = [
     { label: "Ingresos cobrados", value: totals.income, accent: "finance-card-green" },
-    { label: "Gastos totales", value: totals.expenses, accent: "finance-card-red" },
+    { label: "Remanente esperado este mes", value: totals.remainingExpectedThisMonth, accent: "finance-card-red" },
     { label: "Neto antes comisiones", value: totals.netBeforeCommissions, accent: "finance-card-blue" },
     { label: "Comisiones totales", value: totals.commissions, accent: "finance-card-orange" },
     { label: "Neto despues comisiones", value: totals.netAfterCommissions, accent: "finance-card-rose" }
@@ -729,6 +781,11 @@ export function FinancesPage() {
     return (
       <div className="finance-table-shell">
         <table className="finance-table finance-table-monthly">
+          <colgroup>
+            {MONTHLY_COLUMN_WIDTHS.map((width, index) => (
+              <col key={`finance-monthly-col-${index}`} style={{ width }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               <th><input type="checkbox" checked={records.length > 0 && selectedIds.size === records.length} onChange={toggleAllRecords} /></th>
@@ -743,7 +800,7 @@ export function FinancesPage() {
               <th>Conceptos trabajando</th>
               <th>Honorarios conceptos</th>
               <th>Pagos previos</th>
-              <th>Remanente</th>
+              <th>Remanente esperado este mes</th>
               <th>Fecha de proximo pago</th>
               <th>Detalle Fecha</th>
               <th>Pagado este mes</th>

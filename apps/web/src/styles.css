@@ -3801,7 +3801,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 4200px; font-size: 0.82rem; }
+.finance-table-monthly { min-width: 8600px; font-size: 0.82rem; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
 .finance-table thead th,
@@ -3825,6 +3825,10 @@ textarea {
   padding: 8px 10px;
   border-top: 1px solid rgba(31, 41, 51, 0.08);
   vertical-align: top;
+}
+
+.finance-table-monthly thead th {
+  line-height: 1.4;
 }
 
 .finance-input {
