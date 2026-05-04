@@ -6,10 +6,14 @@ import type {
   CommissionReceiver,
   CommissionSnapshot,
   CreateManagedUserInput,
+  DailyDocumentAssignment,
+  DailyDocumentTemplateId,
   DashboardSummary,
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  InternalContract,
+  InternalContractCollaborator,
   Lead,
   ManagedUser,
   Matter,
@@ -100,6 +104,50 @@ export interface ClientsRepository {
   create(name: string): Promise<Client>;
   update(clientId: string, name: string): Promise<Client>;
   delete(clientId: string): Promise<void>;
+}
+
+export interface InternalContractWriteRecord {
+  contractNumber: string;
+  contractType: InternalContract["contractType"];
+  documentKind: InternalContract["documentKind"];
+  clientId?: string | null;
+  collaboratorName?: string | null;
+  paymentMilestones: InternalContract["paymentMilestones"];
+  notes?: string | null;
+  originalFileName?: string | null;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  fileContent?: Buffer | null;
+}
+
+export interface InternalContractDocumentRecord {
+  contractNumber: string;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileContent: Buffer;
+}
+
+export interface InternalContractsRepository {
+  list(): Promise<InternalContract[]>;
+  create(payload: InternalContractWriteRecord): Promise<InternalContract>;
+  delete(contractId: string): Promise<void>;
+  findDocument(contractId: string): Promise<InternalContractDocumentRecord | null>;
+  listCollaborators(): Promise<InternalContractCollaborator[]>;
+}
+
+export interface DailyDocumentAssignmentWriteRecord {
+  templateId: DailyDocumentTemplateId;
+  templateTitle: string;
+  title: string;
+  clientId: string;
+  values: Record<string, string>;
+}
+
+export interface DailyDocumentsRepository {
+  list(): Promise<DailyDocumentAssignment[]>;
+  create(payload: DailyDocumentAssignmentWriteRecord): Promise<DailyDocumentAssignment>;
+  update(documentId: string, payload: DailyDocumentAssignmentWriteRecord): Promise<DailyDocumentAssignment>;
+  delete(documentId: string): Promise<void>;
 }
 
 export interface QuotesRepository {

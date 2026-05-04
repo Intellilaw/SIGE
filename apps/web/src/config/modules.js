@@ -154,6 +154,17 @@ export const appModules = [
         coverage: ["Seguimiento de escritos", "Control documental operativo"]
     },
     {
+        id: "internal-contracts",
+        path: "/app/internal-contracts",
+        label: "Administraci\u00f3n de contratos internos",
+        shortLabel: "Contratos",
+        icon: "\u{1F4DC}",
+        description: "Carga y control interno de contratos profesionales, laborales y addenda.",
+        phase: "Operativo",
+        available: true,
+        coverage: ["Contratos por cliente", "Contratos laborales por colaborador", "Hitos de pago visibles"]
+    },
+    {
         id: "labor-file",
         path: "/app/labor-file",
         label: "Expediente laboral",
@@ -163,6 +174,17 @@ export const appModules = [
         phase: "En preparacion",
         available: false,
         coverage: ["Historial laboral", "Control documental por colaborador"]
+    },
+    {
+        id: "daily-documents",
+        path: "/app/daily-documents",
+        label: "Documentos de uso diario",
+        shortLabel: "Uso diario",
+        icon: "\u{1F4DD}",
+        description: "Generacion rapida de documentos operativos frecuentes para uso interno y atencion diaria.",
+        phase: "Operativo",
+        available: true,
+        coverage: ["Cartas poder", "Recibos", "Entregas recepcion", "Vista previa y descarga"]
     },
     {
         id: "third-party-documents",

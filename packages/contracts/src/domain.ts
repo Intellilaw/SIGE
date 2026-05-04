@@ -41,6 +41,57 @@ export interface Client {
   createdAt: string;
 }
 
+export type InternalContractType = "PROFESSIONAL_SERVICES" | "LABOR";
+export type InternalContractDocumentKind = "CONTRACT" | "ADDENDUM";
+
+export interface InternalContractPaymentMilestone {
+  id: string;
+  label: string;
+  dueDate?: string;
+  amountMxn?: number;
+  notes?: string;
+}
+
+export interface InternalContract {
+  id: string;
+  contractNumber: string;
+  contractType: InternalContractType;
+  documentKind: InternalContractDocumentKind;
+  clientId?: string;
+  clientNumber?: string;
+  clientName?: string;
+  collaboratorName?: string;
+  originalFileName?: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  paymentMilestones: InternalContractPaymentMilestone[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InternalContractCollaborator {
+  id: string;
+  name: string;
+  shortName?: string;
+  team?: Team;
+}
+
+export type DailyDocumentTemplateId = "power-letter" | "receipt" | "delivery-receipt";
+
+export interface DailyDocumentAssignment {
+  id: string;
+  templateId: DailyDocumentTemplateId;
+  templateTitle: string;
+  title: string;
+  clientId: string;
+  clientNumber: string;
+  clientName: string;
+  values: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface QuoteLineItem {
   concept: string;
   amountMxn: number;

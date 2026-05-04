@@ -843,6 +843,262 @@ textarea {
   min-height: 38px;
 }
 
+.daily-documents-page {
+  max-width: 1360px;
+}
+
+.daily-documents-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.daily-doc-tabs-panel {
+  padding: 30px;
+}
+
+.daily-doc-tabs {
+  margin: 0;
+}
+
+.daily-doc-tabs .lead-tab {
+  font-size: 0.98rem;
+  min-height: 54px;
+  padding-inline: 24px;
+}
+
+.daily-documents-controls,
+.daily-doc-template-panel,
+.daily-doc-form-panel,
+.daily-doc-preview-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.daily-doc-template-list {
+  display: grid;
+  gap: 10px;
+}
+
+.daily-doc-template-option {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-height: 82px;
+  padding: 14px;
+  border: 1px solid rgba(31, 41, 51, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2933;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.daily-doc-template-option:hover,
+.daily-doc-template-option.is-active {
+  border-color: rgba(29, 78, 216, 0.34);
+  box-shadow: 0 12px 26px rgba(31, 41, 51, 0.08);
+  transform: translateY(-1px);
+}
+
+.daily-doc-template-option strong {
+  color: #102a43;
+  font-size: 0.98rem;
+}
+
+.daily-doc-template-option span {
+  color: #52606d;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.daily-doc-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.daily-doc-field-wide {
+  grid-column: 1 / -1;
+}
+
+.daily-doc-save-actions,
+.daily-doc-assigned-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.daily-doc-preview-head {
+  align-items: flex-start;
+}
+
+.daily-doc-preview-head > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.daily-doc-preview-head span {
+  color: #0f766e;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.daily-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.daily-doc-paper {
+  display: grid;
+  gap: 20px;
+  min-height: 760px;
+  padding: clamp(24px, 4vw, 52px);
+  border: 1px solid rgba(31, 41, 51, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72), 0 16px 36px rgba(31, 41, 51, 0.08);
+}
+
+.daily-doc-paper header {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+
+.daily-doc-paper h3 {
+  margin: 0;
+  color: #102a43;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+}
+
+.daily-doc-paper header span {
+  color: #52606d;
+  font-weight: 700;
+}
+
+.daily-doc-paper-body {
+  display: grid;
+  gap: 14px;
+}
+
+.daily-doc-paper-body p {
+  margin: 0;
+  color: #1f2933;
+  line-height: 1.65;
+  text-align: justify;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-details {
+  display: grid;
+  gap: 0;
+  margin: 4px 0 0;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.daily-doc-details div {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+}
+
+.daily-doc-details div + div {
+  border-top: 1px solid #d9e2ec;
+}
+
+.daily-doc-details dt,
+.daily-doc-details dd {
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.daily-doc-details dt {
+  background: #f5f7fa;
+  color: #334e68;
+  font-weight: 800;
+}
+
+.daily-doc-details dd {
+  color: #1f2933;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-signatures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 36px;
+  align-self: end;
+  margin-top: 48px;
+}
+
+.daily-doc-signatures div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  text-align: center;
+}
+
+.daily-doc-signatures span {
+  border-top: 1px solid #1f2933;
+  min-height: 1px;
+}
+
+.daily-doc-signatures strong {
+  color: #1f2933;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-assigned-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.daily-doc-assigned-head {
+  align-items: flex-start;
+}
+
+.daily-doc-assigned-head > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.daily-doc-assigned-head span {
+  color: #52606d;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.daily-doc-assigned-search {
+  max-width: 520px;
+}
+
+.daily-doc-assigned-table-shell {
+  overflow-x: auto;
+}
+
+.daily-doc-assigned-table th,
+.daily-doc-assigned-table td {
+  vertical-align: top;
+}
+
+.daily-doc-client-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.daily-doc-client-cell span {
+  color: #52606d;
+  font-size: 0.9rem;
+}
+
 .table-scroll {
   overflow-x: auto;
 }
@@ -4909,6 +5165,8 @@ textarea {
   .general-expenses-filters,
   .general-expenses-actions,
   .general-expense-date-stack,
+  .daily-doc-preview-head,
+  .daily-doc-assigned-head,
   .commissions-tabs,
   .commissions-toolbar,
   .commissions-receiver-form,
@@ -4936,10 +5194,16 @@ textarea {
   .commissions-layout,
   .commissions-group-grid,
   .commissions-snapshot-grid,
+  .daily-documents-layout,
+  .daily-doc-field-grid,
   .execution-selector-layout,
   .tasks-distributor-config-layout,
   .tasks-active-target-fields {
     grid-template-columns: 1fr;
+  }
+
+  .daily-doc-actions {
+    justify-content: flex-start;
   }
 
   .tasks-active-term-verification-row,
@@ -4993,6 +5257,10 @@ textarea {
 
 @media (max-width: 640px) {
   .tasks-team-timeframes {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-doc-details div {
     grid-template-columns: 1fr;
   }
 
@@ -5213,5 +5481,155 @@ textarea {
   .budget-snapshot-grid,
   .budget-snapshot-metrics {
     grid-template-columns: 1fr;
+  }
+}
+
+.internal-contracts-page {
+  max-width: 1440px;
+}
+
+.internal-contracts-layout {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.25fr);
+}
+
+.internal-contracts-tabs {
+  margin: 0;
+}
+
+.internal-contracts-form-panel,
+.internal-contracts-list-panel,
+.internal-contracts-form {
+  display: grid;
+  gap: 18px;
+}
+
+.internal-contracts-form-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.internal-contracts-wide-field,
+.internal-contracts-file-field {
+  grid-column: 1 / -1;
+}
+
+.internal-contracts-file-field input {
+  padding: 10px 12px;
+}
+
+.internal-contract-meta-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.internal-contract-meta-grid div {
+  background: #f8fafb;
+  border: 1px solid rgba(31, 41, 51, 0.07);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.internal-contract-meta-grid strong {
+  color: #1f354f;
+  overflow-wrap: anywhere;
+}
+
+.internal-contract-meta-grid span,
+.internal-contract-meta-grid small {
+  color: #52657a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.internal-contracts-toolbar {
+  display: grid;
+  gap: 12px;
+}
+
+.internal-contracts-list {
+  display: grid;
+  gap: 14px;
+}
+
+.internal-contract-card {
+  background: #ffffff;
+  border: 1px solid rgba(31, 41, 51, 0.09);
+  border-radius: 8px;
+  box-shadow: 0 14px 30px rgba(31, 41, 51, 0.07);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.internal-contract-card-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.internal-contract-card-head h3 {
+  color: #243447;
+  font-size: 1rem;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.internal-contract-number {
+  color: #8b5e00;
+  display: block;
+  font-size: 1.18rem;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.internal-contract-milestones {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.internal-contract-milestones li {
+  background: rgba(29, 78, 216, 0.07);
+  border: 1px solid rgba(29, 78, 216, 0.12);
+  border-radius: 8px;
+  color: #1d4ed8;
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  padding: 9px 10px;
+}
+
+.internal-contract-empty-milestones,
+.internal-contract-notes {
+  margin: 0;
+}
+
+.internal-contract-notes {
+  color: #3b4559;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .internal-contracts-layout,
+  .internal-contracts-form-grid,
+  .internal-contract-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .internal-contract-card-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

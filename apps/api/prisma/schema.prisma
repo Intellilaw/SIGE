@@ -66,8 +66,52 @@ model Client {
   quotes       Quote[]
   leads        Lead[]
   matters      Matter[]
+  internalContracts InternalContract[]
+  dailyDocumentAssignments DailyDocumentAssignment[]
 
   @@index([deletedAt, clientNumber])
+}
+
+model InternalContract {
+  id                String   @id @default(uuid())
+  contractNumber    String   @unique
+  contractType      String
+  documentKind      String   @default("CONTRACT")
+  clientId          String?
+  clientNumber      String?
+  clientName        String?
+  collaboratorName  String?
+  originalFileName  String?
+  fileMimeType      String?
+  fileSizeBytes     Int?
+  fileContent       Bytes?
+  paymentMilestones Json     @default("[]")
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  client            Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([contractType, contractNumber])
+  @@index([clientId])
+  @@index([collaboratorName])
+}
+
+model DailyDocumentAssignment {
+  id            String   @id @default(uuid())
+  templateId    String
+  templateTitle String
+  title         String
+  clientId      String
+  clientNumber  String
+  clientName    String
+  values        Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([clientId, createdAt])
+  @@index([templateId, createdAt])
+  @@index([createdAt])
 }
 
 model Quote {

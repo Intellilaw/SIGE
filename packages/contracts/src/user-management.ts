@@ -262,6 +262,7 @@ export function derivePermissions(input: {
     "commissions:read",
     "documents-third-party:read",
     "brief-manager:read",
+    "internal-contracts:read",
     "labor-file:read",
     "kpis:read"
   ]);
@@ -283,6 +284,7 @@ export function derivePermissions(input: {
     permissions.add("matters:read");
     permissions.add("matters:write");
     permissions.add("finances:read");
+    permissions.add("internal-contracts:read");
     permissions.add("holidays:read");
     permissions.add("holidays:write");
   }
@@ -295,11 +297,14 @@ export function derivePermissions(input: {
     permissions.add("finances:write");
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
+    permissions.add("internal-contracts:read");
   }
 
   if (normalizedTeam === "servicios administrativos") {
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
+    permissions.add("internal-contracts:read");
+    permissions.add("internal-contracts:write");
   }
 
   if (normalizedTeam === "litigio") {

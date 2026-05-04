@@ -10,6 +10,8 @@ export const BASE_PERMISSIONS = {
   mattersWrite: "matters:write",
   financesRead: "finances:read",
   financesWrite: "finances:write",
+  internalContractsRead: "internal-contracts:read",
+  internalContractsWrite: "internal-contracts:write",
   tasksRead: "tasks:read",
   tasksWrite: "tasks:write",
   usersRead: "users:read"

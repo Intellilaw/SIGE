@@ -6,9 +6,12 @@ import type {
   Client,
   CommissionReceiver,
   CommissionSnapshot,
+  DailyDocumentAssignment,
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  InternalContract,
+  InternalContractCollaborator,
   Lead,
   ManagedUser,
   Matter,
@@ -258,6 +261,111 @@ export function mapClient(record: { id: string; clientNumber: string; name: stri
     clientNumber: record.clientNumber,
     name: record.name,
     createdAt: record.createdAt.toISOString()
+  };
+}
+
+function asInternalContractPaymentMilestones(value: Prisma.JsonValue): InternalContract["paymentMilestones"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+    .map((entry, index) => {
+      const candidate = entry as {
+        id?: unknown;
+        label?: unknown;
+        dueDate?: unknown;
+        amountMxn?: unknown;
+        notes?: unknown;
+      };
+      const amountMxn = Number(candidate.amountMxn);
+
+      return {
+        id: typeof candidate.id === "string" && candidate.id ? candidate.id : `milestone-${index + 1}`,
+        label: typeof candidate.label === "string" ? candidate.label : "",
+        dueDate: typeof candidate.dueDate === "string" && candidate.dueDate ? candidate.dueDate : undefined,
+        amountMxn: Number.isFinite(amountMxn) && amountMxn > 0 ? amountMxn : undefined,
+        notes: typeof candidate.notes === "string" && candidate.notes ? candidate.notes : undefined
+      };
+    })
+    .filter((milestone) => milestone.label || milestone.dueDate || milestone.notes || milestone.amountMxn);
+}
+
+export function mapInternalContract(record: {
+  id: string;
+  contractNumber: string;
+  contractType: string;
+  documentKind: string;
+  clientId: string | null;
+  clientNumber: string | null;
+  clientName: string | null;
+  collaboratorName: string | null;
+  originalFileName: string | null;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  paymentMilestones: Prisma.JsonValue;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): InternalContract {
+  return {
+    id: record.id,
+    contractNumber: record.contractNumber,
+    contractType: record.contractType as InternalContract["contractType"],
+    documentKind: record.documentKind as InternalContract["documentKind"],
+    clientId: record.clientId ?? undefined,
+    clientNumber: record.clientNumber ?? undefined,
+    clientName: record.clientName ?? undefined,
+    collaboratorName: record.collaboratorName ?? undefined,
+    originalFileName: record.originalFileName ?? undefined,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    paymentMilestones: asInternalContractPaymentMilestones(record.paymentMilestones),
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapInternalContractCollaborator(record: {
+  id: string;
+  displayName: string;
+  username: string;
+  shortName: string | null;
+  team: string | null;
+}): InternalContractCollaborator {
+  return {
+    id: record.id,
+    name: record.displayName || record.username,
+    shortName: record.shortName ?? undefined,
+    team: (record.team ?? undefined) as InternalContractCollaborator["team"]
+  };
+}
+
+export function mapDailyDocumentAssignment(record: {
+  id: string;
+  templateId: string;
+  templateTitle: string;
+  title: string;
+  clientId: string;
+  clientNumber: string;
+  clientName: string;
+  values: Prisma.JsonValue;
+  createdAt: Date;
+  updatedAt: Date;
+}): DailyDocumentAssignment {
+  return {
+    id: record.id,
+    templateId: record.templateId as DailyDocumentAssignment["templateId"],
+    templateTitle: record.templateTitle,
+    title: record.title,
+    clientId: record.clientId,
+    clientNumber: record.clientNumber,
+    clientName: record.clientName,
+    values: asStringRecord(record.values),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 

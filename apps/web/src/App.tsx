@@ -5,6 +5,8 @@ import { EntryPage } from "./features/auth/EntryPage";
 import { LoginPage } from "./features/auth/LoginPage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
+import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
+import { InternalContractsPage } from "./features/modules/InternalContractsPage";
 import { ModulePlaceholderPage } from "./features/modules/ModulePlaceholderPage";
 import { ThirdPartyDocumentsPage } from "./features/modules/ThirdPartyDocumentsPage";
 import { AppShell } from "./features/shell/AppShell";
@@ -96,7 +98,9 @@ export default function App() {
             <Route path="general-supervision" element={<ModulePlaceholderPage moduleId="general-supervision" />} />
             <Route path="matter-catalog" element={<MatterCatalogPage />} />
             <Route path="brief-manager" element={<ModulePlaceholderPage moduleId="brief-manager" />} />
+            <Route path="internal-contracts" element={<InternalContractsPage />} />
             <Route path="labor-file" element={<ModulePlaceholderPage moduleId="labor-file" />} />
+            <Route path="daily-documents" element={<DailyDocumentsPage />} />
             <Route path="third-party-documents" element={<ThirdPartyDocumentsPage />} />
             <Route path="holidays" element={<ModulePlaceholderPage moduleId="holidays" />} />
             <Route path="users" element={<UsersPage />} />
