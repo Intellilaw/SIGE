@@ -918,7 +918,12 @@ export function FinancesPage() {
                     </select>
                   </td>
                   <td>{formatCurrency(stats.closingCommissionMxn)}</td>
-                  <td><input className="finance-input finance-input-readonly" value={record.closingCommissionRecipient ?? ""} readOnly /></td>
+                  <td>
+                    <select className="finance-input" value={record.closingCommissionRecipient ?? ""} onChange={(event) => { const closingCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { closingCommissionRecipient }); void persistRecordPatch(record.id, { closingCommissionRecipient }); }}>
+                      <option value="">Seleccionar...</option>
+                      {receivers.map((receiver) => <option key={receiver.id} value={receiver.name}>{receiver.name}</option>)}
+                    </select>
+                  </td>
                   <td className="finance-total-cell">{formatCurrency(stats.netFeesMxn - stats.clientCommissionMxn - stats.closingCommissionMxn)}</td>
                   {([
                     ["pctLitigation", record.pctLitigation],
