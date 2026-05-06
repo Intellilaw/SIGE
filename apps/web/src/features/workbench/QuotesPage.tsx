@@ -1734,10 +1734,11 @@ export function QuotesPage() {
         applyTemplateToQuoteForm(response.template, "en");
         setActiveTab("new-quote-template");
       } catch (error) {
-        window.alert("La plantilla no pudo ser traducida.");
+        const message = `La plantilla no pudo ser traducida. ${toErrorMessage(error)}`;
+        window.alert(message);
         setFlash({
           tone: "error",
-          text: `La plantilla no pudo ser traducida. ${toErrorMessage(error)}`
+          text: message
         });
       } finally {
         setTranslatingTemplateId(null);

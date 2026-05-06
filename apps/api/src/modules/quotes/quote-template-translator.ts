@@ -182,12 +182,65 @@ function extractChatCompletionText(payload: unknown) {
   return typeof content === "string" ? content : "";
 }
 
+async function readOpenAiError(response: Response) {
+  const rawBody = await response.text();
+
+  try {
+    const payload = JSON.parse(rawBody) as {
+      error?: {
+        message?: string;
+        type?: string;
+        code?: string;
+      };
+    };
+
+    return payload.error;
+  } catch {
+    return undefined;
+  }
+}
+
+async function throwOpenAiResponseError(response: Response) {
+  const openAiError = await readOpenAiError(response);
+  const providerMessage = openAiError?.message ? ` OpenAI respondio: ${openAiError.message}` : "";
+
+  if (response.status === 401 || response.status === 403) {
+    throw new AppError(
+      502,
+      "QUOTE_TRANSLATION_OPENAI_AUTH_FAILED",
+      `OpenAI rechazo la credencial configurada. Revisa OPENAI_API_KEY.${providerMessage}`
+    );
+  }
+
+  if (response.status === 400 || response.status === 404) {
+    throw new AppError(
+      502,
+      "QUOTE_TRANSLATION_OPENAI_REQUEST_FAILED",
+      `OpenAI no acepto la configuracion de traduccion. Revisa OPENAI_QUOTE_TRANSLATION_MODEL y OPENAI_BASE_URL.${providerMessage}`
+    );
+  }
+
+  if (response.status === 429) {
+    throw new AppError(
+      502,
+      "QUOTE_TRANSLATION_OPENAI_RATE_LIMITED",
+      `OpenAI limito la solicitud o la cuenta no tiene cuota disponible.${providerMessage}`
+    );
+  }
+
+  throw new AppError(
+    502,
+    "QUOTE_TEMPLATE_TRANSLATION_FAILED",
+    `La plantilla no pudo ser traducida por OpenAI.${providerMessage}`
+  );
+}
+
 async function requestLlmTranslation(payload: TranslationPayload) {
   if (!env.OPENAI_API_KEY) {
     throw new AppError(
       503,
       "QUOTE_TRANSLATION_NOT_CONFIGURED",
-      "La traduccion con LLM no esta configurada. Falta OPENAI_API_KEY."
+      "La traduccion de plantillas no esta conectada a OpenAI. Falta configurar OPENAI_API_KEY en el runtime de la API."
     );
   }
 
@@ -223,7 +276,7 @@ async function requestLlmTranslation(payload: TranslationPayload) {
     });
 
     if (!response.ok) {
-      throw new AppError(502, "QUOTE_TEMPLATE_TRANSLATION_FAILED", "La plantilla no pudo ser traducida.");
+      await throwOpenAiResponseError(response);
     }
 
     const rawResponse = await response.json() as unknown;
@@ -236,6 +289,14 @@ async function requestLlmTranslation(payload: TranslationPayload) {
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new AppError(
+        504,
+        "QUOTE_TRANSLATION_OPENAI_TIMEOUT",
+        "OpenAI tardo demasiado en responder. Revisa OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS o intenta nuevamente."
+      );
     }
 
     throw new AppError(502, "QUOTE_TEMPLATE_TRANSLATION_FAILED", "La plantilla no pudo ser traducida.");

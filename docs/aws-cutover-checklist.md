@@ -13,7 +13,7 @@ This checklist is the operational sequence for moving `SIGE_2` from a Supabase-b
 
 1. `SIGE_2` code deployed and stable in the source environment
 2. AWS PostgreSQL reachable from the API runtime
-3. destination secrets prepared for `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `WEB_ORIGIN`, and `WEB_ORIGINS`
+3. destination secrets prepared for `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `WEB_ORIGIN`, `WEB_ORIGINS`, and `OPENAI_API_KEY`
 4. `pg_dump` and `pg_restore` available on the operator machine or release runner
 5. versioned Prisma migrations present in [apps/api/prisma/migrations](C:/Users/edrus/Dropbox/2%20Intellilaw/SIGE_2/apps/api/prisma/migrations)
 
@@ -93,8 +93,20 @@ npm.cmd run db:transfer --workspace @sige/api -- --mode restore --target-url "po
 1. update ECS / container / secret configuration to the AWS `DATABASE_URL`
 2. redeploy the API if needed
 3. keep the frontend origin and API base URL aligned with the production host
-4. verify health checks and application startup logs
-5. run the AWS runtime guardrail before handing the environment back to users:
+4. confirm the API runtime secret also includes OpenAI access for template translation:
+
+```powershell
+$secretId="arn:aws:secretsmanager:us-east-1:110661052936:secret:sige-prod-api-config-ALU8io"
+$secret = aws secretsmanager get-secret-value --secret-id $secretId --query SecretString --output text | ConvertFrom-Json
+$secret | Add-Member -NotePropertyName OPENAI_API_KEY -NotePropertyValue $env:OPENAI_API_KEY -Force
+$secret | Add-Member -NotePropertyName OPENAI_BASE_URL -NotePropertyValue "https://api.openai.com/v1" -Force
+$secret | Add-Member -NotePropertyName OPENAI_QUOTE_TRANSLATION_MODEL -NotePropertyValue "gpt-4o-mini" -Force
+$secret | Add-Member -NotePropertyName OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS -NotePropertyValue 45000 -Force
+aws secretsmanager put-secret-value --secret-id $secretId --secret-string ($secret | ConvertTo-Json -Compress)
+```
+
+5. verify health checks and application startup logs
+6. run the AWS runtime guardrail before handing the environment back to users:
 
 ```powershell
 npm.cmd run aws:verify-runtime --workspace @sige/api -- `
@@ -110,7 +122,7 @@ $env:SIGE_VERIFY_LOGIN_IDENTIFIER="Eduardo Rusconi"
 $env:SIGE_VERIFY_LOGIN_PASSWORD="REPLACE_WITH_TEST_PASSWORD"
 ```
 
-The guardrail fails the deployment if the API secret is malformed, if `DATABASE_URL` no longer matches the active RDS secret, or if the production health endpoint fails.
+The guardrail fails the deployment if the API secret is malformed, if `OPENAI_API_KEY` is missing, if `DATABASE_URL` no longer matches the active RDS secret, or if the production health endpoint fails.
 
 If the command runs from inside the AWS VPC or from a runner with network access to the private RDS endpoint, add `--direct-db` to also open a Prisma connection directly from the runner:
 

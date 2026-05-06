@@ -12,6 +12,10 @@ type RuntimeSecret = {
   DATABASE_URL?: string;
   JWT_ACCESS_SECRET?: string;
   JWT_REFRESH_SECRET?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  OPENAI_QUOTE_TRANSLATION_MODEL?: string;
+  OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS?: string | number;
 };
 
 type RdsSecret = {
@@ -95,7 +99,7 @@ function redactDatabaseUrl(databaseUrl: string) {
 }
 
 function assertSecretShape(secret: RuntimeSecret) {
-  const missing = ["DATABASE_URL", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"].filter(
+  const missing = ["DATABASE_URL", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OPENAI_API_KEY"].filter(
     (key) => !secret[key as keyof RuntimeSecret]
   );
 
@@ -106,6 +110,27 @@ function assertSecretShape(secret: RuntimeSecret) {
   if ((secret.JWT_ACCESS_SECRET?.length ?? 0) < 32 || (secret.JWT_REFRESH_SECRET?.length ?? 0) < 32) {
     throw new Error("JWT secrets must be at least 32 characters.");
   }
+
+  if (secret.OPENAI_BASE_URL) {
+    new URL(secret.OPENAI_BASE_URL);
+  }
+
+  if (
+    secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS !== undefined &&
+    (!Number.isFinite(Number(secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS)) ||
+      Number(secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS) <= 0)
+  ) {
+    throw new Error("OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS must be a positive number.");
+  }
+}
+
+function redactOpenAiConfig(secret: RuntimeSecret) {
+  return {
+    openAiConfigured: Boolean(secret.OPENAI_API_KEY),
+    openAiBaseUrl: secret.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+    quoteTranslationModel: secret.OPENAI_QUOTE_TRANSLATION_MODEL ?? "gpt-4o-mini",
+    quoteTranslationTimeoutMs: secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS ?? 45000
+  };
 }
 
 function assertRdsSecretMatches(databaseUrl: string, rdsSecret: RdsSecret) {
@@ -220,7 +245,10 @@ async function main() {
     "runtime secret shape",
     async () => {
       assertSecretShape(runtimeSecret);
-      return redactDatabaseUrl(databaseUrl);
+      return {
+        database: redactDatabaseUrl(databaseUrl),
+        openAi: redactOpenAiConfig(runtimeSecret)
+      };
     },
     results
   );
