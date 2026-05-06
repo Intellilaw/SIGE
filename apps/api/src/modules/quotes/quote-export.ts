@@ -202,7 +202,6 @@ function getExportCopy(language: Quote["language"]) {
   if (language === "en") {
     return {
       quoteNumberLabel: "Quote number",
-      presentText: "P R E S E N T",
       introText:
         "Herein I present to you the quotation of the services that will be provided by Rusconi Consulting, according to the terms and conditions stated below:",
       disclaimerText:
