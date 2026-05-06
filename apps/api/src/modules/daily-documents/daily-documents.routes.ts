@@ -4,7 +4,14 @@ import { z } from "zod";
 import { requireAuth } from "../../core/auth/guards";
 
 const writeDocumentSchema = z.object({
-  templateId: z.enum(["power-letter", "receipt", "delivery-receipt"]),
+  templateId: z.enum([
+    "general-power-letter",
+    "labor-power-letter",
+    "money-receipt",
+    "rc-received-document-receipt",
+    "rc-delivered-document-receipt",
+    "property-delivery-receipt"
+  ]),
   templateTitle: z.string().trim().min(1).max(120),
   title: z.string().trim().min(1).max(160),
   clientId: z.string().trim().min(1),

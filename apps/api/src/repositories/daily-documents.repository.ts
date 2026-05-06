@@ -6,9 +6,12 @@ import { mapDailyDocumentAssignment } from "./mappers";
 import type { DailyDocumentAssignmentWriteRecord, DailyDocumentsRepository } from "./types";
 
 const DAILY_DOCUMENT_TEMPLATE_IDS = new Set<DailyDocumentTemplateId>([
-  "power-letter",
-  "receipt",
-  "delivery-receipt"
+  "general-power-letter",
+  "labor-power-letter",
+  "money-receipt",
+  "rc-received-document-receipt",
+  "rc-delivered-document-receipt",
+  "property-delivery-receipt"
 ]);
 
 function normalizeText(value?: string | null) {

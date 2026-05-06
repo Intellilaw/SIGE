@@ -353,6 +353,7 @@ function createTemplateRow() {
     return {
         id: createId("template-row"),
         conceptDescription: "",
+        excludeFromIva: false,
         amountCells: [createTemplateCell(), createTemplateCell()],
         paymentMoment: createTemplateCell(),
         notesCell: createTemplateCell()
@@ -430,6 +431,7 @@ function buildQuoteTemplateDraftFromQuote(quote) {
         tableRows: quote.lineItems.map((item, index) => ({
             id: `quote-row-${index + 1}`,
             conceptDescription: item.concept,
+            excludeFromIva: false,
             amountCells: [
                 createTemplateCell(String(item.amountMxn)),
                 createTemplateCell("")
@@ -752,9 +754,17 @@ function getAmountColumnSummary(rows, column, amountIndex) {
         }
         return sum + parseAmountInput(cell.value);
     }, 0);
-    const iva = subtotal * IVA_RATE;
+    const taxableSubtotal = rows.reduce((sum, row) => {
+        const cell = row.amountCells[amountIndex];
+        if (!cell || cell.hidden || row.excludeFromIva) {
+            return sum;
+        }
+        return sum + parseAmountInput(cell.value);
+    }, 0);
+    const iva = taxableSubtotal * IVA_RATE;
     return {
         subtotal,
+        taxableSubtotal,
         iva,
         total: subtotal + iva
     };
@@ -818,7 +828,7 @@ function TemplateSummaryGrid(props) {
             summary: getAmountColumnSummary(props.tableRows, column, amountIndex)
         }))
             .filter(({ column }) => column.enabled)
-            .map(({ column, amountIndex, summary }) => (_jsxs("article", { className: "quote-template-summary-card", children: [_jsxs("div", { className: "quote-template-summary-head", children: [_jsx("strong", { children: column.title }), _jsx("span", { children: getAmountModeLabel(column.mode) })] }), summary ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "quote-template-summary-row", children: [_jsx("span", { children: "Sin IVA" }), _jsx("strong", { children: formatCurrency(summary.subtotal) })] }), _jsxs("div", { className: "quote-template-summary-row", children: [_jsx("span", { children: "IVA" }), _jsx("strong", { children: formatCurrency(summary.iva) })] }), _jsxs("div", { className: "quote-template-summary-row quote-template-summary-total", children: [_jsx("span", { children: "Total con IVA" }), _jsx("strong", { children: formatCurrency(summary.total) })] })] })) : (_jsx("p", { className: "muted", children: "Esta columna usa monto variable, asi que no se calcula sumatoria final." })), amountIndex === 0 ? null : _jsx("small", { className: "muted", children: "Resumen independiente por columna." })] }, column.id))) }));
+            .map(({ column, amountIndex, summary }) => (_jsxs("article", { className: "quote-template-summary-card", children: [_jsxs("div", { className: "quote-template-summary-head", children: [_jsx("strong", { children: column.title }), _jsx("span", { children: getAmountModeLabel(column.mode) })] }), summary ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "quote-template-summary-row", children: [_jsx("span", { children: "Subtotal" }), _jsx("strong", { children: formatCurrency(summary.subtotal) })] }), summary.taxableSubtotal !== summary.subtotal ? (_jsxs("div", { className: "quote-template-summary-row", children: [_jsx("span", { children: "Base IVA" }), _jsx("strong", { children: formatCurrency(summary.taxableSubtotal) })] })) : null, _jsxs("div", { className: "quote-template-summary-row", children: [_jsx("span", { children: "IVA" }), _jsx("strong", { children: formatCurrency(summary.iva) })] }), _jsxs("div", { className: "quote-template-summary-row quote-template-summary-total", children: [_jsx("span", { children: "Total con IVA" }), _jsx("strong", { children: formatCurrency(summary.total) })] })] })) : (_jsx("p", { className: "muted", children: "Esta columna usa monto variable, asi que no se calcula sumatoria final." })), amountIndex === 0 ? null : _jsx("small", { className: "muted", children: "Resumen independiente por columna." })] }, column.id))) }));
 }
 function TemplateVisualPreview(props) {
     const enabledAmountColumns = getEnabledAmountColumns(props.amountColumns);
@@ -856,7 +866,10 @@ function TemplateConceptCard(props) {
     return (_jsxs("article", { className: "quote-template-row-card", children: [_jsxs("div", { className: "quote-template-row-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Sin titulo" }), _jsx("h3", { children: getTemplateRowLabel(props.rowIndex) })] }), _jsx("div", { className: "quote-template-row-actions", children: !props.readOnly ? (_jsxs(_Fragment, { children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => props.onInsertAfter?.(props.rowIndex), children: "+ Concepto" }), _jsx("button", { type: "button", className: "danger-button", onClick: () => props.onRemove?.(props.rowIndex), children: "Quitar" })] })) : null })] }), _jsxs("div", { className: "quote-template-row-grid", children: [_jsxs("label", { className: "form-field quote-template-field quote-template-field-wide", children: [_jsx("span", { children: "Conceptos" }), _jsx("textarea", { rows: 3, value: props.row.conceptDescription, readOnly: props.readOnly, onChange: (event) => props.onRowChange?.(props.rowIndex, (row) => ({
                                     ...row,
                                     conceptDescription: event.target.value
-                                })), placeholder: "Describe el alcance o concepto de este servicio" })] }), renderAmountField(0), renderAmountField(1), _jsxs("div", { className: "quote-template-field", children: [_jsxs("div", { className: "quote-template-field-head", children: [_jsx("span", { children: "Momento de pago" }), _jsx("small", { children: "Fusionable" })] }), paymentIsMaster ? (_jsxs(_Fragment, { children: [_jsx("textarea", { rows: 3, value: paymentCell.value, readOnly: props.readOnly, onChange: (event) => props.onRowChange?.(props.rowIndex, (row) => ({
+                                })), placeholder: "Describe el alcance o concepto de este servicio" }), _jsxs("label", { className: "quote-template-checkbox quote-template-tax-checkbox", children: [_jsx("input", { type: "checkbox", checked: Boolean(props.row.excludeFromIva), disabled: props.readOnly, onChange: (event) => props.onRowChange?.(props.rowIndex, (row) => ({
+                                            ...row,
+                                            excludeFromIva: event.target.checked
+                                        })) }), _jsx("span", { children: "No cuenta para IVA" })] })] }), renderAmountField(0), renderAmountField(1), _jsxs("div", { className: "quote-template-field", children: [_jsxs("div", { className: "quote-template-field-head", children: [_jsx("span", { children: "Momento de pago" }), _jsx("small", { children: "Fusionable" })] }), paymentIsMaster ? (_jsxs(_Fragment, { children: [_jsx("textarea", { rows: 3, value: paymentCell.value, readOnly: props.readOnly, onChange: (event) => props.onRowChange?.(props.rowIndex, (row) => ({
                                             ...row,
                                             paymentMoment: {
                                                 ...row.paymentMoment,

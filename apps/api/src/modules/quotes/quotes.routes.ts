@@ -38,6 +38,7 @@ const amountColumnSchema = z.object({
 const tableRowSchema = z.object({
   id: z.string().min(1),
   conceptDescription: z.string(),
+  excludeFromIva: z.boolean().optional(),
   amountCells: z.array(templateCellSchema).length(2),
   paymentMoment: templateCellSchema,
   notesCell: templateCellSchema

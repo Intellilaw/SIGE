@@ -67,6 +67,7 @@ const wordTotalLabelFill = "C2D2E8";
 const wordTotalAmountFill = "EBF0F7";
 const wordText = "1A2330";
 const wordMuted = "4F5E70";
+const IVA_RATE = 0.16;
 
 let letterheadImageBufferPromise: Promise<Buffer | null> | null = null;
 
@@ -93,9 +94,17 @@ type ExportCell = {
 type ExportRow = {
   id: string;
   conceptDescription: string;
+  excludeFromIva: boolean;
   amountCells: ExportCell[];
   paymentMoment: ExportCell;
   notesCell: ExportCell;
+};
+
+type AmountSummary = {
+  subtotal: number;
+  taxableSubtotal: number;
+  iva: number;
+  total: number;
 };
 
 type QuoteExportPayload = {
@@ -112,6 +121,8 @@ type QuoteExportPayload = {
   closingText: string;
   signatureText: string;
   signatureFirm: string;
+  subtotalLabel: string;
+  ivaLabel: string;
   totalLabel: string;
   conceptHeader: string;
   paymentHeader: string;
@@ -119,7 +130,7 @@ type QuoteExportPayload = {
   emptyCellLabel: string;
   amountColumns: ExportAmountColumn[];
   tableRows: ExportRow[];
-  amountSummaries: Array<number | null>;
+  amountSummaries: Array<AmountSummary | null>;
   lineItems: Quote["lineItems"];
   totalMxn: number;
 };
@@ -144,14 +155,47 @@ function formatQuoteDate(value: string, language: Quote["language"]) {
     ? new Date(Date.UTC(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]), 12))
     : new Date(value);
 
-  const formattedDate = new Intl.DateTimeFormat(language === "en" ? "en-US" : "es-MX", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "America/Mexico_City"
-  }).format(date);
+  if (Number.isNaN(date.getTime())) {
+    return language === "en" ? "Mexico City." : "Ciudad de M\u00e9xico.";
+  }
 
-  return language === "en" ? `Mexico City, ${formattedDate}.` : formattedDate;
+  const day = date.getUTCDate();
+  const year = date.getUTCFullYear();
+  const spanishMonths = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre"
+  ];
+  const englishMonths = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  const monthIndex = date.getUTCMonth();
+  const spanishMonth = spanishMonths[monthIndex] ?? "";
+  const englishMonth = englishMonths[monthIndex] ?? "";
+
+  return language === "en"
+    ? `Mexico City, ${day} ${englishMonth} ${year}.`
+    : `Ciudad de M\u00e9xico, ${day} de ${spanishMonth} de ${year}.`;
 }
 
 function getExportCopy(language: Quote["language"]) {
@@ -162,12 +206,14 @@ function getExportCopy(language: Quote["language"]) {
       introText:
         "Herein I present to you the quotation of the services that will be provided by Rusconi Consulting, according to the terms and conditions stated below:",
       disclaimerText:
-        "The Value Added Tax (IVA) as well as any expenses which might be necessary for the correct execution of the services provided, such as transportation outside of Mexico City, copies, expert witnesses and/or notary public\u2019s fees or taxes, among others, should be added to the fees contained in this quotation.",
+        "The amounts above do not include expenses that may be necessary for the correct execution of the services provided, such as transportation outside of Mexico City, copies, expert witnesses and/or notary public\u2019s fees or taxes, among others.",
       closingText:
         "The firm looks forward to discussing further the details of this document.",
       signatureText: "Sincerely,",
       signatureFirm: "RUSCONI CONSULTING",
-      totalLabel: "TOTAL (EXCLUDING VAT)",
+      subtotalLabel: "SUBTOTAL",
+      ivaLabel: "VAT",
+      totalLabel: "TOTAL",
       conceptHeader: "CONCEPTS",
       paymentHeader: "TIME OF PAYMENT",
       notesHeader: "NOTES",
@@ -180,12 +226,14 @@ function getExportCopy(language: Quote["language"]) {
     introText:
       "Por medio de este documento le hacemos llegar la cotizaci\u00f3n de los honorarios que ser\u00edan generados por el despacho con motivo de la prestaci\u00f3n de los servicios detallados a continuaci\u00f3n:",
     disclaimerText:
-      "Las sumas anteriores no contemplan los gastos generados con motivo de la prestaci\u00f3n de los servicios detallados, tales como copias simples o certificadas, gastos de transportaci\u00f3n fuera de la Ciudad de M\u00e9xico, o impuestos o derechos generados a cargo del cliente, entre otros conceptos an\u00e1logos distintos a los arriba se\u00f1alados expresamente. Asimismo, a las sumas anteriores les deber\u00e1 ser agregado el monto correspondiente al Impuesto al Valor Agregado.",
+      "Las sumas anteriores no contemplan los gastos generados con motivo de la prestaci\u00f3n de los servicios detallados, tales como copias simples o certificadas, gastos de transportaci\u00f3n fuera de la Ciudad de M\u00e9xico, o impuestos o derechos generados a cargo del cliente, entre otros conceptos an\u00e1logos distintos a los arriba se\u00f1alados expresamente.",
     closingText:
       "El despacho se encuentra en la mejor disposici\u00f3n de comentar con mayor precisi\u00f3n los detalles, mecanismos, tiempos y dem\u00e1s consideraciones t\u00e9cnicas de los servicios propuestos.",
     signatureText: "Atentamente,",
     signatureFirm: "RUSCONI CONSULTING",
-    totalLabel: "TOTAL (SIN IVA)",
+    subtotalLabel: "SUBTOTAL",
+    ivaLabel: "IVA",
+    totalLabel: "TOTAL",
     conceptHeader: "CONCEPTOS",
     paymentHeader: "MOMENTO DE PAGO",
     notesHeader: "NOTAS",
@@ -706,61 +754,83 @@ function drawPdfQuoteTable(
   });
 
   const summaryHeight = 26;
-  if (currentY + summaryHeight > pdfContentBottom) {
+  const summaryRows = [
+    {
+      label: payload.subtotalLabel,
+      fill: pdfPaleAmount,
+      value: (summary: AmountSummary) => summary.subtotal
+    },
+    {
+      label: payload.ivaLabel,
+      fill: pdfPaleBlue,
+      value: (summary: AmountSummary) => summary.iva
+    },
+    {
+      label: payload.totalLabel,
+      fill: pdfPaleAmount,
+      value: (summary: AmountSummary) => summary.total
+    }
+  ];
+
+  if (currentY + summaryHeight * summaryRows.length > pdfContentBottom) {
     addPdfLetterheadPage(doc, letterheadImage);
     currentY = drawPdfTableHeader(doc, payload, columns, pdfContentTop);
   }
 
-  drawPdfCell(doc, {
-    x: columns[0].x,
-    y: currentY,
-    width: columns[0].width,
-    height: summaryHeight,
-    text: payload.totalLabel,
-    fill: pdfPaleBlue,
-    color: pdfNavy,
-    bold: true,
-    fontSize: 8.2
-  });
-
-  payload.amountColumns.forEach((_column, amountIndex) => {
-    const column = columns.find((candidate) => candidate.key === `amount-${amountIndex}`);
-    if (!column) {
-      return;
-    }
-
-    const summary = payload.amountSummaries[amountIndex];
+  summaryRows.forEach((summaryRow) => {
     drawPdfCell(doc, {
-      x: column.x,
+      x: columns[0].x,
       y: currentY,
-      width: column.width,
+      width: columns[0].width,
       height: summaryHeight,
-      text: summary == null ? payload.emptyCellLabel : formatExportCurrency(summary),
-      fill: pdfPaleAmount,
+      text: summaryRow.label,
+      fill: summaryRow.fill,
       color: pdfNavy,
       bold: true,
       fontSize: 8.2
     });
-  });
 
-  ["payment", "notes"].forEach((key) => {
-    const column = columns.find((candidate) => candidate.key === key);
-    if (!column) {
-      return;
-    }
+    payload.amountColumns.forEach((_column, amountIndex) => {
+      const column = columns.find((candidate) => candidate.key === `amount-${amountIndex}`);
+      if (!column) {
+        return;
+      }
 
-    drawPdfCell(doc, {
-      x: column.x,
-      y: currentY,
-      width: column.width,
-      height: summaryHeight,
-      text: "",
-      fill: "#000000",
-      color: "#ffffff"
+      const summary = payload.amountSummaries[amountIndex];
+      drawPdfCell(doc, {
+        x: column.x,
+        y: currentY,
+        width: column.width,
+        height: summaryHeight,
+        text: summary == null ? payload.emptyCellLabel : formatExportCurrency(summaryRow.value(summary)),
+        fill: summaryRow.fill,
+        color: pdfNavy,
+        bold: true,
+        fontSize: 8.2
+      });
     });
+
+    ["payment", "notes"].forEach((key) => {
+      const column = columns.find((candidate) => candidate.key === key);
+      if (!column) {
+        return;
+      }
+
+      drawPdfCell(doc, {
+        x: column.x,
+        y: currentY,
+        width: column.width,
+        height: summaryHeight,
+        text: "",
+        fill: "#000000",
+        color: "#ffffff"
+      });
+    });
+
+    currentY += summaryHeight;
   });
 
-  return currentY + summaryHeight + 24;
+  return currentY + 24;
 }
 
 function ensurePdfSpace(
@@ -1166,43 +1236,63 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
     );
   });
 
-  rows.push(
-    new TableRow({
-      cantSplit: true,
-      height: { value: 420, rule: HeightRule.ATLEAST },
-      children: [
-        createWordCell(payload.totalLabel, {
-          width: widths[0],
-          fill: wordTotalLabelFill,
-          color: wordNavy,
-          bold: true,
-          size: 16
-        }),
-        ...payload.amountColumns.map((_column, amountIndex) =>
-          createWordCell(
-            payload.amountSummaries[amountIndex] == null
-              ? payload.emptyCellLabel
-              : formatExportCurrency(payload.amountSummaries[amountIndex] ?? 0),
-            {
-              width: widths[amountIndex + 1],
-              fill: wordTotalAmountFill,
-              color: wordNavy,
-              bold: true,
-              size: 16
-            }
-          )
-        ),
-        createWordCell("", {
-          width: widths[payload.amountColumns.length + 1],
-          fill: "000000"
-        }),
-        createWordCell("", {
-          width: widths[payload.amountColumns.length + 2],
-          fill: "000000"
-        })
-      ]
-    })
-  );
+  [
+    {
+      label: payload.subtotalLabel,
+      labelFill: wordTotalLabelFill,
+      amountFill: wordTotalAmountFill,
+      value: (summary: AmountSummary) => summary.subtotal
+    },
+    {
+      label: payload.ivaLabel,
+      labelFill: wordHeaderFill,
+      amountFill: wordHeaderFill,
+      value: (summary: AmountSummary) => summary.iva
+    },
+    {
+      label: payload.totalLabel,
+      labelFill: wordTotalLabelFill,
+      amountFill: wordTotalAmountFill,
+      value: (summary: AmountSummary) => summary.total
+    }
+  ].forEach((summaryRow) => {
+    rows.push(
+      new TableRow({
+        cantSplit: true,
+        height: { value: 420, rule: HeightRule.ATLEAST },
+        children: [
+          createWordCell(summaryRow.label, {
+            width: widths[0],
+            fill: summaryRow.labelFill,
+            color: wordNavy,
+            bold: true,
+            size: 16
+          }),
+          ...payload.amountColumns.map((_column, amountIndex) => {
+            const summary = payload.amountSummaries[amountIndex];
+            return createWordCell(
+              summary == null ? payload.emptyCellLabel : formatExportCurrency(summaryRow.value(summary)),
+              {
+                width: widths[amountIndex + 1],
+                fill: summaryRow.amountFill,
+                color: wordNavy,
+                bold: true,
+                size: 16
+              }
+            );
+          }),
+          createWordCell("", {
+            width: widths[payload.amountColumns.length + 1],
+            fill: "000000"
+          }),
+          createWordCell("", {
+            width: widths[payload.amountColumns.length + 2],
+            fill: "000000"
+          })
+        ]
+      })
+    );
+  });
 
   return new Table({
     rows,
@@ -1325,6 +1415,7 @@ function buildLegacyExportTable(quote: Quote, language: Quote["language"]) {
   const tableRows: QuoteTemplateTableRow[] = quote.lineItems.map((item, index) => ({
     id: `quote-row-${index + 1}`,
     conceptDescription: item.concept,
+    excludeFromIva: false,
     amountCells: [
       { value: String(item.amountMxn), rowSpan: 1, hidden: false },
       { value: "", rowSpan: 1, hidden: false }
@@ -1341,6 +1432,7 @@ function buildLegacyExportTable(quote: Quote, language: Quote["language"]) {
           {
             id: "quote-row-1",
             conceptDescription: "",
+            excludeFromIva: false,
             amountCells: [
               { value: "", rowSpan: 1, hidden: false },
               { value: "", rowSpan: 1, hidden: false }
@@ -1370,6 +1462,7 @@ function buildExportTable(quote: Quote, language: Quote["language"]) {
   const tableRows = source.tableRows.map((row, rowIndex) => ({
     id: row.id,
     conceptDescription: normalizeText(row.conceptDescription) || getDefaultConceptLabel(rowIndex, language),
+    excludeFromIva: Boolean(row.excludeFromIva),
     amountCells: enabledAmountColumns.map(({ index }) => ({
       value: String(row.amountCells[index]?.value ?? ""),
       rowSpan: row.amountCells[index]?.rowSpan ?? 1,
@@ -1392,7 +1485,7 @@ function buildExportTable(quote: Quote, language: Quote["language"]) {
       return null;
     }
 
-    return source.tableRows.reduce((sum, row) => {
+    const subtotal = source.tableRows.reduce((sum, row) => {
       const cell = row.amountCells[index];
       if (!cell || cell.hidden) {
         return sum;
@@ -1401,6 +1494,24 @@ function buildExportTable(quote: Quote, language: Quote["language"]) {
       const parsed = Number.parseFloat(String(cell.value ?? "").replace(/,/g, ""));
       return Number.isFinite(parsed) ? sum + parsed : sum;
     }, 0);
+
+    const taxableSubtotal = source.tableRows.reduce((sum, row) => {
+      const cell = row.amountCells[index];
+      if (!cell || cell.hidden || row.excludeFromIva) {
+        return sum;
+      }
+
+      const parsed = Number.parseFloat(String(cell.value ?? "").replace(/,/g, ""));
+      return Number.isFinite(parsed) ? sum + parsed : sum;
+    }, 0);
+    const iva = taxableSubtotal * IVA_RATE;
+
+    return {
+      subtotal,
+      taxableSubtotal,
+      iva,
+      total: subtotal + iva
+    };
   });
 
   return {

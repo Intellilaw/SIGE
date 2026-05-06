@@ -475,6 +475,7 @@ function createTemplateRow(): QuoteTemplateTableRow {
   return {
     id: createId("template-row"),
     conceptDescription: "",
+    excludeFromIva: false,
     amountCells: [createTemplateCell(), createTemplateCell()],
     paymentMoment: createTemplateCell(),
     notesCell: createTemplateCell()
@@ -562,6 +563,7 @@ function buildQuoteTemplateDraftFromQuote(quote: Quote): QuoteTemplateDraftState
     tableRows: quote.lineItems.map((item, index) => ({
       id: `quote-row-${index + 1}`,
       conceptDescription: item.concept,
+      excludeFromIva: false,
       amountCells: [
         createTemplateCell(String(item.amountMxn)),
         createTemplateCell("")
@@ -990,10 +992,19 @@ function getAmountColumnSummary(rows: QuoteTemplateTableRow[], column: QuoteTemp
 
     return sum + parseAmountInput(cell.value);
   }, 0);
+  const taxableSubtotal = rows.reduce((sum, row) => {
+    const cell = row.amountCells[amountIndex];
+    if (!cell || cell.hidden || row.excludeFromIva) {
+      return sum;
+    }
 
-  const iva = subtotal * IVA_RATE;
+    return sum + parseAmountInput(cell.value);
+  }, 0);
+
+  const iva = taxableSubtotal * IVA_RATE;
   return {
     subtotal,
+    taxableSubtotal,
     iva,
     total: subtotal + iva
   };
@@ -1208,9 +1219,15 @@ function TemplateSummaryGrid(props: {
             {summary ? (
               <>
                 <div className="quote-template-summary-row">
-                  <span>Sin IVA</span>
+                  <span>Subtotal</span>
                   <strong>{formatCurrency(summary.subtotal)}</strong>
                 </div>
+                {summary.taxableSubtotal !== summary.subtotal ? (
+                  <div className="quote-template-summary-row">
+                    <span>Base IVA</span>
+                    <strong>{formatCurrency(summary.taxableSubtotal)}</strong>
+                  </div>
+                ) : null}
                 <div className="quote-template-summary-row">
                   <span>IVA</span>
                   <strong>{formatCurrency(summary.iva)}</strong>
@@ -1476,6 +1493,20 @@ function TemplateConceptCard(props: {
             }
             placeholder="Describe el alcance o concepto de este servicio"
           />
+          <label className="quote-template-checkbox quote-template-tax-checkbox">
+            <input
+              type="checkbox"
+              checked={Boolean(props.row.excludeFromIva)}
+              disabled={props.readOnly}
+              onChange={(event) =>
+                props.onRowChange?.(props.rowIndex, (row) => ({
+                  ...row,
+                  excludeFromIva: event.target.checked
+                }))
+              }
+            />
+            <span>No cuenta para IVA</span>
+          </label>
         </label>
 
         {renderAmountField(0)}

@@ -77,7 +77,13 @@ export interface InternalContractCollaborator {
   team?: Team;
 }
 
-export type DailyDocumentTemplateId = "power-letter" | "receipt" | "delivery-receipt";
+export type DailyDocumentTemplateId =
+  | "general-power-letter"
+  | "labor-power-letter"
+  | "money-receipt"
+  | "rc-received-document-receipt"
+  | "rc-delivered-document-receipt"
+  | "property-delivery-receipt";
 
 export interface DailyDocumentAssignment {
   id: string;
@@ -115,6 +121,7 @@ export interface QuoteTemplateAmountColumn {
 export interface QuoteTemplateTableRow {
   id: string;
   conceptDescription: string;
+  excludeFromIva?: boolean;
   amountCells: QuoteTemplateCell[];
   paymentMoment: QuoteTemplateCell;
   notesCell: QuoteTemplateCell;

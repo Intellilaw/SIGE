@@ -924,6 +924,189 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.daily-doc-client-search {
+  position: relative;
+}
+
+.daily-doc-client-search-results {
+  position: absolute;
+  z-index: 8;
+  inset: calc(100% + 6px) 0 auto;
+  display: grid;
+  gap: 4px;
+  max-height: 270px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(31, 41, 51, 0.12);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+}
+
+.daily-doc-client-search-results button,
+.daily-doc-client-search-empty {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  color: #243b53;
+  text-align: left;
+}
+
+.daily-doc-client-search-results button {
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.daily-doc-client-search-results button strong {
+  color: #102a43;
+  font-size: 0.95rem;
+}
+
+.daily-doc-client-search-results button span {
+  color: #52606d;
+  font-size: 0.86rem;
+}
+
+.daily-doc-client-search-results button:hover,
+.daily-doc-client-search-results button[aria-selected="true"] {
+  background: rgba(29, 78, 216, 0.08);
+}
+
+.daily-doc-client-search-empty {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.daily-doc-grantor-type-field {
+  gap: 10px;
+}
+
+.daily-doc-grantor-type-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid #d9e2ec;
+  border-radius: 16px;
+  background: #f5f7fa;
+}
+
+.daily-doc-grantor-type-toggle button {
+  flex: 1 1 180px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 9px 12px;
+  background: transparent;
+  color: #334e68;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.daily-doc-grantor-type-toggle button:hover,
+.daily-doc-grantor-type-toggle button.is-active {
+  border-color: rgba(29, 78, 216, 0.18);
+  background: #fff;
+  color: #1d4ed8;
+  box-shadow: 0 8px 18px rgba(31, 41, 51, 0.08);
+}
+
+.daily-doc-grantor-type-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.daily-doc-attorney-list {
+  gap: 12px;
+}
+
+.daily-doc-attorney-list-head,
+.daily-doc-attorney-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.daily-doc-attorney-list-head {
+  justify-content: space-between;
+}
+
+.daily-doc-attorney-list-head > span {
+  min-width: 0;
+}
+
+.daily-doc-attorney-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.daily-doc-attorney-row .form-field {
+  flex: 1 1 auto;
+}
+
+.daily-doc-attorney-row .danger-button {
+  align-self: end;
+  min-height: 46px;
+}
+
+.daily-doc-receipt-doc-list {
+  gap: 12px;
+}
+
+.daily-doc-receipt-doc-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-doc-receipt-doc-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-doc-receipt-doc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.daily-doc-receipt-doc-kind {
+  display: grid;
+  gap: 6px;
+}
+
+.daily-doc-receipt-doc-kind .checkbox-row {
+  min-height: 0;
+}
+
+.daily-doc-receipt-doc-kind .checkbox-row span {
+  color: #334e68;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.daily-doc-receipt-doc-row .danger-button {
+  min-height: 46px;
+}
+
+.daily-doc-client-paid-toggle {
+  padding: 10px 12px;
+  border: 1px solid #d9e2ec;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.daily-doc-client-paid-toggle span {
+  color: #334e68;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
 .daily-doc-save-actions,
 .daily-doc-assigned-actions {
   display: flex;
@@ -962,6 +1145,17 @@ textarea {
   border-radius: 8px;
   background: #fff;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72), 0 16px 36px rgba(31, 41, 51, 0.08);
+  position: relative;
+}
+
+.daily-doc-paper-letterhead {
+  aspect-ratio: 8.5 / 11;
+  background-image: url("/assets/rusconi-letterhead-2025.jpg");
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  min-height: clamp(760px, 92vw, 980px);
+  padding: clamp(96px, 10vw, 128px) clamp(36px, 5vw, 70px) clamp(118px, 11vw, 148px);
 }
 
 .daily-doc-paper header {
@@ -982,6 +1176,20 @@ textarea {
   font-weight: 700;
 }
 
+.daily-doc-paper header span.daily-doc-subtitle-right {
+  text-align: right;
+}
+
+.daily-doc-paper-rc-receipt {
+  align-content: start;
+}
+
+.daily-doc-paper-money-receipt header h3 {
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+  font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+}
+
 .daily-doc-paper-body {
   display: grid;
   gap: 14px;
@@ -993,6 +1201,199 @@ textarea {
   line-height: 1.65;
   text-align: justify;
   overflow-wrap: anywhere;
+}
+
+.daily-doc-paper-body p.daily-doc-clause-heading {
+  font-weight: 800;
+  text-align: center;
+}
+
+.daily-doc-rc-delivered-form {
+  display: grid;
+  gap: 36px;
+  margin-top: 34px;
+}
+
+.daily-doc-paper-rc-receipt .daily-doc-rc-delivered-form {
+  margin-top: 12px;
+}
+
+.daily-doc-rc-docs-table,
+.daily-doc-rc-meta-table {
+  width: 92%;
+  margin: 0 auto;
+  border-collapse: collapse;
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+}
+
+.daily-doc-rc-docs-table th,
+.daily-doc-rc-docs-table td,
+.daily-doc-rc-meta-table th,
+.daily-doc-rc-meta-table td {
+  border: 1px solid #111;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.daily-doc-rc-docs-table th,
+.daily-doc-rc-meta-table th {
+  background: #d9d9d9;
+  font-size: clamp(0.82rem, 1.5vw, 1rem);
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.daily-doc-rc-docs-table td,
+.daily-doc-rc-meta-table td {
+  min-height: 28px;
+  height: 28px;
+  font-size: clamp(0.78rem, 1.3vw, 0.95rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-rc-doc-description {
+  width: 50%;
+  text-align: left !important;
+}
+
+.daily-doc-rc-doc-kind {
+  width: 25%;
+  white-space: nowrap;
+}
+
+.daily-doc-checkbox {
+  display: inline-block;
+  width: 0.78em;
+  height: 0.78em;
+  margin-right: 5px;
+  border: 1px solid #111;
+  vertical-align: -0.1em;
+}
+
+.daily-doc-checkbox.is-checked::after {
+  content: "";
+  display: block;
+  width: 0.45em;
+  height: 0.22em;
+  margin: 0.14em auto 0;
+  border-bottom: 2px solid #111;
+  border-left: 2px solid #111;
+  transform: rotate(-45deg);
+}
+
+.daily-doc-rc-receiver-signature {
+  width: min(58%, 420px);
+  margin: 6px auto 0;
+  padding-top: 8px;
+  border-top: 1px solid #111;
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+  text-align: center;
+}
+
+.daily-doc-rc-receiver-signature strong,
+.daily-doc-rc-receiver-signature em {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-rc-receiver-signature strong {
+  font-size: clamp(0.82rem, 1.3vw, 0.95rem);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.daily-doc-rc-receiver-signature em {
+  margin-top: 4px;
+  font-size: clamp(0.76rem, 1.2vw, 0.86rem);
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.daily-doc-money-receipt-form {
+  display: grid;
+  gap: 48px;
+  width: 92%;
+  margin: 46px auto 0;
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+}
+
+.daily-doc-money-receipt-lines {
+  display: grid;
+  gap: 26px;
+}
+
+.daily-doc-money-receipt-lines p {
+  margin: 0;
+  color: #000;
+  font-size: clamp(0.95rem, 1.6vw, 1.1rem);
+  line-height: 1.7;
+}
+
+.daily-doc-money-receipt-lines strong {
+  font-weight: 900;
+}
+
+.daily-doc-money-receipt-table {
+  width: 100%;
+  margin: 0 auto;
+  border-collapse: collapse;
+  color: #000;
+}
+
+.daily-doc-money-receipt-table th,
+.daily-doc-money-receipt-table td {
+  border: 1px solid #111;
+  padding: 2px 8px;
+  text-align: center;
+}
+
+.daily-doc-money-receipt-table th {
+  background: #d9d9d9;
+  font-size: clamp(0.82rem, 1.45vw, 1rem);
+  font-weight: 900;
+  line-height: 1.12;
+}
+
+.daily-doc-money-receipt-table td {
+  font-size: clamp(0.78rem, 1.35vw, 0.95rem);
+  font-weight: 900;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-money-receiver-signature {
+  width: min(58%, 420px);
+  margin: -14px auto 0;
+  padding-top: 8px;
+  border-top: 1px solid #111;
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+  text-align: center;
+}
+
+.daily-doc-money-receiver-signature strong,
+.daily-doc-money-receiver-signature em {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-money-receiver-signature strong {
+  font-size: clamp(0.82rem, 1.3vw, 0.95rem);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.daily-doc-money-receiver-signature em {
+  margin-top: 4px;
+  font-size: clamp(0.76rem, 1.2vw, 0.86rem);
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.2;
 }
 
 .daily-doc-details {
@@ -1038,6 +1439,10 @@ textarea {
   margin-top: 48px;
 }
 
+.daily-doc-signatures-two-column {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
 .daily-doc-signatures div {
   display: grid;
   gap: 8px;
@@ -1053,6 +1458,29 @@ textarea {
 .daily-doc-signatures strong {
   color: #1f2933;
   overflow-wrap: anywhere;
+}
+
+.daily-doc-signatures em {
+  color: #52606d;
+  font-style: normal;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.daily-doc-page-number {
+  align-self: end;
+  color: #52606d;
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-self: center;
+  text-align: center;
+}
+
+.daily-doc-paper-rc-receipt .daily-doc-page-number {
+  position: absolute;
+  right: 0;
+  bottom: clamp(16px, 2.8vw, 28px);
+  left: 0;
 }
 
 .daily-doc-assigned-panel {
@@ -1081,6 +1509,56 @@ textarea {
 
 .daily-doc-assigned-table-shell {
   overflow-x: auto;
+}
+
+.daily-doc-assigned-groups {
+  display: grid;
+  gap: 18px;
+}
+
+.daily-doc-client-group {
+  display: grid;
+  gap: 0;
+}
+
+.daily-doc-client-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #f5f7fa;
+}
+
+.daily-doc-client-group-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.daily-doc-client-group-title strong {
+  color: #102a43;
+  font-size: 1rem;
+}
+
+.daily-doc-client-group-title span,
+.daily-doc-client-group-head > span {
+  color: #52606d;
+  font-weight: 800;
+}
+
+.daily-doc-client-group .daily-doc-assigned-table-shell {
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 0 0 8px 8px;
+}
+
+.daily-doc-assigned-group-table {
+  min-width: 780px;
 }
 
 .daily-doc-assigned-table th,
@@ -1780,6 +2258,12 @@ textarea {
   gap: 10px;
   font-weight: 600;
   color: #334e68;
+}
+
+.quote-template-tax-checkbox {
+  justify-content: flex-start;
+  color: #475569;
+  font-size: 0.9rem;
 }
 
 .quote-template-mode-toggle {
@@ -5206,6 +5690,17 @@ textarea {
     justify-content: flex-start;
   }
 
+  .daily-doc-attorney-list-head,
+  .daily-doc-attorney-row,
+  .daily-doc-receipt-doc-list-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-doc-receipt-doc-row {
+    grid-template-columns: 1fr;
+  }
+
   .tasks-active-term-verification-row,
   .tasks-active-term-verification-row-date-only {
     grid-column: auto;
@@ -5261,6 +5756,10 @@ textarea {
   }
 
   .daily-doc-details div {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-doc-signatures-two-column {
     grid-template-columns: 1fr;
   }
 

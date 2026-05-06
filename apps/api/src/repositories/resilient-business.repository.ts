@@ -4,6 +4,9 @@ import type {
   ClientsRepository,
   MattersRepository,
   MatterWriteRecord,
+  QuotesRepository,
+  QuoteTemplateWriteRecord,
+  QuoteWriteRecord,
   TaskAdditionalTaskWriteRecord,
   TaskDistributionEventWriteRecord,
   TaskDistributionWriteRecord,
@@ -145,6 +148,55 @@ export class ResilientMattersRepository extends ResilientRepositoryBase implemen
 
   public sendToExecution(matterId: string) {
     return this.withFallback(() => this.primary.sendToExecution(matterId), () => this.fallback!.sendToExecution(matterId));
+  }
+}
+
+export class ResilientQuotesRepository extends ResilientRepositoryBase implements QuotesRepository {
+  public constructor(
+    private readonly primary: QuotesRepository,
+    private readonly fallback: QuotesRepository | null,
+    logger?: { warn: (message: string) => void }
+  ) {
+    super(fallback, logger, "quotes");
+  }
+
+  public list() {
+    return this.withFallback(() => this.primary.list(), () => this.fallback?.list() ?? Promise.resolve([]));
+  }
+
+  public findById(quoteId: string) {
+    return this.withFallback(() => this.primary.findById(quoteId), () => this.fallback?.findById(quoteId) ?? Promise.resolve(null));
+  }
+
+  public listTemplates() {
+    return this.withFallback(() => this.primary.listTemplates(), () => this.fallback?.listTemplates() ?? Promise.resolve([]));
+  }
+
+  public create(payload: QuoteWriteRecord) {
+    return this.withFallback(() => this.primary.create(payload), () => this.fallback!.create(payload));
+  }
+
+  public update(quoteId: string, payload: QuoteWriteRecord) {
+    return this.withFallback(() => this.primary.update(quoteId, payload), () => this.fallback!.update(quoteId, payload));
+  }
+
+  public delete(quoteId: string) {
+    return this.withFallback(() => this.primary.delete(quoteId), () => this.fallback!.delete(quoteId));
+  }
+
+  public createTemplate(payload: QuoteTemplateWriteRecord) {
+    return this.withFallback(() => this.primary.createTemplate(payload), () => this.fallback!.createTemplate(payload));
+  }
+
+  public updateTemplate(templateId: string, payload: QuoteTemplateWriteRecord) {
+    return this.withFallback(
+      () => this.primary.updateTemplate(templateId, payload),
+      () => this.fallback!.updateTemplate(templateId, payload)
+    );
+  }
+
+  public deleteTemplate(templateId: string) {
+    return this.withFallback(() => this.primary.deleteTemplate(templateId), () => this.fallback!.deleteTemplate(templateId));
   }
 }
 

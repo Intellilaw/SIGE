@@ -53,6 +53,7 @@ import {
   LocalBusinessStore,
   LocalClientsRepository,
   LocalMattersRepository,
+  LocalQuotesRepository,
   LocalTasksRepository
 } from "./repositories/local-business.repository";
 import { PrismaMattersRepository } from "./repositories/matters.repository";
@@ -61,6 +62,7 @@ import { ResilientAuthRepository } from "./repositories/resilient-auth.repositor
 import {
   ResilientClientsRepository,
   ResilientMattersRepository,
+  ResilientQuotesRepository,
   ResilientTasksRepository
 } from "./repositories/resilient-business.repository";
 import { PrismaTasksRepository } from "./repositories/tasks.repository";
@@ -71,6 +73,7 @@ import type {
   DailyDocumentsRepository,
   InternalContractsRepository,
   MattersRepository,
+  QuotesRepository,
   TasksRepository
 } from "./repositories/types";
 import { ACCESS_TOKEN_COOKIE_NAME } from "./core/auth/session-cookies";
@@ -93,7 +96,7 @@ declare module "fastify" {
       internalContracts: InternalContractsRepository;
       leads: PrismaLeadsRepository;
       matters: MattersRepository;
-      quotes: PrismaQuotesRepository;
+      quotes: QuotesRepository;
       tasks: TasksRepository;
       users: PrismaUsersRepository;
     };
@@ -180,7 +183,11 @@ export async function buildApp() {
       localBusinessStore ? new LocalMattersRepository(localBusinessStore) : null,
       app.log
     ),
-    quotes: new PrismaQuotesRepository(prisma),
+    quotes: new ResilientQuotesRepository(
+      new PrismaQuotesRepository(prisma),
+      localBusinessStore ? new LocalQuotesRepository(localBusinessStore) : null,
+      app.log
+    ),
     tasks: new ResilientTasksRepository(
       new PrismaTasksRepository(prisma),
       localBusinessStore ? new LocalTasksRepository(localBusinessStore) : null,

@@ -3,13 +3,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { TASK_MODULES, type Client, type Matter } from "@sige/contracts";
+import { TASK_MODULES, type Client, type Matter, type Quote } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import type {
   ClientsRepository,
   MattersRepository,
   MatterWriteRecord,
+  QuotesRepository,
+  QuoteTemplateWriteRecord,
+  QuoteWriteRecord,
   TaskAdditionalTaskWriteRecord,
   TaskDistributionEventWriteRecord,
   TaskDistributionWriteRecord,
@@ -227,6 +230,47 @@ export class LocalBusinessStore {
         if (Number.isNaN(rightNumber)) return -1;
         return leftNumber - rightNumber;
       });
+  }
+
+  public async listQuotes() {
+    return this.rows("quotes")
+      .map((row) => this.mapQuote(row))
+      .sort((left, right) => {
+        const quoteDateDelta = (right.quoteDate ?? right.createdAt).localeCompare(left.quoteDate ?? left.createdAt);
+        return quoteDateDelta || right.createdAt.localeCompare(left.createdAt);
+      });
+  }
+
+  public async findQuoteById(quoteId: string) {
+    return this.listQuotes().then((quotes) => quotes.find((quote) => quote.id === quoteId) ?? null);
+  }
+
+  public async listQuoteTemplates() {
+    return [];
+  }
+
+  public async createQuote(_payload: QuoteWriteRecord) {
+    return unavailableWrite();
+  }
+
+  public async updateQuote(_quoteId: string, _payload: QuoteWriteRecord) {
+    return unavailableWrite();
+  }
+
+  public async deleteQuote(_quoteId: string) {
+    unavailableWrite();
+  }
+
+  public async createQuoteTemplate(_payload: QuoteTemplateWriteRecord) {
+    return unavailableWrite();
+  }
+
+  public async updateQuoteTemplate(_templateId: string, _payload: QuoteTemplateWriteRecord) {
+    return unavailableWrite();
+  }
+
+  public async deleteQuoteTemplate(_templateId: string) {
+    unavailableWrite();
   }
 
   public async listDeletedMatters() {
@@ -675,6 +719,41 @@ export class LocalBusinessStore {
     };
   }
 
+  private mapQuote(row: ExportRow): Quote {
+    const createdAt = isoDate(row.created_at) ?? new Date(0).toISOString();
+    const updatedAt = isoDate(row.updated_at) ?? createdAt;
+    const rawItems = asArray(row.items);
+    const lineItems = rawItems
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => {
+        const item = entry as Record<string, unknown>;
+        return {
+          concept: text(item.concept) || "Concepto",
+          amountMxn: numberValue(item.amount ?? item.amountMxn ?? item.price)
+        };
+      })
+      .filter((item) => item.concept || item.amountMxn > 0);
+
+    return {
+      id: text(row.id),
+      quoteNumber: text(row.quote_number) || text(row.numero_cotizacion) || text(row.id),
+      clientId: text(row.client_id) || text(row.client_name),
+      clientName: text(row.client_name) || text(row.cliente),
+      responsibleTeam: teamFromLegacy(row.responsible_team ?? row.equipo_responsable),
+      subject: text(row.asunto) || text(row.subject) || "Cotizacion",
+      status: normalizedText(row.status).includes("aprob") ? "APPROVED" : normalizedText(row.status).includes("rechaz") ? "REJECTED" : normalizedText(row.status).includes("envi") ? "SENT" : "DRAFT",
+      quoteType: matterType(row.quote_type),
+      language: "es",
+      quoteDate: isoDate(row.quote_date) ?? createdAt,
+      lineItems,
+      totalMxn: numberValue(row.total_mxn) || lineItems.reduce((sum, item) => sum + item.amountMxn, 0),
+      milestone: optionalText(row.hito_conclusion),
+      notes: optionalText(row.notes),
+      createdAt,
+      updatedAt
+    };
+  }
+
   private mapTrackingRecord(row: ExportRow, module: ExportModuleConfig, source: ExportModuleConfig["sourceTables"][number]) {
     const createdAt = isoDate(row.created_at) ?? new Date(0).toISOString();
     const updatedAt = isoDate(row.updated_at) ?? createdAt;
@@ -832,6 +911,46 @@ export class LocalMattersRepository implements MattersRepository {
 
   public sendToExecution(_matterId: string) {
     return unavailableWrite();
+  }
+}
+
+export class LocalQuotesRepository implements QuotesRepository {
+  public constructor(private readonly store: LocalBusinessStore) {}
+
+  public list() {
+    return this.store.listQuotes();
+  }
+
+  public findById(quoteId: string) {
+    return this.store.findQuoteById(quoteId);
+  }
+
+  public listTemplates() {
+    return this.store.listQuoteTemplates();
+  }
+
+  public create(payload: QuoteWriteRecord) {
+    return this.store.createQuote(payload);
+  }
+
+  public update(quoteId: string, payload: QuoteWriteRecord) {
+    return this.store.updateQuote(quoteId, payload);
+  }
+
+  public delete(quoteId: string) {
+    return this.store.deleteQuote(quoteId);
+  }
+
+  public createTemplate(payload: QuoteTemplateWriteRecord) {
+    return this.store.createQuoteTemplate(payload);
+  }
+
+  public updateTemplate(templateId: string, payload: QuoteTemplateWriteRecord) {
+    return this.store.updateQuoteTemplate(templateId, payload);
+  }
+
+  public deleteTemplate(templateId: string) {
+    return this.store.deleteQuoteTemplate(templateId);
   }
 }
 

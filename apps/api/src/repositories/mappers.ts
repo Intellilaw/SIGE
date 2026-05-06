@@ -115,6 +115,7 @@ function asLegacyQuoteTemplateRows(lineItems: QuoteTemplate["lineItems"]): Quote
       {
         id: "row-1",
         conceptDescription: "",
+        excludeFromIva: false,
         amountCells: [
           { value: "", rowSpan: 1, hidden: false },
           { value: "", rowSpan: 1, hidden: false }
@@ -128,6 +129,7 @@ function asLegacyQuoteTemplateRows(lineItems: QuoteTemplate["lineItems"]): Quote
   return lineItems.map((lineItem, index) => ({
     id: `legacy-row-${index + 1}`,
     conceptDescription: lineItem.concept,
+    excludeFromIva: false,
     amountCells: [
       { value: String(lineItem.amountMxn), rowSpan: 1, hidden: false },
       { value: "", rowSpan: 1, hidden: false }
@@ -148,6 +150,7 @@ function asQuoteTemplateRows(value: unknown, lineItems: QuoteTemplate["lineItems
       const candidate = entry as {
         id?: unknown;
         conceptDescription?: unknown;
+        excludeFromIva?: unknown;
         amountCells?: unknown;
         paymentMoment?: unknown;
         notesCell?: unknown;
@@ -163,6 +166,7 @@ function asQuoteTemplateRows(value: unknown, lineItems: QuoteTemplate["lineItems
         id: typeof candidate.id === "string" ? candidate.id : `row-${index + 1}`,
         conceptDescription:
           typeof candidate.conceptDescription === "string" ? candidate.conceptDescription : "",
+        excludeFromIva: Boolean(candidate.excludeFromIva),
         amountCells,
         paymentMoment: asQuoteTemplateCell(candidate.paymentMoment, ""),
         notesCell: asQuoteTemplateCell(
