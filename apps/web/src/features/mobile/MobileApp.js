@@ -1,19 +1,19 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 import { APP_VERSION_LABEL, APP_VERSION_TEXT } from "@sige/contracts";
-import { apiGet, apiPost } from "../../api/http-client";
+import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import { buildDistributionHistoryTaskNameMap, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
-import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
-const MOBILE_TIMEFRAMES = [
-    { id: "anteriores", label: "Realizadas" },
-    { id: "hoy", label: "Hoy" },
-    { id: "manana", label: "Manana" },
-    { id: "posteriores", label: "Posteriores" }
+const MOBILE_LEAD_CHANNELS = [
+    { value: "WHATSAPP", label: "WhatsApp" },
+    { value: "TELEGRAM", label: "Telegram" },
+    { value: "WECHAT", label: "WeChat" },
+    { value: "EMAIL", label: "Email" },
+    { value: "PHONE", label: "Telefono" }
 ];
 const TERMS_TABLE_ID = "terminos";
 const RECURRING_TERMS_TABLE_ID = "terminos-recurrentes";
@@ -50,6 +50,18 @@ function addBusinessDays(baseDate, amount) {
         }
     }
     return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+}
+function initialLeadForm() {
+    return {
+        clientName: "",
+        prospectName: "",
+        subject: "",
+        amountMxn: "",
+        communicationChannel: "WHATSAPP",
+        nextInteractionLabel: "Dar seguimiento",
+        nextInteraction: addBusinessDays(new Date(), 1),
+        notes: ""
+    };
 }
 function toErrorMessage(error) {
     return error instanceof Error && error.message ? error.message : "Ocurrio un error inesperado.";
@@ -170,61 +182,6 @@ function buildVisibleTerms(moduleConfig, terms, records, recurring) {
         .filter((record) => isManagerTermRecord(moduleConfig, record))
         .map((record) => termFromTrackingRecord(moduleConfig, record, getLinkedTerm(terms, record)));
 }
-function splitResponsibleAliases(value) {
-    const normalized = normalizeComparableText(value).replace(/\s*\/\s*/g, "/");
-    if (!normalized) {
-        return [];
-    }
-    return normalized
-        .split(/\s*(?:\/|,|;|&|\by\b)\s*/u)
-        .map((candidate) => candidate.trim())
-        .filter(Boolean);
-}
-function matchesResponsible(taskResponsible, member, sharedAliases) {
-    const normalizedResponsible = normalizeComparableText(taskResponsible).replace(/\s*\/\s*/g, "/");
-    const responsibleAliases = splitResponsibleAliases(taskResponsible);
-    const memberAliases = member.aliases.map((alias) => normalizeComparableText(alias));
-    const shared = sharedAliases.map((alias) => normalizeComparableText(alias).replace(/\s*\/\s*/g, "/"));
-    return memberAliases.includes(normalizedResponsible)
-        || responsibleAliases.some((alias) => memberAliases.includes(alias))
-        || shared.includes(normalizedResponsible);
-}
-function belongsToTimeframe(input, timeframe) {
-    const today = localDateInput();
-    const tomorrow = localDateInput(1);
-    if (timeframe === "anteriores") {
-        return input.state === "closed";
-    }
-    if (input.state === "closed") {
-        return false;
-    }
-    if (timeframe === "hoy") {
-        return !input.date || input.date <= today;
-    }
-    if (timeframe === "manana") {
-        return input.date === tomorrow;
-    }
-    return input.date > tomorrow;
-}
-function isVerificationComplete(term) {
-    const values = Object.values(term.verification ?? {});
-    return values.length > 0 && values.every((value) => ["si", "yes"].includes(normalizeComparableText(value)));
-}
-function getTrackingDashboardDate(table, record) {
-    const dates = [toDateInput(record.dueDate)];
-    const termDate = toDateInput(record.termDate);
-    if (isTrackingTermEnabled(record, table) && termDate) {
-        dates.push(termDate);
-    }
-    if (!usesPresentationAndTermDates(table) && !dates[0] && termDate) {
-        dates.push(termDate);
-    }
-    return dates.filter(Boolean).sort()[0] ?? "";
-}
-function getDashboardMemberForUser(member, user) {
-    const userAliases = [user?.shortName, user?.displayName, user?.username].map((value) => normalizeComparableText(value));
-    return member.aliases.some((alias) => userAliases.includes(normalizeComparableText(alias))) || userAliases.includes(normalizeComparableText(member.id));
-}
 function getRecordStatusLabel(status) {
     if (status === "presentado" || status === "concluida") {
         return "Concluida";
@@ -276,14 +233,101 @@ export function MobileProtectedLayout() {
         return _jsx("div", { className: "mobile-centered", children: "Cargando SIGE..." });
     }
     if (!user) {
-        return _jsx(Navigate, { to: "/intranet-login", replace: true });
+        return _jsx(Navigate, { to: "/intranet-login?redirect=/mobile", replace: true });
     }
-    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_LABEL })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }), _jsx(NavLink, { to: "/mobile/dashboard", children: "Dashboard" }), _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }), _jsx(NavLink, { to: "/app", children: "Web" })] })] }));
+    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_LABEL })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }), _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }), _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" })] })] }));
 }
 export function MobileHomePage() {
-    const { user } = useAuth();
-    const visibleModules = getVisibleExecutionModules(user);
-    return (_jsxs("section", { className: "mobile-stack", children: [_jsxs("div", { className: "mobile-hero", children: [_jsxs("div", { className: "mobile-hero-version-row", children: [_jsx("p", { className: "mobile-eyebrow", children: "Operacion diaria" }), _jsx("span", { className: "mobile-version-badge", children: APP_VERSION_TEXT })] }), _jsx("h1", { children: "Crear tareas y revisar seguimiento" }), _jsx("p", { children: "Entrada rapida al modulo de ejecucion y a las tablas del manager de tareas." })] }), _jsxs("section", { className: "mobile-version-card", "aria-label": "Version instalada", children: [_jsx("span", { children: "Version instalada" }), _jsx("strong", { children: APP_VERSION_LABEL })] }), _jsxs("div", { className: "mobile-action-grid", children: [_jsx(Link, { className: "mobile-primary-action", to: "/mobile/execution", children: "Crear tarea de ejecucion" }), _jsx(Link, { className: "mobile-secondary-action", to: "/mobile/tracking", children: "Consultar tablas" }), _jsx(Link, { className: "mobile-secondary-action", to: "/mobile/dashboard", children: "Ver dashboard" })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Tus equipos" }), _jsx("span", { children: visibleModules.length })] }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/execution/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: module.description })] }, module.moduleId))) })] })] }));
+    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" }), _jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" }), _jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })] }) }));
+}
+export function MobileLeadsPage() {
+    const [form, setForm] = useState(() => initialLeadForm());
+    const [leads, setLeads] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
+    const [search, setSearch] = useState("");
+    const [errorMessage, setErrorMessage] = useState(null);
+    const [successMessage, setSuccessMessage] = useState(null);
+    const visibleLeads = useMemo(() => {
+        const query = normalizeComparableText(search);
+        const sorted = [...leads].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
+        if (!query) {
+            return sorted;
+        }
+        return sorted.filter((lead) => normalizeComparableText([
+            lead.clientName,
+            lead.prospectName,
+            lead.subject,
+            lead.nextInteractionLabel,
+            lead.notes
+        ].join(" ")).includes(query));
+    }, [leads, search]);
+    async function loadLeads() {
+        setLoading(true);
+        setErrorMessage(null);
+        try {
+            setLeads(await apiGet("/leads"));
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setLoading(false);
+        }
+    }
+    useEffect(() => {
+        void loadLeads();
+    }, []);
+    function updateField(field, value) {
+        setForm((current) => ({ ...current, [field]: value }));
+        setSuccessMessage(null);
+    }
+    async function handleSubmit(event) {
+        event.preventDefault();
+        const clientName = normalizeText(form.clientName);
+        const prospectName = normalizeText(form.prospectName);
+        const subject = normalizeText(form.subject);
+        if (!clientName && !prospectName) {
+            setErrorMessage("Captura cliente o prospecto.");
+            return;
+        }
+        if (!subject) {
+            setErrorMessage("Captura el asunto del lead.");
+            return;
+        }
+        setSubmitting(true);
+        setErrorMessage(null);
+        setSuccessMessage(null);
+        try {
+            const created = await apiPost("/leads", {});
+            const updated = await apiPatch(`/leads/${created.id}`, {
+                clientId: null,
+                clientName,
+                prospectName: prospectName || null,
+                commissionAssignee: null,
+                quoteId: null,
+                quoteNumber: null,
+                subject,
+                amountMxn: Number(form.amountMxn || 0),
+                communicationChannel: form.communicationChannel,
+                lastInteractionLabel: "Captura movil",
+                lastInteraction: todayInput(),
+                nextInteractionLabel: normalizeText(form.nextInteractionLabel) || null,
+                nextInteraction: toDateInput(form.nextInteraction) || null,
+                notes: normalizeText(form.notes) || null
+            });
+            setLeads((items) => [updated, ...items.filter((item) => item.id !== updated.id)]);
+            setForm(initialLeadForm());
+            setSuccessMessage("Lead agregado.");
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setSubmitting(false);
+        }
+    }
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Leads", subtitle: "Captura rapida y consulta de leads activos." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("form", { className: "mobile-section mobile-form-panel", onSubmit: (event) => void handleSubmit(event), children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nuevo lead" }), _jsx("span", { children: "Movil" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Cliente" }), _jsx("input", { value: form.clientName, onChange: (event) => updateField("clientName", event.target.value), placeholder: "Nombre del cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Prospecto" }), _jsx("input", { value: form.prospectName, onChange: (event) => updateField("prospectName", event.target.value), placeholder: "Si todavia no es cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { value: form.subject, onChange: (event) => updateField("subject", event.target.value), placeholder: "Que necesita" })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Monto" }), _jsx("input", { inputMode: "decimal", value: form.amountMxn, onChange: (event) => updateField("amountMxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Canal" }), _jsx("select", { value: form.communicationChannel, onChange: (event) => updateField("communicationChannel", event.target.value), children: MOBILE_LEAD_CHANNELS.map((channel) => (_jsx("option", { value: channel.value, children: channel.label }, channel.value))) })] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Siguiente accion" }), _jsx("input", { value: form.nextInteractionLabel, onChange: (event) => updateField("nextInteractionLabel", event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: form.nextInteraction, onChange: (event) => updateField("nextInteraction", event.target.value) })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Notas" }), _jsx("textarea", { value: form.notes, onChange: (event) => updateField("notes", event.target.value), placeholder: "Contexto breve", rows: 3 })] }), _jsx("button", { className: "mobile-submit", type: "submit", disabled: submitting, children: submitting ? "Guardando..." : "Guardar lead" })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Leads activos" }), _jsx("span", { children: visibleLeads.length })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Cliente, prospecto, asunto..." })] }), loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando leads..." })) : visibleLeads.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay leads para mostrar." })) : (_jsx("div", { className: "mobile-card-list", children: visibleLeads.map((lead) => (_jsxs("article", { className: "mobile-lead-card", children: [_jsxs("div", { className: "mobile-lead-card-head", children: [_jsx("strong", { children: lead.clientName || lead.prospectName || "Sin nombre" }), _jsx("span", { children: MOBILE_LEAD_CHANNELS.find((channel) => channel.value === lead.communicationChannel)?.label ?? lead.communicationChannel })] }), _jsx("p", { children: lead.subject || "Sin asunto" }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "Siguiente" }), _jsx("dd", { children: lead.nextInteractionLabel || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Fecha" }), _jsx("dd", { children: toDateInput(lead.nextInteraction) || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Monto" }), _jsx("dd", { children: Number(lead.amountMxn || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) })] })] })] }, lead.id))) }))] })] }));
 }
 export function MobileExecutionIndexPage() {
     const { user } = useAuth();
@@ -449,176 +493,39 @@ export function MobileExecutionTeamPage() {
             setSubmitting(false);
         }
     }
+    function renderSelectedMatterPanel() {
+        if (!selectedMatter) {
+            return null;
+        }
+        return (_jsxs(_Fragment, { children: [_jsxs("section", { className: "mobile-section mobile-form-panel mobile-inline-task-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nueva tarea" }), _jsx("span", { children: selectedMatter.clientName })] }), _jsx(MobileMatterSummary, { matter: selectedMatter, clientNumber: getEffectiveClientNumber(selectedMatter, clients) }), _jsxs("label", { className: "mobile-field mobile-event-search-field", children: [_jsx("span", { children: "Selector de tareas" }), _jsxs("div", { className: "mobile-event-search", ref: eventSearchRef, children: [_jsx("input", { value: eventSearch, onChange: (event) => {
+                                                setEventSearch(event.target.value);
+                                                setEventSearchOpen(true);
+                                                setSuccessMessage(null);
+                                                if (selectedEventId) {
+                                                    setSelectedEventId("");
+                                                    setTargets([]);
+                                                }
+                                            }, onFocus: () => setEventSearchOpen(true), placeholder: "Buscar tarea...", autoComplete: "off" }), eventSearchOpen ? (_jsx("div", { className: "mobile-event-search-results", role: "listbox", children: filteredEvents.length === 0 ? (_jsx("div", { className: "mobile-event-search-empty", children: "No hay tareas con ese criterio." })) : (filteredEvents.map((event) => (_jsx("button", { type: "button", role: "option", "aria-selected": event.id === selectedEventId, onMouseDown: (mouseEvent) => {
+                                                    mouseEvent.preventDefault();
+                                                    handleEventChange(event.id);
+                                                }, children: event.name }, event.id)))) })) : null] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Responsable" }), _jsx("input", { value: responsible, onChange: (event) => setResponsible(event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: dueDate, onChange: (event) => setDueDate(event.target.value) })] })] }), targets.length > 0 ? (_jsx("div", { className: "mobile-target-list", children: targets.map((target) => {
+                                const table = currentLegacyConfig.tables.find((candidate) => candidate.slug === target.tableSlug);
+                                return (_jsxs("article", { className: "mobile-target-card", children: [_jsxs("div", { children: [_jsx("strong", { children: getTableDisplayName(currentLegacyConfig, target.tableSlug) }), _jsx("button", { type: "button", onClick: () => setTargets((current) => current.filter((candidate) => candidate.id !== target.id)), children: "Quitar" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Nombre del registro" }), _jsx("input", { value: target.taskName, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, taskName: event.target.value } : candidate)) })] }), table?.showReportedPeriod ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: table.reportedPeriodLabel ?? "Periodo reportado" }), _jsx("input", { type: "month", value: target.reportedMonth, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, reportedMonth: event.target.value } : candidate)) })] })) : null] }, target.id));
+                            }) })) : null, _jsx("button", { type: "button", className: "mobile-submit", disabled: submitting || !selectedEvent || targets.length === 0 || !dueDate, onClick: () => void handleSubmit(), children: submitting ? "Enviando..." : "Enviar al manager de tareas" })] }), _jsxs("section", { className: "mobile-section mobile-inline-pending-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Pendientes del asunto" }), _jsx("span", { children: matterRecords.length + matterTerms.length })] }), _jsx(MobileRecordList, { records: [...matterRecords, ...matterTerms], legacyConfig: currentLegacyConfig, histories: histories })] })] }));
+    }
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: currentModule.label, subtitle: "Crea tareas y revisa pendientes ligados al asunto." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar asunto" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Cliente, asunto, ID..." })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Asuntos" }), _jsx("span", { children: filteredMatters.length })] }), _jsx("div", { className: "mobile-card-list", children: loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando asuntos..." })) : filteredMatters.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay asuntos para esta busqueda." })) : (filteredMatters.map((matter) => {
                             const pendingCount = records.filter((record) => recordBelongsToMatter(record, matter)).filter(isPendingRecord).length +
                                 terms.filter((term) => recordBelongsToMatter(term, matter)).filter(isPendingRecord).length;
-                            return (_jsxs("button", { type: "button", className: `mobile-matter-card${matter.id === selectedMatterId ? " is-selected" : ""}`, onClick: () => {
-                                    setSelectedMatterId(matter.id);
-                                    setSuccessMessage(null);
-                                }, children: [_jsx("strong", { children: matter.clientName || "Sin cliente" }), _jsx("span", { children: matter.subject || "Sin asunto" }), _jsxs("small", { children: [getEffectiveClientNumber(matter, clients) || "S/N", " | ", matter.matterIdentifier || matter.matterNumber || "Sin ID", " | ", pendingCount, " pendientes"] })] }, matter.id));
-                        })) })] }), selectedMatter ? (_jsxs("section", { className: "mobile-section mobile-form-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nueva tarea" }), _jsx("span", { children: selectedMatter.clientName })] }), _jsx(MobileMatterSummary, { matter: selectedMatter, clientNumber: getEffectiveClientNumber(selectedMatter, clients) }), _jsxs("label", { className: "mobile-field mobile-event-search-field", children: [_jsx("span", { children: "Selector de tareas" }), _jsxs("div", { className: "mobile-event-search", ref: eventSearchRef, children: [_jsx("input", { value: eventSearch, onChange: (event) => {
-                                            setEventSearch(event.target.value);
-                                            setEventSearchOpen(true);
+                            return (_jsxs("div", { className: "mobile-matter-item", children: [_jsxs("button", { type: "button", className: `mobile-matter-card${matter.id === selectedMatterId ? " is-selected" : ""}`, onClick: () => {
+                                            setSelectedMatterId(matter.id);
                                             setSuccessMessage(null);
-                                            if (selectedEventId) {
-                                                setSelectedEventId("");
-                                                setTargets([]);
-                                            }
-                                        }, onFocus: () => setEventSearchOpen(true), placeholder: "Buscar tarea...", autoComplete: "off" }), eventSearchOpen ? (_jsx("div", { className: "mobile-event-search-results", role: "listbox", children: filteredEvents.length === 0 ? (_jsx("div", { className: "mobile-event-search-empty", children: "No hay tareas con ese criterio." })) : (filteredEvents.map((event) => (_jsx("button", { type: "button", role: "option", "aria-selected": event.id === selectedEventId, onMouseDown: (mouseEvent) => {
-                                                mouseEvent.preventDefault();
-                                                handleEventChange(event.id);
-                                            }, children: event.name }, event.id)))) })) : null] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Responsable" }), _jsx("input", { value: responsible, onChange: (event) => setResponsible(event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: dueDate, onChange: (event) => setDueDate(event.target.value) })] })] }), targets.length > 0 ? (_jsx("div", { className: "mobile-target-list", children: targets.map((target) => {
-                            const table = currentLegacyConfig.tables.find((candidate) => candidate.slug === target.tableSlug);
-                            return (_jsxs("article", { className: "mobile-target-card", children: [_jsxs("div", { children: [_jsx("strong", { children: getTableDisplayName(currentLegacyConfig, target.tableSlug) }), _jsx("button", { type: "button", onClick: () => setTargets((current) => current.filter((candidate) => candidate.id !== target.id)), children: "Quitar" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Nombre del registro" }), _jsx("input", { value: target.taskName, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, taskName: event.target.value } : candidate)) })] }), table?.showReportedPeriod ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: table.reportedPeriodLabel ?? "Periodo reportado" }), _jsx("input", { type: "month", value: target.reportedMonth, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, reportedMonth: event.target.value } : candidate)) })] })) : null] }, target.id));
-                        }) })) : null, _jsx("button", { type: "button", className: "mobile-submit", disabled: submitting || !selectedEvent || targets.length === 0 || !dueDate, onClick: () => void handleSubmit(), children: submitting ? "Enviando..." : "Enviar al manager de tareas" })] })) : null, selectedMatter ? (_jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Pendientes del asunto" }), _jsx("span", { children: matterRecords.length + matterTerms.length })] }), _jsx(MobileRecordList, { records: [...matterRecords, ...matterTerms], legacyConfig: currentLegacyConfig, histories: histories })] })) : null] }));
+                                        }, children: [_jsx("strong", { children: matter.clientName || "Sin cliente" }), _jsx("span", { children: matter.subject || "Sin asunto" }), _jsxs("small", { children: [getEffectiveClientNumber(matter, clients) || "S/N", " | ", matter.matterIdentifier || matter.matterNumber || "Sin ID", " | ", pendingCount, " pendientes"] })] }), matter.id === selectedMatterId ? renderSelectedMatterPanel() : null] }, matter.id));
+                        })) })] })] }));
 }
 export function MobileTrackingIndexPage() {
     const { user } = useAuth();
     const visibleModules = getVisibleExecutionModules(user);
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Seguimiento", subtitle: "Consulta rapida de tablas del manager de tareas." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/tracking/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Ver tablas" })] }, module.moduleId))) })] }));
-}
-export function MobileDashboardIndexPage() {
-    const { user } = useAuth();
-    const visibleModules = getVisibleExecutionModules(user);
-    if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
-        return _jsx(Navigate, { to: `/mobile/dashboard/${visibleModules[0].slug}`, replace: true });
-    }
-    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Dashboard", subtitle: "Vista diaria de tareas por integrante." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/dashboard/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Dashboard del equipo" })] }, module.moduleId))) })] }));
-}
-export function MobileDashboardModulePage() {
-    const { slug } = useParams();
-    const { user } = useAuth();
-    const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-    const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-    const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
-    const visibleModules = getVisibleExecutionModules(user);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
-    const [clients, setClients] = useState([]);
-    const [matters, setMatters] = useState([]);
-    const [records, setRecords] = useState([]);
-    const [terms, setTerms] = useState([]);
-    const [additionalTasks, setAdditionalTasks] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedMemberId, setSelectedMemberId] = useState("");
-    const [timeframe, setTimeframe] = useState("hoy");
-    useEffect(() => {
-        if (!module || !canAccess) {
-            return;
-        }
-        async function loadDashboard() {
-            setLoading(true);
-            try {
-                const [loadedClients, loadedMatters, loadedRecords, loadedTerms, loadedAdditionalTasks] = await Promise.all([
-                    apiGet("/clients"),
-                    apiGet("/matters"),
-                    apiGet(`/tasks/tracking-records?moduleId=${module.moduleId}`),
-                    apiGet(`/tasks/terms?moduleId=${module.moduleId}`),
-                    apiGet(`/tasks/additional?moduleId=${module.moduleId}`)
-                ]);
-                setClients(loadedClients);
-                setMatters(loadedMatters.filter((matter) => matter.responsibleTeam === module.team));
-                setRecords(loadedRecords);
-                setTerms(loadedTerms);
-                setAdditionalTasks(loadedAdditionalTasks);
-            }
-            finally {
-                setLoading(false);
-            }
-        }
-        void loadDashboard();
-    }, [canAccess, module?.moduleId, module?.team]);
-    useEffect(() => {
-        if (!dashboardConfig || selectedMemberId) {
-            return;
-        }
-        const userMember = dashboardConfig.members.find((member) => getDashboardMemberForUser(member, user));
-        setSelectedMemberId((userMember ?? dashboardConfig.members[0])?.id ?? "");
-    }, [dashboardConfig, selectedMemberId, user]);
-    if (!module || !legacyConfig || !dashboardConfig || !canAccess) {
-        return _jsx(Navigate, { to: "/mobile/dashboard", replace: true });
-    }
-    const currentLegacyConfig = legacyConfig;
-    const currentDashboardConfig = dashboardConfig;
-    const selectedMember = currentDashboardConfig.members.find((member) => member.id === selectedMemberId) ?? currentDashboardConfig.members[0];
-    function buildRows(member, activeTimeframe) {
-        const termById = new Map(terms.map((term) => [term.id, term]));
-        const termBySourceRecordId = new Map(terms.filter((term) => term.sourceRecordId).map((term) => [term.sourceRecordId ?? "", term]));
-        const sharedAliases = currentDashboardConfig.sharedResponsibleAliases ?? [];
-        const trackingRows = records
-            .filter((record) => matchesResponsible(record.responsible, member, sharedAliases))
-            .filter((record) => {
-            const table = findTrackingTable(currentLegacyConfig, record);
-            return belongsToTimeframe({
-                state: isCompletedTrackingRecord(table, record) ? "closed" : "open",
-                date: getTrackingDashboardDate(table, record)
-            }, activeTimeframe);
-        })
-            .map((record) => {
-            const table = findTrackingTable(currentLegacyConfig, record);
-            const linkedTerm = (record.termId ? termById.get(record.termId) : undefined) ?? termBySourceRecordId.get(record.id);
-            const date = getTrackingDashboardDate(table, record);
-            const taskLabel = resolveTrackingTaskName(record, table, undefined, record.eventName) || "Tarea";
-            const completed = isCompletedTrackingRecord(table, record);
-            const highlighted = !completed && (!taskLabel || !record.responsible || !date || date <= localDateInput() || (isTrackingTermEnabled(record, table) && !linkedTerm));
-            return {
-                id: `tracking-${record.id}`,
-                title: taskLabel,
-                typeLabel: completed ? "Completada" : isTrackingTermEnabled(record, table) ? "Termino / seguimiento" : "Seguimiento",
-                date: completed ? toDateInput(record.completedAt || record.updatedAt) : date,
-                clientName: record.clientName || "-",
-                clientNumber: record.clientNumber || "-",
-                subject: record.subject || "-",
-                originLabel: table?.title ?? record.sourceTable,
-                highlighted
-            };
-        });
-        const termRows = terms
-            .filter((term) => term.recurring && !term.sourceRecordId)
-            .filter((term) => matchesResponsible(term.responsible, member, sharedAliases))
-            .filter((term) => belongsToTimeframe({
-            state: isCompletedStatus(term.status) ? "closed" : "open",
-            date: toDateInput(term.termDate || term.dueDate)
-        }, activeTimeframe))
-            .map((term) => {
-            const date = toDateInput(term.termDate || term.dueDate);
-            const completed = isCompletedStatus(term.status);
-            return {
-                id: `term-${term.id}`,
-                title: term.eventName || term.pendingTaskLabel || "Termino",
-                typeLabel: term.recurring ? "Termino recurrente" : "Termino",
-                date,
-                clientName: term.clientName || "-",
-                clientNumber: term.clientNumber || "-",
-                subject: term.subject || "-",
-                originLabel: term.recurring ? "Terminos recurrentes" : "Terminos",
-                highlighted: !completed && (!term.responsible || !date || date <= localDateInput() || !isVerificationComplete(term))
-            };
-        });
-        const additionalRows = additionalTasks
-            .filter((task) => matchesResponsible(task.responsible, member, sharedAliases) ||
-            matchesResponsible(task.responsible2 ?? "", member, sharedAliases))
-            .filter((task) => belongsToTimeframe({
-            state: task.status === "concluida" ? "closed" : "open",
-            date: toDateInput(task.dueDate)
-        }, activeTimeframe))
-            .map((task) => {
-            const date = toDateInput(task.dueDate);
-            return {
-                id: `additional-${task.id}`,
-                title: task.task,
-                typeLabel: task.recurring ? "Termino recurrente" : "Tarea adicional",
-                date,
-                clientName: "-",
-                clientNumber: "-",
-                subject: "-",
-                originLabel: "Tareas adicionales",
-                highlighted: task.status !== "concluida" && (!task.task || !task.responsible || !date || date < localDateInput())
-            };
-        });
-        return [...trackingRows, ...termRows, ...additionalRows].sort((left, right) => left.date.localeCompare(right.date));
-    }
-    const rows = selectedMember ? buildRows(selectedMember, timeframe) : [];
-    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: `Dashboard ${module.shortLabel}`, subtitle: "Vista diaria por integrante." }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Integrante" }), _jsx("span", { children: selectedMember?.id })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Usuario" }), _jsx("select", { value: selectedMember?.id ?? "", onChange: (event) => setSelectedMemberId(event.target.value), children: currentDashboardConfig.members.map((member) => (_jsx("option", { value: member.id, children: member.name }, member.id))) })] })] }), _jsx("div", { className: "mobile-segmented mobile-dashboard-segmented", children: MOBILE_TIMEFRAMES.map((item) => (_jsx("button", { type: "button", className: timeframe === item.id ? "is-active" : "", onClick: () => setTimeframe(item.id), children: item.label }, item.id))) }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: MOBILE_TIMEFRAMES.find((item) => item.id === timeframe)?.label }), _jsxs("span", { children: [rows.length, " tareas"] })] }), loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando dashboard..." })) : rows.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay tareas en esta ventana." })) : (_jsx("div", { className: "mobile-card-list", children: rows.map((row) => (_jsxs("article", { className: `mobile-record-card${row.highlighted ? " is-overdue" : ""}`, children: [_jsxs("div", { className: "mobile-record-card-head", children: [_jsx("strong", { children: row.title }), _jsx("span", { children: row.typeLabel })] }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "Cliente" }), _jsxs("dd", { children: [row.clientNumber, " | ", row.clientName] })] }), _jsxs("div", { children: [_jsx("dt", { children: "Asunto" }), _jsx("dd", { children: row.subject })] }), _jsxs("div", { children: [_jsx("dt", { children: "Fecha" }), _jsx("dd", { children: row.date || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Origen" }), _jsx("dd", { children: row.originLabel })] })] })] }, row.id))) }))] })] }));
 }
 export function MobileTrackingModulePage() {
     const { slug } = useParams();

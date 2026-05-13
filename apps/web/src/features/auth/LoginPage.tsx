@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "./AuthContext";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
@@ -31,13 +31,15 @@ function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
 
 export function LoginPage() {
   const { user, login } = useAuth();
+  const [searchParams] = useSearchParams();
   const [identifier, setIdentifier] = useState("Eduardo Rusconi");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const redirectTarget = getSafeRedirectTarget(searchParams.get("redirect"));
 
   if (user) {
-    return <Navigate to="/app" replace />;
+    return <Navigate to={redirectTarget} replace />;
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -106,4 +108,16 @@ export function LoginPage() {
       </section>
     </main>
   );
+}
+
+function getSafeRedirectTarget(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/app";
+  }
+
+  if (value === "/mobile" || value.startsWith("/mobile/")) {
+    return value;
+  }
+
+  return "/app";
 }

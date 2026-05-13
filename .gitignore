@@ -11,3 +11,9 @@ coverage/
 *.log
 apps/api/.cache/
 apps/web/.vite/
+apps/mobile/.expo/
+apps/mobile/dist-codex-check*/
+apps/mobile/*.local
+apps/mobile/*Copia en conflicto*
+emulator-sige-mobile.png
+expo-qr.png
