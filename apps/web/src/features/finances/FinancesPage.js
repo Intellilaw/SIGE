@@ -255,6 +255,7 @@ function MonthSummaryCards({ records }) {
 export function FinancesPage() {
     const { user } = useAuth();
     const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+    const canDeleteFinanceRecords = isSuperadmin || Boolean(user?.permissions.includes("finances:write"));
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
@@ -511,8 +512,8 @@ export function FinancesPage() {
         });
     }
     async function handleDeleteRecord(recordId) {
-        if (!isSuperadmin) {
-            window.alert("Solo los superadministradores pueden borrar registros.");
+        if (!canDeleteFinanceRecords) {
+            window.alert("Solo el equipo de Finanzas puede borrar registros.");
             return;
         }
         if (!window.confirm("Borrar este registro?")) {
@@ -532,8 +533,8 @@ export function FinancesPage() {
         }
     }
     async function handleBulkDelete() {
-        if (!isSuperadmin) {
-            window.alert("Solo los superadministradores pueden borrar registros.");
+        if (!canDeleteFinanceRecords) {
+            window.alert("Solo el equipo de Finanzas puede borrar registros.");
             return;
         }
         if (selectedIds.size === 0) {

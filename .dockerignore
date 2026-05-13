@@ -13,4 +13,10 @@ apps/api/node_modules
 apps/web/node_modules
 packages/*/node_modules
 apps/api/runtime-assets/local-auth-store.json
+apps/mobile/.expo
+apps/mobile/dist-codex-check*
+apps/mobile/*.local
+apps/mobile/*Copia en conflicto*
+emulator-sige-mobile.png
+expo-qr.png
 *.log

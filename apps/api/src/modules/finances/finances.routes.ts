@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
-import { requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
+import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
 
 const teamSchema = z.enum([
   "CLIENT_RELATIONS",
@@ -77,7 +77,7 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
   const readGuards = [requireAuth, requireAnyPermissions(["finances:read", "finances:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
   const sendMatterGuards = [requireAuth, requireAnyPermissions(["finances:write", "matters:write"])];
-  const deleteGuards = [requireAuth, requireRoles(["SUPERADMIN"])];
+  const deleteGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
 
   app.get("/finances/records", { preHandler: readGuards }, async (request) => {
     const query = yearMonthSchema.parse(request.query);

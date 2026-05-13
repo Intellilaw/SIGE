@@ -2390,7 +2390,7 @@ export function QuotesPage() {
               </label>
 
               <label className="form-field">
-                <span>Numero de cotizacion</span>
+                <span>Numero de cotizacion tipo</span>
                 <input type="text" value={templateFormNumber} readOnly />
               </label>
 

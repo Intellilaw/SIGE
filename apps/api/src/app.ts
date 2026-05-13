@@ -21,6 +21,7 @@ import { InternalContractsService } from "./modules/internal-contracts/internal-
 import { LeadsService } from "./modules/leads/leads.service";
 import { MattersService } from "./modules/matters/matters.service";
 import { QuotesService } from "./modules/quotes/quotes.service";
+import { startTasksMaintenanceScheduler } from "./modules/tasks/tasks-maintenance";
 import { TasksService } from "./modules/tasks/tasks.service";
 import { UsersService } from "./modules/users/users.service";
 import { healthRoutes } from "./modules/health/health.routes";
@@ -256,6 +257,13 @@ export async function buildApp() {
     await api.register(mattersRoutes);
     await api.register(tasksRoutes);
   }, { prefix: "/api/v1" });
+
+  if (env.APP_ENV !== "test") {
+    const stopTasksMaintenance = startTasksMaintenanceScheduler(prisma, app.log);
+    app.addHook("onClose", async () => {
+      stopTasksMaintenance();
+    });
+  }
 
   return app;
 }

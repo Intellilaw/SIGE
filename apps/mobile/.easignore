@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+dist*/
+*.log
+*.apk
+*.aab
+*Copia en conflicto*
+.env.local
