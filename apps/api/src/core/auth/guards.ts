@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { SystemRole, Team } from "@sige/contracts";
+import { deriveEffectivePermissions } from "@sige/contracts";
 
 import { AppError } from "../errors/app-error";
 import type { SessionUser } from "./types";
@@ -37,11 +38,18 @@ export function requireTeams(allowedTeams: Team[]) {
 export function requireAnyPermissions(allowedPermissions: string[]) {
   return async function permissionGuard(request: FastifyRequest) {
     const user = getSessionUser(request);
-    if (user.permissions.includes("*")) {
+    const permissions = deriveEffectivePermissions({
+      legacyRole: user.legacyRole,
+      team: user.team,
+      legacyTeam: user.legacyTeam,
+      specificRole: user.specificRole
+    });
+
+    if (permissions.includes("*")) {
       return;
     }
 
-    if (!allowedPermissions.some((permission) => user.permissions.includes(permission))) {
+    if (!allowedPermissions.some((permission) => permissions.includes(permission))) {
       throw new AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
     }
   };

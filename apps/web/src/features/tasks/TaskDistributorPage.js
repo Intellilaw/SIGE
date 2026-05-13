@@ -2,7 +2,8 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
+import { useAuth } from "../auth/AuthContext";
+import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { buildDistributionHistoryTaskNameMap, getTermEnabledRecordData, isTrackingTermEnabled, resolveTrackingTaskName, usesOptionalTermToggle, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { encodeCatalogTarget, findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName, makeCatalogTargetEntry } from "./task-distribution-utils";
@@ -159,8 +160,10 @@ export function TaskDistributorPage() {
     const { slug } = useParams();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const { user } = useAuth();
     const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
     const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
+    const canAccessModule = Boolean(executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId));
     const [activeTab, setActiveTab] = useState(searchParams.get("tab") === "config" ? "config" : "active");
     const [events, setEvents] = useState([]);
     const [history, setHistory] = useState([]);
@@ -174,7 +177,7 @@ export function TaskDistributorPage() {
     const [responsibleOptions, setResponsibleOptions] = useState([]);
     const [loading, setLoading] = useState(true);
     async function loadDistributor() {
-        if (!moduleConfig) {
+        if (!moduleConfig || !canAccessModule) {
             return;
         }
         setLoading(true);
@@ -196,9 +199,9 @@ export function TaskDistributorPage() {
     }
     useEffect(() => {
         void loadDistributor();
-    }, [moduleConfig]);
+    }, [canAccessModule, moduleConfig]);
     useEffect(() => {
-        if (!moduleConfig) {
+        if (!moduleConfig || !canAccessModule) {
             setResponsibleOptions([]);
             return;
         }
@@ -223,7 +226,7 @@ export function TaskDistributorPage() {
         return () => {
             cancelled = true;
         };
-    }, [moduleConfig]);
+    }, [canAccessModule, moduleConfig]);
     useEffect(() => {
         const requestedTab = searchParams.get("tab");
         setActiveTab(requestedTab === "config" ? "config" : "active");
@@ -635,7 +638,7 @@ export function TaskDistributorPage() {
         setTrackingRecords((current) => current.map((record) => records.some((deleted) => deleted.id === record.id) ? { ...record, deletedAt } : record));
         setTerms((current) => current.map((term) => records.some((record) => term.id === record.termId || term.sourceRecordId === record.id) ? { ...term, deletedAt } : term));
     }
-    if (!moduleConfig) {
+    if (!moduleConfig || !executionModule || !canAccessModule) {
         return _jsx(Navigate, { to: "/app/tasks", replace: true });
     }
     return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsx("div", { className: "execution-page-topline", children: _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }) }), _jsxs("h2", { children: ["Manager de tareas (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "La pesta\u00F1a de tareas activas es la fuente operativa: sus registros alimentan las tablas de seguimiento y el modulo de ejecucion. La configuracion define el catalogo usado por el Selector de Tareas." })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "tasks-legacy-tabs tasks-distributor-tabs", children: [_jsx("button", { type: "button", className: activeTab === "active" ? "is-active" : "", onClick: () => setActiveTab("active"), children: "Tareas activas" }), _jsx("button", { type: "button", className: activeTab === "config" ? "is-active" : "", onClick: () => setActiveTab("config"), children: "Configuraci\u00F3n" })] }), activeTab === "active" ? (_jsxs("div", { className: "tasks-distributor-active", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsxs("h2", { children: ["Tareas activas (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "Registro de tareas distribuidas. Editar aqui actualiza la informacion que se ve en seguimiento y ejecucion." })] }), _jsxs("span", { children: [activeHistory.length, " activas"] })] }), _jsx("div", { className: "tasks-distributor-search-panel", children: _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, tabla..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsxs("div", { className: "matters-toolbar-actions tasks-distributor-search-actions", children: [_jsx("span", { className: "muted", children: "Filtra las tareas activas por cliente o por cualquier dato del asunto, tarea, tabla o vencimiento." }), executionModule ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/execution/${executionModule.slug}`), children: "Ir a Ejecuci\u00F3n" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => document.getElementById("tasks-recycle-bin")?.scrollIntoView({ behavior: "smooth", block: "start" }), children: "Ir a papelera" })] })] }) }), _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: "data-table tasks-legacy-table tasks-distributor-active-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Tablas / tareas" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 6, className: "centered-inline-message", children: "Cargando tareas activas..." }) })) : activeHistory.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 6, className: "centered-inline-message", children: "No hay tareas activas en este equipo." }) })) : (activeHistory.map((item) => {

@@ -76,7 +76,7 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.FinancesService(app.repositories.finances);
   const readGuards = [requireAuth, requireAnyPermissions(["finances:read", "finances:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
-  const sendMatterGuards = [requireAuth, requireAnyPermissions(["finances:write", "matters:write"])];
+  const sendMatterGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
   const deleteGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
 
   app.get("/finances/records", { preHandler: readGuards }, async (request) => {

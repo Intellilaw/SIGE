@@ -1,4 +1,5 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import { deriveEffectivePermissions } from "@sige/contracts";
 import { z } from "zod";
 
 import { getSessionUser, requireAnyPermissions, requireAuth } from "../../core/auth/guards";
@@ -56,6 +57,33 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.GeneralExpensesService(app.repositories.generalExpenses);
   const readGuards = [requireAuth, requireAnyPermissions(["general-expenses:read", "general-expenses:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["general-expenses:write"])];
+  const patchGuards = [requireAuth, async (request: FastifyRequest) => {
+    const payload = updateSchema.parse(request.body ?? {});
+    const payloadKeys = Object.keys(payload);
+    const isJnlsApprovalOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "reviewedByJnls");
+    const user = getSessionUser(request);
+    const permissions = deriveEffectivePermissions({
+      legacyRole: user.legacyRole,
+      team: user.team,
+      legacyTeam: user.legacyTeam,
+      specificRole: user.specificRole
+    });
+
+    if (isJnlsApprovalOnlyPatch) {
+      if (!permissions.includes("general-expenses:jnls-approval:write")) {
+        throw new app.errors.AppError(403, "FORBIDDEN", "Only the audit team can update the JNLS approval flag.");
+      }
+      return;
+    }
+
+    if (payloadKeys.includes("reviewedByJnls")) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "The JNLS approval flag must be updated separately by the audit team.");
+    }
+
+    if (!permissions.includes("*") && !permissions.includes("general-expenses:write")) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+  }];
 
   app.get("/general-expenses", { preHandler: readGuards }, async (request) => {
     const query = querySchema.parse(request.query ?? {});
@@ -70,7 +98,7 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
     return service.create(payload);
   });
 
-  app.patch("/general-expenses/:expenseId", { preHandler: writeGuards }, async (request) => {
+  app.patch("/general-expenses/:expenseId", { preHandler: patchGuards }, async (request) => {
     const params = paramsSchema.parse(request.params);
     const payload = updateSchema.parse(request.body ?? {});
     const actor = getSessionUser(request);

@@ -44,6 +44,7 @@ const pdfMarginX = 54;
 const pdfContentWidth = pdfPageWidth - pdfMarginX * 2;
 const pdfContentTop = 76;
 const pdfContentBottom = 704;
+const pdfTableHeaderHeight = 60;
 const pdfNavy = "#0b1f33";
 const pdfBlue = "#d8e2f0";
 const pdfPaleBlue = "#c2d2e8";
@@ -63,6 +64,7 @@ const wordNavy = "0B1F33";
 const wordHeaderFill = "D8E2F0";
 const wordTitleFill = "0F3052";
 const wordConceptFill = "F4F7FA";
+const wordConceptReferenceFill = "E9EEF5";
 const wordTotalLabelFill = "C2D2E8";
 const wordTotalAmountFill = "EBF0F7";
 const wordText = "1A2330";
@@ -266,6 +268,10 @@ function localizeAmountColumnTitle(title: string, index: number, language: Quote
 }
 
 function getDefaultConceptLabel(index: number, language: Quote["language"]) {
+  return language === "en" ? `Concept ${index + 1}` : `Concepto ${index + 1}`;
+}
+
+function getConceptReferenceLabel(index: number, language: Quote["language"]) {
   return language === "en" ? `Concept ${index + 1}` : `Concepto ${index + 1}`;
 }
 
@@ -509,13 +515,16 @@ function drawPdfCell(
 
 function getPdfTableColumns(payload: QuoteExportPayload) {
   const amountColumnCount = Math.max(1, payload.amountColumns.length);
+  const referenceWidth = 58;
+  const contentWidth = pdfContentWidth - referenceWidth;
   const widthRatios = amountColumnCount >= 2
-    ? [0.3, 0.15, 0.15, 0.2, 0.2]
+    ? [0.31, 0.15, 0.15, 0.195, 0.195]
     : [0.34, 0.2, 0.23, 0.23];
-  const widths = widthRatios.map((ratio) => Math.floor(pdfContentWidth * ratio));
-  widths[widths.length - 1] += pdfContentWidth - widths.reduce((sum, width) => sum + width, 0);
+  const widths = widthRatios.map((ratio) => Math.floor(contentWidth * ratio));
+  widths[widths.length - 1] += contentWidth - widths.reduce((sum, width) => sum + width, 0);
 
   const columns: Array<{ key: string; header: string; width: number; amountIndex?: number }> = [
+    { key: "reference", header: "", width: referenceWidth },
     { key: "concept", header: payload.conceptHeader, width: widths[0] ?? 170 }
   ];
 
@@ -562,21 +571,22 @@ function drawPdfTableHeader(
 
   const headerY = y + 30;
   columns.forEach((column) => {
+    const isReferenceColumn = column.key === "reference";
     drawPdfCell(doc, {
       x: column.x,
       y: headerY,
       width: column.width,
       height: 30,
-      text: column.header.toUpperCase(),
-      fill: pdfBlue,
-      color: pdfNavy,
+      text: isReferenceColumn ? "" : column.header.toUpperCase(),
+      fill: isReferenceColumn ? "#000000" : pdfBlue,
+      color: isReferenceColumn ? "#ffffff" : pdfNavy,
       bold: true,
       fontSize: 7.8,
       padding: 5
     });
   });
 
-  return headerY + 30;
+  return y + pdfTableHeaderHeight;
 }
 
 function getCellSpanHeight(rowHeights: number[], rowIndex: number, rowSpan: number) {
@@ -591,7 +601,7 @@ function getPdfRowHeights(
   columns: ReturnType<typeof getPdfTableColumns>
 ) {
   const rowHeights = payload.tableRows.map((row) => {
-    const conceptColumn = columns[0];
+    const conceptColumn = columns.find((column) => column.key === "concept") ?? columns[1] ?? columns[0];
     const conceptHeight = measurePdfTextHeight(doc, row.conceptDescription, conceptColumn.width - 12, 8.5, false, "left");
     return Math.max(38, Math.ceil(conceptHeight + 14));
   });
@@ -652,76 +662,108 @@ function getPdfRowHeights(
   return rowHeights;
 }
 
-function getPdfRowBlockHeight(payload: QuoteExportPayload, rowHeights: number[], rowIndex: number) {
-  let blockEndIndex = rowIndex;
-
-  for (let index = rowIndex; index <= blockEndIndex && index < payload.tableRows.length; index += 1) {
-    const row = payload.tableRows[index];
-    [
-      ...row.amountCells,
-      row.paymentMoment,
-      row.notesCell
-    ].forEach((cell) => {
-      if (!cell.hidden) {
-        blockEndIndex = Math.max(blockEndIndex, index + Math.max(1, cell.rowSpan) - 1);
-      }
-    });
-  }
-
-  return getCellSpanHeight(rowHeights, rowIndex, blockEndIndex - rowIndex + 1);
-}
-
-function drawPdfQuoteTable(
+function drawPdfTableRowsSegment(
   doc: PDFKit.PDFDocument,
   payload: QuoteExportPayload,
-  y: number,
-  letterheadImage: Buffer | null
+  columns: ReturnType<typeof getPdfTableColumns>,
+  rowHeights: number[],
+  startRowIndex: number,
+  endRowIndex: number,
+  y: number
 ) {
-  const columns = getPdfTableColumns(payload);
-  const rowHeights = getPdfRowHeights(doc, payload, columns);
-  let currentY = drawPdfTableHeader(doc, payload, columns, y);
+  const rowYPositions = new Map<number, number>();
+  let currentY = y;
 
-  payload.tableRows.forEach((row, rowIndex) => {
-    const blockHeight = getPdfRowBlockHeight(payload, rowHeights, rowIndex);
-    if (currentY + blockHeight > pdfContentBottom && currentY > pdfContentTop + 70) {
-      addPdfLetterheadPage(doc, letterheadImage);
-      currentY = drawPdfTableHeader(doc, payload, columns, pdfContentTop);
+  for (let rowIndex = startRowIndex; rowIndex < endRowIndex; rowIndex += 1) {
+    const row = payload.tableRows[rowIndex];
+    const rowHeight = rowHeights[rowIndex] ?? 38;
+    const referenceColumn = columns.find((column) => column.key === "reference");
+    const conceptColumn = columns.find((column) => column.key === "concept");
+    rowYPositions.set(rowIndex, currentY);
+
+    if (referenceColumn) {
+      drawPdfCell(doc, {
+        x: referenceColumn.x,
+        y: currentY,
+        width: referenceColumn.width,
+        height: rowHeight,
+        text: getConceptReferenceLabel(rowIndex, payload.language),
+        fill: pdfConceptFill,
+        color: pdfNavy,
+        bold: true,
+        fontSize: 6.2,
+        padding: 4
+      });
     }
 
-    const rowHeight = rowHeights[rowIndex] ?? 38;
-    drawPdfCell(doc, {
-      x: columns[0].x,
-      y: currentY,
-      width: columns[0].width,
-      height: rowHeight,
-      text: getPdfPlainCellText(row.conceptDescription, payload.emptyCellLabel),
-      fill: pdfConceptFill,
-      color: pdfText,
-      fontSize: 8.2,
-      align: "left"
-    });
+    if (conceptColumn) {
+      drawPdfCell(doc, {
+        x: conceptColumn.x,
+        y: currentY,
+        width: conceptColumn.width,
+        height: rowHeight,
+        text: getPdfPlainCellText(row.conceptDescription, payload.emptyCellLabel),
+        fill: pdfConceptFill,
+        color: pdfText,
+        fontSize: 8.2,
+        align: "left"
+      });
+    }
 
+    currentY += rowHeight;
+  }
+
+  const drawSpanFragment = (
+    columnKey: string,
+    rowIndex: number,
+    rowSpan: number,
+    text: string,
+    options: { bold?: boolean; color?: string; fontSize?: number }
+  ) => {
+    const column = columns.find((candidate) => candidate.key === columnKey);
+    if (!column) {
+      return;
+    }
+
+    const spanStartIndex = rowIndex;
+    const spanEndIndex = Math.min(payload.tableRows.length, rowIndex + Math.max(1, rowSpan));
+    const fragmentStartIndex = Math.max(spanStartIndex, startRowIndex);
+    const fragmentEndIndex = Math.min(spanEndIndex, endRowIndex);
+    if (fragmentStartIndex >= fragmentEndIndex) {
+      return;
+    }
+
+    const fragmentY = rowYPositions.get(fragmentStartIndex);
+    if (fragmentY == null) {
+      return;
+    }
+
+    drawPdfCell(doc, {
+      x: column.x,
+      y: fragmentY,
+      width: column.width,
+      height: getCellSpanHeight(rowHeights, fragmentStartIndex, fragmentEndIndex - fragmentStartIndex),
+      text,
+      fill: "#ffffff",
+      color: options.color ?? pdfText,
+      bold: options.bold,
+      fontSize: options.fontSize
+    });
+  };
+
+  payload.tableRows.forEach((row, rowIndex) => {
     row.amountCells.forEach((cell, amountIndex) => {
       if (cell.hidden) {
         return;
       }
 
-      const column = columns.find((candidate) => candidate.key === `amount-${amountIndex}`);
-      if (!column) {
-        return;
-      }
-
-      drawPdfCell(doc, {
-        x: column.x,
-        y: currentY,
-        width: column.width,
-        height: getCellSpanHeight(rowHeights, rowIndex, cell.rowSpan),
-        text: getPdfAmountCellText(cell.value, payload.amountColumns[amountIndex]?.mode ?? "FIXED", payload.emptyCellLabel),
-        fill: "#ffffff",
-        color: pdfNavy,
-        bold: true,
-        fontSize: 8.2
-      });
+      drawSpanFragment(
+        `amount-${amountIndex}`,
+        rowIndex,
+        cell.rowSpan,
+        getPdfAmountCellText(cell.value, payload.amountColumns[amountIndex]?.mode ?? "FIXED", payload.emptyCellLabel),
+        { bold: true, color: pdfNavy, fontSize: 8.2 }
+      );
     });
 
     [
@@ -732,25 +774,72 @@ function drawPdfQuoteTable(
         return;
       }
 
-      const column = columns.find((candidate) => candidate.key === key);
-      if (!column) {
-        return;
+      drawSpanFragment(
+        key,
+        rowIndex,
+        cell.rowSpan,
+        getPdfPlainCellText(cell.value, payload.emptyCellLabel),
+        { color: pdfText, fontSize: 8.1 }
+      );
+    });
+  });
+
+  return currentY;
+}
+
+function drawPdfQuoteTable(
+  doc: PDFKit.PDFDocument,
+  payload: QuoteExportPayload,
+  y: number,
+  letterheadImage: Buffer | null
+) {
+  const columns = getPdfTableColumns(payload);
+  const rowHeights = getPdfRowHeights(doc, payload, columns);
+  let tableStartY = y;
+
+  if (payload.tableRows.length > 0 && tableStartY + pdfTableHeaderHeight + 38 > pdfContentBottom) {
+    addPdfLetterheadPage(doc, letterheadImage);
+    tableStartY = pdfContentTop;
+  }
+
+  let currentY = drawPdfTableHeader(doc, payload, columns, tableStartY);
+  let rowIndex = 0;
+
+  while (rowIndex < payload.tableRows.length) {
+    const segmentStartRowIndex = rowIndex;
+    let segmentHeight = 0;
+
+    while (rowIndex < payload.tableRows.length) {
+      const rowHeight = rowHeights[rowIndex] ?? 38;
+      const rowFits = currentY + segmentHeight + rowHeight <= pdfContentBottom;
+
+      if (!rowFits && rowIndex > segmentStartRowIndex) {
+        break;
       }
 
-      drawPdfCell(doc, {
-        x: column.x,
-        y: currentY,
-        width: column.width,
-        height: getCellSpanHeight(rowHeights, rowIndex, cell.rowSpan),
-        text: getPdfPlainCellText(cell.value, payload.emptyCellLabel),
-        fill: "#ffffff",
-        color: pdfText,
-        fontSize: 8.1
-      });
-    });
+      segmentHeight += rowHeight;
+      rowIndex += 1;
 
-    currentY += rowHeight;
-  });
+      if (!rowFits) {
+        break;
+      }
+    }
+
+    currentY = drawPdfTableRowsSegment(
+      doc,
+      payload,
+      columns,
+      rowHeights,
+      segmentStartRowIndex,
+      rowIndex,
+      currentY
+    );
+
+    if (rowIndex < payload.tableRows.length) {
+      addPdfLetterheadPage(doc, letterheadImage);
+      currentY = drawPdfTableHeader(doc, payload, columns, pdfContentTop);
+    }
+  }
 
   const summaryHeight = 26;
   const summaryRows = [
@@ -777,10 +866,29 @@ function drawPdfQuoteTable(
   }
 
   summaryRows.forEach((summaryRow) => {
+    const referenceColumn = columns.find((candidate) => candidate.key === "reference");
+    const conceptColumn = columns.find((candidate) => candidate.key === "concept");
+    if (referenceColumn) {
+      drawPdfCell(doc, {
+        x: referenceColumn.x,
+        y: currentY,
+        width: referenceColumn.width,
+        height: summaryHeight,
+        text: "",
+        fill: "#000000",
+        color: "#ffffff"
+      });
+    }
+
+    if (!conceptColumn) {
+      currentY += summaryHeight;
+      return;
+    }
+
     drawPdfCell(doc, {
-      x: columns[0].x,
+      x: conceptColumn.x,
       y: currentY,
-      width: columns[0].width,
+      width: conceptColumn.width,
       height: summaryHeight,
       text: summaryRow.label,
       fill: summaryRow.fill,
@@ -1114,18 +1222,20 @@ function createWordCell(
 
 function getWordTableColumns(payload: QuoteExportPayload) {
   const amountColumnCount = Math.max(1, payload.amountColumns.length);
+  const referenceWidth = 760;
+  const contentWidth = wordContentWidthTwip - referenceWidth;
   const widthRatios = amountColumnCount >= 2
-    ? [0.3, 0.15, 0.15, 0.2, 0.2]
+    ? [0.31, 0.15, 0.15, 0.195, 0.195]
     : [0.34, 0.2, 0.23, 0.23];
-  const widths = widthRatios.map((ratio) => Math.floor(wordContentWidthTwip * ratio));
-  widths[widths.length - 1] += wordContentWidthTwip - widths.reduce((sum, width) => sum + width, 0);
+  const widths = widthRatios.map((ratio) => Math.floor(contentWidth * ratio));
+  widths[widths.length - 1] += contentWidth - widths.reduce((sum, width) => sum + width, 0);
 
-  return widths;
+  return [referenceWidth, ...widths];
 }
 
 function createWordQuoteTable(payload: QuoteExportPayload) {
   const widths = getWordTableColumns(payload);
-  const columnCount = 1 + payload.amountColumns.length + 2;
+  const columnCount = 2 + payload.amountColumns.length + 2;
   const rows: TableRow[] = [
     new TableRow({
       tableHeader: true,
@@ -1144,8 +1254,15 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
       tableHeader: true,
       height: { value: 420, rule: HeightRule.ATLEAST },
       children: [
-        createWordCell(payload.conceptHeader.toUpperCase(), {
+        createWordCell("", {
           width: widths[0],
+          fill: "000000",
+          color: "FFFFFF",
+          bold: true,
+          size: 12
+        }),
+        createWordCell(payload.conceptHeader.toUpperCase(), {
+          width: widths[1],
           fill: wordHeaderFill,
           color: wordNavy,
           bold: true,
@@ -1153,7 +1270,7 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
         }),
         ...payload.amountColumns.map((column, index) =>
           createWordCell(column.title.toUpperCase(), {
-            width: widths[index + 1],
+            width: widths[index + 2],
             fill: wordHeaderFill,
             color: wordNavy,
             bold: true,
@@ -1161,14 +1278,14 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
           })
         ),
         createWordCell(payload.paymentHeader.toUpperCase(), {
-          width: widths[payload.amountColumns.length + 1],
+          width: widths[payload.amountColumns.length + 2],
           fill: wordHeaderFill,
           color: wordNavy,
           bold: true,
           size: 16
         }),
         createWordCell(payload.notesHeader.toUpperCase(), {
-          width: widths[payload.amountColumns.length + 2],
+          width: widths[payload.amountColumns.length + 3],
           fill: wordHeaderFill,
           color: wordNavy,
           bold: true,
@@ -1178,14 +1295,21 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
     })
   ];
 
-  payload.tableRows.forEach((row) => {
+  payload.tableRows.forEach((row, rowIndex) => {
     rows.push(
       new TableRow({
         cantSplit: true,
         height: { value: 520, rule: HeightRule.ATLEAST },
         children: [
-          createWordCell(getPdfPlainCellText(row.conceptDescription, payload.emptyCellLabel), {
+          createWordCell(getConceptReferenceLabel(rowIndex, payload.language), {
             width: widths[0],
+            fill: wordConceptReferenceFill,
+            color: wordNavy,
+            bold: true,
+            size: 12
+          }),
+          createWordCell(getPdfPlainCellText(row.conceptDescription, payload.emptyCellLabel), {
+            width: widths[1],
             fill: wordConceptFill,
             align: AlignmentType.START,
             size: 16
@@ -1200,7 +1324,7 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
                     payload.emptyCellLabel
                   ),
               {
-                width: widths[amountIndex + 1],
+                width: widths[amountIndex + 2],
                 bold: !cell.hidden,
                 color: wordNavy,
                 size: 16,
@@ -1213,7 +1337,7 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
             )
           ),
           createWordCell(row.paymentMoment.hidden ? "" : getPdfPlainCellText(row.paymentMoment.value, payload.emptyCellLabel), {
-            width: widths[payload.amountColumns.length + 1],
+            width: widths[payload.amountColumns.length + 2],
             size: 16,
             verticalMerge: row.paymentMoment.hidden
               ? VerticalMergeType.CONTINUE
@@ -1222,7 +1346,7 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
                 : undefined
           }),
           createWordCell(row.notesCell.hidden ? "" : getPdfPlainCellText(row.notesCell.value, payload.emptyCellLabel), {
-            width: widths[payload.amountColumns.length + 2],
+            width: widths[payload.amountColumns.length + 3],
             size: 16,
             verticalMerge: row.notesCell.hidden
               ? VerticalMergeType.CONTINUE
@@ -1260,8 +1384,12 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
         cantSplit: true,
         height: { value: 420, rule: HeightRule.ATLEAST },
         children: [
-          createWordCell(summaryRow.label, {
+          createWordCell("", {
             width: widths[0],
+            fill: "000000"
+          }),
+          createWordCell(summaryRow.label, {
+            width: widths[1],
             fill: summaryRow.labelFill,
             color: wordNavy,
             bold: true,
@@ -1272,7 +1400,7 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
             return createWordCell(
               summary == null ? payload.emptyCellLabel : formatExportCurrency(summaryRow.value(summary)),
               {
-                width: widths[amountIndex + 1],
+                width: widths[amountIndex + 2],
                 fill: summaryRow.amountFill,
                 color: wordNavy,
                 bold: true,
@@ -1281,11 +1409,11 @@ function createWordQuoteTable(payload: QuoteExportPayload) {
             );
           }),
           createWordCell("", {
-            width: widths[payload.amountColumns.length + 1],
+            width: widths[payload.amountColumns.length + 2],
             fill: "000000"
           }),
           createWordCell("", {
-            width: widths[payload.amountColumns.length + 2],
+            width: widths[payload.amountColumns.length + 3],
             fill: "000000"
           })
         ]

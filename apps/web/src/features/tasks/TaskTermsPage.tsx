@@ -3,6 +3,8 @@ import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom"
 import type { TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
+import { useAuth } from "../auth/AuthContext";
+import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import {
   hasMeaningfulTaskLabel,
   isTrackingTermEnabled,
@@ -141,14 +143,19 @@ export function TaskTermsPage() {
   const { slug } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
+  const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
+  const canAccessModule = Boolean(
+    executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId)
+  );
   const recurrentMode = location.pathname.endsWith("/terminos-recurrentes");
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadTerms() {
-    if (!moduleConfig) {
+    if (!moduleConfig || !canAccessModule) {
       return;
     }
 
@@ -167,7 +174,7 @@ export function TaskTermsPage() {
 
   useEffect(() => {
     void loadTerms();
-  }, [moduleConfig]);
+  }, [canAccessModule, moduleConfig]);
 
   const visibleTermRows = useMemo<TermTableRow[]>(() => {
     if (!moduleConfig) {
@@ -211,7 +218,7 @@ export function TaskTermsPage() {
     return rows.sort(sortTermRows);
   }, [moduleConfig, recurrentMode, terms, trackingRecords]);
 
-  if (!moduleConfig) {
+  if (!moduleConfig || !executionModule || !canAccessModule) {
     return <Navigate to="/app/tasks" replace />;
   }
 

@@ -1,9 +1,10 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { APP_VERSION_LABEL, APP_VERSION_TEXT } from "@sige/contracts";
+import { APP_VERSION_LABEL, APP_VERSION_TEXT, TEAM_OPTIONS } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import { buildDistributionHistoryTaskNameMap, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
@@ -17,8 +18,31 @@ const MOBILE_LEAD_CHANNELS = [
 ];
 const TERMS_TABLE_ID = "terminos";
 const RECURRING_TERMS_TABLE_ID = "terminos-recurrentes";
+const MOBILE_GENERAL_EXPENSE_TEAMS = [
+    { value: "Litigio", label: "Litigio" },
+    { value: "Corporativo y laboral", label: "Corporativo y laboral" },
+    { value: "Convenios", label: "Convenios" },
+    { value: "Der Financiero", label: "Der Financiero" },
+    { value: "Compliance Fiscal", label: "Compliance Fiscal" }
+];
+const MOBILE_GENERAL_EXPENSE_BANKS = ["Banamex", "HSBC"];
 function normalizeText(value) {
     return (value ?? "").trim();
+}
+function normalizeResponsibleOption(value) {
+    return normalizeText(value).toUpperCase();
+}
+function splitResponsibleOptions(value) {
+    return normalizeText(value)
+        .split(/[\/,;]/)
+        .map(normalizeResponsibleOption)
+        .filter(Boolean);
+}
+function dedupeResponsibleOptions(values) {
+    return Array.from(new Set(values.map(normalizeResponsibleOption).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+}
+function getDefaultResponsibleOption(userShortName, moduleDefaultResponsible) {
+    return normalizeResponsibleOption(userShortName) || splitResponsibleOptions(moduleDefaultResponsible)[0] || "";
 }
 function normalizeComparableText(value) {
     return normalizeText(value)
@@ -63,8 +87,134 @@ function initialLeadForm() {
         notes: ""
     };
 }
+function initialFinanceForm() {
+    return {
+        clientNumber: "",
+        clientName: "",
+        quoteNumber: "",
+        matterType: "ONE_TIME",
+        subject: "",
+        responsibleTeam: "",
+        totalMatterMxn: "",
+        workingConcepts: "",
+        conceptFeesMxn: "",
+        previousPaymentsMxn: "",
+        paidThisMonthMxn: "",
+        paymentDate1: todayInput(),
+        expenseNotes1: "",
+        expenseAmount1Mxn: "",
+        nextPaymentDate: "",
+        nextPaymentNotes: "",
+        financeComments: ""
+    };
+}
+function initialGeneralExpenseForm() {
+    return {
+        detail: "",
+        amountMxn: "",
+        countsTowardLimit: false,
+        distributionMode: "general",
+        team: "Litigio",
+        paymentMethod: "Transferencia",
+        bank: "Banamex",
+        recurring: false
+    };
+}
 function toErrorMessage(error) {
     return error instanceof Error && error.message ? error.message : "Ocurrio un error inesperado.";
+}
+function hasMobilePermission(user, permission) {
+    return Boolean(user?.permissions.includes("*") || user?.permissions.includes(permission));
+}
+function canReadMobileFinances(user) {
+    return canReadModule(user, "finances");
+}
+function canWriteMobileFinances(user) {
+    return canWriteModule(user, "finances");
+}
+function canReadMobileLeads(user) {
+    return canReadModule(user, "lead-tracking");
+}
+function canReadMobileGeneralExpenses(user) {
+    return canReadModule(user, "general-expenses");
+}
+function canWriteMobileGeneralExpenses(user) {
+    return canWriteModule(user, "general-expenses");
+}
+function canReadMobileExecution(user) {
+    return canReadModule(user, "execution");
+}
+function parseMoneyInput(value) {
+    const parsed = Number(value.replace(/,/g, "").trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+function formatCurrency(value) {
+    return new Intl.NumberFormat("es-MX", {
+        style: "currency",
+        currency: "MXN",
+        minimumFractionDigits: 2
+    }).format(Number(value || 0));
+}
+function getMonthName(month) {
+    return [
+        "Enero",
+        "Febrero",
+        "Marzo",
+        "Abril",
+        "Mayo",
+        "Junio",
+        "Julio",
+        "Agosto",
+        "Septiembre",
+        "Octubre",
+        "Noviembre",
+        "Diciembre"
+    ][month - 1] ?? String(month);
+}
+function getTeamLabel(team) {
+    return TEAM_OPTIONS.find((option) => option.key === team)?.label ?? "-";
+}
+function getFinanceMatterTypeLabel(type) {
+    return type === "RETAINER" ? "Iguala" : "Unico";
+}
+function formatDateList(values) {
+    const dates = values.map(toDateInput).filter(Boolean);
+    return dates.length > 0 ? dates.join(" / ") : "-";
+}
+function getGeneralExpenseDistributionPatch(form) {
+    if (form.distributionMode === "general") {
+        return {
+            team: "General",
+            generalExpense: true,
+            expenseWithoutTeam: false
+        };
+    }
+    if (form.distributionMode === "without-team") {
+        return {
+            team: "Sin equipo",
+            generalExpense: false,
+            expenseWithoutTeam: true
+        };
+    }
+    return {
+        team: form.team,
+        generalExpense: false,
+        expenseWithoutTeam: false,
+        pctLitigation: form.team === "Litigio" ? 100 : 0,
+        pctCorporateLabor: form.team === "Corporativo y laboral" ? 100 : 0,
+        pctSettlements: form.team === "Convenios" ? 100 : 0,
+        pctFinancialLaw: form.team === "Der Financiero" ? 100 : 0,
+        pctTaxCompliance: form.team === "Compliance Fiscal" ? 100 : 0
+    };
+}
+function getGeneralExpenseDistributionLabel(expense) {
+    if (expense.generalExpense) {
+        return "Gasto general";
+    }
+    if (expense.expenseWithoutTeam) {
+        return "Sin equipo";
+    }
+    return expense.team || "Sin equipo";
 }
 function getEffectiveClientNumber(matter, clients) {
     const normalizedName = normalizeComparableText(matter.clientName);
@@ -229,18 +379,28 @@ function buildDistributionPayload(module, legacyConfig, matter, clients, eventNa
 }
 export function MobileProtectedLayout() {
     const { user, loading, logout } = useAuth();
+    const showLeads = canReadMobileLeads(user);
+    const showFinances = canReadMobileFinances(user);
+    const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+    const showExecution = canReadMobileExecution(user);
     if (loading) {
         return _jsx("div", { className: "mobile-centered", children: "Cargando SIGE..." });
     }
     if (!user) {
         return _jsx(Navigate, { to: "/intranet-login?redirect=/mobile", replace: true });
     }
-    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_LABEL })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }), _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }), _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" })] })] }));
+    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_LABEL })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
 }
 export function MobileHomePage() {
-    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" }), _jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" }), _jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })] }) }));
+    const { user } = useAuth();
+    const showLeads = canReadMobileLeads(user);
+    const showFinances = canReadMobileFinances(user);
+    const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+    const showExecution = canReadMobileExecution(user);
+    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
 }
 export function MobileLeadsPage() {
+    const { user } = useAuth();
     const [form, setForm] = useState(() => initialLeadForm());
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -248,6 +408,8 @@ export function MobileLeadsPage() {
     const [search, setSearch] = useState("");
     const [errorMessage, setErrorMessage] = useState(null);
     const [successMessage, setSuccessMessage] = useState(null);
+    const canRead = canReadMobileLeads(user);
+    const canWrite = canWriteModule(user, "lead-tracking");
     const visibleLeads = useMemo(() => {
         const query = normalizeComparableText(search);
         const sorted = [...leads].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
@@ -276,14 +438,21 @@ export function MobileLeadsPage() {
         }
     }
     useEffect(() => {
+        if (!canRead) {
+            setLoading(false);
+            return;
+        }
         void loadLeads();
-    }, []);
+    }, [canRead]);
     function updateField(field, value) {
         setForm((current) => ({ ...current, [field]: value }));
         setSuccessMessage(null);
     }
     async function handleSubmit(event) {
         event.preventDefault();
+        if (!canWrite) {
+            return;
+        }
         const clientName = normalizeText(form.clientName);
         const prospectName = normalizeText(form.prospectName);
         const subject = normalizeText(form.subject);
@@ -327,11 +496,264 @@ export function MobileLeadsPage() {
             setSubmitting(false);
         }
     }
-    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Leads", subtitle: "Captura rapida y consulta de leads activos." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("form", { className: "mobile-section mobile-form-panel", onSubmit: (event) => void handleSubmit(event), children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nuevo lead" }), _jsx("span", { children: "Movil" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Cliente" }), _jsx("input", { value: form.clientName, onChange: (event) => updateField("clientName", event.target.value), placeholder: "Nombre del cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Prospecto" }), _jsx("input", { value: form.prospectName, onChange: (event) => updateField("prospectName", event.target.value), placeholder: "Si todavia no es cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { value: form.subject, onChange: (event) => updateField("subject", event.target.value), placeholder: "Que necesita" })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Monto" }), _jsx("input", { inputMode: "decimal", value: form.amountMxn, onChange: (event) => updateField("amountMxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Canal" }), _jsx("select", { value: form.communicationChannel, onChange: (event) => updateField("communicationChannel", event.target.value), children: MOBILE_LEAD_CHANNELS.map((channel) => (_jsx("option", { value: channel.value, children: channel.label }, channel.value))) })] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Siguiente accion" }), _jsx("input", { value: form.nextInteractionLabel, onChange: (event) => updateField("nextInteractionLabel", event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: form.nextInteraction, onChange: (event) => updateField("nextInteraction", event.target.value) })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Notas" }), _jsx("textarea", { value: form.notes, onChange: (event) => updateField("notes", event.target.value), placeholder: "Contexto breve", rows: 3 })] }), _jsx("button", { className: "mobile-submit", type: "submit", disabled: submitting, children: submitting ? "Guardando..." : "Guardar lead" })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Leads activos" }), _jsx("span", { children: visibleLeads.length })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Cliente, prospecto, asunto..." })] }), loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando leads..." })) : visibleLeads.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay leads para mostrar." })) : (_jsx("div", { className: "mobile-card-list", children: visibleLeads.map((lead) => (_jsxs("article", { className: "mobile-lead-card", children: [_jsxs("div", { className: "mobile-lead-card-head", children: [_jsx("strong", { children: lead.clientName || lead.prospectName || "Sin nombre" }), _jsx("span", { children: MOBILE_LEAD_CHANNELS.find((channel) => channel.value === lead.communicationChannel)?.label ?? lead.communicationChannel })] }), _jsx("p", { children: lead.subject || "Sin asunto" }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "Siguiente" }), _jsx("dd", { children: lead.nextInteractionLabel || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Fecha" }), _jsx("dd", { children: toDateInput(lead.nextInteraction) || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Monto" }), _jsx("dd", { children: Number(lead.amountMxn || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) })] })] })] }, lead.id))) }))] })] }));
+    if (!canRead) {
+        return _jsx(Navigate, { to: "/mobile", replace: true });
+    }
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Leads", subtitle: "Captura rapida y consulta de leads activos." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("form", { className: "mobile-section mobile-form-panel", onSubmit: (event) => void handleSubmit(event), children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nuevo lead" }), _jsx("span", { children: "Movil" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Cliente" }), _jsx("input", { value: form.clientName, onChange: (event) => updateField("clientName", event.target.value), placeholder: "Nombre del cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Prospecto" }), _jsx("input", { value: form.prospectName, onChange: (event) => updateField("prospectName", event.target.value), placeholder: "Si todavia no es cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { value: form.subject, onChange: (event) => updateField("subject", event.target.value), placeholder: "Que necesita" })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Monto" }), _jsx("input", { inputMode: "decimal", value: form.amountMxn, onChange: (event) => updateField("amountMxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Canal" }), _jsx("select", { value: form.communicationChannel, onChange: (event) => updateField("communicationChannel", event.target.value), children: MOBILE_LEAD_CHANNELS.map((channel) => (_jsx("option", { value: channel.value, children: channel.label }, channel.value))) })] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Siguiente accion" }), _jsx("input", { value: form.nextInteractionLabel, onChange: (event) => updateField("nextInteractionLabel", event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: form.nextInteraction, onChange: (event) => updateField("nextInteraction", event.target.value) })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Notas" }), _jsx("textarea", { value: form.notes, onChange: (event) => updateField("notes", event.target.value), placeholder: "Contexto breve", rows: 3 })] }), _jsx("button", { className: "mobile-submit", type: "submit", disabled: submitting || !canWrite, children: submitting ? "Guardando..." : "Guardar lead" })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Leads activos" }), _jsx("span", { children: visibleLeads.length })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Cliente, prospecto, asunto..." })] }), loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando leads..." })) : visibleLeads.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay leads para mostrar." })) : (_jsx("div", { className: "mobile-card-list", children: visibleLeads.map((lead) => (_jsxs("article", { className: "mobile-lead-card", children: [_jsxs("div", { className: "mobile-lead-card-head", children: [_jsx("strong", { children: lead.clientName || lead.prospectName || "Sin nombre" }), _jsx("span", { children: MOBILE_LEAD_CHANNELS.find((channel) => channel.value === lead.communicationChannel)?.label ?? lead.communicationChannel })] }), _jsx("p", { children: lead.subject || "Sin asunto" }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "Siguiente" }), _jsx("dd", { children: lead.nextInteractionLabel || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Fecha" }), _jsx("dd", { children: toDateInput(lead.nextInteraction) || "-" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Monto" }), _jsx("dd", { children: Number(lead.amountMxn || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" }) })] })] })] }, lead.id))) }))] })] }));
+}
+export function MobileFinancesPage() {
+    const { user } = useAuth();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const canRead = canReadMobileFinances(user);
+    const canWrite = canWriteMobileFinances(user);
+    const [selectedYear, setSelectedYear] = useState(currentYear);
+    const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+    const [form, setForm] = useState(() => initialFinanceForm());
+    const [records, setRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
+    const [search, setSearch] = useState("");
+    const [errorMessage, setErrorMessage] = useState(null);
+    const [successMessage, setSuccessMessage] = useState(null);
+    const monthTotals = useMemo(() => {
+        return records.reduce((totals, record) => {
+            const income = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+            const expenses = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
+            return {
+                income: totals.income + income,
+                expenses: totals.expenses + expenses,
+                pending: totals.pending + Math.max(record.conceptFeesMxn - record.previousPaymentsMxn - income, 0)
+            };
+        }, { income: 0, expenses: 0, pending: 0 });
+    }, [records]);
+    const visibleRecords = useMemo(() => {
+        const query = normalizeComparableText(search);
+        const sorted = [...records].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
+        if (!query) {
+            return sorted;
+        }
+        return sorted.filter((record) => normalizeComparableText([
+            record.clientNumber,
+            record.clientName,
+            record.quoteNumber,
+            record.subject,
+            record.workingConcepts,
+            record.nextPaymentNotes,
+            record.financeComments
+        ].join(" ")).includes(query));
+    }, [records, search]);
+    async function loadFinanceRecords(year = selectedYear, month = selectedMonth) {
+        setLoading(true);
+        setErrorMessage(null);
+        try {
+            setRecords(await apiGet(`/finances/records?year=${year}&month=${month}`));
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setLoading(false);
+        }
+    }
+    useEffect(() => {
+        if (!canRead) {
+            setLoading(false);
+            return;
+        }
+        void loadFinanceRecords();
+    }, [canRead, selectedMonth, selectedYear]);
+    function updateField(field, value) {
+        setForm((current) => ({ ...current, [field]: value }));
+        setSuccessMessage(null);
+    }
+    async function handleSubmit(event) {
+        event.preventDefault();
+        const clientName = normalizeText(form.clientName);
+        const subject = normalizeText(form.subject);
+        const paidThisMonthMxn = parseMoneyInput(form.paidThisMonthMxn);
+        const conceptFeesMxn = parseMoneyInput(form.conceptFeesMxn) || paidThisMonthMxn;
+        const totalMatterMxn = parseMoneyInput(form.totalMatterMxn) || conceptFeesMxn || paidThisMonthMxn;
+        const expenseAmount1Mxn = parseMoneyInput(form.expenseAmount1Mxn);
+        if (!clientName) {
+            setErrorMessage("Captura el cliente.");
+            return;
+        }
+        if (!subject) {
+            setErrorMessage("Captura el asunto o concepto.");
+            return;
+        }
+        if (!canWrite) {
+            setErrorMessage("Tu usuario no tiene permiso para agregar entradas de Finanzas.");
+            return;
+        }
+        setSubmitting(true);
+        setErrorMessage(null);
+        setSuccessMessage(null);
+        try {
+            const created = await apiPost("/finances/records", {
+                year: selectedYear,
+                month: selectedMonth,
+                clientNumber: normalizeText(form.clientNumber) || null,
+                clientName,
+                quoteNumber: normalizeText(form.quoteNumber) || null,
+                matterType: form.matterType,
+                subject,
+                contractSignedStatus: "NOT_REQUIRED",
+                responsibleTeam: form.responsibleTeam || null,
+                totalMatterMxn,
+                workingConcepts: normalizeText(form.workingConcepts) || subject,
+                conceptFeesMxn,
+                previousPaymentsMxn: parseMoneyInput(form.previousPaymentsMxn),
+                nextPaymentDate: toDateInput(form.nextPaymentDate) || null,
+                nextPaymentNotes: normalizeText(form.nextPaymentNotes) || null,
+                paidThisMonthMxn,
+                paymentDate1: paidThisMonthMxn > 0 ? toDateInput(form.paymentDate1) || todayInput() : null,
+                expenseNotes1: normalizeText(form.expenseNotes1) || null,
+                expenseAmount1Mxn,
+                financeComments: normalizeText(form.financeComments) || "Captura movil"
+            });
+            setRecords((items) => [created, ...items.filter((item) => item.id !== created.id)]);
+            setForm(initialFinanceForm());
+            setSuccessMessage("Entrada agregada a Finanzas.");
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setSubmitting(false);
+        }
+    }
+    if (!canRead) {
+        return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Finanzas", subtitle: "Captura rapida de entradas del mes." }), _jsx("div", { className: "mobile-alert mobile-alert-error", children: "Tu usuario no tiene permiso para ver Finanzas." })] }));
+    }
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Finanzas", subtitle: "Agrega entradas del mes desde el celular." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Periodo" }), _jsxs("span", { children: [getMonthName(selectedMonth), " ", selectedYear] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => (_jsx("option", { value: year, children: year }, year))) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (_jsx("option", { value: month, children: getMonthName(month) }, month))) })] })] }), _jsxs("div", { className: "mobile-finance-summary-grid", children: [_jsxs("article", { children: [_jsx("span", { children: "Cobrado" }), _jsx("strong", { children: formatCurrency(monthTotals.income) })] }), _jsxs("article", { children: [_jsx("span", { children: "Gastos" }), _jsx("strong", { children: formatCurrency(monthTotals.expenses) })] }), _jsxs("article", { children: [_jsx("span", { children: "Pendiente" }), _jsx("strong", { children: formatCurrency(monthTotals.pending) })] })] })] }), _jsxs("form", { className: "mobile-section mobile-form-panel", onSubmit: (event) => void handleSubmit(event), children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nueva entrada" }), _jsx("span", { children: "Finanzas" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Cliente" }), _jsx("input", { value: form.clientName, onChange: (event) => updateField("clientName", event.target.value), placeholder: "Nombre del cliente" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Asunto o concepto" }), _jsx("input", { value: form.subject, onChange: (event) => updateField("subject", event.target.value), placeholder: "Que se esta cobrando" })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "No. cliente" }), _jsx("input", { value: form.clientNumber, onChange: (event) => updateField("clientNumber", event.target.value), placeholder: "Opcional" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "No. cotizacion" }), _jsx("input", { value: form.quoteNumber, onChange: (event) => updateField("quoteNumber", event.target.value), placeholder: "Opcional" })] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Tipo" }), _jsxs("select", { value: form.matterType, onChange: (event) => updateField("matterType", event.target.value), children: [_jsx("option", { value: "ONE_TIME", children: "Unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Equipo" }), _jsxs("select", { value: form.responsibleTeam, onChange: (event) => updateField("responsibleTeam", event.target.value), children: [_jsx("option", { value: "", children: "Sin equipo" }), TEAM_OPTIONS.map((option) => (_jsx("option", { value: option.key, children: option.label }, option.key)))] })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Conceptos trabajando" }), _jsx("textarea", { value: form.workingConcepts, onChange: (event) => updateField("workingConcepts", event.target.value), placeholder: "Descripcion breve", rows: 2 })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Total asunto" }), _jsx("input", { inputMode: "decimal", value: form.totalMatterMxn, onChange: (event) => updateField("totalMatterMxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Honorarios" }), _jsx("input", { inputMode: "decimal", value: form.conceptFeesMxn, onChange: (event) => updateField("conceptFeesMxn", event.target.value), placeholder: "0" })] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Pagos previos" }), _jsx("input", { inputMode: "decimal", value: form.previousPaymentsMxn, onChange: (event) => updateField("previousPaymentsMxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Cobrado ahora" }), _jsx("input", { inputMode: "decimal", value: form.paidThisMonthMxn, onChange: (event) => updateField("paidThisMonthMxn", event.target.value), placeholder: "0" })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha de pago" }), _jsx("input", { type: "date", value: form.paymentDate1, onChange: (event) => updateField("paymentDate1", event.target.value) })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Gasto" }), _jsx("input", { inputMode: "decimal", value: form.expenseAmount1Mxn, onChange: (event) => updateField("expenseAmount1Mxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Detalle gasto" }), _jsx("input", { value: form.expenseNotes1, onChange: (event) => updateField("expenseNotes1", event.target.value), placeholder: "Opcional" })] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Proximo pago" }), _jsx("input", { type: "date", value: form.nextPaymentDate, onChange: (event) => updateField("nextPaymentDate", event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Detalle" }), _jsx("input", { value: form.nextPaymentNotes, onChange: (event) => updateField("nextPaymentNotes", event.target.value), placeholder: "Opcional" })] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Comentarios" }), _jsx("textarea", { value: form.financeComments, onChange: (event) => updateField("financeComments", event.target.value), placeholder: "Notas para Finanzas", rows: 3 })] }), _jsx("button", { className: "mobile-submit", type: "submit", disabled: submitting || !canWrite, children: submitting ? "Guardando..." : "Guardar entrada" })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Entradas del mes" }), _jsx("span", { children: visibleRecords.length })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Cliente, asunto, cotizacion..." })] }), loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando Finanzas..." })) : visibleRecords.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay entradas para este periodo." })) : (_jsx("div", { className: "mobile-card-list", children: visibleRecords.map((record) => {
+                            const income = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+                            const expenses = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
+                            return (_jsxs("article", { className: "mobile-record-card mobile-finance-card", children: [_jsxs("div", { className: "mobile-record-card-head", children: [_jsx("strong", { children: record.clientName || "Sin cliente" }), _jsx("span", { children: getFinanceMatterTypeLabel(record.matterType) })] }), _jsx("p", { children: record.subject || "Sin asunto" }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "Cobrado" }), _jsx("dd", { children: formatCurrency(income) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Gastos" }), _jsx("dd", { children: formatCurrency(expenses) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Pago" }), _jsx("dd", { children: formatDateList([record.paymentDate1, record.paymentDate2, record.paymentDate3]) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Equipo" }), _jsx("dd", { children: getTeamLabel(record.responsibleTeam) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Cotizacion" }), _jsx("dd", { children: record.quoteNumber || "-" })] })] })] }, record.id));
+                        }) }))] })] }));
+}
+export function MobileGeneralExpensesPage() {
+    const { user } = useAuth();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const canRead = canReadMobileGeneralExpenses(user);
+    const canWrite = canWriteMobileGeneralExpenses(user);
+    const [selectedYear, setSelectedYear] = useState(currentYear);
+    const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+    const [form, setForm] = useState(() => initialGeneralExpenseForm());
+    const [records, setRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
+    const [search, setSearch] = useState("");
+    const [errorMessage, setErrorMessage] = useState(null);
+    const [successMessage, setSuccessMessage] = useState(null);
+    const monthTotals = useMemo(() => {
+        return records.reduce((totals, expense) => {
+            const amount = Number(expense.amountMxn || 0);
+            return {
+                total: totals.total + amount,
+                limit: totals.limit + (expense.countsTowardLimit ? amount : 0),
+                paid: totals.paid + (expense.paid ? amount : 0)
+            };
+        }, { total: 0, limit: 0, paid: 0 });
+    }, [records]);
+    const visibleRecords = useMemo(() => {
+        const query = normalizeComparableText(search);
+        const sorted = [...records].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
+        if (!query) {
+            return sorted;
+        }
+        return sorted.filter((expense) => normalizeComparableText([
+            expense.detail,
+            expense.team,
+            expense.paymentMethod,
+            expense.bank,
+            getGeneralExpenseDistributionLabel(expense)
+        ].join(" ")).includes(query));
+    }, [records, search]);
+    async function loadGeneralExpenses(year = selectedYear, month = selectedMonth) {
+        setLoading(true);
+        setErrorMessage(null);
+        try {
+            setRecords(await apiGet(`/general-expenses?year=${year}&month=${month}`));
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setLoading(false);
+        }
+    }
+    useEffect(() => {
+        if (!canRead) {
+            setLoading(false);
+            return;
+        }
+        void loadGeneralExpenses();
+    }, [canRead, selectedMonth, selectedYear]);
+    function updateField(field, value) {
+        setForm((current) => ({ ...current, [field]: value }));
+        setSuccessMessage(null);
+    }
+    async function handleSubmit(event) {
+        event.preventDefault();
+        const detail = normalizeText(form.detail);
+        const amountMxn = parseMoneyInput(form.amountMxn);
+        if (!detail) {
+            setErrorMessage("Captura el detalle del gasto.");
+            return;
+        }
+        if (amountMxn <= 0) {
+            setErrorMessage("Captura un monto mayor a cero.");
+            return;
+        }
+        if (!canWrite) {
+            setErrorMessage("Tu usuario no tiene permiso para agregar gastos generales.");
+            return;
+        }
+        setSubmitting(true);
+        setErrorMessage(null);
+        setSuccessMessage(null);
+        try {
+            const created = await apiPost("/general-expenses", {
+                year: selectedYear,
+                month: selectedMonth
+            });
+            const patch = {
+                detail,
+                amountMxn,
+                countsTowardLimit: form.countsTowardLimit,
+                paymentMethod: form.paymentMethod,
+                bank: form.paymentMethod === "Transferencia" ? form.bank || "Banamex" : null,
+                recurring: form.recurring,
+                ...getGeneralExpenseDistributionPatch(form)
+            };
+            const updated = await apiPatch(`/general-expenses/${created.id}`, patch);
+            setRecords((items) => [updated, ...items.filter((item) => item.id !== updated.id)]);
+            setForm(initialGeneralExpenseForm());
+            setSuccessMessage("Gasto agregado.");
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setSubmitting(false);
+        }
+    }
+    if (!canRead) {
+        return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Gastos generales", subtitle: "Captura rapida de gastos del mes." }), _jsx("div", { className: "mobile-alert mobile-alert-error", children: "Tu usuario no tiene permiso para ver Gastos generales." })] }));
+    }
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Gastos generales", subtitle: "Agrega gastos del mes desde el celular." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Periodo" }), _jsxs("span", { children: [getMonthName(selectedMonth), " ", selectedYear] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => (_jsx("option", { value: year, children: year }, year))) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (_jsx("option", { value: month, children: getMonthName(month) }, month))) })] })] }), _jsxs("div", { className: "mobile-finance-summary-grid", children: [_jsxs("article", { children: [_jsx("span", { children: "Total" }), _jsx("strong", { children: formatCurrency(monthTotals.total) })] }), _jsxs("article", { children: [_jsx("span", { children: "Limite" }), _jsx("strong", { children: formatCurrency(monthTotals.limit) })] }), _jsxs("article", { children: [_jsx("span", { children: "Pagado" }), _jsx("strong", { children: formatCurrency(monthTotals.paid) })] })] })] }), _jsxs("form", { className: "mobile-section mobile-form-panel", onSubmit: (event) => void handleSubmit(event), children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nuevo gasto" }), _jsx("span", { children: "Movil" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Detalle" }), _jsx("textarea", { value: form.detail, onChange: (event) => updateField("detail", event.target.value), placeholder: "Concepto del gasto", rows: 3 })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Monto" }), _jsx("input", { inputMode: "decimal", value: form.amountMxn, onChange: (event) => updateField("amountMxn", event.target.value), placeholder: "0" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Metodo" }), _jsxs("select", { value: form.paymentMethod, onChange: (event) => updateField("paymentMethod", event.target.value), children: [_jsx("option", { value: "Transferencia", children: "Transferencia" }), _jsx("option", { value: "Efectivo", children: "Efectivo" })] })] })] }), form.paymentMethod === "Transferencia" ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Banco" }), _jsx("select", { value: form.bank, onChange: (event) => updateField("bank", event.target.value), children: MOBILE_GENERAL_EXPENSE_BANKS.map((bank) => (_jsx("option", { value: bank, children: bank }, bank))) })] })) : null, _jsxs("div", { className: "mobile-segmented mobile-three-segmented", children: [_jsx("button", { type: "button", className: form.distributionMode === "general" ? "is-active" : "", onClick: () => updateField("distributionMode", "general"), children: "General" }), _jsx("button", { type: "button", className: form.distributionMode === "without-team" ? "is-active" : "", onClick: () => updateField("distributionMode", "without-team"), children: "Sin equipo" }), _jsx("button", { type: "button", className: form.distributionMode === "team" ? "is-active" : "", onClick: () => updateField("distributionMode", "team"), children: "Equipo" })] }), form.distributionMode === "team" ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Equipo" }), _jsx("select", { value: form.team, onChange: (event) => updateField("team", event.target.value), children: MOBILE_GENERAL_EXPENSE_TEAMS.map((team) => (_jsx("option", { value: team.value, children: team.label }, team.value))) })] })) : null, _jsxs("div", { className: "mobile-checkbox-list", children: [_jsxs("label", { children: [_jsx("input", { type: "checkbox", checked: form.countsTowardLimit, onChange: (event) => updateField("countsTowardLimit", event.target.checked) }), _jsx("span", { children: "Cuenta para limite" })] }), _jsxs("label", { children: [_jsx("input", { type: "checkbox", checked: form.recurring, onChange: (event) => updateField("recurring", event.target.checked) }), _jsx("span", { children: "Gasto recurrente" })] })] }), _jsx("button", { className: "mobile-submit", type: "submit", disabled: submitting || !canWrite, children: submitting ? "Guardando..." : "Guardar gasto" })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Gastos del mes" }), _jsx("span", { children: visibleRecords.length })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Detalle, equipo, banco..." })] }), loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando gastos..." })) : visibleRecords.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay gastos para este periodo." })) : (_jsx("div", { className: "mobile-card-list", children: visibleRecords.map((expense) => (_jsxs("article", { className: "mobile-record-card mobile-expense-card", children: [_jsxs("div", { className: "mobile-record-card-head", children: [_jsx("strong", { children: expense.detail || "Sin detalle" }), _jsx("span", { children: expense.paid ? "Pagado" : "Pendiente" })] }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "Monto" }), _jsx("dd", { children: formatCurrency(expense.amountMxn) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Tipo" }), _jsx("dd", { children: getGeneralExpenseDistributionLabel(expense) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Metodo" }), _jsxs("dd", { children: [expense.paymentMethod, expense.bank ? ` / ${expense.bank}` : ""] })] }), _jsxs("div", { children: [_jsx("dt", { children: "Limite" }), _jsx("dd", { children: expense.countsTowardLimit ? "Si" : "No" })] }), _jsxs("div", { children: [_jsx("dt", { children: "Recurrente" }), _jsx("dd", { children: expense.recurring ? "Si" : "No" })] })] })] }, expense.id))) }))] })] }));
 }
 export function MobileExecutionIndexPage() {
     const { user } = useAuth();
     const visibleModules = getVisibleExecutionModules(user);
+    if (!canReadMobileExecution(user)) {
+        return _jsx(Navigate, { to: "/mobile", replace: true });
+    }
     if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
         return _jsx(Navigate, { to: `/mobile/execution/${visibleModules[0].slug}`, replace: true });
     }
@@ -365,7 +787,8 @@ export function MobileExecutionTeamPage() {
     const [eventSearch, setEventSearch] = useState("");
     const [eventSearchOpen, setEventSearchOpen] = useState(false);
     const [targets, setTargets] = useState([]);
-    const [responsible, setResponsible] = useState(user?.shortName || module?.defaultResponsible || "");
+    const [responsible, setResponsible] = useState(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
+    const [responsibleOptions, setResponsibleOptions] = useState([]);
     const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
     const [submitting, setSubmitting] = useState(false);
     const eventSearchRef = useRef(null);
@@ -378,6 +801,13 @@ export function MobileExecutionTeamPage() {
         }
         return events.filter((event) => normalizeComparableText(event.name).includes(query));
     }, [eventSearch, events]);
+    const fallbackResponsibleOptions = useMemo(() => splitResponsibleOptions(module?.defaultResponsible), [module?.defaultResponsible]);
+    const moduleResponsibleOptions = useMemo(() => dedupeResponsibleOptions([
+        ...responsibleOptions,
+        ...fallbackResponsibleOptions,
+        user?.shortName,
+        responsible
+    ]), [fallbackResponsibleOptions, responsible, responsibleOptions, user?.shortName]);
     async function loadModuleData() {
         if (!module) {
             return;
@@ -413,8 +843,35 @@ export function MobileExecutionTeamPage() {
         }
     }, [module?.moduleId, canAccess]);
     useEffect(() => {
-        setResponsible(user?.shortName || module?.defaultResponsible || "");
+        setResponsible(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
     }, [module?.moduleId, user?.shortName]);
+    useEffect(() => {
+        if (!module || !canAccess) {
+            setResponsibleOptions([]);
+            return;
+        }
+        let cancelled = false;
+        const team = module.team;
+        const fallbackOptions = splitResponsibleOptions(module.defaultResponsible);
+        async function loadResponsibleOptions() {
+            try {
+                const loaded = await apiGet(`/users/team-short-names?team=${encodeURIComponent(team)}`);
+                const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions, user?.shortName]);
+                if (!cancelled) {
+                    setResponsibleOptions(nextOptions.length > 0 ? nextOptions : fallbackOptions);
+                }
+            }
+            catch {
+                if (!cancelled) {
+                    setResponsibleOptions(dedupeResponsibleOptions([...fallbackOptions, user?.shortName]));
+                }
+            }
+        }
+        void loadResponsibleOptions();
+        return () => {
+            cancelled = true;
+        };
+    }, [canAccess, module?.moduleId, module?.team, module?.defaultResponsible, user?.shortName]);
     useEffect(() => {
         if (!eventSearchOpen) {
             return;
@@ -508,7 +965,7 @@ export function MobileExecutionTeamPage() {
                                             }, onFocus: () => setEventSearchOpen(true), placeholder: "Buscar tarea...", autoComplete: "off" }), eventSearchOpen ? (_jsx("div", { className: "mobile-event-search-results", role: "listbox", children: filteredEvents.length === 0 ? (_jsx("div", { className: "mobile-event-search-empty", children: "No hay tareas con ese criterio." })) : (filteredEvents.map((event) => (_jsx("button", { type: "button", role: "option", "aria-selected": event.id === selectedEventId, onMouseDown: (mouseEvent) => {
                                                     mouseEvent.preventDefault();
                                                     handleEventChange(event.id);
-                                                }, children: event.name }, event.id)))) })) : null] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Responsable" }), _jsx("input", { value: responsible, onChange: (event) => setResponsible(event.target.value) })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: dueDate, onChange: (event) => setDueDate(event.target.value) })] })] }), targets.length > 0 ? (_jsx("div", { className: "mobile-target-list", children: targets.map((target) => {
+                                                }, children: event.name }, event.id)))) })) : null] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Responsable" }), _jsxs("select", { value: responsible, onChange: (event) => setResponsible(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar responsable" }), moduleResponsibleOptions.map((option) => (_jsx("option", { value: option, children: option }, option)))] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: dueDate, onChange: (event) => setDueDate(event.target.value) })] })] }), targets.length > 0 ? (_jsx("div", { className: "mobile-target-list", children: targets.map((target) => {
                                 const table = currentLegacyConfig.tables.find((candidate) => candidate.slug === target.tableSlug);
                                 return (_jsxs("article", { className: "mobile-target-card", children: [_jsxs("div", { children: [_jsx("strong", { children: getTableDisplayName(currentLegacyConfig, target.tableSlug) }), _jsx("button", { type: "button", onClick: () => setTargets((current) => current.filter((candidate) => candidate.id !== target.id)), children: "Quitar" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Nombre del registro" }), _jsx("input", { value: target.taskName, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, taskName: event.target.value } : candidate)) })] }), table?.showReportedPeriod ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: table.reportedPeriodLabel ?? "Periodo reportado" }), _jsx("input", { type: "month", value: target.reportedMonth, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, reportedMonth: event.target.value } : candidate)) })] })) : null] }, target.id));
                             }) })) : null, _jsx("button", { type: "button", className: "mobile-submit", disabled: submitting || !selectedEvent || targets.length === 0 || !dueDate, onClick: () => void handleSubmit(), children: submitting ? "Enviando..." : "Enviar al manager de tareas" })] }), _jsxs("section", { className: "mobile-section mobile-inline-pending-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Pendientes del asunto" }), _jsx("span", { children: matterRecords.length + matterTerms.length })] }), _jsx(MobileRecordList, { records: [...matterRecords, ...matterTerms], legacyConfig: currentLegacyConfig, histories: histories })] })] }));
@@ -525,6 +982,9 @@ export function MobileExecutionTeamPage() {
 export function MobileTrackingIndexPage() {
     const { user } = useAuth();
     const visibleModules = getVisibleExecutionModules(user);
+    if (!canReadMobileExecution(user)) {
+        return _jsx(Navigate, { to: "/mobile", replace: true });
+    }
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Seguimiento", subtitle: "Consulta rapida de tablas del manager de tareas." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/tracking/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Ver tablas" })] }, module.moduleId))) })] }));
 }
 export function MobileTrackingModulePage() {

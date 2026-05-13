@@ -16,8 +16,13 @@ const updatePlanSchema = z.object({
 
 export const budgetPlanningRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.BudgetPlanningService(app.repositories.budgetPlanning);
-  const readGuards = [requireAuth, requireAnyPermissions(["finances:read", "finances:write", "general-expenses:read", "general-expenses:write"])];
-  const writeGuards = [requireAuth, requireAnyPermissions(["finances:write", "general-expenses:write"])];
+  const readGuards = [requireAuth, requireAnyPermissions([
+    "budget-planning:read",
+    "budget-planning:write"
+  ])];
+  const writeGuards = [requireAuth, requireAnyPermissions([
+    "budget-planning:write"
+  ])];
 
   app.get("/budget-planning", { preHandler: readGuards }, async (request) => {
     const query = yearMonthSchema.parse(request.query ?? {});

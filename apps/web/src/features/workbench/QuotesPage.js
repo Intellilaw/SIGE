@@ -220,6 +220,19 @@ function formatDate(value) {
     }
     return date.toLocaleDateString("es-MX");
 }
+function formatDateTime(value) {
+    if (!value) {
+        return "-";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return formatDate(value);
+    }
+    return new Intl.DateTimeFormat("es-MX", {
+        dateStyle: "short",
+        timeStyle: "short"
+    }).format(date);
+}
 function getTodayDateInputValue() {
     const date = new Date();
     const year = date.getFullYear();
@@ -519,18 +532,21 @@ function buildLineItemsFromTemplateDraft(draft) {
     }
     return lineItems;
 }
-function sortQuotes(items) {
+function sortQuotesByCreatedAt(items) {
     return [...items].sort((left, right) => {
-        const quoteDateDelta = getQuoteDisplayDate(right).localeCompare(getQuoteDisplayDate(left));
-        if (quoteDateDelta !== 0) {
-            return quoteDateDelta;
-        }
         const createdDelta = (right.createdAt ?? "").localeCompare(left.createdAt ?? "");
         if (createdDelta !== 0) {
             return createdDelta;
         }
+        const quoteDateDelta = getQuoteDisplayDate(right).localeCompare(getQuoteDisplayDate(left));
+        if (quoteDateDelta !== 0) {
+            return quoteDateDelta;
+        }
         return right.quoteNumber.localeCompare(left.quoteNumber, "es-MX", { numeric: true });
     });
+}
+function sortQuotes(items) {
+    return sortQuotesByCreatedAt(items);
 }
 function getQuoteSequence(quoteNumber) {
     const match = normalizeText(quoteNumber).match(/^E-(\d+)$/i);
@@ -898,6 +914,9 @@ export function QuotesPage() {
     const [deletingQuoteId, setDeletingQuoteId] = useState(null);
     const [deletingTemplateId, setDeletingTemplateId] = useState(null);
     const [translatingTemplateId, setTranslatingTemplateId] = useState(null);
+    const [sendingQuoteToLeadsId, setSendingQuoteToLeadsId] = useState(null);
+    const [sendingQuoteToMattersId, setSendingQuoteToMattersId] = useState(null);
+    const [quoteListViewMode, setQuoteListViewMode] = useState("recent");
     const [errorMessage, setErrorMessage] = useState(null);
     const [flash, setFlash] = useState(null);
     const [editingQuoteId, setEditingQuoteId] = useState(null);
@@ -961,15 +980,10 @@ export function QuotesPage() {
         });
     }
     function resetQuoteComposer(nextMode = sourceMode) {
-        const template = nextMode === "template" ? templates.find((item) => item.id === selectedTemplateId) : undefined;
         setEditingQuoteId(null);
         setPreparedQuote(null);
-        setQuoteForm(template ? buildQuoteFormFromTemplate(template, user?.team) : buildEmptyQuoteForm(user?.team));
-        setQuoteTemplateDraft(nextMode === "generic"
-            ? buildEmptyQuoteTemplateDraft()
-            : template
-                ? buildQuoteTemplateDraftFromTemplate(template)
-                : null);
+        setQuoteForm(buildEmptyQuoteForm(user?.team));
+        setQuoteTemplateDraft(nextMode === "generic" ? buildEmptyQuoteTemplateDraft() : null);
     }
     function startNewTemplate() {
         setFlash(null);
@@ -1122,14 +1136,8 @@ export function QuotesPage() {
             setQuoteTemplateDraft(null);
             return;
         }
-        const template = templates.find((item) => item.id === selectedTemplateId);
-        if (!template) {
-            setQuoteForm(buildEmptyQuoteForm(user?.team));
-            setQuoteTemplateDraft(null);
-            return;
-        }
-        setQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
-        setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
+        setQuoteForm(buildEmptyQuoteForm(user?.team));
+        setQuoteTemplateDraft(null);
     }
     function handleQuoteComposerTab(nextMode) {
         handleSourceModeChange(nextMode);
@@ -1145,14 +1153,8 @@ export function QuotesPage() {
         setSelectedTemplateId(templateId);
         setEditingQuoteId(null);
         setPreparedQuote(null);
-        const template = templates.find((item) => item.id === templateId);
-        if (!template) {
-            setQuoteForm(buildEmptyQuoteForm(user?.team));
-            setQuoteTemplateDraft(null);
-            return;
-        }
-        setQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
-        setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
+        setQuoteForm(buildEmptyQuoteForm(user?.team));
+        setQuoteTemplateDraft(null);
     }
     function handleClientSelection(clientId) {
         const client = clients.find((item) => item.id === clientId);
@@ -1365,8 +1367,68 @@ export function QuotesPage() {
             setSavedQuoteDownload(null);
         }
     }
+    async function handleQuoteSendToLeads(quote) {
+        setSendingQuoteToLeadsId(quote.id);
+        setFlash(null);
+        try {
+            await apiPost("/leads", {
+                quoteId: quote.id,
+                quoteNumber: quote.quoteNumber,
+                communicationChannel: "WHATSAPP",
+                status: "ACTIVE"
+            });
+            setFlash({
+                tone: "success",
+                text: `La cotizacion ${quote.quoteNumber} fue enviada al modulo de leads.`
+            });
+        }
+        catch (error) {
+            setFlash({
+                tone: "error",
+                text: toErrorMessage(error)
+            });
+        }
+        finally {
+            setSendingQuoteToLeadsId(null);
+        }
+    }
+    async function handleQuoteSendToMatters(quote) {
+        setSendingQuoteToMattersId(quote.id);
+        setFlash(null);
+        try {
+            await apiPost("/matters", {
+                quoteId: quote.id,
+                quoteNumber: quote.quoteNumber,
+                matterType: quote.quoteType,
+                responsibleTeam: quote.responsibleTeam || null,
+                communicationChannel: "WHATSAPP",
+                stage: "INTAKE",
+                origin: "QUOTE"
+            });
+            setFlash({
+                tone: "success",
+                text: `La cotizacion ${quote.quoteNumber} fue enviada al modulo de asuntos activos.`
+            });
+        }
+        catch (error) {
+            setFlash({
+                tone: "error",
+                text: toErrorMessage(error)
+            });
+        }
+        finally {
+            setSendingQuoteToMattersId(null);
+        }
+    }
+    function renderQuoteTableActions(quote) {
+        const isDownloadingSavedQuote = savedQuoteDownload?.quoteId === quote.id;
+        const isSendingToLeads = sendingQuoteToLeadsId === quote.id;
+        const isSendingToMatters = sendingQuoteToMattersId === quote.id;
+        return (_jsxs("div", { className: "quotes-table-actions", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteView(quote), children: "Ver" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "pdf"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "pdf" ? "PDF..." : "PDF" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "word"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "word" ? "Word..." : "Word" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteEdit(quote), children: "Editar" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isSendingToLeads, onClick: () => void handleQuoteSendToLeads(quote), children: isSendingToLeads ? "Enviando..." : "Enviar a leads" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isSendingToMatters, onClick: () => void handleQuoteSendToMatters(quote), children: isSendingToMatters ? "Enviando..." : "Enviar a asuntos" }), _jsx("button", { type: "button", className: "danger-button", disabled: deletingQuoteId === quote.id, onClick: () => handleQuoteDeleteRequest(quote), children: "Borrar" })] }));
+    }
     const filteredTemplates = filterTemplatesForSearch(templates, templateWordSearch, templateTeamSearch);
     const filteredQuotes = filterQuotesForSearch(quotes, clients, quoteWordSearch, quoteClientSearch);
+    const recentQuotes = sortQuotesByCreatedAt(filteredQuotes);
     const templateGroups = groupTemplatesByTeam(filteredTemplates);
     const quoteGroups = groupQuotesByClient(filteredQuotes, clients);
     const editingQuote = quotes.find((item) => item.id === editingQuoteId);
@@ -1398,10 +1460,9 @@ export function QuotesPage() {
                                             })), onRemove: (index) => setTemplateForm((current) => ({
                                                 ...current,
                                                 tableRows: removeTemplateRow(current.tableRows, index)
-                                            })), onMerge: handleMerge, onUnmerge: handleUnmerge }, row.id))) }), _jsx(TemplateSummaryGrid, { amountColumns: templateForm.amountColumns, tableRows: templateForm.tableRows })] }), _jsx(TemplateVisualPreview, { heading: "Preview visual", templateNumber: templateFormNumber, team: templateForm.team, quoteType: templateForm.quoteType, milestone: templateForm.milestone, services: templateForm.services, amountColumns: templateForm.amountColumns, tableRows: templateForm.tableRows }), _jsx("div", { className: "form-actions", children: _jsx("button", { type: "submit", className: "primary-button", disabled: savingTemplate, children: savingTemplate ? "Guardando..." : editingTemplate ? "Guardar cambios" : "Guardar cotizacion tipo" }) })] })] })) : null, !loading && activeTab === "quotes" ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Cotizaciones por cliente" }), _jsxs("span", { children: [filteredQuotes.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: quoteWordSearch, onChange: (event) => setQuoteWordSearch(event.target.value), placeholder: "No., asunto, equipo, hito, concepto..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: quoteClientSearch, onChange: (event) => setQuoteClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente y por contenido de la cotizacion antes de abrirla o descargarla." }) })] })] }), quotes.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Todavia no hay cotizaciones guardadas." }) })) : quoteGroups.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No hay cotizaciones que coincidan con la busqueda." }) })) : (quoteGroups.map((group) => (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: group.clientName }), _jsx("p", { className: "muted", children: group.clientNumber ? `No. cliente ${group.clientNumber}` : "Cliente sin numero ligado" })] }), _jsxs("span", { children: [group.items.length, " cotizaciones | ", formatCurrency(group.totalMxn)] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. cotizacion" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Tipo de cotizacion" }), _jsx("th", { children: "Equipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Hito de conclusion" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: group.items.map((quote) => {
-                                                const isDownloadingSavedQuote = savedQuoteDownload?.quoteId === quote.id;
-                                                return (_jsxs("tr", { children: [_jsx("td", { children: quote.quoteNumber }), _jsx("td", { children: formatDate(getQuoteDisplayDate(quote)) }), _jsx("td", { children: getQuoteTypeLabel(quote.quoteType) }), _jsx("td", { children: getTeamLabel(quote.responsibleTeam) }), _jsx("td", { children: quote.subject }), _jsx("td", { children: formatCurrency(quote.totalMxn) }), _jsx("td", { children: quote.milestone || "-" }), _jsx("td", { children: _jsxs("div", { className: "quotes-table-actions", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteView(quote), children: "Ver" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "pdf"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "pdf" ? "PDF..." : "PDF" }), _jsx("button", { type: "button", className: "secondary-button", disabled: isDownloadingSavedQuote, onClick: () => void handleSavedQuoteDownload(quote, "word"), children: savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "word" ? "Word..." : "Word" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => handleQuoteEdit(quote), children: "Editar" }), _jsx("button", { type: "button", className: "danger-button", disabled: deletingQuoteId === quote.id, onClick: () => handleQuoteDeleteRequest(quote), children: "Borrar" })] }) })] }, quote.id));
-                                            }) })] }) })] }, group.clientId ?? group.clientName))))] })) : null, !loading && (activeTab === "new-quote-template" || activeTab === "new-quote-generic") ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: editingQuote
+                                            })), onMerge: handleMerge, onUnmerge: handleUnmerge }, row.id))) }), _jsx(TemplateSummaryGrid, { amountColumns: templateForm.amountColumns, tableRows: templateForm.tableRows })] }), _jsx(TemplateVisualPreview, { heading: "Preview visual", templateNumber: templateFormNumber, team: templateForm.team, quoteType: templateForm.quoteType, milestone: templateForm.milestone, services: templateForm.services, amountColumns: templateForm.amountColumns, tableRows: templateForm.tableRows }), _jsx("div", { className: "form-actions", children: _jsx("button", { type: "submit", className: "primary-button", disabled: savingTemplate, children: savingTemplate ? "Guardando..." : editingTemplate ? "Guardar cambios" : "Guardar cotizacion tipo" }) })] })] })) : null, !loading && activeTab === "quotes" ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: quoteListViewMode === "recent" ? "Cotizaciones recientes" : "Cotizaciones por cliente" }), _jsxs("span", { children: [filteredQuotes.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: quoteWordSearch, onChange: (event) => setQuoteWordSearch(event.target.value), placeholder: "No., asunto, equipo, hito, concepto..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: quoteClientSearch, onChange: (event) => setQuoteClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsxs("div", { className: "matters-toolbar-actions", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => setQuoteListViewMode((current) => (current === "recent" ? "client" : "recent")), children: quoteListViewMode === "recent" ? "Ver por cliente" : "Ver por fecha" }), _jsx("span", { className: "muted", children: quoteListViewMode === "recent"
+                                                    ? "Ordenado por fecha y hora de creacion, empezando por la mas reciente."
+                                                    : "Agrupado por cliente; usa el boton para volver al orden por fecha." })] })] })] }), quotes.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Todavia no hay cotizaciones guardadas." }) })) : quoteGroups.length === 0 ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No hay cotizaciones que coincidan con la busqueda." }) })) : quoteListViewMode === "recent" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Mas recientes" }), _jsx("p", { className: "muted", children: "Ordenadas por fecha y hora de creacion." })] }), _jsxs("span", { children: [recentQuotes.length, " cotizaciones"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. cotizacion" }), _jsx("th", { children: "Creada" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Tipo de cotizacion" }), _jsx("th", { children: "Equipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Hito de conclusion" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: recentQuotes.map((quote) => (_jsxs("tr", { children: [_jsx("td", { children: quote.quoteNumber }), _jsx("td", { children: quote.createdAt ? formatDateTime(quote.createdAt) : formatDate(getQuoteDisplayDate(quote)) }), _jsx("td", { children: quote.clientName }), _jsx("td", { children: getQuoteTypeLabel(quote.quoteType) }), _jsx("td", { children: getTeamLabel(quote.responsibleTeam) }), _jsx("td", { children: quote.subject }), _jsx("td", { children: formatCurrency(quote.totalMxn) }), _jsx("td", { children: quote.milestone || "-" }), _jsx("td", { children: renderQuoteTableActions(quote) })] }, quote.id))) })] }) })] })) : (quoteGroups.map((group) => (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: group.clientName }), _jsx("p", { className: "muted", children: group.clientNumber ? `No. cliente ${group.clientNumber}` : "Cliente sin numero ligado" })] }), _jsxs("span", { children: [group.items.length, " cotizaciones | ", formatCurrency(group.totalMxn)] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. cotizacion" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Tipo de cotizacion" }), _jsx("th", { children: "Equipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Hito de conclusion" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: group.items.map((quote) => (_jsxs("tr", { children: [_jsx("td", { children: quote.quoteNumber }), _jsx("td", { children: formatDate(getQuoteDisplayDate(quote)) }), _jsx("td", { children: getQuoteTypeLabel(quote.quoteType) }), _jsx("td", { children: getTeamLabel(quote.responsibleTeam) }), _jsx("td", { children: quote.subject }), _jsx("td", { children: formatCurrency(quote.totalMxn) }), _jsx("td", { children: quote.milestone || "-" }), _jsx("td", { children: renderQuoteTableActions(quote) })] }, quote.id))) })] }) })] }, group.clientId ?? group.clientName))))] })) : null, !loading && (activeTab === "new-quote-template" || activeTab === "new-quote-generic") ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: editingQuote
                                             ? `Editar cotizacion ${editingQuote.quoteNumber}`
                                             : sourceMode === "template"
                                                 ? "Generar nueva desde plantilla"
@@ -1413,9 +1474,17 @@ export function QuotesPage() {
                                     setQuoteForm(buildEmptyQuoteForm(user?.team));
                                     setQuoteTemplateDraft(null);
                                     setActiveTab("quotes");
-                                }, children: "Cancelar edicion" })) : (_jsx("button", { type: "button", className: "secondary-button", onClick: () => resetQuoteComposer(), children: "Reiniciar captura" }))] }), sourceMode === "template" ? (_jsxs("div", { className: "quotes-template-picker", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cotizacion tipo base" }), _jsxs("select", { value: selectedTemplateId, onChange: (event) => handleTemplateSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar plantilla..." }), templates.map((template) => (_jsxs("option", { value: template.id, children: [template.templateNumber, " - ", getTeamLabel(template.team)] }, template.id)))] })] }), _jsx("p", { className: "muted", children: selectedTemplate
-                                    ? "La tabla editable de esta cotizacion tipo aparece debajo de los campos de captura."
-                                    : "Selecciona una cotizacion tipo para precargar el layout y mostrar su tabla editable debajo de los campos." })] })) : (_jsx("p", { className: "muted", children: "El layout generico empieza en blanco para capturar una propuesta desde cero." })), _jsxs("form", { className: "quotes-form", onSubmit: handleQuoteSubmit, children: [_jsxs("div", { className: "quotes-form-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsxs("select", { value: quoteForm.clientId, onChange: (event) => handleClientSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar cliente..." }), clients.map((client) => (_jsxs("option", { value: client.id, children: [client.clientNumber, " - ", client.name] }, client.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo responsable" }), _jsxs("select", { value: quoteForm.responsibleTeam, onChange: (event) => updateQuoteForm((current) => ({ ...current, responsibleTeam: event.target.value })), children: [_jsx("option", { value: "", children: "Sin equipo" }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: quoteForm.quoteType, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), sourceMode === "generic" ? (_jsxs("div", { className: "form-field quote-language-field", children: [_jsx("span", { children: "Idioma de la cotizaci\u00F3n" }), _jsxs("label", { className: "quote-language-checkbox", children: [_jsx("input", { type: "checkbox", checked: quoteForm.language === "en", onChange: (event) => handleGenericQuoteLanguageChange(event.target.checked ? "en" : "es") }), _jsx("span", { children: quoteForm.language === "en" ? "Inglés" : "Español" })] }), _jsx("small", { children: "Desmarcado: espa\u00F1ol. Marcado: ingl\u00E9s." })] })) : null, _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: suggestedQuoteNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: quoteForm.quoteDate, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { type: "text", value: quoteForm.subject, onChange: (event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value })), placeholder: "Describe el alcance de la propuesta" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: quoteForm.milestone, onChange: (event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), sourceMode === "template" && !selectedTemplate ? (_jsx("section", { className: "quote-template-editor-shell", children: _jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: "Tabla de cotizacion tipo" }), _jsx("p", { className: "muted", children: "Selecciona una cotizacion tipo base para cargar aqui su tabla editable." })] }) }) })) : null, quoteTemplateDraft ? (_jsxs("section", { className: "quote-template-editor-shell", children: [_jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: sourceMode === "template" ? "Tabla de cotizacion tipo" : "Tabla de cotizacion" }), _jsx("p", { className: "muted", children: sourceMode === "template"
+                                }, children: "Cancelar edicion" })) : (_jsx("button", { type: "button", className: "secondary-button", onClick: () => resetQuoteComposer(), children: "Reiniciar captura" }))] }), sourceMode === "template" ? (_jsxs("div", { className: "quotes-template-picker", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cotizacion tipo base" }), _jsxs("select", { value: selectedTemplateId, onChange: (event) => handleTemplateSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar plantilla..." }), templates.map((template) => (_jsxs("option", { value: template.id, children: [template.templateNumber, " - ", getTeamLabel(template.team)] }, template.id)))] })] }), _jsxs("div", { className: "quotes-template-picker-actions", children: [_jsx("button", { type: "button", className: "primary-button", disabled: !selectedTemplate || translatingTemplateId === selectedTemplate.id, onClick: () => {
+                                            if (selectedTemplate) {
+                                                void handleTemplateUse(selectedTemplate, "es");
+                                            }
+                                        }, children: "Usar plantilla en espa\u00F1ol" }), _jsx("button", { type: "button", className: "secondary-button", disabled: !selectedTemplate || translatingTemplateId === selectedTemplate.id, onClick: () => {
+                                            if (selectedTemplate) {
+                                                void handleTemplateUse(selectedTemplate, "en");
+                                            }
+                                        }, children: selectedTemplate && translatingTemplateId === selectedTemplate.id ? "Traduciendo..." : "Usar plantilla en inglés" })] }), _jsx("p", { className: "muted", children: selectedTemplate
+                                    ? "Elige si quieres usar la plantilla tal como esta en español o traducirla al inglés antes de capturar la cotizacion."
+                                    : "Selecciona una cotizacion tipo base y despues elige el idioma de uso." })] })) : (_jsx("p", { className: "muted", children: "El layout generico empieza en blanco para capturar una propuesta desde cero." })), _jsxs("form", { className: "quotes-form", onSubmit: handleQuoteSubmit, children: [_jsxs("div", { className: "quotes-form-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsxs("select", { value: quoteForm.clientId, onChange: (event) => handleClientSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar cliente..." }), clients.map((client) => (_jsxs("option", { value: client.id, children: [client.clientNumber, " - ", client.name] }, client.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo responsable" }), _jsxs("select", { value: quoteForm.responsibleTeam, onChange: (event) => updateQuoteForm((current) => ({ ...current, responsibleTeam: event.target.value })), children: [_jsx("option", { value: "", children: "Sin equipo" }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: quoteForm.quoteType, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), sourceMode === "generic" ? (_jsxs("div", { className: "form-field quote-language-field", children: [_jsx("span", { children: "Idioma de la cotizaci\u00F3n" }), _jsxs("label", { className: "quote-language-checkbox", children: [_jsx("input", { type: "checkbox", checked: quoteForm.language === "en", onChange: (event) => handleGenericQuoteLanguageChange(event.target.checked ? "en" : "es") }), _jsx("span", { children: quoteForm.language === "en" ? "Inglés" : "Español" })] }), _jsx("small", { children: "Desmarcado: espa\u00F1ol. Marcado: ingl\u00E9s." })] })) : null, _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: suggestedQuoteNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: quoteForm.quoteDate, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { type: "text", value: quoteForm.subject, onChange: (event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value })), placeholder: "Describe el alcance de la propuesta" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: quoteForm.milestone, onChange: (event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), sourceMode === "template" && !selectedTemplate ? (_jsx("section", { className: "quote-template-editor-shell", children: _jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: "Tabla de cotizacion tipo" }), _jsx("p", { className: "muted", children: "Selecciona una cotizacion tipo base para cargar aqui su tabla editable." })] }) }) })) : null, quoteTemplateDraft ? (_jsxs("section", { className: "quote-template-editor-shell", children: [_jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: sourceMode === "template" ? "Tabla de cotizacion tipo" : "Tabla de cotizacion" }), _jsx("p", { className: "muted", children: sourceMode === "template"
                                                         ? "Puedes editar la misma tabla de la plantilla antes de guardar la cotizacion."
                                                         : "Configura desde cero la cotizacion del cliente usando la misma tabla avanzada de las cotizaciones tipo." })] }) }), _jsxs("div", { className: "quote-template-amount-config-grid", children: [_jsx(TemplateAmountColumnConfig, { column: quoteTemplateDraft.amountColumns[0], onModeChange: (mode) => updateQuoteTemplateDraft((current) => ({
                                                     ...current,

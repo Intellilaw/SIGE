@@ -3,7 +3,8 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import type { TaskDistributionEvent, TaskDistributionHistory, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
+import { useAuth } from "../auth/AuthContext";
+import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import {
   buildDistributionHistoryTaskNameMap,
   getTermEnabledRecordData,
@@ -244,8 +245,12 @@ export function TaskDistributorPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
   const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
+  const canAccessModule = Boolean(
+    executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId)
+  );
   const [activeTab, setActiveTab] = useState<DistributorTab>(
     searchParams.get("tab") === "config" ? "config" : "active"
   );
@@ -262,7 +267,7 @@ export function TaskDistributorPage() {
   const [loading, setLoading] = useState(true);
 
   async function loadDistributor() {
-    if (!moduleConfig) {
+    if (!moduleConfig || !canAccessModule) {
       return;
     }
 
@@ -285,10 +290,10 @@ export function TaskDistributorPage() {
 
   useEffect(() => {
     void loadDistributor();
-  }, [moduleConfig]);
+  }, [canAccessModule, moduleConfig]);
 
   useEffect(() => {
-    if (!moduleConfig) {
+    if (!moduleConfig || !canAccessModule) {
       setResponsibleOptions([]);
       return;
     }
@@ -316,7 +321,7 @@ export function TaskDistributorPage() {
     return () => {
       cancelled = true;
     };
-  }, [moduleConfig]);
+  }, [canAccessModule, moduleConfig]);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -868,7 +873,7 @@ export function TaskDistributorPage() {
     );
   }
 
-  if (!moduleConfig) {
+  if (!moduleConfig || !executionModule || !canAccessModule) {
     return <Navigate to="/app/tasks" replace />;
   }
 

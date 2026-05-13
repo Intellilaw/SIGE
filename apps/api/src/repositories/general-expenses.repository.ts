@@ -27,8 +27,7 @@ const LOCKED_AFTER_APPROVAL_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "pctTaxCompliance",
   "paymentMethod",
   "bank",
-  "recurring",
-  "reviewedByJnls"
+  "recurring"
 ];
 const PCT_KEYS: Array<keyof Pick<
   GeneralExpenseUpdateRecord,
@@ -124,17 +123,11 @@ function isEduardoRusconi(actor: GeneralExpenseActor) {
   );
 }
 
-function isJaelLopez(actor: GeneralExpenseActor) {
-  return (
-    actor.email.toLowerCase() === "jael.lopez@calculadora.app" ||
-    normalizeComparableText(actor.username) === "jael lopez" ||
-    normalizeComparableText(actor.displayName) === "jael lopez" ||
-    (actor.shortName ?? "").trim().toUpperCase() === "JNLS"
-  );
-}
-
 function canReviewJnls(actor: GeneralExpenseActor) {
-  return (actor.role === "AUDITOR" || normalizeComparableText(actor.specificRole) === "auditor") && isJaelLopez(actor);
+  return !isSuperadmin(actor) && (
+    actor.team === "AUDIT" ||
+    normalizeComparableText(actor.legacyTeam) === "auditoria"
+  );
 }
 
 function assertMonth(month: number) {
@@ -301,8 +294,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     }
 
     if (hasOwn(payload, "reviewedByJnls")) {
-      if (current.approvedByEmrt || !canReviewJnls(actor)) {
-        throw new AppError(403, "GENERAL_EXPENSE_REVIEW_FORBIDDEN", "Only JNLS as auditor can update that review flag.");
+      if (!canReviewJnls(actor)) {
+        throw new AppError(403, "GENERAL_EXPENSE_REVIEW_FORBIDDEN", "Only the audit team can update the JNLS approval flag.");
       }
     }
 

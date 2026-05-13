@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildLegacyEmail,
   buildLegacyUsernameLookupCandidates,
+  deriveEffectivePermissions,
   type AuthUser
 } from "@sige/contracts";
 
@@ -119,7 +120,7 @@ export class LocalAuthRepository implements AuthRepository {
       return buildLookupAliases(candidate).includes(normalizedLookup);
     });
 
-    return user ?? null;
+    return user ? this.asStoredUser(user) : null;
   }
 
   public async findUserById(userId: string) {
@@ -298,6 +299,13 @@ export class LocalAuthRepository implements AuthRepository {
     writeFileSync(LocalAuthRepository.statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   }
 
+  private asStoredUser(user: LocalStateUser): StoredUser {
+    return {
+      ...this.asAuthUser(user),
+      passwordHash: user.passwordHash
+    };
+  }
+
   private asAuthUser(user: LocalStateUser): AuthUser {
     return {
       id: user.id,
@@ -310,7 +318,12 @@ export class LocalAuthRepository implements AuthRepository {
       team: user.team,
       legacyTeam: user.legacyTeam,
       specificRole: user.specificRole,
-      permissions: user.permissions,
+      permissions: deriveEffectivePermissions({
+        legacyRole: user.legacyRole,
+        team: user.team,
+        legacyTeam: user.legacyTeam,
+        specificRole: user.specificRole
+      }),
       isActive: user.isActive,
       passwordResetRequired: user.passwordResetRequired
     };

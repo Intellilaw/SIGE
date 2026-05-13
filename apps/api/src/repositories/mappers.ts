@@ -25,6 +25,7 @@ import type {
   TaskTerm,
   TaskTrackingRecord
 } from "@sige/contracts";
+import { deriveEffectivePermissions } from "@sige/contracts";
 
 import type { RefreshTokenRecord, StoredUser } from "./types";
 
@@ -203,7 +204,12 @@ export function mapUser(record: {
     team: (record.team ?? undefined) as AuthUser["team"],
     legacyTeam: record.legacyTeam ?? undefined,
     specificRole: record.specificRole ?? undefined,
-    permissions: asStringArray(record.permissions),
+    permissions: deriveEffectivePermissions({
+      legacyRole: record.legacyRole as AuthUser["legacyRole"],
+      team: (record.team ?? undefined) as AuthUser["team"],
+      legacyTeam: record.legacyTeam,
+      specificRole: record.specificRole
+    }),
     isActive: record.isActive,
     passwordResetRequired: record.passwordResetRequired
   };

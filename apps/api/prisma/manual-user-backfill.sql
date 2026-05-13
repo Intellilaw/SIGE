@@ -25,6 +25,7 @@ SET "legacyTeam" = CASE "team"
   WHEN 'SETTLEMENTS' THEN 'Convenios'
   WHEN 'FINANCIAL_LAW' THEN 'Der Financiero'
   WHEN 'TAX_COMPLIANCE' THEN 'Compliance Fiscal'
+  WHEN 'AUDIT' THEN 'AuditorÃ­a'
   WHEN 'ADMIN_OPERATIONS' THEN 'Servicios administrativos'
   WHEN 'ADMIN' THEN 'Dirección general'
   ELSE NULL

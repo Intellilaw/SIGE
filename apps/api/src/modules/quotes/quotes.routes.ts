@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
-import { requireAuth } from "../../core/auth/guards";
+import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
 import { exportQuoteDocument } from "./quote-export";
 import { translateQuoteTemplateWithLlm } from "./quote-template-translator";
 
@@ -110,25 +110,27 @@ const quoteExportParamsSchema = z.object({
 
 export const quotesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.QuotesService(app.repositories.quotes);
+  const readGuards = [requireAuth, requireAnyPermissions(["quotes:read", "quotes:write"])];
+  const writeGuards = [requireAuth, requireAnyPermissions(["quotes:write"])];
 
-  app.get("/quotes", { preHandler: [requireAuth] }, async () => service.list());
-  app.get("/quotes/templates", { preHandler: [requireAuth] }, async () => service.listTemplates());
-  app.post("/quotes", { preHandler: [requireAuth] }, async (request) => {
+  app.get("/quotes", { preHandler: readGuards }, async () => service.list());
+  app.get("/quotes/templates", { preHandler: readGuards }, async () => service.listTemplates());
+  app.post("/quotes", { preHandler: writeGuards }, async (request) => {
     const payload = quoteSchema.parse(request.body);
     return service.create(payload);
   });
-  app.patch("/quotes/:quoteId", { preHandler: [requireAuth] }, async (request) => {
+  app.patch("/quotes/:quoteId", { preHandler: writeGuards }, async (request) => {
     const params = quoteIdParamsSchema.parse(request.params);
     const payload = quoteSchema.parse(request.body);
     return service.update(params.quoteId, payload);
   });
-  app.delete("/quotes/:quoteId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/quotes/:quoteId", { preHandler: writeGuards }, async (request, reply) => {
     const params = quoteIdParamsSchema.parse(request.params);
     await service.delete(params.quoteId);
     reply.code(204);
     return null;
   });
-  app.get("/quotes/:quoteId/export/:format", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.get("/quotes/:quoteId/export/:format", { preHandler: readGuards }, async (request, reply) => {
     const params = quoteExportParamsSchema.parse(request.params);
     const quote = await service.findById(params.quoteId);
 
@@ -145,11 +147,11 @@ export const quotesRoutes: FastifyPluginAsync = async (app) => {
     reply.header("Content-Disposition", `attachment; filename="${file.filename}"`);
     return reply.send(file.buffer);
   });
-  app.post("/quotes/templates", { preHandler: [requireAuth] }, async (request) => {
+  app.post("/quotes/templates", { preHandler: writeGuards }, async (request) => {
     const payload = quoteTemplateSchema.parse(request.body);
     return service.createTemplate(payload);
   });
-  app.post("/quotes/templates/translate", { preHandler: [requireAuth] }, async (request) => {
+  app.post("/quotes/templates/translate", { preHandler: writeGuards }, async (request) => {
     const payload = quoteTemplateTranslationSchema.parse(request.body);
     const translatedTemplate = await translateQuoteTemplateWithLlm(payload.template);
 
@@ -157,12 +159,12 @@ export const quotesRoutes: FastifyPluginAsync = async (app) => {
       template: translatedTemplate
     };
   });
-  app.patch("/quotes/templates/:templateId", { preHandler: [requireAuth] }, async (request) => {
+  app.patch("/quotes/templates/:templateId", { preHandler: writeGuards }, async (request) => {
     const params = quoteTemplateIdParamsSchema.parse(request.params);
     const payload = quoteTemplateSchema.parse(request.body);
     return service.updateTemplate(params.templateId, payload);
   });
-  app.delete("/quotes/templates/:templateId", { preHandler: [requireAuth] }, async (request, reply) => {
+  app.delete("/quotes/templates/:templateId", { preHandler: writeGuards }, async (request, reply) => {
     const params = quoteTemplateIdParamsSchema.parse(request.params);
     await service.deleteTemplate(params.templateId);
     reply.code(204);

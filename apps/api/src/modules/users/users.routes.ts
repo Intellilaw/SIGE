@@ -12,6 +12,7 @@ const teamSchema = z.enum([
   "SETTLEMENTS",
   "FINANCIAL_LAW",
   "TAX_COMPLIANCE",
+  "AUDIT",
   "ADMIN_OPERATIONS"
 ]);
 

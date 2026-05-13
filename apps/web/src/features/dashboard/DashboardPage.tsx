@@ -1,24 +1,27 @@
 import { Link } from "react-router-dom";
-import { APP_VERSION_TEXT } from "@sige/contracts";
 
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 import { appModules } from "../../config/modules";
+import { useAuth } from "../auth/AuthContext";
+import { canReadModule } from "../auth/permissions";
 
 export function DashboardPage() {
+  const { user } = useAuth();
+  const visibleModules = appModules.filter((module) => canReadModule(user, module.id));
+
   return (
     <section className="page-stack dashboard-page">
       <header className="hero hero-logo-only">
         <img className="rusconi-logo hero-logo-only-mark" src={rusconiLogo} alt="Rusconi Consulting" />
-        <span className="app-version-badge hero-logo-version">{APP_VERSION_TEXT}</span>
       </header>
 
       <section className="panel">
         <div className="panel-header">
           <h2>Modulos del sistema</h2>
-          <span>{appModules.length} modulos</span>
+          <span>{visibleModules.length} modulos</span>
         </div>
         <div className="dashboard-module-grid">
-          {appModules.map((module) => (
+          {visibleModules.map((module) => (
             <Link
               key={module.id}
               to={module.path}

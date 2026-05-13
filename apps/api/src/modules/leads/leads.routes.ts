@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
-import { requireAuth } from "../../core/auth/guards";
+import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
 
 const leadStatusSchema = z.enum(["ACTIVE", "MOVED_TO_MATTERS", "ARCHIVED"]);
 const leadChannelSchema = z.enum(["WHATSAPP", "TELEGRAM", "WECHAT", "EMAIL", "PHONE"]);
@@ -42,53 +42,54 @@ const bulkDeleteSchema = z.object({
 
 export const leadsRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.LeadsService(app.repositories.leads);
-  const authGuards = [requireAuth];
+  const readGuards = [requireAuth, requireAnyPermissions(["leads:read", "leads:write"])];
+  const writeGuards = [requireAuth, requireAnyPermissions(["leads:write"])];
 
-  app.get("/leads", { preHandler: authGuards }, async () => service.list());
+  app.get("/leads", { preHandler: readGuards }, async () => service.list());
 
-  app.get("/leads/history", { preHandler: authGuards }, async () => service.listHistory());
+  app.get("/leads/history", { preHandler: readGuards }, async () => service.listHistory());
 
-  app.get("/leads/monthly", { preHandler: authGuards }, async (request) => {
+  app.get("/leads/monthly", { preHandler: readGuards }, async (request) => {
     const query = monthlyQuerySchema.parse(request.query);
     return service.listMonthly(query.year, query.month);
   });
 
-  app.get("/leads/short-names", { preHandler: authGuards }, async () => service.listCommissionShortNames());
+  app.get("/leads/short-names", { preHandler: readGuards }, async () => service.listCommissionShortNames());
 
-  app.post("/leads", { preHandler: authGuards }, async (request) => {
+  app.post("/leads", { preHandler: writeGuards }, async (request) => {
     const payload = leadWriteSchema.partial().parse(request.body ?? {});
     return service.create(payload);
   });
 
-  app.post("/leads/bulk-delete", { preHandler: authGuards }, async (request, reply) => {
+  app.post("/leads/bulk-delete", { preHandler: writeGuards }, async (request, reply) => {
     const payload = bulkDeleteSchema.parse(request.body);
     await service.bulkDelete(payload.ids);
     reply.code(204);
     return null;
   });
 
-  app.post("/leads/:leadId/mark-sent-to-client", { preHandler: authGuards }, async (request) => {
+  app.post("/leads/:leadId/mark-sent-to-client", { preHandler: writeGuards }, async (request) => {
     const params = leadIdParamsSchema.parse(request.params);
     return service.markSentToClient(params.leadId);
   });
 
-  app.post("/leads/:leadId/send-to-matters", { preHandler: authGuards }, async (request) => {
+  app.post("/leads/:leadId/send-to-matters", { preHandler: writeGuards }, async (request) => {
     const params = leadIdParamsSchema.parse(request.params);
     return service.sendToMatters(params.leadId);
   });
 
-  app.post("/leads/:leadId/return-to-active", { preHandler: authGuards }, async (request) => {
+  app.post("/leads/:leadId/return-to-active", { preHandler: writeGuards }, async (request) => {
     const params = leadIdParamsSchema.parse(request.params);
     return service.returnToActive(params.leadId);
   });
 
-  app.patch("/leads/:leadId", { preHandler: authGuards }, async (request) => {
+  app.patch("/leads/:leadId", { preHandler: writeGuards }, async (request) => {
     const params = leadIdParamsSchema.parse(request.params);
     const payload = leadWriteSchema.parse(request.body);
     return service.update(params.leadId, payload);
   });
 
-  app.delete("/leads/:leadId", { preHandler: authGuards }, async (request, reply) => {
+  app.delete("/leads/:leadId", { preHandler: writeGuards }, async (request, reply) => {
     const params = leadIdParamsSchema.parse(request.params);
     await service.delete(params.leadId);
     reply.code(204);

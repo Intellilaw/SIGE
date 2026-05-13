@@ -7,6 +7,7 @@ export type Team =
   | "SETTLEMENTS"
   | "FINANCIAL_LAW"
   | "TAX_COMPLIANCE"
+  | "AUDIT"
   | "ADMIN_OPERATIONS";
 
 export type SystemRole =

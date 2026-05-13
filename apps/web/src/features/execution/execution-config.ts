@@ -100,13 +100,15 @@ export const EXECUTION_MODULE_BY_TEAM = Object.fromEntries(
 export function canAccessAllExecutionModules(user?: {
   role?: string;
   team?: string;
+  permissions?: string[];
 } | null) {
-  return user?.role === "SUPERADMIN" || user?.team === "ADMIN" || user?.team === "CLIENT_RELATIONS";
+  return Boolean(user?.permissions?.includes("*") || user?.team === "ADMIN");
 }
 
 export function getVisibleExecutionModules(user?: {
   role?: string;
   team?: string;
+  permissions?: string[];
 } | null) {
   if (canAccessAllExecutionModules(user)) {
     return EXECUTION_MODULES;

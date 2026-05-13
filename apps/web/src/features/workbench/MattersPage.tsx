@@ -4,6 +4,7 @@ import { TEAM_OPTIONS } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { canReadModule, canWriteModule, hasPermission } from "../auth/permissions";
 
 type MatterPatchPayload = {
   clientId?: string | null;
@@ -926,7 +927,10 @@ export function MattersPage() {
   const [clientSearch, setClientSearch] = useState("");
   const [wordSearch, setWordSearch] = useState("");
 
-  const canDeleteReadOnlyRows = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+  const canReadMatters = canReadModule(user, "active-matters");
+  const canWriteMatters = canWriteModule(user, "active-matters");
+  const canReadTasks = canReadModule(user, "tasks");
+  const canDeleteReadOnlyRows = hasPermission(user, "*");
   const commissionOptions = useMemo(
     () =>
       [...new Set(
@@ -946,10 +950,10 @@ export function MattersPage() {
       const [loadedMatters, loadedDeleted, loadedQuotes, loadedClients, loadedTaskItems, loadedTaskModules, shortNames] = await Promise.all([
         apiGet<Matter[]>("/matters"),
         apiGet<Matter[]>("/matters/recycle-bin"),
-        apiGet<Quote[]>("/quotes"),
-        apiGet<Client[]>("/clients"),
-        apiGet<TaskItem[]>("/tasks/items"),
-        apiGet<TaskModuleDefinition[]>("/tasks/modules"),
+        canWriteMatters ? apiGet<Quote[]>("/quotes") : Promise.resolve([]),
+        canWriteMatters ? apiGet<Client[]>("/clients") : Promise.resolve([]),
+        canReadTasks ? apiGet<TaskItem[]>("/tasks/items") : Promise.resolve([]),
+        canReadTasks ? apiGet<TaskModuleDefinition[]>("/tasks/modules") : Promise.resolve([]),
         apiGet<string[]>("/matters/short-names")
       ]);
 
@@ -969,8 +973,13 @@ export function MattersPage() {
   }
 
   useEffect(() => {
+    if (!canReadMatters) {
+      setLoading(false);
+      return;
+    }
+
     void loadBoard();
-  }, []);
+  }, [canReadMatters]);
 
   function syncMatterAcrossViews(updated: Matter) {
     setActiveItems((items) => {
@@ -1002,6 +1011,10 @@ export function MattersPage() {
   }
 
   async function persistMatter(matter: Matter) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     try {
       const updated = await apiPatch<Matter>(`/matters/${matter.id}`, buildMatterPatch(matter));
       syncMatterAcrossViews(updated);
@@ -1012,6 +1025,10 @@ export function MattersPage() {
   }
 
   function handleLocalChange(matterId: string, field: keyof MatterPatchPayload, value: string | number) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     updateMatterLocal(matterId, (matter) => {
       const draft = matter as Matter & Record<string, unknown>;
       draft[field as string] = value;
@@ -1020,6 +1037,10 @@ export function MattersPage() {
   }
 
   async function handleImmediateChange(matterId: string, field: keyof MatterPatchPayload, value: string | boolean) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     const updated = updateMatterLocal(matterId, (matter) => {
       const draft = matter as Matter & Record<string, unknown>;
       draft[field as string] = value;
@@ -1032,6 +1053,10 @@ export function MattersPage() {
   }
 
   async function handleQuoteChange(matterId: string, quoteNumber: string) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     const updated = updateMatterLocal(matterId, (matter) => {
       const cleanQuoteNumber = normalizeText(quoteNumber);
       const linkedQuote = findQuoteByNumber(quotes, cleanQuoteNumber);
@@ -1065,6 +1090,10 @@ export function MattersPage() {
   }
 
   function handleBlur(matterId: string) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     const matter = activeItems.find((item) => item.id === matterId);
     if (!matter) {
       return;
@@ -1074,6 +1103,10 @@ export function MattersPage() {
   }
 
   async function handleAddRow() {
+    if (!canWriteMatters) {
+      return;
+    }
+
     try {
       const created = await apiPost<Matter>("/matters", {});
       setActiveItems((items) => sortActiveMatters([...items, created], clients));
@@ -1083,6 +1116,10 @@ export function MattersPage() {
   }
 
   async function handleTrash(matterId: string) {
+    if (!canWriteMatters && !canDeleteReadOnlyRows) {
+      return;
+    }
+
     if (!window.confirm("Mover este asunto a la papelera?")) {
       return;
     }
@@ -1096,6 +1133,10 @@ export function MattersPage() {
   }
 
   async function handleBulkTrash() {
+    if (!canWriteMatters) {
+      return;
+    }
+
     if (selectedIds.size === 0) {
       return;
     }
@@ -1115,6 +1156,10 @@ export function MattersPage() {
   }
 
   async function handleRestore(matterId: string) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     if (!window.confirm("Restaurar este asunto a activos?")) {
       return;
     }
@@ -1128,6 +1173,10 @@ export function MattersPage() {
   }
 
   async function handleGenerateIdentifier(matterId: string) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     const matter = activeItems.find((item) => item.id === matterId);
     if (!matter) {
       return;
@@ -1147,6 +1196,10 @@ export function MattersPage() {
   }
 
   async function handleSendToExecution(matterId: string) {
+    if (!canWriteMatters) {
+      return;
+    }
+
     const matter = activeItems.find((item) => item.id === matterId);
     if (!matter) {
       return;
@@ -1271,10 +1324,12 @@ export function MattersPage() {
 
         <div className="matters-toolbar matters-active-toolbar">
           <div className="matters-toolbar-actions">
-            <button type="button" className="primary-button" onClick={() => void handleAddRow()}>
-              + Agregar fila
-            </button>
-            {selectedIds.size > 0 ? (
+            {canWriteMatters ? (
+              <button type="button" className="primary-button" onClick={() => void handleAddRow()}>
+                + Agregar fila
+              </button>
+            ) : null}
+            {canWriteMatters && selectedIds.size > 0 ? (
               <button type="button" className="danger-button" onClick={() => void handleBulkTrash()}>
                 Borrar ({selectedIds.size})
               </button>
@@ -1334,7 +1389,7 @@ export function MattersPage() {
           reflections={reflections}
           commissionOptions={commissionOptions}
           selectedIds={selectedIds}
-          readOnly={false}
+          readOnly={!canWriteMatters}
           variant="unique"
           canDeleteReadOnlyRows={canDeleteReadOnlyRows}
           onToggleSelection={toggleSelection}
@@ -1450,9 +1505,13 @@ export function MattersPage() {
                       <td>{item.concluded ? "Si" : "No"}</td>
                       <td>{item.notes || "-"}</td>
                       <td>
-                        <button type="button" className="secondary-button matter-inline-button" onClick={() => void handleRestore(item.id)}>
-                          Regresar
-                        </button>
+                        {canWriteMatters ? (
+                          <button type="button" className="secondary-button matter-inline-button" onClick={() => void handleRestore(item.id)}>
+                            Regresar
+                          </button>
+                        ) : (
+                          <span className="matter-cell-muted">-</span>
+                        )}
                       </td>
                     </tr>
                   ))
