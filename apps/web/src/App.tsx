@@ -30,10 +30,11 @@ import { CommissionsPage } from "./features/commissions/CommissionsPage";
 import { FinancesPage } from "./features/finances/FinancesPage";
 import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
 import {
+  MobileDashboardIndexPage,
+  MobileDashboardModulePage,
   MobileExecutionIndexPage,
   MobileExecutionTeamPage,
   MobileHomePage,
-  MobileLeadsPage,
   MobileProtectedLayout,
   MobileTrackingIndexPage,
   MobileTrackingModulePage,
@@ -66,7 +67,8 @@ export default function App() {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/mobile" element={<MobileProtectedLayout />}>
             <Route index element={<MobileHomePage />} />
-            <Route path="leads" element={<MobileLeadsPage />} />
+            <Route path="dashboard" element={<MobileDashboardIndexPage />} />
+            <Route path="dashboard/:slug" element={<MobileDashboardModulePage />} />
             <Route path="execution" element={<MobileExecutionIndexPage />} />
             <Route path="execution/:slug" element={<MobileExecutionTeamPage />} />
             <Route path="tracking" element={<MobileTrackingIndexPage />} />

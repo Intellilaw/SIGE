@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 function PasswordVisibilityIcon({ visible }) {
@@ -8,14 +8,12 @@ function PasswordVisibilityIcon({ visible }) {
 }
 export function LoginPage() {
     const { user, login } = useAuth();
-    const [searchParams] = useSearchParams();
     const [identifier, setIdentifier] = useState("Eduardo Rusconi");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState(null);
-    const redirectTarget = getSafeRedirectTarget(searchParams.get("redirect"));
     if (user) {
-        return _jsx(Navigate, { to: redirectTarget, replace: true });
+        return _jsx(Navigate, { to: "/app", replace: true });
     }
     async function handleSubmit(event) {
         event.preventDefault();
@@ -28,13 +26,4 @@ export function LoginPage() {
         }
     }
     return (_jsx("main", { className: "login-page", children: _jsxs("section", { className: "login-card", children: [_jsx("div", { className: "login-brand", children: _jsx("img", { className: "rusconi-logo login-brand-logo", src: rusconiLogo, alt: "Rusconi Consulting" }) }), _jsx("p", { className: "eyebrow", children: "Rusconi Consulting" }), _jsx("h1", { children: "SIGE" }), _jsx("p", { className: "muted", children: "Accede al entorno operativo de SIGE para continuar con clientes, cotizaciones, leads, asuntos y tareas." }), _jsx("p", { className: "login-back-link", children: _jsx(Link, { to: "/", children: "Volver a la pantalla de entrada" }) }), _jsx("p", { className: "login-support-link", children: _jsx(Link, { to: "/intranet-password-help", children: "Activar cuenta o restablecer contrasena" }) }), _jsxs("form", { className: "login-form", onSubmit: handleSubmit, children: [_jsxs("label", { children: ["Usuario o email", _jsx("input", { autoComplete: "username", value: identifier, onChange: (event) => setIdentifier(event.target.value), type: "text" })] }), _jsxs("label", { children: ["Password", _jsxs("span", { className: "password-input-wrap", children: [_jsx("input", { value: password, autoComplete: "current-password", onChange: (event) => setPassword(event.target.value), placeholder: "Escribe tu contrasena", type: showPassword ? "text" : "password" }), _jsx("button", { "aria-label": showPassword ? "Ocultar contrasena" : "Mostrar contrasena", "aria-pressed": showPassword, className: "password-visibility-toggle", onClick: () => setShowPassword((current) => !current), type: "button", children: _jsx(PasswordVisibilityIcon, { visible: showPassword }) })] })] }), error ? _jsx("p", { className: "error-text", children: error }) : null, _jsx("button", { type: "submit", children: "Entrar a SIGE" })] })] }) }));
-}
-function getSafeRedirectTarget(value) {
-    if (!value || !value.startsWith("/") || value.startsWith("//")) {
-        return "/app";
-    }
-    if (value === "/mobile" || value.startsWith("/mobile/")) {
-        return value;
-    }
-    return "/app";
 }
