@@ -72,7 +72,7 @@ export const EXECUTION_MODULE_BY_SLUG = Object.fromEntries(EXECUTION_MODULES.map
 export const EXECUTION_MODULE_BY_ID = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.moduleId, module]));
 export const EXECUTION_MODULE_BY_TEAM = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.team, module]));
 export function canAccessAllExecutionModules(user) {
-    return Boolean(user?.permissions?.includes("*") || user?.team === "ADMIN");
+    return user?.role === "SUPERADMIN" || user?.team === "ADMIN" || user?.team === "CLIENT_RELATIONS";
 }
 export function getVisibleExecutionModules(user) {
     if (canAccessAllExecutionModules(user)) {

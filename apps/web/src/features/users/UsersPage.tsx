@@ -211,11 +211,11 @@ export function UsersPage() {
     setFlash(null);
 
     if (target.id === user?.id) {
-      setFlash({ tone: "error", text: "No puedes eliminar la sesion administrativa activa." });
+      setFlash({ tone: "error", text: "No puedes dar de baja la sesion administrativa activa." });
       return;
     }
 
-    if (!window.confirm(`Seguro que deseas eliminar al usuario ${target.username}?`)) {
+    if (!window.confirm(`Seguro que deseas dar de baja al usuario ${target.username}?`)) {
       return;
     }
 
@@ -223,7 +223,7 @@ export function UsersPage() {
 
     try {
       await apiDelete(`/users/${target.id}`);
-      setFlash({ tone: "success", text: `Usuario ${target.username} eliminado correctamente.` });
+      setFlash({ tone: "success", text: `Usuario ${target.username} dado de baja correctamente.` });
       if (editingUserId === target.id) {
         resetForm();
       }
@@ -476,7 +476,7 @@ export function UsersPage() {
                           onClick={() => void handleDeleteTarget(entry)}
                           type="button"
                         >
-                          {deletingUserId === entry.id ? "Borrando..." : "Borrar"}
+                          {deletingUserId === entry.id ? "Procesando..." : "Dar de baja"}
                         </button>
                       </div>
                     </td>

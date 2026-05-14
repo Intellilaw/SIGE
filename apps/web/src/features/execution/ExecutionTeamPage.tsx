@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import type {
-  Client,
-  Matter,
-  TaskDistributionEvent,
-  TaskDistributionHistory,
-  TaskState,
-  TaskTerm,
-  TaskTrackingRecord
+import {
+  EXECUTION_HOLIDAY_AUTHORITIES,
+  type Client,
+  type ExecutionHolidayAuthorityShortName,
+  type Holiday,
+  type Matter,
+  type TaskDistributionEvent,
+  type TaskDistributionHistory,
+  type TaskState,
+  type TaskTerm,
+  type TaskTrackingRecord
 } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
@@ -18,6 +21,7 @@ import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "./executio
 
 type MatterPatchPayload = {
   executionPrompt?: string | null;
+  holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName | null;
   concluded?: boolean;
   notes?: string | null;
 };
@@ -42,6 +46,12 @@ type MatterTaskView = {
   sourceType: "tracking" | "term" | "matter";
 };
 
+type HolidayDateKeysByAuthority = Partial<Record<ExecutionHolidayAuthorityShortName, Set<string>>>;
+
+type HolidayListResponse = {
+  holidays: Holiday[];
+};
+
 const CHANNEL_LABELS: Record<string, string> = {
   WHATSAPP: "WhatsApp",
   TELEGRAM: "Telegram",
@@ -50,6 +60,17 @@ const CHANNEL_LABELS: Record<string, string> = {
   PHONE: "Telefono"
 };
 const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "termino legacy", "distribucion legacy", "evento legacy"]);
+const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
+const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME: Record<string, string> = {
+  PJF: "PJF",
+  PJCDMX: "TSJCDMX",
+  PJEdoMex: "PJEdoMex",
+  TFJA: "TFJA",
+  TJACDMX: "TJACDMX",
+  SAT: "SAT",
+  APF: "APF",
+  APCDMX: "APCDMX"
+};
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
@@ -79,7 +100,8 @@ function matchesWordSearch(
   matter: Matter,
   clientNumber: string,
   tasks: MatterTaskView[],
-  searchWords: string[]
+  searchWords: string[],
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
 ) {
   if (searchWords.length === 0) {
     return true;
@@ -96,6 +118,7 @@ function matchesWordSearch(
       matter.executionPrompt,
       matter.notes,
       matter.milestone,
+      matter.holidayAuthorityShortName,
       matter.nextAction,
       matter.nextActionSource,
       toDateInput(matter.nextActionDueAt),
@@ -105,7 +128,8 @@ function matchesWordSearch(
         task.trackLabel,
         task.sourceLabel,
         task.responsible,
-        toDateInput(task.dueDate)
+        toDateInput(task.dueDate),
+        getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority)
       ])
     ]
       .filter(Boolean)
@@ -190,6 +214,137 @@ function toLocalDateInput(value: Date) {
   const month = String(value.getMonth() + 1).padStart(2, "0");
   const day = String(value.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function isDateKey(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function getExecutionHolidayAuthority(value?: string | null) {
+  const normalized = normalizeText(value);
+  return EXECUTION_HOLIDAY_AUTHORITY_SET.has(normalized)
+    ? (normalized as ExecutionHolidayAuthorityShortName)
+    : "";
+}
+
+function toUtcDateFromDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = toUtcDateFromDateKey(dateKey);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getNextMonthKey(dateKey: string) {
+  const year = Number(dateKey.slice(0, 4));
+  const month = Number(dateKey.slice(5, 7));
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+}
+
+function isWeekendDateKey(dateKey: string) {
+  const weekday = toUtcDateFromDateKey(dateKey).getUTCDay();
+  return weekday === 0 || weekday === 6;
+}
+
+function isNonBusinessDate(
+  dateKey: string,
+  authority: ExecutionHolidayAuthorityShortName,
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
+) {
+  return isWeekendDateKey(dateKey) || Boolean(holidayDateKeysByAuthority[authority]?.has(dateKey));
+}
+
+function getEffectiveTaskDueDate(
+  task: MatterTaskView,
+  matter: Matter,
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
+) {
+  const dueDate = toDateInput(task.dueDate);
+  const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+  if (!dueDate || !authority || !isDateKey(dueDate)) {
+    return dueDate;
+  }
+
+  let effectiveDate = dueDate;
+  for (let guard = 0; guard < 31; guard += 1) {
+    if (!isNonBusinessDate(effectiveDate, authority, holidayDateKeysByAuthority)) {
+      return effectiveDate;
+    }
+    effectiveDate = addDaysToDateKey(effectiveDate, 1);
+  }
+
+  return effectiveDate;
+}
+
+function collectHolidayFetchPlan(matters: Matter[], taskMap: Map<string, MatterTaskView[]>) {
+  const monthsByAuthority = new Map<ExecutionHolidayAuthorityShortName, Set<string>>();
+
+  matters.forEach((matter) => {
+    const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+    if (!authority) {
+      return;
+    }
+
+    getMatterTasks(matter, taskMap).forEach((task) => {
+      const dueDate = toDateInput(task.dueDate);
+      if (!isDateKey(dueDate)) {
+        return;
+      }
+
+      const months = monthsByAuthority.get(authority) ?? new Set<string>();
+      months.add(dueDate.slice(0, 7));
+      months.add(getNextMonthKey(dueDate));
+      monthsByAuthority.set(authority, months);
+    });
+  });
+
+  return monthsByAuthority;
+}
+
+function serializeHolidayFetchPlan(fetchPlan: Map<ExecutionHolidayAuthorityShortName, Set<string>>) {
+  return Array.from(fetchPlan.entries())
+    .map(([authority, months]) => `${authority}:${Array.from(months).sort().join(",")}`)
+    .sort()
+    .join("|");
+}
+
+async function fetchHolidayDateKeysByAuthority(fetchPlan: Map<ExecutionHolidayAuthorityShortName, Set<string>>) {
+  const requests = Array.from(fetchPlan.entries()).flatMap(([authority, months]) =>
+    Array.from(months).map(async (monthKey) => {
+      const [yearText, monthText] = monthKey.split("-");
+      const response = await apiGet<HolidayListResponse>(
+        `/holidays?year=${Number(yearText)}&month=${Number(monthText)}&authorityShortName=${encodeURIComponent(
+          HOLIDAY_AUTHORITY_QUERY_SHORT_NAME[authority]
+        )}`
+      );
+
+      return {
+        authority,
+        holidays: response.holidays
+      };
+    })
+  );
+
+  const results = await Promise.all(requests);
+  const dateKeysByAuthority: HolidayDateKeysByAuthority = {};
+
+  results.forEach(({ authority, holidays }) => {
+    const dateKeys = dateKeysByAuthority[authority] ?? new Set<string>();
+    holidays.forEach((holiday) => {
+      const dateKey = toDateInput(holiday.date);
+      if (isDateKey(dateKey)) {
+        dateKeys.add(dateKey);
+      }
+    });
+    dateKeysByAuthority[authority] = dateKeys;
+  });
+
+  return dateKeysByAuthority;
 }
 
 function toErrorMessage(error: unknown) {
@@ -423,18 +578,30 @@ function getTaskSourcePath(teamSlug: string, task: MatterTaskView) {
   return `/app/tasks/${teamSlug}/${task.trackId}`;
 }
 
-function getNextBusinessDate() {
+function getNextBusinessDate(
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority,
+  authority?: ExecutionHolidayAuthorityShortName | ""
+) {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
 
   do {
     date.setDate(date.getDate() + 1);
-  } while (date.getDay() === 0 || date.getDay() === 6);
+  } while (
+    date.getDay() === 0 ||
+    date.getDay() === 6 ||
+    Boolean(authority && holidayDateKeysByAuthority[authority]?.has(toLocalDateInput(date)))
+  );
 
   return toLocalDateInput(date);
 }
 
-function evaluateMatterRow(matter: Matter, clientNumber: string, tasks: MatterTaskView[]) {
+function evaluateMatterRow(
+  matter: Matter,
+  clientNumber: string,
+  tasks: MatterTaskView[],
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
+) {
   const missing: string[] = [];
 
   if (!clientNumber) missing.push("No. Cliente");
@@ -448,11 +615,16 @@ function evaluateMatterRow(matter: Matter, clientNumber: string, tasks: MatterTa
 
   const today = toLocalDateInput(new Date());
   const isOverdue = tasks.some((task) => {
-    const dueDate = toDateInput(task.dueDate);
+    const dueDate = getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority);
     return Boolean(dueDate) && dueDate <= today;
   });
-  const nextBusinessDate = getNextBusinessDate();
-  const isNextBusinessDay = !isOverdue && tasks.some((task) => toDateInput(task.dueDate) === nextBusinessDate);
+  const nextBusinessDate = getNextBusinessDate(
+    holidayDateKeysByAuthority,
+    getExecutionHolidayAuthority(matter.holidayAuthorityShortName)
+  );
+  const isNextBusinessDay = !isOverdue && tasks.some((task) =>
+    getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) === nextBusinessDate
+  );
 
   return {
     missing,
@@ -490,6 +662,7 @@ export function ExecutionTeamWorkspace({
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [distributionEvents, setDistributionEvents] = useState<TaskDistributionEvent[]>([]);
   const [distributionHistory, setDistributionHistory] = useState<TaskDistributionHistory[]>([]);
+  const [holidayDateKeysByAuthority, setHolidayDateKeysByAuthority] = useState<HolidayDateKeysByAuthority>({});
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [wordSearch, setWordSearch] = useState("");
@@ -582,6 +755,43 @@ export function ExecutionTeamWorkspace({
     () => mergeTaskMaps(allTermMap, allTrackingMap),
     [allTermMap, allTrackingMap]
   );
+  const holidayFetchPlan = useMemo(
+    () => collectHolidayFetchPlan([...activeMatters, ...deletedMatters], allTaskMap),
+    [activeMatters, allTaskMap, deletedMatters]
+  );
+  const holidayFetchSignature = useMemo(
+    () => serializeHolidayFetchPlan(holidayFetchPlan),
+    [holidayFetchPlan]
+  );
+
+  useEffect(() => {
+    if (holidayFetchPlan.size === 0) {
+      setHolidayDateKeysByAuthority({});
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadHolidayDateKeys() {
+      try {
+        const dateKeys = await fetchHolidayDateKeysByAuthority(holidayFetchPlan);
+        if (!isCancelled) {
+          setHolidayDateKeysByAuthority(dateKeys);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setHolidayDateKeysByAuthority({});
+          setErrorMessage(toErrorMessage(error));
+        }
+      }
+    }
+
+    void loadHolidayDateKeys();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [holidayFetchSignature]);
 
   const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
   const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
@@ -592,10 +802,10 @@ export function ExecutionTeamWorkspace({
         const matterTasks = getMatterTasks(matter, activeTaskMap);
         return (
           matchesClientSearch(matter, clientSearchWords) &&
-          matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords)
+          matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority)
         );
       }),
-    [activeMatters, activeTaskMap, clientSearchWords, clients, wordSearchWords]
+    [activeMatters, activeTaskMap, clientSearchWords, clients, holidayDateKeysByAuthority, wordSearchWords]
   );
   const filteredDeletedMatters = useMemo(
     () =>
@@ -604,10 +814,10 @@ export function ExecutionTeamWorkspace({
         const matterTasks = getMatterTasks(matter, allTaskMap);
         return (
           matchesClientSearch(matter, clientSearchWords) &&
-          matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords)
+          matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority)
         );
       }),
-    [allTaskMap, clientSearchWords, clients, deletedMatters, wordSearchWords]
+    [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]
   );
 
   if (!module || !canAccess || !legacyConfig) {
@@ -661,6 +871,16 @@ export function ExecutionTeamWorkspace({
     });
 
     await persistMatter(matterId, { concluded });
+  }
+
+  async function handleHolidayAuthorityChange(matterId: string, value: string) {
+    const holidayAuthorityShortName = getExecutionHolidayAuthority(value) || null;
+    updateMatterLocal(matterId, (matter) => {
+      matter.holidayAuthorityShortName = holidayAuthorityShortName ?? undefined;
+      return matter;
+    });
+
+    await persistMatter(matterId, { holidayAuthorityShortName });
   }
 
   async function handleRestore(matterId: string) {
@@ -874,6 +1094,7 @@ export function ExecutionTeamWorkspace({
                   <th>Fecha sig. tarea</th>
                   <th>Origen</th>
                   <th>Ir a tareas activas</th>
+                  <th>Órgano para efectos de días inhábiles</th>
                   <th>Comentarios LLM</th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
@@ -883,13 +1104,13 @@ export function ExecutionTeamWorkspace({
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={16} className="centered-inline-message">
+                    <td colSpan={17} className="centered-inline-message">
                       Cargando ejecucion...
                     </td>
                   </tr>
                 ) : filteredMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={16} className="centered-inline-message">
+                    <td colSpan={17} className="centered-inline-message">
                       No hay asuntos del equipo en esta vista.
                     </td>
                   </tr>
@@ -898,7 +1119,7 @@ export function ExecutionTeamWorkspace({
                     {filteredMatters.map((matter) => {
                       const clientNumber = getEffectiveClientNumber(matter, clients);
                       const matterTasks = getMatterTasks(matter, activeTaskMap);
-                      const validation = evaluateMatterRow(matter, clientNumber, matterTasks);
+                      const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                       const rowClassName = validation.missing.length > 0 || validation.isOverdue
                         ? "execution-row-danger"
                         : validation.isNextBusinessDay
@@ -966,7 +1187,7 @@ export function ExecutionTeamWorkspace({
                               ) : (
                                 matterTasks.map((task) => (
                                   <div key={`${getTaskViewIdentity(task)}:due-date`} className="execution-inline-entry">
-                                    {toDateInput(task.dueDate) || "S/F"}
+                                    {getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F"}
                                   </div>
                                 ))
                               )}
@@ -1008,6 +1229,20 @@ export function ExecutionTeamWorkspace({
                             </button>
                           </td>
                           <td>
+                            <select
+                              className="lead-cell-input execution-authority-select"
+                              value={getExecutionHolidayAuthority(matter.holidayAuthorityShortName)}
+                              onChange={(event) => void handleHolidayAuthorityChange(matter.id, event.target.value)}
+                            >
+                              <option value="">Seleccionar...</option>
+                              {EXECUTION_HOLIDAY_AUTHORITIES.map((authority) => (
+                                <option key={authority} value={authority}>
+                                  {authority}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
                             <textarea
                               className="lead-cell-input execution-textarea"
                               value={matter.executionPrompt || ""}
@@ -1040,7 +1275,7 @@ export function ExecutionTeamWorkspace({
                     })}
 
                     <tr className="execution-table-note">
-                      <td colSpan={16}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
+                      <td colSpan={17}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
                     </tr>
                   </>
                 )}
@@ -1121,7 +1356,7 @@ export function ExecutionTeamWorkspace({
                           ) : (
                             matterTasks.map((task) => (
                               <div key={`${getTaskViewIdentity(task)}:recycle-due-date`} className="execution-inline-entry">
-                                {toDateInput(task.dueDate) || "S/F"}
+                                {getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F"}
                               </div>
                             ))
                           )}

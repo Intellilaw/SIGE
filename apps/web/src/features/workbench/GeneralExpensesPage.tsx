@@ -164,22 +164,29 @@ function isEduardoRusconi(input: {
   );
 }
 
-function canReviewJnls(input: {
-  role?: string;
-  legacyRole?: string;
-  team?: string;
-  legacyTeam?: string;
-  permissions?: string[];
+function isJaelLopez(input: {
+  username?: string;
+  displayName?: string;
+  email?: string;
+  shortName?: string;
 }) {
   return (
-    input.role !== "SUPERADMIN" &&
-    input.legacyRole !== "SUPERADMIN" &&
-    (
-      input.team === "AUDIT" ||
-      normalizeComparableText(input.legacyTeam) === "auditoria"
-    ) &&
-    Boolean(input.permissions?.includes("general-expenses:jnls-approval:write"))
+    (input.email ?? "").toLowerCase() === "jael.lopez@calculadora.app" ||
+    normalizeComparableText(input.username) === "jael lopez" ||
+    normalizeComparableText(input.displayName) === "jael lopez" ||
+    (input.shortName ?? "").trim().toUpperCase() === "JNLS"
   );
+}
+
+function canReviewJnls(input: {
+  role?: string;
+  specificRole?: string;
+  username?: string;
+  displayName?: string;
+  email?: string;
+  shortName?: string;
+}) {
+  return (input.role === "AUDITOR" || normalizeComparableText(input.specificRole) === "auditor") && isJaelLopez(input);
 }
 
 function getIvaAmount(expense: GeneralExpense) {
@@ -378,10 +385,11 @@ export function GeneralExpensesPage() {
   const canEditEmrtDate = Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
   const canReviewJnlsFlag = Boolean(user && canReviewJnls({
     role: user.role,
-    legacyRole: user.legacyRole,
-    team: user.team,
-    legacyTeam: user.legacyTeam,
-    permissions: user.permissions
+    specificRole: user.specificRole,
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email,
+    shortName: user.shortName
   }));
 
   async function loadRecords() {
@@ -455,17 +463,6 @@ export function GeneralExpensesPage() {
     payload: GeneralExpensePatchPayload,
     localPatch: GeneralExpensePatchPayload = payload
   ) {
-    const canApplyPrivilegedPatch = (
-      (Object.prototype.hasOwnProperty.call(payload, "approvedByEmrt") && canApprove) ||
-      (Object.prototype.hasOwnProperty.call(payload, "paidByEmrtAt") && canEditEmrtDate) ||
-      (Object.prototype.hasOwnProperty.call(payload, "reviewedByJnls") && canReviewJnlsFlag) ||
-      (Object.prototype.hasOwnProperty.call(payload, "paid") && canPay)
-    );
-
-    if (!canWrite && !canApplyPrivilegedPatch) {
-      return;
-    }
-
     updateExpenseLocal(expenseId, localPatch);
 
     try {
@@ -1011,7 +1008,7 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.reviewedByJnls}
                                   onChange={(event) => void persistExpensePatch(expense.id, { reviewedByJnls: event.target.checked })}
-                                  disabled={!canReviewJnlsFlag}
+                                  disabled={!canReviewJnlsFlag || expense.approvedByEmrt}
                                 />
                               </td>
                               <td className="general-expense-checkbox-cell">

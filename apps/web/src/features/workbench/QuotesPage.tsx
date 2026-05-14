@@ -21,7 +21,6 @@ import { useAuth } from "../auth/AuthContext";
 type ActiveTab = "new-template" | "templates" | "quotes" | "new-quote-template" | "new-quote-generic";
 type QuoteSourceMode = "template" | "generic";
 type QuoteTemplateLanguage = "es" | "en";
-type QuoteListViewMode = "recent" | "client";
 type FlashTone = "success" | "error";
 type MergeTargetKind = "amount" | "payment" | "notes";
 type QuoteDownloadFormat = "pdf" | "word";
@@ -316,22 +315,6 @@ function formatDate(value?: string) {
   }
 
   return date.toLocaleDateString("es-MX");
-}
-
-function formatDateTime(value?: string) {
-  if (!value) {
-    return "-";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return formatDate(value);
-  }
-
-  return new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(date);
 }
 
 function getTodayDateInputValue() {
@@ -686,24 +669,20 @@ function buildLineItemsFromTemplateDraft(draft: QuoteTemplateDraftState) {
   return lineItems;
 }
 
-function sortQuotesByCreatedAt(items: Quote[]) {
+function sortQuotes(items: Quote[]) {
   return [...items].sort((left, right) => {
-    const createdDelta = (right.createdAt ?? "").localeCompare(left.createdAt ?? "");
-    if (createdDelta !== 0) {
-      return createdDelta;
-    }
-
     const quoteDateDelta = getQuoteDisplayDate(right).localeCompare(getQuoteDisplayDate(left));
     if (quoteDateDelta !== 0) {
       return quoteDateDelta;
     }
 
+    const createdDelta = (right.createdAt ?? "").localeCompare(left.createdAt ?? "");
+    if (createdDelta !== 0) {
+      return createdDelta;
+    }
+
     return right.quoteNumber.localeCompare(left.quoteNumber, "es-MX", { numeric: true });
   });
-}
-
-function sortQuotes(items: Quote[]) {
-  return sortQuotesByCreatedAt(items);
 }
 
 function getQuoteSequence(quoteNumber: string) {
@@ -1638,9 +1617,6 @@ export function QuotesPage() {
   const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [translatingTemplateId, setTranslatingTemplateId] = useState<string | null>(null);
-  const [sendingQuoteToLeadsId, setSendingQuoteToLeadsId] = useState<string | null>(null);
-  const [sendingQuoteToMattersId, setSendingQuoteToMattersId] = useState<string | null>(null);
-  const [quoteListViewMode, setQuoteListViewMode] = useState<QuoteListViewMode>("recent");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
@@ -1717,10 +1693,17 @@ export function QuotesPage() {
   }
 
   function resetQuoteComposer(nextMode: QuoteSourceMode = sourceMode) {
+    const template = nextMode === "template" ? templates.find((item) => item.id === selectedTemplateId) : undefined;
     setEditingQuoteId(null);
     setPreparedQuote(null);
-    setQuoteForm(buildEmptyQuoteForm(user?.team));
-    setQuoteTemplateDraft(nextMode === "generic" ? buildEmptyQuoteTemplateDraft() : null);
+    setQuoteForm(template ? buildQuoteFormFromTemplate(template, user?.team) : buildEmptyQuoteForm(user?.team));
+    setQuoteTemplateDraft(
+      nextMode === "generic"
+        ? buildEmptyQuoteTemplateDraft()
+        : template
+          ? buildQuoteTemplateDraftFromTemplate(template)
+          : null
+    );
   }
 
   function startNewTemplate() {
@@ -1894,8 +1877,15 @@ export function QuotesPage() {
       return;
     }
 
-    setQuoteForm(buildEmptyQuoteForm(user?.team));
-    setQuoteTemplateDraft(null);
+    const template = templates.find((item) => item.id === selectedTemplateId);
+    if (!template) {
+      setQuoteForm(buildEmptyQuoteForm(user?.team));
+      setQuoteTemplateDraft(null);
+      return;
+    }
+
+    setQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
+    setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
   }
 
   function handleQuoteComposerTab(nextMode: QuoteSourceMode) {
@@ -1914,8 +1904,15 @@ export function QuotesPage() {
     setSelectedTemplateId(templateId);
     setEditingQuoteId(null);
     setPreparedQuote(null);
-    setQuoteForm(buildEmptyQuoteForm(user?.team));
-    setQuoteTemplateDraft(null);
+    const template = templates.find((item) => item.id === templateId);
+    if (!template) {
+      setQuoteForm(buildEmptyQuoteForm(user?.team));
+      setQuoteTemplateDraft(null);
+      return;
+    }
+
+    setQuoteForm(buildQuoteFormFromTemplate(template, user?.team));
+    setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
   }
 
   function handleClientSelection(clientId: string) {
@@ -2162,119 +2159,8 @@ export function QuotesPage() {
     }
   }
 
-  async function handleQuoteSendToLeads(quote: Quote) {
-    setSendingQuoteToLeadsId(quote.id);
-    setFlash(null);
-
-    try {
-      await apiPost<unknown>("/leads", {
-        quoteId: quote.id,
-        quoteNumber: quote.quoteNumber,
-        communicationChannel: "WHATSAPP",
-        status: "ACTIVE"
-      });
-      setFlash({
-        tone: "success",
-        text: `La cotizacion ${quote.quoteNumber} fue enviada al modulo de leads.`
-      });
-    } catch (error) {
-      setFlash({
-        tone: "error",
-        text: toErrorMessage(error)
-      });
-    } finally {
-      setSendingQuoteToLeadsId(null);
-    }
-  }
-
-  async function handleQuoteSendToMatters(quote: Quote) {
-    setSendingQuoteToMattersId(quote.id);
-    setFlash(null);
-
-    try {
-      await apiPost<unknown>("/matters", {
-        quoteId: quote.id,
-        quoteNumber: quote.quoteNumber,
-        matterType: quote.quoteType,
-        responsibleTeam: quote.responsibleTeam || null,
-        communicationChannel: "WHATSAPP",
-        stage: "INTAKE",
-        origin: "QUOTE"
-      });
-      setFlash({
-        tone: "success",
-        text: `La cotizacion ${quote.quoteNumber} fue enviada al modulo de asuntos activos.`
-      });
-    } catch (error) {
-      setFlash({
-        tone: "error",
-        text: toErrorMessage(error)
-      });
-    } finally {
-      setSendingQuoteToMattersId(null);
-    }
-  }
-
-  function renderQuoteTableActions(quote: Quote) {
-    const isDownloadingSavedQuote = savedQuoteDownload?.quoteId === quote.id;
-    const isSendingToLeads = sendingQuoteToLeadsId === quote.id;
-    const isSendingToMatters = sendingQuoteToMattersId === quote.id;
-
-    return (
-      <div className="quotes-table-actions">
-        <button type="button" className="secondary-button" onClick={() => handleQuoteView(quote)}>
-          Ver
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={isDownloadingSavedQuote}
-          onClick={() => void handleSavedQuoteDownload(quote, "pdf")}
-        >
-          {savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "pdf" ? "PDF..." : "PDF"}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={isDownloadingSavedQuote}
-          onClick={() => void handleSavedQuoteDownload(quote, "word")}
-        >
-          {savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "word" ? "Word..." : "Word"}
-        </button>
-        <button type="button" className="secondary-button" onClick={() => handleQuoteEdit(quote)}>
-          Editar
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={isSendingToLeads}
-          onClick={() => void handleQuoteSendToLeads(quote)}
-        >
-          {isSendingToLeads ? "Enviando..." : "Enviar a leads"}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={isSendingToMatters}
-          onClick={() => void handleQuoteSendToMatters(quote)}
-        >
-          {isSendingToMatters ? "Enviando..." : "Enviar a asuntos"}
-        </button>
-        <button
-          type="button"
-          className="danger-button"
-          disabled={deletingQuoteId === quote.id}
-          onClick={() => handleQuoteDeleteRequest(quote)}
-        >
-          Borrar
-        </button>
-      </div>
-    );
-  }
-
   const filteredTemplates = filterTemplatesForSearch(templates, templateWordSearch, templateTeamSearch);
   const filteredQuotes = filterQuotesForSearch(quotes, clients, quoteWordSearch, quoteClientSearch);
-  const recentQuotes = sortQuotesByCreatedAt(filteredQuotes);
   const templateGroups = groupTemplatesByTeam(filteredTemplates);
   const quoteGroups = groupQuotesByClient(filteredQuotes, clients);
   const editingQuote = quotes.find((item) => item.id === editingQuoteId);
@@ -2504,7 +2390,7 @@ export function QuotesPage() {
               </label>
 
               <label className="form-field">
-                <span>Numero de cotizacion tipo</span>
+                <span>Numero de cotizacion</span>
                 <input type="text" value={templateFormNumber} readOnly />
               </label>
 
@@ -2621,7 +2507,7 @@ export function QuotesPage() {
         <>
           <section className="panel">
             <div className="panel-header">
-              <h2>{quoteListViewMode === "recent" ? "Cotizaciones recientes" : "Cotizaciones por cliente"}</h2>
+              <h2>Cotizaciones por cliente</h2>
               <span>{filteredQuotes.length} registros</span>
             </div>
 
@@ -2649,18 +2535,7 @@ export function QuotesPage() {
               </div>
 
               <div className="matters-toolbar-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setQuoteListViewMode((current) => (current === "recent" ? "client" : "recent"))}
-                >
-                  {quoteListViewMode === "recent" ? "Ver por cliente" : "Ver por fecha"}
-                </button>
-                <span className="muted">
-                  {quoteListViewMode === "recent"
-                    ? "Ordenado por fecha y hora de creacion, empezando por la mas reciente."
-                    : "Agrupado por cliente; usa el boton para volver al orden por fecha."}
-                </span>
+                <span className="muted">Filtra por cliente y por contenido de la cotizacion antes de abrirla o descargarla.</span>
               </div>
             </div>
           </section>
@@ -2672,49 +2547,6 @@ export function QuotesPage() {
           ) : quoteGroups.length === 0 ? (
             <section className="panel">
               <div className="centered-inline-message">No hay cotizaciones que coincidan con la busqueda.</div>
-            </section>
-          ) : quoteListViewMode === "recent" ? (
-            <section className="panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Mas recientes</h2>
-                  <p className="muted">Ordenadas por fecha y hora de creacion.</p>
-                </div>
-                <span>{recentQuotes.length} cotizaciones</span>
-              </div>
-
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>No. cotizacion</th>
-                      <th>Creada</th>
-                      <th>Cliente</th>
-                      <th>Tipo de cotizacion</th>
-                      <th>Equipo</th>
-                      <th>Asunto</th>
-                      <th>Total</th>
-                      <th>Hito de conclusion</th>
-                      <th>Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentQuotes.map((quote) => (
-                      <tr key={quote.id}>
-                        <td>{quote.quoteNumber}</td>
-                        <td>{quote.createdAt ? formatDateTime(quote.createdAt) : formatDate(getQuoteDisplayDate(quote))}</td>
-                        <td>{quote.clientName}</td>
-                        <td>{getQuoteTypeLabel(quote.quoteType)}</td>
-                        <td>{getTeamLabel(quote.responsibleTeam)}</td>
-                        <td>{quote.subject}</td>
-                        <td>{formatCurrency(quote.totalMxn)}</td>
-                        <td>{quote.milestone || "-"}</td>
-                        <td>{renderQuoteTableActions(quote)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </section>
           ) : (
             quoteGroups.map((group) => (
@@ -2744,18 +2576,55 @@ export function QuotesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {group.items.map((quote) => (
-                        <tr key={quote.id}>
-                          <td>{quote.quoteNumber}</td>
-                          <td>{formatDate(getQuoteDisplayDate(quote))}</td>
-                          <td>{getQuoteTypeLabel(quote.quoteType)}</td>
-                          <td>{getTeamLabel(quote.responsibleTeam)}</td>
-                          <td>{quote.subject}</td>
-                          <td>{formatCurrency(quote.totalMxn)}</td>
-                          <td>{quote.milestone || "-"}</td>
-                          <td>{renderQuoteTableActions(quote)}</td>
-                        </tr>
-                      ))}
+                      {group.items.map((quote) => {
+                        const isDownloadingSavedQuote = savedQuoteDownload?.quoteId === quote.id;
+
+                        return (
+                          <tr key={quote.id}>
+                            <td>{quote.quoteNumber}</td>
+                            <td>{formatDate(getQuoteDisplayDate(quote))}</td>
+                            <td>{getQuoteTypeLabel(quote.quoteType)}</td>
+                            <td>{getTeamLabel(quote.responsibleTeam)}</td>
+                            <td>{quote.subject}</td>
+                            <td>{formatCurrency(quote.totalMxn)}</td>
+                            <td>{quote.milestone || "-"}</td>
+                            <td>
+                              <div className="quotes-table-actions">
+                                <button type="button" className="secondary-button" onClick={() => handleQuoteView(quote)}>
+                                  Ver
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  disabled={isDownloadingSavedQuote}
+                                  onClick={() => void handleSavedQuoteDownload(quote, "pdf")}
+                                >
+                                  {savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "pdf" ? "PDF..." : "PDF"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  disabled={isDownloadingSavedQuote}
+                                  onClick={() => void handleSavedQuoteDownload(quote, "word")}
+                                >
+                                  {savedQuoteDownload?.quoteId === quote.id && savedQuoteDownload.format === "word" ? "Word..." : "Word"}
+                                </button>
+                                <button type="button" className="secondary-button" onClick={() => handleQuoteEdit(quote)}>
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="danger-button"
+                                  disabled={deletingQuoteId === quote.id}
+                                  onClick={() => handleQuoteDeleteRequest(quote)}
+                                >
+                                  Borrar
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2815,37 +2684,10 @@ export function QuotesPage() {
                 </select>
               </label>
 
-              <div className="quotes-template-picker-actions">
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={!selectedTemplate || translatingTemplateId === selectedTemplate.id}
-                  onClick={() => {
-                    if (selectedTemplate) {
-                      void handleTemplateUse(selectedTemplate, "es");
-                    }
-                  }}
-                >
-                  Usar plantilla en español
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={!selectedTemplate || translatingTemplateId === selectedTemplate.id}
-                  onClick={() => {
-                    if (selectedTemplate) {
-                      void handleTemplateUse(selectedTemplate, "en");
-                    }
-                  }}
-                >
-                  {selectedTemplate && translatingTemplateId === selectedTemplate.id ? "Traduciendo..." : "Usar plantilla en inglés"}
-                </button>
-              </div>
-
               <p className="muted">
                 {selectedTemplate
-                  ? "Elige si quieres usar la plantilla tal como esta en español o traducirla al inglés antes de capturar la cotizacion."
-                  : "Selecciona una cotizacion tipo base y despues elige el idioma de uso."}
+                  ? "La tabla editable de esta cotizacion tipo aparece debajo de los campos de captura."
+                  : "Selecciona una cotizacion tipo para precargar el layout y mostrar su tabla editable debajo de los campos."}
               </p>
             </div>
           ) : (

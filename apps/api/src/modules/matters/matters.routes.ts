@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { deriveEffectivePermissions } from "@sige/contracts";
+import { EXECUTION_HOLIDAY_AUTHORITIES, deriveEffectivePermissions } from "@sige/contracts";
 
 import { getSessionUser, requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
 
@@ -15,6 +15,8 @@ const teamSchema = z.enum([
   "ADMIN",
   "ADMIN_OPERATIONS"
 ]);
+
+const executionHolidayAuthoritySchema = z.enum(EXECUTION_HOLIDAY_AUTHORITIES);
 
 const matterSchema = z.object({
   clientId: z.string().nullable().optional(),
@@ -40,6 +42,7 @@ const matterSchema = z.object({
   executionLinkedModule: z.string().nullable().optional(),
   executionLinkedAt: z.string().nullable().optional(),
   executionPrompt: z.string().nullable().optional(),
+  holidayAuthorityShortName: executionHolidayAuthoritySchema.nullable().optional(),
   nextAction: z.string().nullable().optional(),
   nextActionDueAt: z.string().nullable().optional(),
   nextActionSource: z.string().nullable().optional(),
@@ -81,7 +84,7 @@ function isExecutionMatterPatch(value: unknown) {
     return false;
   }
 
-  const allowedKeys = new Set(["executionPrompt", "concluded", "notes"]);
+  const allowedKeys = new Set(["executionPrompt", "concluded", "notes", "holidayAuthorityShortName"]);
   const keys = Object.keys(value);
   return keys.length > 0 && keys.every((key) => allowedKeys.has(key));
 }

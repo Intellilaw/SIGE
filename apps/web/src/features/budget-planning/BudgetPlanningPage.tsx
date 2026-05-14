@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { BudgetPlan, BudgetPlanSnapshot, FinanceRecord, GeneralExpense } from "@sige/contracts";
 
 import { apiGet, apiPatch } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { canWriteModule } from "../auth/permissions";
 
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
 const MONTH_NAMES = [
@@ -67,7 +65,6 @@ function getProgressPercent(actual: number, expected: number) {
 }
 
 export function BudgetPlanningPage() {
-  const { user } = useAuth();
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -82,7 +79,6 @@ export function BudgetPlanningPage() {
   const [loading, setLoading] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const canWrite = canWriteModule(user, "budget-planning");
 
   async function loadOverview() {
     setLoading(true);
@@ -126,10 +122,6 @@ export function BudgetPlanningPage() {
   }, [activeTab, selectedMonth, selectedYear]);
 
   async function persistPlanPatch(patch: BudgetPlanPatch) {
-    if (!canWrite) {
-      return;
-    }
-
     try {
       const updated = await apiPatch<BudgetPlan>(`/budget-planning?year=${selectedYear}&month=${selectedMonth}`, patch);
       setPlan(updated);
@@ -252,7 +244,6 @@ export function BudgetPlanningPage() {
                     type="text"
                     inputMode="decimal"
                     value={editingExpectedExpense ? draftExpectedExpense : formatCurrency(Number(draftExpectedExpense || 0))}
-                    disabled={!canWrite}
                     onFocus={() => setEditingExpectedExpense(true)}
                     onChange={(event) => setDraftExpectedExpense(event.target.value)}
                     onBlur={() => {
@@ -301,7 +292,6 @@ export function BudgetPlanningPage() {
               <span>Notas del mes</span>
               <textarea
                 value={draftNotes}
-                disabled={!canWrite}
                 onChange={(event) => setDraftNotes(event.target.value)}
                 onBlur={() => void persistPlanPatch({ notes: draftNotes })}
                 rows={3}

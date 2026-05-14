@@ -12,8 +12,20 @@ import type {
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  Holiday,
+  HolidayAuthorityShortName,
   InternalContract,
   InternalContractCollaborator,
+  InternalContractTemplate,
+  LaborFile,
+  LaborFileDocument,
+  LaborFileDocumentType,
+  LaborFileUpdateInput,
+  LaborGlobalVacationDay,
+  LaborGlobalVacationDayInput,
+  LaborVacationEvent,
+  LaborVacationEventInput,
+  KpiOverview,
   Lead,
   ManagedUser,
   Matter,
@@ -120,8 +132,24 @@ export interface InternalContractWriteRecord {
   fileContent?: Buffer | null;
 }
 
+export interface InternalContractTemplateWriteRecord {
+  title: string;
+  notes?: string | null;
+  originalFileName?: string | null;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  fileContent?: Buffer | null;
+}
+
 export interface InternalContractDocumentRecord {
   contractNumber: string;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileContent: Buffer;
+}
+
+export interface InternalContractTemplateDocumentRecord {
+  title: string;
   originalFileName: string;
   fileMimeType?: string | null;
   fileContent: Buffer;
@@ -133,6 +161,54 @@ export interface InternalContractsRepository {
   delete(contractId: string): Promise<void>;
   findDocument(contractId: string): Promise<InternalContractDocumentRecord | null>;
   listCollaborators(): Promise<InternalContractCollaborator[]>;
+  listTemplates(): Promise<InternalContractTemplate[]>;
+  createTemplate(payload: InternalContractTemplateWriteRecord): Promise<InternalContractTemplate>;
+  deleteTemplate(templateId: string): Promise<void>;
+  findTemplateDocument(templateId: string): Promise<InternalContractTemplateDocumentRecord | null>;
+}
+
+export interface LaborFileDocumentRecord {
+  laborFileId: string;
+  userId?: string | null;
+  employeeName: string;
+  documentType: LaborFileDocumentType;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileContent: Buffer;
+}
+
+export interface LaborFileDocumentUploadRecord {
+  documentType: LaborFileDocumentType;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  fileContent: Buffer;
+}
+
+export interface LaborVacationAcceptanceDocumentRecord {
+  laborFileId: string;
+  userId?: string | null;
+  employeeName: string;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileContent: Buffer;
+}
+
+export interface LaborFilesRepository {
+  list(): Promise<LaborFile[]>;
+  listForUser(userId: string): Promise<LaborFile[]>;
+  findById(laborFileId: string): Promise<LaborFile | null>;
+  findDocument(documentId: string): Promise<LaborFileDocumentRecord | null>;
+  findVacationAcceptanceDocument(eventId: string): Promise<LaborVacationAcceptanceDocumentRecord | null>;
+  update(laborFileId: string, payload: LaborFileUpdateInput): Promise<LaborFile>;
+  uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord): Promise<LaborFileDocument>;
+  deleteDocument(documentId: string): Promise<void>;
+  createVacationEvent(laborFileId: string, payload: LaborVacationEventInput): Promise<LaborVacationEvent>;
+  deleteVacationEvent(eventId: string): Promise<void>;
+  listGlobalVacationDays(): Promise<LaborGlobalVacationDay[]>;
+  createGlobalVacationDay(payload: LaborGlobalVacationDayInput): Promise<LaborGlobalVacationDay>;
+  deleteGlobalVacationDay(dayId: string): Promise<void>;
+  syncMissingForUsers(): Promise<void>;
 }
 
 export interface DailyDocumentAssignmentWriteRecord {
@@ -247,6 +323,7 @@ export interface MatterWriteRecord {
   executionLinkedModule?: string | null;
   executionLinkedAt?: string | null;
   executionPrompt?: string | null;
+  holidayAuthorityShortName?: Matter["holidayAuthorityShortName"] | null;
   nextAction?: string | null;
   nextActionDueAt?: string | null;
   nextActionSource?: string | null;
@@ -314,6 +391,19 @@ export interface GeneralExpensesRepository {
     month: number;
     copied: number;
   }>;
+}
+
+export interface HolidayWriteRecord {
+  date?: string;
+  authorityShortName?: HolidayAuthorityShortName;
+  label?: string | null;
+}
+
+export interface HolidaysRepository {
+  list(year: number, month: number, authorityShortName?: HolidayAuthorityShortName): Promise<Holiday[]>;
+  create(payload: HolidayWriteRecord): Promise<Holiday>;
+  update(holidayId: string, payload: HolidayWriteRecord): Promise<Holiday | null>;
+  delete(holidayId: string): Promise<void>;
 }
 
 export interface BudgetPlanUpdateRecord {
@@ -408,6 +498,16 @@ export interface CommissionsRepository {
   deleteReceiver(receiverId: string): Promise<void>;
   listSnapshots(): Promise<CommissionSnapshot[]>;
   createSnapshot(payload: CreateCommissionSnapshotRecord): Promise<CommissionSnapshot>;
+}
+
+export interface KpiAccessScope extends Pick<
+  AuthUser,
+  "role" | "legacyRole" | "team" | "legacyTeam" | "specificRole" | "permissions"
+> {}
+
+export interface KpisRepository {
+  getOverview(year: number, month: number, accessScope: KpiAccessScope): Promise<KpiOverview>;
+  getPeriodOverview(startDate: string, endDate: string, accessScope: KpiAccessScope): Promise<KpiOverview>;
 }
 
 export interface TasksRepository {

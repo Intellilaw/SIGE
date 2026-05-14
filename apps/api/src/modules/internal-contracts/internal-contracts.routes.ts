@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
-import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
+import { requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
 
 const paymentMilestoneSchema = z.object({
   id: z.string().optional(),
@@ -24,8 +24,20 @@ const createContractSchema = z.object({
   fileBase64: z.string().nullable().optional()
 });
 
+const createTemplateSchema = z.object({
+  title: z.string().min(1),
+  notes: z.string().nullable().optional(),
+  originalFileName: z.string().nullable().optional(),
+  fileMimeType: z.string().nullable().optional(),
+  fileBase64: z.string().nullable().optional()
+});
+
 const paramsSchema = z.object({
   contractId: z.string().min(1)
+});
+
+const templateParamsSchema = z.object({
+  templateId: z.string().min(1)
 });
 
 function decodeFileBase64(value?: string | null) {
@@ -45,10 +57,48 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.InternalContractsService(app.repositories.internalContracts);
   const readGuards = [requireAuth, requireAnyPermissions(["internal-contracts:read", "internal-contracts:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["internal-contracts:write"])];
+  const templateReadGuards = [requireAuth, requireAnyPermissions(["internal-contract-templates:read"])];
+  const superadminGuards = [requireAuth, requireRoles(["SUPERADMIN"])];
 
   app.get("/internal-contracts", { preHandler: readGuards }, async () => service.list());
 
   app.get("/internal-contracts/collaborators", { preHandler: readGuards }, async () => service.listCollaborators());
+
+  app.get("/internal-contracts/templates", { preHandler: templateReadGuards }, async () => service.listTemplates());
+
+  app.post("/internal-contracts/templates", { bodyLimit: 25 * 1024 * 1024, preHandler: superadminGuards }, async (request) => {
+    const payload = createTemplateSchema.parse(request.body ?? {});
+    const fileContent = decodeFileBase64(payload.fileBase64);
+
+    return service.createTemplate({
+      title: payload.title,
+      notes: payload.notes,
+      originalFileName: payload.originalFileName,
+      fileMimeType: payload.fileMimeType,
+      fileSizeBytes: fileContent?.byteLength ?? null,
+      fileContent
+    });
+  });
+
+  app.get("/internal-contracts/templates/:templateId/document", { preHandler: templateReadGuards }, async (request, reply) => {
+    const params = templateParamsSchema.parse(request.params);
+    const document = await service.findTemplateDocument(params.templateId);
+
+    if (!document) {
+      throw new app.errors.AppError(404, "INTERNAL_CONTRACT_TEMPLATE_DOCUMENT_NOT_FOUND", "El archivo del machote no existe.");
+    }
+
+    reply.header("Content-Type", document.fileMimeType || "application/octet-stream");
+    reply.header("Content-Disposition", encodeDispositionFilename(document.originalFileName));
+    return reply.send(document.fileContent);
+  });
+
+  app.delete("/internal-contracts/templates/:templateId", { preHandler: superadminGuards }, async (request, reply) => {
+    const params = templateParamsSchema.parse(request.params);
+    await service.deleteTemplate(params.templateId);
+    reply.code(204);
+    return null;
+  });
 
   app.post("/internal-contracts", { bodyLimit: 25 * 1024 * 1024, preHandler: writeGuards }, async (request) => {
     const payload = createContractSchema.parse(request.body ?? {});

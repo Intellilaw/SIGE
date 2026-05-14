@@ -71,11 +71,159 @@ export interface InternalContract {
   updatedAt: string;
 }
 
+export interface InternalContractTemplate {
+  id: string;
+  title: string;
+  originalFileName: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InternalContractCollaborator {
   id: string;
   name: string;
   shortName?: string;
   team?: Team;
+}
+
+export type LaborFileStatus = "INCOMPLETE" | "COMPLETE";
+export type LaborEmploymentStatus = "ACTIVE" | "FORMER";
+
+export type LaborFileDocumentType =
+  | "EMPLOYMENT_CONTRACT"
+  | "ADDENDUM"
+  | "PROOF_OF_ADDRESS"
+  | "TAX_STATUS_CERTIFICATE"
+  | "OFFICIAL_ID"
+  | "CV"
+  | "PROFESSIONAL_TITLE"
+  | "PROFESSIONAL_LICENSE";
+
+export type LaborFileDocumentRequirement = "ALWAYS" | "PROFESSIONAL_CREDENTIAL" | "OPTIONAL";
+
+export interface LaborFileDocumentDefinition {
+  type: LaborFileDocumentType;
+  label: string;
+  requirement: LaborFileDocumentRequirement;
+  contractSection?: boolean;
+  pdfOnly?: boolean;
+}
+
+export const LABOR_FILE_DOCUMENT_DEFINITIONS: LaborFileDocumentDefinition[] = [
+  { type: "EMPLOYMENT_CONTRACT", label: "Contrato laboral", requirement: "ALWAYS", contractSection: true, pdfOnly: true },
+  { type: "ADDENDUM", label: "Addendum", requirement: "OPTIONAL", contractSection: true, pdfOnly: true },
+  { type: "PROOF_OF_ADDRESS", label: "Comprobante de domicilio", requirement: "ALWAYS" },
+  { type: "TAX_STATUS_CERTIFICATE", label: "Constancia de situación fiscal", requirement: "ALWAYS" },
+  { type: "OFFICIAL_ID", label: "Identificación oficial", requirement: "ALWAYS" },
+  { type: "CV", label: "CV", requirement: "ALWAYS" },
+  { type: "PROFESSIONAL_TITLE", label: "Título profesional", requirement: "PROFESSIONAL_CREDENTIAL" },
+  { type: "PROFESSIONAL_LICENSE", label: "Cédula profesional", requirement: "PROFESSIONAL_CREDENTIAL" }
+];
+
+export type LaborVacationEventType = "PREVIOUS_YEAR_DEDUCTION" | "VACATION";
+
+export interface LaborFileDocument {
+  id: string;
+  laborFileId: string;
+  documentType: LaborFileDocumentType;
+  originalFileName: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  uploadedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaborVacationEvent {
+  id: string;
+  laborFileId: string;
+  eventType: LaborVacationEventType;
+  startDate?: string;
+  endDate?: string;
+  vacationDates?: string[];
+  days: number;
+  description?: string;
+  acceptanceOriginalFileName?: string;
+  acceptanceFileMimeType?: string;
+  acceptanceFileSizeBytes?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaborGlobalVacationDay {
+  id: string;
+  date: string;
+  days: number;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaborVacationSummary {
+  hireDate: string;
+  currentYearStartDate: string;
+  completedYears: number;
+  completedYearsLabel: string;
+  entitlementDays: number;
+  usedDays: number;
+  remainingDays: number;
+  lines: string[];
+}
+
+export interface LaborFile {
+  id: string;
+  userId?: string;
+  employeeName: string;
+  employeeEmail?: string;
+  employeeUsername: string;
+  employeeShortName?: string;
+  team?: Team;
+  legacyTeam?: string;
+  specificRole?: string;
+  status: LaborFileStatus;
+  employmentStatus: LaborEmploymentStatus;
+  hireDate: string;
+  employmentEndedAt?: string;
+  notes?: string;
+  documents: LaborFileDocument[];
+  vacationEvents: LaborVacationEvent[];
+  globalVacationDays: LaborGlobalVacationDay[];
+  vacationSummary: LaborVacationSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaborFileUpdateInput {
+  hireDate?: string;
+  notes?: string | null;
+}
+
+export interface LaborFileDocumentUploadInput {
+  documentType: LaborFileDocumentType;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileBase64: string;
+}
+
+export interface LaborVacationEventInput {
+  eventType: LaborVacationEventType;
+  startDate?: string | null;
+  endDate?: string | null;
+  vacationDates?: string[];
+  days?: number;
+  description?: string | null;
+  acceptanceOriginalFileName?: string | null;
+  acceptanceFileMimeType?: string | null;
+  acceptanceFileBase64?: string | null;
+}
+
+export interface LaborGlobalVacationDayInput {
+  date: string;
+  days?: number;
+  description?: string | null;
 }
 
 export type DailyDocumentTemplateId =
@@ -97,6 +245,55 @@ export interface DailyDocumentAssignment {
   values: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+}
+
+export const HOLIDAY_AUTHORITIES = [
+  { shortName: "PJF", name: "Poder Judicial de la Federaci\u00f3n" },
+  { shortName: "TSJCDMX", name: "Tribunal Superior de Justicia de la Ciudad de M\u00e9xico" },
+  { shortName: "PJEdoMex", name: "Poder Judicial del Estado de M\u00e9xico" },
+  { shortName: "TFJA", name: "Tribunal Federal de Justicia Administrativa" },
+  { shortName: "TJACDMX", name: "Tribunal de Justicia Administrativa de la Ciudad de M\u00e9xico" },
+  { shortName: "SAT", name: "Sistema de Administraci\u00f3n Tributaria" },
+  { shortName: "APF", name: "Administraci\u00f3n P\u00fablica Federal" },
+  { shortName: "APCDMX", name: "Administraci\u00f3n P\u00fablica de la Ciudad de M\u00e9xico" },
+  { shortName: "EMPRESA", name: "Toda la empresa" }
+] as const;
+
+export type HolidayAuthorityShortName = typeof HOLIDAY_AUTHORITIES[number]["shortName"];
+export type HolidaySource = "MANUAL" | "WEEKEND" | "LFT_OFFICIAL";
+
+export const EXECUTION_HOLIDAY_AUTHORITIES = [
+  "PJF",
+  "PJCDMX",
+  "PJEdoMex",
+  "TFJA",
+  "TJACDMX",
+  "SAT",
+  "APF",
+  "APCDMX"
+] as const;
+
+export type ExecutionHolidayAuthorityShortName = typeof EXECUTION_HOLIDAY_AUTHORITIES[number];
+
+export interface HolidayAuthority {
+  shortName: HolidayAuthorityShortName;
+  name: string;
+}
+
+export interface Holiday {
+  id: string;
+  date: string;
+  authorityShortName: HolidayAuthorityShortName;
+  authorityName: string;
+  label: string;
+  source: HolidaySource;
+  automatic: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function isHolidayAuthorityShortName(value: string): value is HolidayAuthorityShortName {
+  return HOLIDAY_AUTHORITIES.some((authority) => authority.shortName === value);
 }
 
 export interface QuoteLineItem {
@@ -227,6 +424,7 @@ export interface Matter {
   executionLinkedModule?: string;
   executionLinkedAt?: string;
   executionPrompt?: string;
+  holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName;
   nextAction?: string;
   nextActionDueAt?: string;
   nextActionSource?: string;
@@ -392,6 +590,76 @@ export interface CommissionSnapshot {
   totalNetMxn: number;
   snapshotData?: CommissionSnapshotData;
   createdAt: string;
+}
+
+export type KpiMetricKind = "production" | "deadline";
+export type KpiMetricStatus = "met" | "warning" | "missed" | "not-configured";
+
+export interface KpiIncident {
+  id: string;
+  sourceType: "tracking-record" | "term";
+  moduleId: string;
+  tableCode?: string;
+  tableLabel: string;
+  clientName: string;
+  subject: string;
+  matterIdentifier?: string;
+  taskName: string;
+  responsible: string;
+  dueDate?: string;
+  termDate?: string;
+  completedAt?: string;
+  status: LegacyTaskStatus;
+  reason: string;
+}
+
+export interface KpiMetric {
+  id: string;
+  label: string;
+  description: string;
+  kind: KpiMetricKind;
+  status: KpiMetricStatus;
+  value: number;
+  target: number;
+  unit: string;
+  progressPct: number;
+  targetLabel: string;
+  actualLabel: string;
+  helper: string;
+  sourceDescription: string;
+  sourceTables: string[];
+  incidents: KpiIncident[];
+}
+
+export interface KpiUserSummary {
+  userId: string;
+  username: string;
+  displayName: string;
+  shortName?: string;
+  team?: Team;
+  teamLabel: string;
+  specificRole?: string;
+  configured: boolean;
+  metrics: KpiMetric[];
+}
+
+export interface KpiTeamSummary {
+  teamKey: string;
+  teamLabel: string;
+  users: KpiUserSummary[];
+  configuredMetricsCount: number;
+  missedMetricsCount: number;
+}
+
+export interface KpiOverview {
+  year: number;
+  month: number;
+  generatedAt: string;
+  cutoffDate: string;
+  businessDaysInPeriod: number;
+  businessDaysElapsed: number;
+  sourceNote: string;
+  teams: KpiTeamSummary[];
 }
 
 export type GeneralExpenseTeam =

@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { UIEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Client, CommissionReceiver, FinanceRecord, FinanceRecordStats, FinanceSnapshot, Matter } from "@sige/contracts";
 import { TEAM_OPTIONS } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
-import { canReadModule, canWriteModule } from "../auth/permissions";
 
 type FinanceTab = "active-matters" | "monthly-view" | "snapshots";
 type FinanceMatterRow = Matter & { transferYear: number; transferMonth: number };
@@ -102,20 +100,6 @@ const MONTHLY_COLUMN_WIDTHS = [
   "110px",
   "320px",
   "110px"
-] as const;
-
-const ACTIVE_COLUMN_WIDTHS = [
-  "120px",
-  "260px",
-  "150px",
-  "110px",
-  "360px",
-  "170px",
-  "150px",
-  "220px",
-  "220px",
-  "150px",
-  "120px"
 ] as const;
 
 function toErrorMessage(error: unknown) {
@@ -357,12 +341,7 @@ function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
 
 export function FinancesPage() {
   const { user } = useAuth();
-  const canReadFinances = canReadModule(user, "finances");
-  const canWriteFinances = canWriteModule(user, "finances");
   const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
-  const canDeleteFinanceRecords = isSuperadmin || canWriteFinances;
-  const pageRef = useRef<HTMLElement | null>(null);
-  const tabsPanelRef = useRef<HTMLElement | null>(null);
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
@@ -381,39 +360,6 @@ export function FinancesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
-
-  useEffect(() => {
-    const page = pageRef.current;
-    const tabsPanel = tabsPanelRef.current;
-
-    if (!page || !tabsPanel) {
-      return;
-    }
-
-    const syncStickyTableOffset = () => {
-      const tabsHeight = Math.ceil(tabsPanel.getBoundingClientRect().height);
-      page.style.setProperty("--finance-sticky-tabs-height", `${tabsHeight}px`);
-      page.style.setProperty("--finance-sticky-table-top", `${tabsHeight}px`);
-    };
-
-    syncStickyTableOffset();
-
-    const resizeObserver = new ResizeObserver(syncStickyTableOffset);
-    resizeObserver.observe(tabsPanel);
-    window.addEventListener("resize", syncStickyTableOffset);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", syncStickyTableOffset);
-    };
-  }, []);
-
-  function handleFinanceTableScroll(event: UIEvent<HTMLDivElement>) {
-    event.currentTarget.parentElement?.style.setProperty(
-      "--finance-table-scroll-left",
-      `${event.currentTarget.scrollLeft}px`
-    );
-  }
 
   const clientNumberByName = useMemo(() => {
     const lookup = new Map<string, string>();
@@ -461,11 +407,6 @@ export function FinancesPage() {
   );
 
   async function loadCurrentMonthPresence() {
-    if (!canReadFinances) {
-      setCurrentMonthMatchKeys(new Set());
-      return;
-    }
-
     const currentRecords = await apiGet<FinanceRecord[]>(`/finances/records?year=${currentYear}&month=${currentMonth}`);
     const nextKeys = new Set<string>();
     currentRecords.forEach((record) => {
@@ -475,22 +416,12 @@ export function FinancesPage() {
   }
 
   async function loadMonthlyView() {
-    if (!canReadFinances) {
-      setRecords([]);
-      setClients([]);
-      setReceivers([]);
-      setSelectedIds(new Set());
-      setLoading(false);
-      setError("No tienes permisos para consultar Finanzas.");
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
       const [nextRecords, nextClients, nextReceivers] = await Promise.all([
         apiGet<FinanceRecord[]>(`/finances/records?year=${selectedYear}&month=${selectedMonth}`),
-        canWriteFinances ? apiGet<Client[]>("/clients") : Promise.resolve([]),
+        apiGet<Client[]>("/clients"),
         apiGet<CommissionReceiver[]>("/finances/commission-receivers")
       ]);
       setRecords(nextRecords);
@@ -505,13 +436,6 @@ export function FinancesPage() {
   }
 
   async function loadSnapshotsView() {
-    if (!canReadFinances) {
-      setSnapshots([]);
-      setLoading(false);
-      setError("No tienes permisos para consultar Finanzas.");
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
@@ -525,20 +449,12 @@ export function FinancesPage() {
   }
 
   async function loadActiveMattersView() {
-    if (!canReadFinances) {
-      setClients([]);
-      setActiveMatters([]);
-      setLoading(false);
-      setError("No tienes permisos para consultar Finanzas.");
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
       const [matters, nextClients] = await Promise.all([
         apiGet<Matter[]>("/matters"),
-        canWriteFinances ? apiGet<Client[]>("/clients") : Promise.resolve([])
+        apiGet<Client[]>("/clients")
       ]);
       setClients(nextClients);
       setActiveMatters(
@@ -568,7 +484,7 @@ export function FinancesPage() {
     }
 
     void loadActiveMattersView();
-  }, [activeTab, canReadFinances, selectedMonth, selectedYear]);
+  }, [activeTab, selectedMonth, selectedYear]);
 
   function resolveClientNumber(clientName?: string | null, fallback?: string | null) {
     return clientNumberByName.get(normalizeComparableText(clientName)) ?? normalizeText(fallback);
@@ -655,10 +571,6 @@ export function FinancesPage() {
   }
 
   async function persistRecordPatch(recordId: string, patch: FinanceRecordPatchPayload) {
-    if (!canWriteFinances) {
-      return;
-    }
-
     try {
       const updated = await apiPatch<FinanceRecord>(`/finances/records/${recordId}`, patch);
       setRecords((current) => current.map((record) => (record.id === recordId ? updated : record)));
@@ -668,10 +580,6 @@ export function FinancesPage() {
   }
 
   async function handleMatterNextPaymentDateChange(matterId: string, value: string) {
-    if (!canWriteFinances) {
-      return;
-    }
-
     const previous = activeMatters;
     setActiveMatters((current) =>
       current.map((matter) => (matter.id === matterId ? { ...matter, nextPaymentDate: value || undefined } : matter))
@@ -693,20 +601,12 @@ export function FinancesPage() {
   }
 
   function updateMatterTransferTarget(matterId: string, field: "transferYear" | "transferMonth", value: number) {
-    if (!canWriteFinances) {
-      return;
-    }
-
     setActiveMatters((current) =>
       current.map((matter) => (matter.id === matterId ? { ...matter, [field]: value } : matter))
     );
   }
 
   async function handleSendMatterToFinance(matter: FinanceMatterRow) {
-    if (!canWriteFinances) {
-      return;
-    }
-
     try {
       await apiPost<FinanceRecord>("/finances/send-matter", {
         matterId: matter.id,
@@ -745,8 +645,8 @@ export function FinancesPage() {
   }
 
   async function handleDeleteRecord(recordId: string) {
-    if (!canDeleteFinanceRecords) {
-      window.alert("Solo el equipo de Finanzas puede borrar registros.");
+    if (!isSuperadmin) {
+      window.alert("Solo los superadministradores pueden borrar registros.");
       return;
     }
 
@@ -768,8 +668,8 @@ export function FinancesPage() {
   }
 
   async function handleBulkDelete() {
-    if (!canDeleteFinanceRecords) {
-      window.alert("Solo el equipo de Finanzas puede borrar registros.");
+    if (!isSuperadmin) {
+      window.alert("Solo los superadministradores pueden borrar registros.");
       return;
     }
 
@@ -791,10 +691,6 @@ export function FinancesPage() {
   }
 
   async function handleCreateSnapshot() {
-    if (!canWriteFinances) {
-      return;
-    }
-
     try {
       await apiPost<FinanceSnapshot>("/finances/snapshots", {
         year: selectedYear,
@@ -807,10 +703,6 @@ export function FinancesPage() {
   }
 
   async function handleCopyToNextMonth() {
-    if (!canWriteFinances) {
-      return;
-    }
-
     try {
       const result = await apiPost<CopyResult>("/finances/records/copy-to-next-month", {
         year: selectedYear,
@@ -886,81 +778,66 @@ export function FinancesPage() {
       }
     );
 
-    const renderMonthlyColGroup = () => (
-      <colgroup>
-        {MONTHLY_COLUMN_WIDTHS.map((width, index) => (
-          <col key={`finance-monthly-col-${index}`} style={{ width }} />
-        ))}
-      </colgroup>
-    );
-
-    const renderMonthlyHeader = () => (
-      <thead>
-        <tr>
-          <th><input type="checkbox" checked={records.length > 0 && selectedIds.size === records.length} onChange={toggleAllRecords} /></th>
-          <th>No. Cliente</th>
-          <th>Cliente</th>
-          <th>No. Cotizacion</th>
-          <th>Tipo</th>
-          <th>Asunto</th>
-          <th>Contrato firmado</th>
-          <th>Equipo Responsable</th>
-          <th>Total Asunto</th>
-          <th>Conceptos trabajando</th>
-          <th>Honorarios conceptos</th>
-          <th>Pagos previos</th>
-          <th>Remanente esperado este mes</th>
-          <th>Fecha de proximo pago</th>
-          <th>Detalle Fecha</th>
-          <th>Pagado este mes</th>
-          <th>Fecha Pago Real</th>
-          <th>Adeudado hoy</th>
-          <th>Honorarios netos</th>
-          <th>Comision cliente 20%</th>
-          <th>Para quien</th>
-          <th>Comision cierre 10%</th>
-          <th>Para quien</th>
-          <th>Ingresos menos 20% y 10%</th>
-          <th>% Litigio</th>
-          <th>% Corp-Lab</th>
-          <th>% Convenios</th>
-          <th>% Der Fin</th>
-          <th>% Compl. Fis.</th>
-          <th>SUM %</th>
-          <th>COM. EJEC. LITIGIO (LIDER 8%)</th>
-          <th>COM. EJEC. LITIGIO (COLAB 1%)</th>
-          <th>COM. EJEC. CORP-LAB (LIDER 8%)</th>
-          <th>COM. EJEC. CORP-LAB (COLAB 1%)</th>
-          <th>COM. EJEC. CONVENIOS (LIDER 8%)</th>
-          <th>COM. EJEC. CONVENIOS (COLAB 1%)</th>
-          <th>COM. EJEC. DER FIN (LIDER 10%)</th>
-          <th>COM. EJEC. DER FIN (COLAB 1%)</th>
-          <th>COM. EJEC. COMPL FIS (LIDER 8%)</th>
-          <th>COM. EJEC. COMPL FIS (COLAB 1%)</th>
-          <th>Com. Com. Cliente (1% Neto)</th>
-          <th>Com. Finanzas (1% Neto)</th>
-          <th>Utilidad neta</th>
-          <th>Hito conclusion</th>
-          <th>Concluyo?</th>
-          <th>Comentarios</th>
-          <th>Accion</th>
-        </tr>
-      </thead>
-    );
-
     return (
-      <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances}>
-        <div className="finance-table-shell finance-table-shell-sticky">
-        <div className="finance-table-sticky-head">
-          <table className="finance-table finance-table-monthly">
-            {renderMonthlyColGroup()}
-            {renderMonthlyHeader()}
-          </table>
-        </div>
-        <div className="finance-table-scroll" onScroll={handleFinanceTableScroll}>
-          <table className="finance-table finance-table-monthly">
-            {renderMonthlyColGroup()}
-            <tbody>
+      <div className="finance-table-shell">
+        <table className="finance-table finance-table-monthly">
+          <colgroup>
+            {MONTHLY_COLUMN_WIDTHS.map((width, index) => (
+              <col key={`finance-monthly-col-${index}`} style={{ width }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              <th><input type="checkbox" checked={records.length > 0 && selectedIds.size === records.length} onChange={toggleAllRecords} /></th>
+              <th>No. Cliente</th>
+              <th>Cliente</th>
+              <th>No. Cotizacion</th>
+              <th>Tipo</th>
+              <th>Asunto</th>
+              <th>Contrato firmado</th>
+              <th>Equipo Responsable</th>
+              <th>Total Asunto</th>
+              <th>Conceptos trabajando</th>
+              <th>Honorarios conceptos</th>
+              <th>Pagos previos</th>
+              <th>Remanente esperado este mes</th>
+              <th>Fecha de proximo pago</th>
+              <th>Detalle Fecha</th>
+              <th>Pagado este mes</th>
+              <th>Fecha Pago Real</th>
+              <th>Adeudado hoy</th>
+              <th>Honorarios netos</th>
+              <th>Comision cliente 20%</th>
+              <th>Para quien</th>
+              <th>Comision cierre 10%</th>
+              <th>Para quien</th>
+              <th>Ingresos menos 20% y 10%</th>
+              <th>% Litigio</th>
+              <th>% Corp-Lab</th>
+              <th>% Convenios</th>
+              <th>% Der Fin</th>
+              <th>% Compl. Fis.</th>
+              <th>SUM %</th>
+              <th>COM. EJEC. LITIGIO (LIDER 8%)</th>
+              <th>COM. EJEC. LITIGIO (COLAB 1%)</th>
+              <th>COM. EJEC. CORP-LAB (LIDER 8%)</th>
+              <th>COM. EJEC. CORP-LAB (COLAB 1%)</th>
+              <th>COM. EJEC. CONVENIOS (LIDER 8%)</th>
+              <th>COM. EJEC. CONVENIOS (COLAB 1%)</th>
+              <th>COM. EJEC. DER FIN (LIDER 10%)</th>
+              <th>COM. EJEC. DER FIN (COLAB 1%)</th>
+              <th>COM. EJEC. COMPL FIS (LIDER 8%)</th>
+              <th>COM. EJEC. COMPL FIS (COLAB 1%)</th>
+              <th>Com. Com. Cliente (1% Neto)</th>
+              <th>Com. Finanzas (1% Neto)</th>
+              <th>Utilidad neta</th>
+              <th>Hito conclusion</th>
+              <th>Concluyo?</th>
+              <th>Comentarios</th>
+              <th>Accion</th>
+            </tr>
+          </thead>
+          <tbody>
             {records.map((record) => {
               const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
               const isSelected = selectedIds.has(record.id);
@@ -1116,54 +993,32 @@ export function FinancesPage() {
               <td>{formatCurrency(totals.netProfitMxn)}</td>
               <td colSpan={4} />
             </tr>
-            </tfoot>
-          </table>
-        </div>
-        </div>
-      </fieldset>
+          </tfoot>
+        </table>
+      </div>
     );
   }
 
   function renderActiveMattersTable(items: FinanceMatterRow[], variant: "unique" | "retainer") {
-    const renderActiveColGroup = () => (
-      <colgroup>
-        {ACTIVE_COLUMN_WIDTHS.map((width, index) => (
-          <col key={`finance-active-col-${index}`} style={{ width }} />
-        ))}
-      </colgroup>
-    );
-
-    const renderActiveHeader = () => (
-      <thead>
-        <tr>
-          <th>No. Cliente</th>
-          <th>Cliente</th>
-          <th>No. Cotizacion</th>
-          <th>Tipo</th>
-          <th>Asunto</th>
-          <th>Honorarios Totales</th>
-          <th>Comision cierre</th>
-          <th>Equipo Responsable</th>
-          <th>Fecha de proximo pago</th>
-          <th>Destino (Finanzas)</th>
-          <th>Accion</th>
-        </tr>
-      </thead>
-    );
-
     return (
-      <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances}>
-        <div className="finance-active-table-shell finance-table-shell-sticky">
-        <div className="finance-table-sticky-head">
-          <table className="finance-active-table">
-            {renderActiveColGroup()}
-            {renderActiveHeader()}
-          </table>
-        </div>
-        <div className="finance-table-scroll" onScroll={handleFinanceTableScroll}>
-          <table className="finance-active-table">
-            {renderActiveColGroup()}
-            <tbody>
+      <div className="finance-active-table-shell">
+        <table className="finance-active-table">
+          <thead>
+            <tr>
+              <th>No. Cliente</th>
+              <th>Cliente</th>
+              <th>No. Cotizacion</th>
+              <th>Tipo</th>
+              <th>Asunto</th>
+              <th>Honorarios Totales</th>
+              <th>Comision cierre</th>
+              <th>Equipo Responsable</th>
+              <th>Fecha de proximo pago</th>
+              <th>Destino (Finanzas)</th>
+              <th>Accion</th>
+            </tr>
+          </thead>
+          <tbody>
             {items.map((matter) => {
               const highlight = shouldHighlightMatter(matter);
               const targetDate = new Date(matter.transferYear, matter.transferMonth - 1, 1);
@@ -1198,11 +1053,9 @@ export function FinancesPage() {
             {!loading && items.length === 0 ? (
               <tr><td className="centered-inline-message" colSpan={11}>{variant === "retainer" ? "No hay igualas activas." : "No hay asuntos unicos activos."}</td></tr>
             ) : null}
-            </tbody>
-          </table>
-        </div>
-        </div>
-      </fieldset>
+          </tbody>
+        </table>
+      </div>
     );
   }
 
@@ -1245,7 +1098,7 @@ export function FinancesPage() {
   }
 
   return (
-    <section className="page-stack finances-page" ref={pageRef}>
+    <section className="page-stack finances-page">
       <header className="hero module-hero">
         <div className="module-hero-head">
           <span className="module-hero-icon" aria-hidden="true">Finanzas</span>
@@ -1258,7 +1111,7 @@ export function FinancesPage() {
 
       {error ? <div className="message-banner message-error">{error}</div> : null}
 
-      <section className="panel finance-tabs-panel" ref={tabsPanelRef}>
+      <section className="panel finance-tabs-panel">
         <div className="finance-tabs">
           <button className={`finance-tab ${activeTab === "active-matters" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("active-matters")}>1. Asuntos activos</button>
           <button className={`finance-tab ${activeTab === "monthly-view" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("monthly-view")}>2. Ver mes</button>
@@ -1298,17 +1151,9 @@ export function FinancesPage() {
               </label>
             </div>
             <div className="finance-toolbar-actions">
-              {selectedIds.size > 0 ? (
-                <button className="danger-button" type="button" onClick={() => void handleBulkDelete()} disabled={!canDeleteFinanceRecords}>
-                  Borrar ({selectedIds.size})
-                </button>
-              ) : null}
-              <button className="secondary-button" type="button" onClick={() => void handleCreateSnapshot()} disabled={!canWriteFinances}>
-                Guardar estampa
-              </button>
-              <button className="primary-button" type="button" onClick={() => setCopyModalOpen(true)} disabled={!canWriteFinances}>
-                Copiar todo al mes siguiente
-              </button>
+              {selectedIds.size > 0 ? <button className="danger-button" type="button" onClick={() => void handleBulkDelete()}>Borrar ({selectedIds.size})</button> : null}
+              <button className="secondary-button" type="button" onClick={() => void handleCreateSnapshot()}>Guardar estampa</button>
+              <button className="primary-button" type="button" onClick={() => setCopyModalOpen(true)}>Copiar todo al mes siguiente</button>
             </div>
           </div>
           <MonthSummaryCards records={records} />
@@ -1325,7 +1170,7 @@ export function FinancesPage() {
             <p>Esta accion borrara todos los registros existentes del siguiente mes y los reemplazara con los registros actuales.</p>
             <div className="finance-modal-actions">
               <button className="secondary-button" type="button" onClick={() => setCopyModalOpen(false)}>Cancelar</button>
-              <button className="danger-button" type="button" onClick={() => void handleCopyToNextMonth()} disabled={!canWriteFinances}>Continuar</button>
+              <button className="danger-button" type="button" onClick={() => void handleCopyToNextMonth()}>Continuar</button>
             </div>
           </div>
         </div>

@@ -18,6 +18,7 @@ export async function issueTokenPair(app: FastifyInstance, repository: AuthRepos
       email: user.email,
       username: user.username,
       displayName: user.displayName,
+      shortName: user.shortName,
       role: user.role,
       legacyRole: user.legacyRole,
       team: user.team,

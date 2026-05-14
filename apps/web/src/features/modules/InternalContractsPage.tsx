@@ -4,6 +4,7 @@ import type {
   InternalContract,
   InternalContractCollaborator,
   InternalContractPaymentMilestone,
+  InternalContractTemplate,
   InternalContractType,
   Quote
 } from "@sige/contracts";
@@ -20,6 +21,7 @@ type FlashState =
 
 type ContractFormState = {
   contractNumber: string;
+  templateTitle: string;
   clientId: string;
   collaboratorName: string;
   documentKind: InternalContract["documentKind"];
@@ -27,15 +29,19 @@ type ContractFormState = {
   notes: string;
 };
 
+type InternalContractSection = InternalContractType | "TEMPLATES";
+
 const MODULE_TITLE = "Administraci\u00f3n de contratos internos";
 
-const SECTION_LABELS: Record<InternalContractType, string> = {
+const SECTION_LABELS: Record<InternalContractSection, string> = {
   PROFESSIONAL_SERVICES: "Contratos de prestaci\u00f3n de servicios profesionales",
-  LABOR: "Contratos laborales"
+  LABOR: "Contratos laborales",
+  TEMPLATES: "Contratos machote"
 };
 
 const initialFormState: ContractFormState = {
   contractNumber: "",
+  templateTitle: "",
   clientId: "",
   collaboratorName: "",
   documentKind: "CONTRACT",
@@ -167,10 +173,24 @@ function sortContracts(items: InternalContract[]) {
   );
 }
 
+function sortContractTemplates(items: InternalContractTemplate[]) {
+  return [...items].sort((left, right) =>
+    left.title.localeCompare(right.title, "es-MX", { numeric: true, sensitivity: "base" })
+  );
+}
+
 function sortQuotes(items: Quote[]) {
   return [...items].sort((left, right) =>
     left.quoteNumber.localeCompare(right.quoteNumber, "es-MX", { numeric: true, sensitivity: "base" })
   );
+}
+
+async function fetchOptionalRows<T>(request: Promise<T[]>) {
+  try {
+    return await request;
+  } catch {
+    return [];
+  }
 }
 
 function normalizeIdentifierSegment(value: string) {
@@ -198,8 +218,9 @@ function contractOwnerLabel(contract: InternalContract) {
 
 export function InternalContractsPage() {
   const { user } = useAuth();
-  const [activeSection, setActiveSection] = useState<InternalContractType>("PROFESSIONAL_SERVICES");
+  const [activeSection, setActiveSection] = useState<InternalContractSection>("PROFESSIONAL_SERVICES");
   const [contracts, setContracts] = useState<InternalContract[]>([]);
+  const [templates, setTemplates] = useState<InternalContractTemplate[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [collaborators, setCollaborators] = useState<InternalContractCollaborator[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -213,22 +234,30 @@ export function InternalContractsPage() {
   const [flash, setFlash] = useState<FlashState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const canRead = hasPermission(user?.permissions, "internal-contracts:read") || hasPermission(user?.permissions, "internal-contracts:write");
+  const canReadContracts = hasPermission(user?.permissions, "internal-contracts:read") || hasPermission(user?.permissions, "internal-contracts:write");
+  const canReadTemplates = hasPermission(user?.permissions, "internal-contract-templates:read");
+  const canRead = canReadContracts || canReadTemplates;
   const canWrite = hasPermission(user?.permissions, "internal-contracts:write");
+  const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+  const canUploadTemplate = Boolean(isSuperadmin);
+  const canSubmitActiveSection = activeSection === "TEMPLATES" ? canUploadTemplate : canWrite;
+  const isTemplateSection = activeSection === "TEMPLATES";
 
   async function loadModule() {
     setLoading(true);
     setErrorMessage(null);
 
     try {
-      const [contractRows, clientRows, collaboratorRows, quoteRows] = await Promise.all([
-        apiGet<InternalContract[]>("/internal-contracts"),
-        apiGet<Client[]>("/clients"),
-        apiGet<InternalContractCollaborator[]>("/internal-contracts/collaborators"),
-        apiGet<Quote[]>("/quotes")
+      const [contractRows, templateRows, clientRows, collaboratorRows, quoteRows] = await Promise.all([
+        canReadContracts ? apiGet<InternalContract[]>("/internal-contracts") : Promise.resolve([]),
+        canReadTemplates ? apiGet<InternalContractTemplate[]>("/internal-contracts/templates") : Promise.resolve([]),
+        canWrite ? fetchOptionalRows(apiGet<Client[]>("/clients")) : Promise.resolve([]),
+        canWrite ? fetchOptionalRows(apiGet<InternalContractCollaborator[]>("/internal-contracts/collaborators")) : Promise.resolve([]),
+        canWrite ? fetchOptionalRows(apiGet<Quote[]>("/quotes")) : Promise.resolve([])
       ]);
 
       setContracts(contractRows);
+      setTemplates(templateRows);
       setClients(sortClients(clientRows));
       setCollaborators(collaboratorRows);
       setQuotes(quoteRows);
@@ -246,14 +275,39 @@ export function InternalContractsPage() {
     }
 
     void loadModule();
-  }, [canRead]);
+  }, [canRead, canReadContracts, canReadTemplates, canWrite]);
+
+  const visibleSections = useMemo(() => {
+    const sections: InternalContractSection[] = [];
+
+    if (canReadContracts) {
+      sections.push("PROFESSIONAL_SERVICES", "LABOR");
+    }
+
+    if (canReadTemplates) {
+      sections.push("TEMPLATES");
+    }
+
+    return sections;
+  }, [canReadContracts, canReadTemplates]);
+
+  useEffect(() => {
+    if (visibleSections.length > 0 && !visibleSections.includes(activeSection)) {
+      setActiveSection(visibleSections[0]);
+    }
+  }, [activeSection, visibleSections]);
 
   const sectionCounts = useMemo(() => ({
     PROFESSIONAL_SERVICES: contracts.filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES").length,
-    LABOR: contracts.filter((contract) => contract.contractType === "LABOR").length
-  }), [contracts]);
+    LABOR: contracts.filter((contract) => contract.contractType === "LABOR").length,
+    TEMPLATES: templates.length
+  }), [contracts, templates]);
 
   const filteredContracts = useMemo(() => {
+    if (activeSection === "TEMPLATES") {
+      return [];
+    }
+
     const search = normalizeSearchValue(query);
     const sectionContracts = contracts.filter((contract) => contract.contractType === activeSection);
 
@@ -276,6 +330,24 @@ export function InternalContractsPage() {
     }));
   }, [activeSection, contracts, query]);
 
+  const filteredTemplates = useMemo(() => {
+    const search = normalizeSearchValue(query);
+
+    if (!search) {
+      return sortContractTemplates(templates);
+    }
+
+    return sortContractTemplates(templates.filter((template) => {
+      const haystack = normalizeSearchValue([
+        template.title,
+        template.originalFileName,
+        template.notes
+      ].filter(Boolean).join(" "));
+
+      return haystack.includes(search);
+    }));
+  }, [query, templates]);
+
   const selectedClientQuotes = useMemo(
     () => sortQuotes(quotes.filter((quote) => quote.clientId === form.clientId)),
     [form.clientId, quotes]
@@ -287,7 +359,7 @@ export function InternalContractsPage() {
     setFlash(null);
   }
 
-  function handleSectionChange(section: InternalContractType) {
+  function handleSectionChange(section: InternalContractSection) {
     setActiveSection(section);
     setForm(initialFormState);
     setSelectedFile(null);
@@ -306,6 +378,50 @@ export function InternalContractsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (activeSection === "TEMPLATES") {
+      if (!canUploadTemplate) {
+        setFlash({ tone: "error", text: "Solo el superadmin puede cargar contratos machote." });
+        return;
+      }
+
+      const title = form.templateTitle.trim();
+
+      if (!title) {
+        setFlash({ tone: "error", text: "Escribe el nombre del contrato machote." });
+        return;
+      }
+
+      if (!selectedFile) {
+        setFlash({ tone: "error", text: "Carga el archivo del contrato machote." });
+        return;
+      }
+
+      setSaving(true);
+      setFlash(null);
+
+      try {
+        const created = await apiPost<InternalContractTemplate>("/internal-contracts/templates", {
+          title,
+          notes: form.notes,
+          originalFileName: selectedFile.name,
+          fileMimeType: selectedFile.type || "application/octet-stream",
+          fileBase64: await fileToBase64(selectedFile)
+        });
+
+        setTemplates((current) => [created, ...current]);
+        setForm(initialFormState);
+        setSelectedFile(null);
+        setFlash({ tone: "success", text: `Machote ${created.title} cargado correctamente.` });
+        event.currentTarget.reset();
+      } catch (error) {
+        setFlash({ tone: "error", text: toErrorMessage(error) });
+      } finally {
+        setSaving(false);
+      }
+
+      return;
+    }
 
     if (activeSection === "PROFESSIONAL_SERVICES" && !form.clientId) {
       setFlash({ tone: "error", text: "Selecciona un cliente del padron." });
@@ -372,6 +488,20 @@ export function InternalContractsPage() {
     }
   }
 
+  async function handleTemplateDownload(template: InternalContractTemplate) {
+    setDownloadingId(template.id);
+    setFlash(null);
+
+    try {
+      const { blob, filename } = await apiDownload(`/internal-contracts/templates/${template.id}/document`);
+      downloadBlobFile(blob, filename ?? template.originalFileName);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   async function handleDelete(contract: InternalContract) {
     if (!window.confirm(`Seguro que deseas borrar el contrato ${contract.contractNumber}?`)) {
       return;
@@ -384,6 +514,25 @@ export function InternalContractsPage() {
       await apiDelete(`/internal-contracts/${contract.id}`);
       setContracts((current) => current.filter((entry) => entry.id !== contract.id));
       setFlash({ tone: "success", text: `Contrato ${contract.contractNumber} borrado.` });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleTemplateDelete(template: InternalContractTemplate) {
+    if (!window.confirm(`Seguro que deseas borrar el machote ${template.title}?`)) {
+      return;
+    }
+
+    setDeletingId(template.id);
+    setFlash(null);
+
+    try {
+      await apiDelete(`/internal-contracts/templates/${template.id}`);
+      setTemplates((current) => current.filter((entry) => entry.id !== template.id));
+      setFlash({ tone: "success", text: `Machote ${template.title} borrado.` });
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
@@ -418,13 +567,13 @@ export function InternalContractsPage() {
           </div>
         </div>
         <p className="muted">
-          Control de contratos por cliente, contratos laborales y addenda por colaborador interno de Rusconii Consulting.
+          Control de contratos por cliente, contratos laborales, addenda y machotes internos de Rusconii Consulting.
         </p>
       </header>
 
       <section className="panel">
         <div className="leads-tabs internal-contracts-tabs" role="tablist" aria-label="Secciones de contratos internos">
-          {(["PROFESSIONAL_SERVICES", "LABOR"] as InternalContractType[]).map((section) => (
+          {visibleSections.map((section) => (
             <button
               key={section}
               type="button"
@@ -448,14 +597,30 @@ export function InternalContractsPage() {
       <section className="internal-contracts-layout">
         <section className="panel internal-contracts-form-panel">
           <div className="panel-header">
-            <h2>Cargar contrato</h2>
-            <span>{activeSection === "LABOR" ? "Laboral / addendum" : "Servicios profesionales"}</span>
+            <h2>{isTemplateSection ? "Cargar machote" : "Cargar contrato"}</h2>
+            <span>
+              {activeSection === "TEMPLATES"
+                ? "Machotes de empresa"
+                : activeSection === "LABOR"
+                  ? "Laboral / addendum"
+                  : "Servicios profesionales"}
+            </span>
           </div>
 
-          {canWrite ? (
+          {canSubmitActiveSection ? (
             <form className="internal-contracts-form" onSubmit={handleSubmit}>
               <div className="internal-contracts-form-grid">
-                {activeSection === "PROFESSIONAL_SERVICES" ? (
+                {activeSection === "TEMPLATES" ? (
+                  <label className="form-field internal-contracts-wide-field">
+                    <span>Nombre del machote</span>
+                    <input
+                      value={form.templateTitle}
+                      onChange={(event) => updateForm("templateTitle", event.target.value)}
+                      placeholder="Ej. Contrato de prestacion de servicios"
+                      disabled={saving || loading}
+                    />
+                  </label>
+                ) : activeSection === "PROFESSIONAL_SERVICES" ? (
                   <>
                     <label className="form-field">
                       <span>Cliente</span>
@@ -555,7 +720,7 @@ export function InternalContractsPage() {
                   <textarea
                     value={form.notes}
                     onChange={(event) => updateForm("notes", event.target.value)}
-                    placeholder="Observaciones internas del contrato..."
+                    placeholder={isTemplateSection ? "Notas internas sobre el uso del machote..." : "Observaciones internas del contrato..."}
                     disabled={saving}
                   />
                 </label>
@@ -563,7 +728,7 @@ export function InternalContractsPage() {
 
               <div className="form-actions">
                 <button className="primary-button" type="submit" disabled={saving || loading}>
-                  {saving ? "Cargando..." : "Guardar contrato"}
+                  {saving ? "Cargando..." : isTemplateSection ? "Guardar machote" : "Guardar contrato"}
                 </button>
                 <button className="secondary-button" type="button" onClick={() => void loadModule()} disabled={saving || loading}>
                   Refrescar
@@ -571,14 +736,18 @@ export function InternalContractsPage() {
               </div>
             </form>
           ) : (
-            <div className="centered-inline-message">Tu perfil puede consultar contratos, pero no cargar nuevos archivos.</div>
+            <div className="centered-inline-message">
+              {isTemplateSection
+                ? "Tu perfil puede ver y descargar machotes, pero solo el superadmin puede cargar nuevos archivos."
+                : "Tu perfil puede consultar contratos, pero no cargar nuevos archivos."}
+            </div>
           )}
         </section>
 
         <section className="panel internal-contracts-list-panel">
           <div className="panel-header">
             <h2>{SECTION_LABELS[activeSection]}</h2>
-            <span>{filteredContracts.length} registros</span>
+            <span>{isTemplateSection ? filteredTemplates.length : filteredContracts.length} registros</span>
           </div>
 
           <div className="internal-contracts-toolbar">
@@ -587,18 +756,70 @@ export function InternalContractsPage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Contrato, cliente, colaborador, archivo o hito..."
+                placeholder={isTemplateSection ? "Machote, archivo o notas..." : "Contrato, cliente, colaborador, archivo o hito..."}
                 type="search"
               />
             </label>
           </div>
 
           <div className="internal-contracts-list" aria-live="polite">
-            {loading ? <div className="centered-inline-message">Cargando contratos...</div> : null}
-            {!loading && filteredContracts.length === 0 ? (
+            {loading ? (
+              <div className="centered-inline-message">{isTemplateSection ? "Cargando machotes..." : "Cargando contratos..."}</div>
+            ) : null}
+            {!loading && isTemplateSection && filteredTemplates.length === 0 ? (
+              <div className="centered-inline-message">No hay machotes cargados.</div>
+            ) : null}
+            {!loading && !isTemplateSection && filteredContracts.length === 0 ? (
               <div className="centered-inline-message">No hay contratos en esta seccion.</div>
             ) : null}
-            {!loading && filteredContracts.map((contract) => (
+            {!loading && isTemplateSection && filteredTemplates.map((template) => (
+              <article className="internal-contract-card" key={template.id}>
+                <div className="internal-contract-card-head">
+                  <div>
+                    <span className="internal-contract-number">{template.title}</span>
+                    <h3>{template.originalFileName}</h3>
+                  </div>
+                  <span className="status-pill status-live">Machote</span>
+                </div>
+
+                <div className="internal-contract-meta-grid">
+                  <div>
+                    <span>Archivo</span>
+                    <strong>{template.originalFileName}</strong>
+                    <small>{formatFileSize(template.fileSizeBytes)}</small>
+                  </div>
+                  <div>
+                    <span>Alta</span>
+                    <strong>{formatDate(template.createdAt)}</strong>
+                    <small>{template.fileMimeType ?? "Tipo no registrado"}</small>
+                  </div>
+                </div>
+
+                {template.notes ? <p className="internal-contract-notes">{template.notes}</p> : null}
+
+                <div className="table-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={downloadingId === template.id}
+                    onClick={() => void handleTemplateDownload(template)}
+                  >
+                    {downloadingId === template.id ? "Descargando..." : "Descargar"}
+                  </button>
+                  {canUploadTemplate ? (
+                    <button
+                      className="danger-button"
+                      type="button"
+                      disabled={deletingId === template.id}
+                      onClick={() => void handleTemplateDelete(template)}
+                    >
+                      {deletingId === template.id ? "Borrando..." : "Borrar"}
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+            {!loading && !isTemplateSection && filteredContracts.map((contract) => (
               <article className="internal-contract-card" key={contract.id}>
                 <div className="internal-contract-card-head">
                   <div>

@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { Prisma, PrismaClient } from "@prisma/client";
-import { TASK_MODULES, type Team } from "@sige/contracts";
+import { HOLIDAY_AUTHORITIES, TASK_MODULES, type Team } from "@sige/contracts";
 import { z } from "zod";
 
 import { LEGACY_EXECUTION_MODULES } from "./legacy-business-config";
@@ -154,6 +154,37 @@ function normalizeText(value: unknown) {
 function normalizeOptionalText(value: unknown) {
   const text = normalizeText(value);
   return text.length > 0 ? text : null;
+}
+
+function normalizeComparableText(value: unknown) {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveHolidayAuthority(row: LegacyRow) {
+  const rawShortName = normalizeText(
+    pickFirst(row, ["authorityShortName", "authority_short_name", "autoridad_corta", "organo_corto"])
+  );
+  const rawName = normalizeText(
+    pickFirst(row, ["authorityName", "authority_name", "autoridad", "organo", "institucion"])
+  );
+  const directMatch = HOLIDAY_AUTHORITIES.find((authority) => authority.shortName === rawShortName);
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const comparableShortName = normalizeComparableText(rawShortName);
+  const comparableName = normalizeComparableText(rawName);
+  const inferredMatch = HOLIDAY_AUTHORITIES.find((authority) =>
+    normalizeComparableText(authority.shortName) === comparableShortName ||
+    normalizeComparableText(authority.name) === comparableName
+  );
+
+  return inferredMatch ?? HOLIDAY_AUTHORITIES[0];
 }
 
 function normalizeDate(value: unknown) {
@@ -1315,14 +1346,25 @@ async function main() {
       continue;
     }
 
+    const authority = resolveHolidayAuthority(row);
+    const label = normalizeText(pickFirst(row, ["label", "descripcion", "motivo"])) || "Dia inhabil";
+
     await prisma.holiday.upsert({
-      where: { date },
+      where: {
+        authorityShortName_date: {
+          authorityShortName: authority.shortName,
+          date
+        }
+      },
       update: {
-        label: normalizeText(pickFirst(row, ["label", "descripcion", "motivo"])) || "Dia inhábil"
+        authorityName: authority.name,
+        label
       },
       create: {
         date,
-        label: normalizeText(pickFirst(row, ["label", "descripcion", "motivo"])) || "Dia inhábil",
+        authorityShortName: authority.shortName,
+        authorityName: authority.name,
+        label,
         createdAt: normalizeDate(pickFirst(row, ["created_at"])) ?? new Date()
       }
     });

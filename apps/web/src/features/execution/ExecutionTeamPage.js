@@ -1,6 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { EXECUTION_HOLIDAY_AUTHORITIES } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
@@ -14,6 +15,17 @@ const CHANNEL_LABELS = {
     PHONE: "Telefono"
 };
 const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "termino legacy", "distribucion legacy", "evento legacy"]);
+const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set(EXECUTION_HOLIDAY_AUTHORITIES);
+const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME = {
+    PJF: "PJF",
+    PJCDMX: "TSJCDMX",
+    PJEdoMex: "PJEdoMex",
+    TFJA: "TFJA",
+    TJACDMX: "TJACDMX",
+    SAT: "SAT",
+    APF: "APF",
+    APCDMX: "APCDMX"
+};
 function normalizeText(value) {
     return (value ?? "").trim();
 }
@@ -33,7 +45,7 @@ function matchesClientSearch(matter, searchWords) {
     const clientName = normalizeComparableText(matter.clientName);
     return searchWords.every((word) => clientName.includes(word));
 }
-function matchesWordSearch(matter, clientNumber, tasks, searchWords) {
+function matchesWordSearch(matter, clientNumber, tasks, searchWords, holidayDateKeysByAuthority) {
     if (searchWords.length === 0) {
         return true;
     }
@@ -47,6 +59,7 @@ function matchesWordSearch(matter, clientNumber, tasks, searchWords) {
         matter.executionPrompt,
         matter.notes,
         matter.milestone,
+        matter.holidayAuthorityShortName,
         matter.nextAction,
         matter.nextActionSource,
         toDateInput(matter.nextActionDueAt),
@@ -56,7 +69,8 @@ function matchesWordSearch(matter, clientNumber, tasks, searchWords) {
             task.trackLabel,
             task.sourceLabel,
             task.responsible,
-            toDateInput(task.dueDate)
+            toDateInput(task.dueDate),
+            getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority)
         ])
     ]
         .filter(Boolean)
@@ -122,6 +136,102 @@ function toLocalDateInput(value) {
     const month = String(value.getMonth() + 1).padStart(2, "0");
     const day = String(value.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+}
+function isDateKey(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+function getExecutionHolidayAuthority(value) {
+    const normalized = normalizeText(value);
+    return EXECUTION_HOLIDAY_AUTHORITY_SET.has(normalized)
+        ? normalized
+        : "";
+}
+function toUtcDateFromDateKey(dateKey) {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+}
+function addDaysToDateKey(dateKey, days) {
+    const date = toUtcDateFromDateKey(dateKey);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+}
+function getNextMonthKey(dateKey) {
+    const year = Number(dateKey.slice(0, 4));
+    const month = Number(dateKey.slice(5, 7));
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+}
+function isWeekendDateKey(dateKey) {
+    const weekday = toUtcDateFromDateKey(dateKey).getUTCDay();
+    return weekday === 0 || weekday === 6;
+}
+function isNonBusinessDate(dateKey, authority, holidayDateKeysByAuthority) {
+    return isWeekendDateKey(dateKey) || Boolean(holidayDateKeysByAuthority[authority]?.has(dateKey));
+}
+function getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) {
+    const dueDate = toDateInput(task.dueDate);
+    const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+    if (!dueDate || !authority || !isDateKey(dueDate)) {
+        return dueDate;
+    }
+    let effectiveDate = dueDate;
+    for (let guard = 0; guard < 31; guard += 1) {
+        if (!isNonBusinessDate(effectiveDate, authority, holidayDateKeysByAuthority)) {
+            return effectiveDate;
+        }
+        effectiveDate = addDaysToDateKey(effectiveDate, 1);
+    }
+    return effectiveDate;
+}
+function collectHolidayFetchPlan(matters, taskMap) {
+    const monthsByAuthority = new Map();
+    matters.forEach((matter) => {
+        const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+        if (!authority) {
+            return;
+        }
+        getMatterTasks(matter, taskMap).forEach((task) => {
+            const dueDate = toDateInput(task.dueDate);
+            if (!isDateKey(dueDate)) {
+                return;
+            }
+            const months = monthsByAuthority.get(authority) ?? new Set();
+            months.add(dueDate.slice(0, 7));
+            months.add(getNextMonthKey(dueDate));
+            monthsByAuthority.set(authority, months);
+        });
+    });
+    return monthsByAuthority;
+}
+function serializeHolidayFetchPlan(fetchPlan) {
+    return Array.from(fetchPlan.entries())
+        .map(([authority, months]) => `${authority}:${Array.from(months).sort().join(",")}`)
+        .sort()
+        .join("|");
+}
+async function fetchHolidayDateKeysByAuthority(fetchPlan) {
+    const requests = Array.from(fetchPlan.entries()).flatMap(([authority, months]) => Array.from(months).map(async (monthKey) => {
+        const [yearText, monthText] = monthKey.split("-");
+        const response = await apiGet(`/holidays?year=${Number(yearText)}&month=${Number(monthText)}&authorityShortName=${encodeURIComponent(HOLIDAY_AUTHORITY_QUERY_SHORT_NAME[authority])}`);
+        return {
+            authority,
+            holidays: response.holidays
+        };
+    }));
+    const results = await Promise.all(requests);
+    const dateKeysByAuthority = {};
+    results.forEach(({ authority, holidays }) => {
+        const dateKeys = dateKeysByAuthority[authority] ?? new Set();
+        holidays.forEach((holiday) => {
+            const dateKey = toDateInput(holiday.date);
+            if (isDateKey(dateKey)) {
+                dateKeys.add(dateKey);
+            }
+        });
+        dateKeysByAuthority[authority] = dateKeys;
+    });
+    return dateKeysByAuthority;
 }
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
@@ -301,15 +411,17 @@ function getTaskSourcePath(teamSlug, task) {
     }
     return `/app/tasks/${teamSlug}/${task.trackId}`;
 }
-function getNextBusinessDate() {
+function getNextBusinessDate(holidayDateKeysByAuthority, authority) {
     const date = new Date();
     date.setHours(0, 0, 0, 0);
     do {
         date.setDate(date.getDate() + 1);
-    } while (date.getDay() === 0 || date.getDay() === 6);
+    } while (date.getDay() === 0 ||
+        date.getDay() === 6 ||
+        Boolean(authority && holidayDateKeysByAuthority[authority]?.has(toLocalDateInput(date))));
     return toLocalDateInput(date);
 }
-function evaluateMatterRow(matter, clientNumber, tasks) {
+function evaluateMatterRow(matter, clientNumber, tasks, holidayDateKeysByAuthority) {
     const missing = [];
     if (!clientNumber)
         missing.push("No. Cliente");
@@ -329,11 +441,11 @@ function evaluateMatterRow(matter, clientNumber, tasks) {
         missing.push("Sin siguientes tareas");
     const today = toLocalDateInput(new Date());
     const isOverdue = tasks.some((task) => {
-        const dueDate = toDateInput(task.dueDate);
+        const dueDate = getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority);
         return Boolean(dueDate) && dueDate <= today;
     });
-    const nextBusinessDate = getNextBusinessDate();
-    const isNextBusinessDay = !isOverdue && tasks.some((task) => toDateInput(task.dueDate) === nextBusinessDate);
+    const nextBusinessDate = getNextBusinessDate(holidayDateKeysByAuthority, getExecutionHolidayAuthority(matter.holidayAuthorityShortName));
+    const isNextBusinessDay = !isOverdue && tasks.some((task) => getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) === nextBusinessDate);
     return {
         missing,
         isOverdue,
@@ -354,6 +466,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const [terms, setTerms] = useState([]);
     const [distributionEvents, setDistributionEvents] = useState([]);
     const [distributionHistory, setDistributionHistory] = useState([]);
+    const [holidayDateKeysByAuthority, setHolidayDateKeysByAuthority] = useState({});
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState(null);
     const [wordSearch, setWordSearch] = useState("");
@@ -407,20 +520,47 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const allTermMap = useMemo(() => buildTermTaskMap(terms, sourcePrefix, true), [terms, sourcePrefix]);
     const activeTaskMap = useMemo(() => mergeTaskMaps(activeTermMap, activeTrackingMap), [activeTermMap, activeTrackingMap]);
     const allTaskMap = useMemo(() => mergeTaskMaps(allTermMap, allTrackingMap), [allTermMap, allTrackingMap]);
+    const holidayFetchPlan = useMemo(() => collectHolidayFetchPlan([...activeMatters, ...deletedMatters], allTaskMap), [activeMatters, allTaskMap, deletedMatters]);
+    const holidayFetchSignature = useMemo(() => serializeHolidayFetchPlan(holidayFetchPlan), [holidayFetchPlan]);
+    useEffect(() => {
+        if (holidayFetchPlan.size === 0) {
+            setHolidayDateKeysByAuthority({});
+            return;
+        }
+        let isCancelled = false;
+        async function loadHolidayDateKeys() {
+            try {
+                const dateKeys = await fetchHolidayDateKeysByAuthority(holidayFetchPlan);
+                if (!isCancelled) {
+                    setHolidayDateKeysByAuthority(dateKeys);
+                }
+            }
+            catch (error) {
+                if (!isCancelled) {
+                    setHolidayDateKeysByAuthority({});
+                    setErrorMessage(toErrorMessage(error));
+                }
+            }
+        }
+        void loadHolidayDateKeys();
+        return () => {
+            isCancelled = true;
+        };
+    }, [holidayFetchSignature]);
     const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
     const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
     const filteredMatters = useMemo(() => activeMatters.filter((matter) => {
         const clientNumber = getEffectiveClientNumber(matter, clients);
         const matterTasks = getMatterTasks(matter, activeTaskMap);
         return (matchesClientSearch(matter, clientSearchWords) &&
-            matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords));
-    }), [activeMatters, activeTaskMap, clientSearchWords, clients, wordSearchWords]);
+            matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority));
+    }), [activeMatters, activeTaskMap, clientSearchWords, clients, holidayDateKeysByAuthority, wordSearchWords]);
     const filteredDeletedMatters = useMemo(() => deletedMatters.filter((matter) => {
         const clientNumber = getEffectiveClientNumber(matter, clients);
         const matterTasks = getMatterTasks(matter, allTaskMap);
         return (matchesClientSearch(matter, clientSearchWords) &&
-            matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords));
-    }), [allTaskMap, clientSearchWords, clients, deletedMatters, wordSearchWords]);
+            matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority));
+    }), [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]);
     if (!module || !canAccess || !legacyConfig) {
         return _jsx(Navigate, { to: fallbackPath, replace: true });
     }
@@ -465,6 +605,14 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             return matter;
         });
         await persistMatter(matterId, { concluded });
+    }
+    async function handleHolidayAuthorityChange(matterId, value) {
+        const holidayAuthorityShortName = getExecutionHolidayAuthority(value) || null;
+        updateMatterLocal(matterId, (matter) => {
+            matter.holidayAuthorityShortName = holidayAuthorityShortName ?? undefined;
+            return matter;
+        });
+        await persistMatter(matterId, { holidayAuthorityShortName });
     }
     async function handleRestore(matterId) {
         if (!window.confirm("Restaurar este asunto a activos?")) {
@@ -571,10 +719,10 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
         }
     }
     const panelTasks = panelMatter ? getMatterTasks(panelMatter, allTaskMap) : [];
-    return (_jsxs("section", { className: "page-stack execution-page", children: [showHero ? (_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(backPath), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: `${titlePrefix}${module.label}` }) })] })] }), _jsx("p", { className: "muted", children: description })] })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente y abre cada asunto para crear o consultar tareas del equipo." }) })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Enviar" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Origen" }), _jsx("th", { children: "Ir a tareas activas" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "Cargando ejecucion..." }) })) : filteredMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "No hay asuntos del equipo en esta vista." }) })) : (_jsxs(_Fragment, { children: [filteredMatters.map((matter) => {
+    return (_jsxs("section", { className: "page-stack execution-page", children: [showHero ? (_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(backPath), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: `${titlePrefix}${module.label}` }) })] })] }), _jsx("p", { className: "muted", children: description })] })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente y abre cada asunto para crear o consultar tareas del equipo." }) })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Enviar" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Origen" }), _jsx("th", { children: "Ir a tareas activas" }), _jsx("th", { children: "\u00D3rgano para efectos de d\u00EDas inh\u00E1biles" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 17, className: "centered-inline-message", children: "Cargando ejecucion..." }) })) : filteredMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 17, className: "centered-inline-message", children: "No hay asuntos del equipo en esta vista." }) })) : (_jsxs(_Fragment, { children: [filteredMatters.map((matter) => {
                                                     const clientNumber = getEffectiveClientNumber(matter, clients);
                                                     const matterTasks = getMatterTasks(matter, activeTaskMap);
-                                                    const validation = evaluateMatterRow(matter, clientNumber, matterTasks);
+                                                    const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                                                     const rowClassName = validation.missing.length > 0 || validation.isOverdue
                                                         ? "execution-row-danger"
                                                         : validation.isNextBusinessDay
@@ -589,10 +737,10 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                                                     return (_jsxs("tr", { className: rowClassName, title: rowTitle, children: [_jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-derived", value: clientNumber || "-", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.clientName || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.quoteNumber || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.subject || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.specificProcess || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.matterIdentifier || "", readOnly: true }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "primary-button matter-inline-button", onClick: () => {
                                                                         setPanelMatter(matter);
                                                                         setPanelMode("create");
-                                                                    }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("div", { className: "matter-reflection-card", children: getChannelLabel(matter.communicationChannel) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:subject`)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, `${getTaskViewIdentity(task)}:due-date`)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: matterTasks.map((task) => (_jsxs("span", { className: "execution-origin-entry", children: [_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }), _jsx("button", { type: "button", className: "secondary-button execution-origin-link", onClick: () => navigate(getTaskSourcePath(legacyConfig.slug, task)), title: `Abrir ${task.sourceLabel}`, children: "Ir" })] }, `${getTaskViewIdentity(task)}:origin`))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(getTaskDistributorPath(legacyConfig.slug, matter)), children: "Ir a tareas activas" }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.executionPrompt || "", onChange: (event) => handleLocalChange(matter.id, "executionPrompt", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Prompt operativo..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.milestone || "", readOnly: true }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(matter.concluded), onChange: (event) => void handleToggleConcluded(matter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.notes || "", onChange: (event) => handleLocalChange(matter.id, "notes", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Comentarios del equipo..." }) })] }, matter.id));
-                                                }), _jsx("tr", { className: "execution-table-note", children: _jsx("td", { colSpan: 16, children: "Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas." }) })] })) })] }) }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsxs("span", { children: [filteredDeletedMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table execution-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedMatters.map((matter) => {
+                                                                    }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("div", { className: "matter-reflection-card", children: getChannelLabel(matter.communicationChannel) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:subject`)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F" }, `${getTaskViewIdentity(task)}:due-date`)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: matterTasks.map((task) => (_jsxs("span", { className: "execution-origin-entry", children: [_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }), _jsx("button", { type: "button", className: "secondary-button execution-origin-link", onClick: () => navigate(getTaskSourcePath(legacyConfig.slug, task)), title: `Abrir ${task.sourceLabel}`, children: "Ir" })] }, `${getTaskViewIdentity(task)}:origin`))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(getTaskDistributorPath(legacyConfig.slug, matter)), children: "Ir a tareas activas" }) }), _jsx("td", { children: _jsxs("select", { className: "lead-cell-input execution-authority-select", value: getExecutionHolidayAuthority(matter.holidayAuthorityShortName), onChange: (event) => void handleHolidayAuthorityChange(matter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), EXECUTION_HOLIDAY_AUTHORITIES.map((authority) => (_jsx("option", { value: authority, children: authority }, authority)))] }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.executionPrompt || "", onChange: (event) => handleLocalChange(matter.id, "executionPrompt", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Prompt operativo..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.milestone || "", readOnly: true }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(matter.concluded), onChange: (event) => void handleToggleConcluded(matter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.notes || "", onChange: (event) => handleLocalChange(matter.id, "notes", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Comentarios del equipo..." }) })] }, matter.id));
+                                                }), _jsx("tr", { className: "execution-table-note", children: _jsx("td", { colSpan: 17, children: "Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas." }) })] })) })] }) }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsxs("span", { children: [filteredDeletedMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table execution-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Comentarios LLM" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 13, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedMatters.map((matter) => {
                                             const matterTasks = getMatterTasks(matter, allTaskMap);
-                                            return (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(matter, clients) || "-" }), _jsx("td", { children: matter.clientName || "-" }), _jsx("td", { children: matter.quoteNumber || "-" }), _jsx("td", { children: matter.subject || "-" }), _jsx("td", { children: matter.matterIdentifier || "-" }), _jsx("td", { children: getChannelLabel(matter.communicationChannel) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:recycle-subject`)))) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: toDateInput(task.dueDate) || "S/F" }, `${getTaskViewIdentity(task)}:recycle-due-date`)))) }), _jsx("td", { children: matter.executionPrompt || "-" }), _jsx("td", { children: matter.milestone || "-" }), _jsx("td", { children: matter.concluded ? "Si" : "No" }), _jsx("td", { children: matter.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(matter.id), children: "Regresar" }) })] }, matter.id));
+                                            return (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(matter, clients) || "-" }), _jsx("td", { children: matter.clientName || "-" }), _jsx("td", { children: matter.quoteNumber || "-" }), _jsx("td", { children: matter.subject || "-" }), _jsx("td", { children: matter.matterIdentifier || "-" }), _jsx("td", { children: getChannelLabel(matter.communicationChannel) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:recycle-subject`)))) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F" }, `${getTaskViewIdentity(task)}:recycle-due-date`)))) }), _jsx("td", { children: matter.executionPrompt || "-" }), _jsx("td", { children: matter.milestone || "-" }), _jsx("td", { children: matter.concluded ? "Si" : "No" }), _jsx("td", { children: matter.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(matter.id), children: "Regresar" }) })] }, matter.id));
                                         })) })] }) }) })] }), _jsx(ExecutionTaskPanel, { module: module, legacyConfig: legacyConfig, distributionEvents: distributionEvents, matter: panelMatter, clientNumber: panelMatter ? getEffectiveClientNumber(panelMatter, clients) : "", mode: panelMode, tasks: panelTasks, userShortName: user?.shortName, onClose: () => {
                     setPanelMatter(null);
                     setPanelMode(null);

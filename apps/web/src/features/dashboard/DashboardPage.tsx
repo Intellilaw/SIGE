@@ -1,13 +1,12 @@
 import { Link } from "react-router-dom";
 
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
-import { appModules } from "../../config/modules";
+import { getVisibleAppModules } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
-import { canReadModule } from "../auth/permissions";
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const visibleModules = appModules.filter((module) => canReadModule(user, module.id));
+  const visibleModules = getVisibleAppModules(user);
 
   return (
     <section className="page-stack dashboard-page">

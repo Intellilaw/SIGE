@@ -4,6 +4,16 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
   app.get("/health", async () => ({
     status: "ok",
     environment: app.config.APP_ENV,
-    modules: ["auth", "clients", "quotes", "leads", "matters", "tasks", "internal-contracts"]
+    modules: [
+      "auth",
+      "clients",
+      "quotes",
+      "leads",
+      "matters",
+      "tasks",
+      "internal-contracts",
+      "holidays",
+      "kpis"
+    ]
   }));
 };

@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { findTaskModule, type Matter } from "@sige/contracts";
+import { EXECUTION_HOLIDAY_AUTHORITIES, findTaskModule, type Matter } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { mapMatter } from "./mappers";
@@ -10,6 +10,7 @@ type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 const DEFAULT_CHANNEL: Matter["communicationChannel"] = "WHATSAPP";
 const DEFAULT_RF_STATUS: Matter["rfCreated"] = "NO";
 const DEFAULT_MATTER_TYPE: Matter["matterType"] = "ONE_TIME";
+const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
 
 const EXECUTION_MODULE_BY_TEAM: Partial<Record<NonNullable<Matter["responsibleTeam"]>, string>> = {
   LITIGATION: "litigation",
@@ -38,6 +39,19 @@ function normalizeRequiredText(value?: string | null) {
 
 function normalizeIdentifier(value?: string | null) {
   return normalizeOptionalText(value);
+}
+
+function normalizeHolidayAuthority(value?: string | null) {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return null;
+  }
+
+  if (!EXECUTION_HOLIDAY_AUTHORITY_SET.has(normalized)) {
+    throw new AppError(400, "INVALID_HOLIDAY_AUTHORITY", `Invalid holiday authority: ${normalized}`);
+  }
+
+  return normalized;
 }
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
@@ -146,6 +160,7 @@ export class PrismaMattersRepository implements MattersRepository {
         executionLinkedModule: normalizeOptionalText(payload.executionLinkedModule),
         executionLinkedAt: parseDateValue(payload.executionLinkedAt),
         executionPrompt: normalizeOptionalText(payload.executionPrompt),
+        holidayAuthorityShortName: normalizeHolidayAuthority(payload.holidayAuthorityShortName),
         nextAction: normalizeOptionalText(payload.nextAction),
         nextActionDueAt: parseDateValue(payload.nextActionDueAt),
         nextActionSource: normalizeOptionalText(payload.nextActionSource),
@@ -576,6 +591,9 @@ export class PrismaMattersRepository implements MattersRepository {
     }
     if (hasOwn(payload, "executionPrompt")) {
       data.executionPrompt = normalizeOptionalText(payload.executionPrompt);
+    }
+    if (hasOwn(payload, "holidayAuthorityShortName")) {
+      data.holidayAuthorityShortName = normalizeHolidayAuthority(payload.holidayAuthorityShortName);
     }
     if (hasOwn(payload, "nextAction")) {
       data.nextAction = normalizeOptionalText(payload.nextAction);

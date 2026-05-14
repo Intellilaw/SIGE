@@ -17,11 +17,15 @@ import { DailyDocumentsService } from "./modules/daily-documents/daily-documents
 import { DashboardService } from "./modules/dashboard/dashboard.service";
 import { FinancesService } from "./modules/finances/finances.service";
 import { GeneralExpensesService } from "./modules/general-expenses/general-expenses.service";
+import { GeneralSupervisionService } from "./modules/general-supervision/general-supervision.service";
+import { HolidaysService } from "./modules/holidays/holidays.service";
 import { InternalContractsService } from "./modules/internal-contracts/internal-contracts.service";
+import { KpisService } from "./modules/kpis/kpis.service";
+import { LaborFilesService } from "./modules/labor-files/labor-files.service";
 import { LeadsService } from "./modules/leads/leads.service";
 import { MattersService } from "./modules/matters/matters.service";
 import { QuotesService } from "./modules/quotes/quotes.service";
-import { startTasksMaintenanceScheduler } from "./modules/tasks/tasks-maintenance";
+import { startTasksMaintenanceScheduler } from "./modules/tasks/tasks-maintenance.js";
 import { TasksService } from "./modules/tasks/tasks.service";
 import { UsersService } from "./modules/users/users.service";
 import { healthRoutes } from "./modules/health/health.routes";
@@ -32,7 +36,11 @@ import { dailyDocumentsRoutes } from "./modules/daily-documents/daily-documents.
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes";
 import { financesRoutes } from "./modules/finances/finances.routes";
 import { generalExpensesRoutes } from "./modules/general-expenses/general-expenses.routes";
+import { generalSupervisionRoutes } from "./modules/general-supervision/general-supervision.routes";
+import { holidaysRoutes } from "./modules/holidays/holidays.routes";
 import { internalContractsRoutes } from "./modules/internal-contracts/internal-contracts.routes";
+import { kpisRoutes } from "./modules/kpis/kpis.routes";
+import { laborFilesRoutes } from "./modules/labor-files/labor-files.routes";
 import { usersRoutes } from "./modules/users/users.routes";
 import { clientsRoutes } from "./modules/clients/clients.routes";
 import { quotesRoutes } from "./modules/quotes/quotes.routes";
@@ -47,7 +55,10 @@ import { PrismaDailyDocumentsRepository } from "./repositories/daily-documents.r
 import { PrismaDashboardRepository } from "./repositories/dashboard.repository";
 import { PrismaFinanceRepository } from "./repositories/finances.repository";
 import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses.repository";
+import { PrismaHolidaysRepository } from "./repositories/holidays.repository";
 import { PrismaInternalContractsRepository } from "./repositories/internal-contracts.repository";
+import { PrismaKpisRepository } from "./repositories/kpis.repository";
+import { PrismaLaborFilesRepository } from "./repositories/labor-files.repository";
 import { PrismaLeadsRepository } from "./repositories/leads.repository";
 import { LocalAuthRepository } from "./repositories/local-auth.repository";
 import {
@@ -72,7 +83,9 @@ import type {
   AuthRepository,
   ClientsRepository,
   DailyDocumentsRepository,
+  HolidaysRepository,
   InternalContractsRepository,
+  LaborFilesRepository,
   MattersRepository,
   QuotesRepository,
   TasksRepository
@@ -94,7 +107,10 @@ declare module "fastify" {
       dashboard: PrismaDashboardRepository;
       finances: PrismaFinanceRepository;
       generalExpenses: PrismaGeneralExpensesRepository;
+      holidays: HolidaysRepository;
       internalContracts: InternalContractsRepository;
+      kpis: PrismaKpisRepository;
+      laborFiles: LaborFilesRepository;
       leads: PrismaLeadsRepository;
       matters: MattersRepository;
       quotes: QuotesRepository;
@@ -110,7 +126,11 @@ declare module "fastify" {
       DashboardService: typeof DashboardService;
       FinancesService: typeof FinancesService;
       GeneralExpensesService: typeof GeneralExpensesService;
+      GeneralSupervisionService: typeof GeneralSupervisionService;
+      HolidaysService: typeof HolidaysService;
       InternalContractsService: typeof InternalContractsService;
+      KpisService: typeof KpisService;
+      LaborFilesService: typeof LaborFilesService;
       LeadsService: typeof LeadsService;
       MattersService: typeof MattersService;
       QuotesService: typeof QuotesService;
@@ -177,7 +197,10 @@ export async function buildApp() {
     dashboard: new PrismaDashboardRepository(prisma),
     finances: new PrismaFinanceRepository(prisma),
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
+    holidays: new PrismaHolidaysRepository(prisma),
     internalContracts: new PrismaInternalContractsRepository(prisma),
+    kpis: new PrismaKpisRepository(prisma),
+    laborFiles: new PrismaLaborFilesRepository(prisma),
     leads: new PrismaLeadsRepository(prisma),
     matters: new ResilientMattersRepository(
       new PrismaMattersRepository(prisma),
@@ -205,7 +228,11 @@ export async function buildApp() {
     DashboardService,
     FinancesService,
     GeneralExpensesService,
+    GeneralSupervisionService,
+    HolidaysService,
     InternalContractsService,
+    KpisService,
+    LaborFilesService,
     LeadsService,
     MattersService,
     QuotesService,
@@ -249,7 +276,11 @@ export async function buildApp() {
     await api.register(dashboardRoutes);
     await api.register(financesRoutes);
     await api.register(generalExpensesRoutes);
+    await api.register(generalSupervisionRoutes);
+    await api.register(holidaysRoutes);
     await api.register(internalContractsRoutes);
+    await api.register(kpisRoutes);
+    await api.register(laborFilesRoutes);
     await api.register(usersRoutes);
     await api.register(clientsRoutes);
     await api.register(quotesRoutes);

@@ -75,6 +75,30 @@ function pickMetadataValue(source: ExportedUser, key: "username" | "nombre" | "t
   return typeof value === "string" ? trimToUndefined(value) : undefined;
 }
 
+const KNOWN_ACCENT_FIXES = new Map([
+  ["Alejandra Mejia", "Alejandra Mejía"],
+  ["Alfonso Ramirez", "Alfonso Ramírez"],
+  ["Andrea Olguin", "Andrea Olguín"],
+  ["Axel mendoza", "Axel Mendoza"],
+  ["Carlos Garcï¿½a", "Carlos García"],
+  ["Evelyng Pï¿½rez", "Evelyng Pérez"],
+  ["Hector Marquina", "Héctor Marquina"],
+  ["Jael Lï¿½pez", "Jael López"],
+  ["Jesus Ramirez", "Jesús Ramírez"],
+  ["Martin Pantoja", "Martín Pantoja"],
+  ["Mayra Ordoï¿½ez", "Mayra Ordóñez"],
+  ["Miguel ï¿½ngel Valencia", "Miguel Ángel Valencia"],
+  ["Rene Viruega", "René Viruega"],
+  ["Verï¿½nica Mariana Salas Elisea", "Verónica Mariana Salas Elisea"],
+  ["Verï¿½nica Salas", "Verónica Salas"],
+  ["Yoseline Alvarez", "Yoseline Álvarez"],
+  ["AuditorÃ­a", "Auditoría"]
+]);
+
+function repairKnownAccents(value?: string) {
+  return value ? KNOWN_ACCENT_FIXES.get(value) ?? value : undefined;
+}
+
 function mapLegacyRole(value?: string | null) {
   const normalized = (value ?? "").trim().toLowerCase();
   if (normalized === "superadmin") {
@@ -130,11 +154,11 @@ function buildImportableUser(source: ExportedUser): ImportableUser | null {
   }
 
   const displayName =
-    trimToUndefined(source.displayName) ??
-    pickMetadataValue(source, "nombre") ??
+    repairKnownAccents(trimToUndefined(source.displayName)) ??
+    repairKnownAccents(pickMetadataValue(source, "nombre")) ??
     buildDisplayName(usernameSource);
-  const legacyTeam = trimToUndefined(source.legacyTeam) ?? pickMetadataValue(source, "team");
-  const specificRole = trimToUndefined(source.specificRole) ?? pickMetadataValue(source, "specific_role");
+  const legacyTeam = repairKnownAccents(trimToUndefined(source.legacyTeam) ?? pickMetadataValue(source, "team"));
+  const specificRole = repairKnownAccents(trimToUndefined(source.specificRole) ?? pickMetadataValue(source, "specific_role"));
   const shortName = normalizeShortName(trimToUndefined(source.shortName) ?? pickMetadataValue(source, "short_name"));
   const team = findTeamOptionByLabel(legacyTeam)?.key;
   const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole });

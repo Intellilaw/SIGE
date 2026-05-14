@@ -4,8 +4,12 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { InternalContract } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
-import { mapInternalContract, mapInternalContractCollaborator } from "./mappers";
-import type { InternalContractsRepository, InternalContractWriteRecord } from "./types";
+import { mapInternalContract, mapInternalContractCollaborator, mapInternalContractTemplate } from "./mappers";
+import type {
+  InternalContractsRepository,
+  InternalContractTemplateWriteRecord,
+  InternalContractWriteRecord
+} from "./types";
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
@@ -153,6 +157,68 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
     return records.map(mapInternalContractCollaborator);
   }
 
+  public async listTemplates() {
+    const records = await this.prisma.internalContractTemplate.findMany({
+      orderBy: [{ createdAt: "desc" }, { title: "asc" }]
+    });
+
+    return records.map(mapInternalContractTemplate);
+  }
+
+  public async createTemplate(payload: InternalContractTemplateWriteRecord) {
+    const title = normalizeText(payload.title);
+    const originalFileName = normalizeText(payload.originalFileName);
+
+    if (!title) {
+      throw new AppError(400, "INTERNAL_CONTRACT_TEMPLATE_TITLE_REQUIRED", "El nombre del machote es obligatorio.");
+    }
+
+    if (!originalFileName || !payload.fileContent) {
+      throw new AppError(400, "INTERNAL_CONTRACT_TEMPLATE_FILE_REQUIRED", "Carga el archivo del contrato machote.");
+    }
+
+    const record = await this.prisma.internalContractTemplate.create({
+      data: {
+        title,
+        originalFileName,
+        fileMimeType: normalizeText(payload.fileMimeType) || null,
+        fileSizeBytes: payload.fileSizeBytes ?? null,
+        fileContent: toPrismaBytes(payload.fileContent) ?? new Uint8Array(),
+        notes: normalizeText(payload.notes) || null
+      }
+    });
+
+    return mapInternalContractTemplate(record);
+  }
+
+  public async deleteTemplate(templateId: string) {
+    await this.findTemplateOrThrow(templateId);
+    await this.prisma.internalContractTemplate.delete({ where: { id: templateId } });
+  }
+
+  public async findTemplateDocument(templateId: string) {
+    const record = await this.prisma.internalContractTemplate.findUnique({
+      where: { id: templateId },
+      select: {
+        title: true,
+        originalFileName: true,
+        fileMimeType: true,
+        fileContent: true
+      }
+    });
+
+    if (!record?.fileContent || !record.originalFileName) {
+      return null;
+    }
+
+    return {
+      title: record.title,
+      originalFileName: record.originalFileName,
+      fileMimeType: record.fileMimeType,
+      fileContent: Buffer.from(record.fileContent)
+    };
+  }
+
   private async buildScopedData(payload: InternalContractWriteRecord) {
     if (payload.contractType === "PROFESSIONAL_SERVICES") {
       const clientId = normalizeText(payload.clientId);
@@ -198,6 +264,19 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
 
     if (!record) {
       throw new AppError(404, "INTERNAL_CONTRACT_NOT_FOUND", "El contrato solicitado no existe.");
+    }
+
+    return record;
+  }
+
+  private async findTemplateOrThrow(templateId: string) {
+    const record = await this.prisma.internalContractTemplate.findUnique({
+      where: { id: templateId },
+      select: { id: true }
+    });
+
+    if (!record) {
+      throw new AppError(404, "INTERNAL_CONTRACT_TEMPLATE_NOT_FOUND", "El contrato machote solicitado no existe.");
     }
 
     return record;

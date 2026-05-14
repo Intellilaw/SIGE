@@ -29,6 +29,81 @@ model User {
   refreshTokens        RefreshToken[]
   passwordResetTokens  PasswordResetToken[]
   auditLogs            AuditLog[]
+  laborFile            LaborFile?
+}
+
+model LaborFile {
+  id                 String                @id @default(uuid())
+  userId             String?               @unique
+  employeeName       String
+  employeeEmail      String?
+  employeeUsername   String
+  employeeShortName  String?
+  team               String?
+  legacyTeam         String?
+  specificRole       String?
+  status             String                @default("INCOMPLETE")
+  employmentStatus   String                @default("ACTIVE")
+  hireDate           DateTime              @db.Date
+  employmentEndedAt  DateTime?             @db.Date
+  notes              String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  user               User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  documents          LaborFileDocument[]
+  vacationEvents     LaborVacationEvent[]
+
+  @@index([status, employmentStatus])
+  @@index([employeeName])
+}
+
+model LaborFileDocument {
+  id               String    @id @default(uuid())
+  laborFileId      String
+  documentType     String
+  originalFileName String
+  fileMimeType     String?
+  fileSizeBytes    Int?
+  fileContent      Bytes
+  uploadedAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  laborFile        LaborFile @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+
+  @@index([laborFileId, documentType])
+  @@index([uploadedAt])
+}
+
+model LaborVacationEvent {
+  id                         String    @id @default(uuid())
+  laborFileId                String
+  eventType                  String
+  startDate                  DateTime? @db.Date
+  endDate                    DateTime? @db.Date
+  vacationDates              Json?
+  days                       Decimal   @default(0) @db.Decimal(6, 2)
+  description                String?
+  acceptanceOriginalFileName String?
+  acceptanceFileMimeType     String?
+  acceptanceFileSizeBytes    Int?
+  acceptanceFileContent      Bytes?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  laborFile                  LaborFile @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+
+  @@index([laborFileId, eventType])
+  @@index([startDate, endDate])
+}
+
+model LaborGlobalVacationDay {
+  id          String   @id @default(uuid())
+  date        DateTime @unique @db.Date
+  days        Decimal  @default(1) @db.Decimal(6, 2)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
 }
 
 model RefreshToken {
@@ -94,6 +169,21 @@ model InternalContract {
   @@index([contractType, contractNumber])
   @@index([clientId])
   @@index([collaboratorName])
+}
+
+model InternalContractTemplate {
+  id               String   @id @default(uuid())
+  title            String
+  originalFileName String
+  fileMimeType     String?
+  fileSizeBytes    Int?
+  fileContent      Bytes
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([title])
+  @@index([createdAt])
 }
 
 model DailyDocumentAssignment {
@@ -214,6 +304,7 @@ model Matter {
   executionLinkedModule String?
   executionLinkedAt    DateTime?
   executionPrompt      String?
+  holidayAuthorityShortName String?
   nextAction           String?
   nextActionDueAt      DateTime?
   nextActionSource     String?
@@ -536,10 +627,17 @@ model TaskAdditionalTask {
 }
 
 model Holiday {
-  id        String   @id @default(uuid())
-  date      DateTime @unique
-  label     String
-  createdAt DateTime @default(now())
+  id                 String   @id @default(uuid())
+  date               DateTime @db.Date
+  authorityShortName String   @default("PJF")
+  authorityName      String   @default("Poder Judicial de la Federacion")
+  label              String   @default("Dia inhabil")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([authorityShortName, date])
+  @@index([date])
+  @@index([authorityShortName, date])
 }
 
 model AuditLog {

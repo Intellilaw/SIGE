@@ -10,8 +10,14 @@ import type {
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  Holiday,
   InternalContract,
   InternalContractCollaborator,
+  InternalContractTemplate,
+  LaborFile,
+  LaborFileDocument,
+  LaborGlobalVacationDay,
+  LaborVacationEvent,
   Lead,
   ManagedUser,
   Matter,
@@ -353,6 +359,346 @@ export function mapInternalContractCollaborator(record: {
   };
 }
 
+export function mapInternalContractTemplate(record: {
+  id: string;
+  title: string;
+  originalFileName: string;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): InternalContractTemplate {
+  return {
+    id: record.id,
+    title: record.title,
+    originalFileName: record.originalFileName,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+function toDateOnlyKey(value?: Date | string | null) {
+  if (!value) {
+    return "";
+  }
+
+  return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10);
+}
+
+function dateFromKey(value: string) {
+  return new Date(`${value}T12:00:00.000Z`);
+}
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0, 12, 0, 0)).getUTCDate();
+}
+
+function makeDateKey(year: number, month: number, day: number) {
+  const safeDay = Math.min(day, daysInMonth(year, month));
+  return `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+}
+
+function getCurrentVacationYearStartKey(hireDateKey: string, todayKey = toDateOnlyKey(new Date())) {
+  const hireDate = dateFromKey(hireDateKey);
+  const today = dateFromKey(todayKey);
+  const hireMonth = hireDate.getUTCMonth() + 1;
+  const hireDay = hireDate.getUTCDate();
+  let year = today.getUTCFullYear();
+  let anniversary = makeDateKey(year, hireMonth, hireDay);
+
+  if (anniversary > todayKey) {
+    year -= 1;
+    anniversary = makeDateKey(year, hireMonth, hireDay);
+  }
+
+  return anniversary;
+}
+
+function getCompletedYears(hireDateKey: string, currentYearStartKey: string) {
+  return Math.max(0, dateFromKey(currentYearStartKey).getUTCFullYear() - dateFromKey(hireDateKey).getUTCFullYear());
+}
+
+function getVacationEntitlementDays(completedYears: number) {
+  if (completedYears < 1) {
+    return 0;
+  }
+
+  if (completedYears <= 5) {
+    return 10 + completedYears * 2;
+  }
+
+  return 22 + Math.floor((completedYears - 6) / 5) * 2;
+}
+
+const YEAR_WORDS = [
+  "cero",
+  "un",
+  "dos",
+  "tres",
+  "cuatro",
+  "cinco",
+  "seis",
+  "siete",
+  "ocho",
+  "nueve",
+  "diez",
+  "once",
+  "doce",
+  "trece",
+  "catorce",
+  "quince",
+  "dieciséis",
+  "diecisiete",
+  "dieciocho",
+  "diecinueve",
+  "veinte"
+];
+
+function formatCompletedYearsLabel(value: number) {
+  return YEAR_WORDS[value] ?? String(value);
+}
+
+function formatLongDateKey(value: string) {
+  if (!value) {
+    return "-";
+  }
+
+  return dateFromKey(value).toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function formatVacationRange(startDate?: string, endDate?: string) {
+  if (!startDate) {
+    return "";
+  }
+
+  if (!endDate || endDate === startDate) {
+    return formatLongDateKey(startDate);
+  }
+
+  return `${formatLongDateKey(startDate)} al ${formatLongDateKey(endDate)}`;
+}
+
+function parseVacationDateKeys(value: Prisma.JsonValue | null | undefined) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(new Set(
+    value
+      .filter((entry): entry is string => typeof entry === "string" && /^\d{4}-\d{2}-\d{2}$/.test(entry))
+      .map((entry) => entry.slice(0, 10))
+  )).sort();
+}
+
+function formatVacationDateSelection(event: LaborVacationEvent) {
+  const dates = event.vacationDates ?? [];
+  if (dates.length === 0) {
+    return formatVacationRange(event.startDate, event.endDate);
+  }
+
+  const continuousRange = event.startDate && event.endDate && dates.length > 1
+    ? formatVacationRange(event.startDate, event.endDate)
+    : "";
+  const rangeLength = event.startDate && event.endDate
+    ? Math.round((dateFromKey(event.endDate).getTime() - dateFromKey(event.startDate).getTime()) / 86_400_000) + 1
+    : 0;
+  if (continuousRange && rangeLength === dates.length) {
+    return continuousRange;
+  }
+
+  return dates.map(formatLongDateKey).join(", ");
+}
+
+function buildVacationSummary(
+  hireDateKey: string,
+  employmentEndedAtKey: string | undefined,
+  vacationEvents: LaborVacationEvent[],
+  globalVacationDays: LaborGlobalVacationDay[]
+): LaborFile["vacationSummary"] {
+  const currentYearStartDate = getCurrentVacationYearStartKey(hireDateKey);
+  const completedYears = getCompletedYears(hireDateKey, currentYearStartDate);
+  const entitlementDays = getVacationEntitlementDays(completedYears);
+  const applicableGlobalVacationDays = globalVacationDays.filter((day) =>
+    day.date >= hireDateKey && (!employmentEndedAtKey || day.date <= employmentEndedAtKey)
+  );
+  const usedDays = vacationEvents.reduce((total, event) => total + event.days, 0) +
+    applicableGlobalVacationDays.reduce((total, day) => total + day.days, 0);
+  const remainingDays = entitlementDays - usedDays;
+  const eventLines = vacationEvents.map((event) => {
+    if (event.eventType === "PREVIOUS_YEAR_DEDUCTION") {
+      return {
+        dateKey: "0000-00-00",
+        line: `Descuenta ${event.days} del año pasado.`
+      };
+    }
+
+    const dateRange = formatVacationDateSelection(event);
+    return {
+      dateKey: event.startDate ?? "9999-99-99",
+      line: `Tomará ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` en ${dateRange}` : ""}.`
+    };
+  });
+  const globalVacationLines = applicableGlobalVacationDays.map((day) => ({
+    dateKey: day.date,
+    line: `Vacación general: descuenta ${day.days} ${day.days === 1 ? "día" : "días"} el ${formatLongDateKey(day.date)}${day.description ? ` (${day.description})` : ""}.`
+  }));
+  const sortedEventLines = [...eventLines, ...globalVacationLines]
+    .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
+    .map((event) => event.line);
+
+  return {
+    hireDate: hireDateKey,
+    currentYearStartDate,
+    completedYears,
+    completedYearsLabel: formatCompletedYearsLabel(completedYears).toUpperCase(),
+    entitlementDays,
+    usedDays,
+    remainingDays,
+    lines: [
+      "Contabilización de vacaciones",
+      `Fecha de ingreso: ${formatLongDateKey(hireDateKey)}`,
+      `Fecha de inicio del año corriente: ${formatLongDateKey(currentYearStartDate)}`,
+      `${formatCompletedYearsLabel(completedYears).toUpperCase()} AÑOS CUMPLIDOS`,
+      `Le corresponden ${entitlementDays} días de vacaciones de los cuales:`,
+      ...sortedEventLines,
+      `Después de disfrutar los días anteriormente señalados, le quedan ${remainingDays} por disfrutar.`
+    ]
+  };
+}
+
+export function mapLaborFileDocument(record: {
+  id: string;
+  laborFileId: string;
+  documentType: string;
+  originalFileName: string;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  uploadedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}): LaborFileDocument {
+  return {
+    id: record.id,
+    laborFileId: record.laborFileId,
+    documentType: record.documentType as LaborFileDocument["documentType"],
+    originalFileName: record.originalFileName,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    uploadedAt: record.uploadedAt.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapLaborVacationEvent(record: {
+  id: string;
+  laborFileId: string;
+  eventType: string;
+  startDate: Date | null;
+  endDate: Date | null;
+  vacationDates?: Prisma.JsonValue | null;
+  days: Prisma.Decimal;
+  description: string | null;
+  acceptanceOriginalFileName?: string | null;
+  acceptanceFileMimeType?: string | null;
+  acceptanceFileSizeBytes?: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): LaborVacationEvent {
+  return {
+    id: record.id,
+    laborFileId: record.laborFileId,
+    eventType: record.eventType as LaborVacationEvent["eventType"],
+    startDate: toDateOnlyKey(record.startDate) || undefined,
+    endDate: toDateOnlyKey(record.endDate) || undefined,
+    vacationDates: parseVacationDateKeys(record.vacationDates),
+    days: Number(record.days),
+    description: record.description ?? undefined,
+    acceptanceOriginalFileName: record.acceptanceOriginalFileName ?? undefined,
+    acceptanceFileMimeType: record.acceptanceFileMimeType ?? undefined,
+    acceptanceFileSizeBytes: record.acceptanceFileSizeBytes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapLaborGlobalVacationDay(record: {
+  id: string;
+  date: Date;
+  days: Prisma.Decimal;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): LaborGlobalVacationDay {
+  return {
+    id: record.id,
+    date: toDateOnlyKey(record.date),
+    days: Number(record.days),
+    description: record.description ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapLaborFile(record: {
+  id: string;
+  userId: string | null;
+  employeeName: string;
+  employeeEmail: string | null;
+  employeeUsername: string;
+  employeeShortName: string | null;
+  team: string | null;
+  legacyTeam: string | null;
+  specificRole: string | null;
+  status: string;
+  employmentStatus: string;
+  hireDate: Date;
+  employmentEndedAt: Date | null;
+  notes: string | null;
+  documents: Array<Parameters<typeof mapLaborFileDocument>[0]>;
+  vacationEvents: Array<Parameters<typeof mapLaborVacationEvent>[0]>;
+  createdAt: Date;
+  updatedAt: Date;
+}, globalVacationDayRecords: Array<Parameters<typeof mapLaborGlobalVacationDay>[0]> = []): LaborFile {
+  const documents = record.documents.map(mapLaborFileDocument);
+  const vacationEvents = record.vacationEvents.map(mapLaborVacationEvent);
+  const globalVacationDays = globalVacationDayRecords.map(mapLaborGlobalVacationDay);
+  const hireDate = toDateOnlyKey(record.hireDate);
+  const employmentEndedAt = toDateOnlyKey(record.employmentEndedAt) || undefined;
+
+  return {
+    id: record.id,
+    userId: record.userId ?? undefined,
+    employeeName: record.employeeName,
+    employeeEmail: record.employeeEmail ?? undefined,
+    employeeUsername: record.employeeUsername,
+    employeeShortName: record.employeeShortName ?? undefined,
+    team: (record.team ?? undefined) as LaborFile["team"],
+    legacyTeam: record.legacyTeam ?? undefined,
+    specificRole: record.specificRole ?? undefined,
+    status: record.status as LaborFile["status"],
+    employmentStatus: record.employmentStatus as LaborFile["employmentStatus"],
+    hireDate,
+    employmentEndedAt,
+    notes: record.notes ?? undefined,
+    documents,
+    vacationEvents,
+    globalVacationDays,
+    vacationSummary: buildVacationSummary(hireDate, employmentEndedAt, vacationEvents, globalVacationDays),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
 export function mapDailyDocumentAssignment(record: {
   id: string;
   templateId: string;
@@ -532,6 +878,7 @@ export function mapMatter(record: {
   executionLinkedModule: string | null;
   executionLinkedAt: Date | null;
   executionPrompt: string | null;
+  holidayAuthorityShortName: string | null;
   nextAction: string | null;
   nextActionDueAt: Date | null;
   nextActionSource: string | null;
@@ -570,6 +917,7 @@ export function mapMatter(record: {
     executionLinkedModule: record.executionLinkedModule ?? undefined,
     executionLinkedAt: record.executionLinkedAt?.toISOString(),
     executionPrompt: record.executionPrompt ?? undefined,
+    holidayAuthorityShortName: (record.holidayAuthorityShortName ?? undefined) as Matter["holidayAuthorityShortName"],
     nextAction: record.nextAction ?? undefined,
     nextActionDueAt: record.nextActionDueAt?.toISOString(),
     nextActionSource: record.nextActionSource ?? undefined,
@@ -757,6 +1105,28 @@ export function mapGeneralExpense(record: {
     reviewedByJnls: record.reviewedByJnls,
     paid: record.paid,
     paidAt: record.paidAt?.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapHoliday(record: {
+  id: string;
+  date: Date;
+  authorityShortName: string;
+  authorityName: string;
+  label: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): Holiday {
+  return {
+    id: record.id,
+    date: record.date.toISOString().slice(0, 10),
+    authorityShortName: record.authorityShortName as Holiday["authorityShortName"],
+    authorityName: record.authorityName,
+    label: record.label,
+    source: "MANUAL",
+    automatic: false,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

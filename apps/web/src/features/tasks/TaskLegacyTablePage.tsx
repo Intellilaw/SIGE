@@ -3,8 +3,6 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import type { TaskDistributionHistory, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import {
   buildDistributionHistoryTaskNameMap,
   isTrackingTermEnabled,
@@ -104,12 +102,7 @@ function isRowRed(
 export function TaskLegacyTablePage() {
   const { slug, tableId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
-  const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const canAccessModule = Boolean(
-    executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId)
-  );
   const tableConfig = moduleConfig ? getLegacyTaskTable(moduleConfig, tableId) : undefined;
   const [records, setRecords] = useState<TaskTrackingRecord[]>([]);
   const [history, setHistory] = useState<TaskDistributionHistory[]>([]);
@@ -119,15 +112,15 @@ export function TaskLegacyTablePage() {
   const activeTab = tableConfig?.tabs.find((tab) => tab.key === activeTabKey) ?? tableConfig?.tabs[0];
 
   useEffect(() => {
-    if (!moduleConfig || !tableConfig || !canAccessModule) {
+    if (!moduleConfig || !tableConfig) {
       return;
     }
 
     setActiveTabKey(tableConfig.tabs[0]?.key ?? null);
-  }, [canAccessModule, moduleConfig, tableConfig]);
+  }, [moduleConfig, tableConfig]);
 
   async function loadRecords() {
-    if (!moduleConfig || !tableConfig || !canAccessModule) {
+    if (!moduleConfig || !tableConfig) {
       return;
     }
 
@@ -148,7 +141,7 @@ export function TaskLegacyTablePage() {
 
   useEffect(() => {
     void loadRecords();
-  }, [canAccessModule, moduleConfig, tableConfig]);
+  }, [moduleConfig, tableConfig]);
 
   const taskNamesByRecordId = useMemo(() => buildDistributionHistoryTaskNameMap(history), [history]);
 
@@ -179,7 +172,7 @@ export function TaskLegacyTablePage() {
     });
   }, [activeTab, completedMonth, moduleConfig, records, tableConfig]);
 
-  if (!moduleConfig || !executionModule || !canAccessModule || !tableConfig || !activeTab) {
+  if (!moduleConfig || !tableConfig || !activeTab) {
     return <Navigate to="/app/tasks" replace />;
   }
 

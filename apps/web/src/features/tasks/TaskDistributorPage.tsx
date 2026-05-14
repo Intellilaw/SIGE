@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { TaskDistributionEvent, TaskDistributionHistory, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import {
+  HOLIDAY_AUTHORITIES,
+  type Holiday,
+  type TaskDistributionEvent,
+  type TaskDistributionHistory,
+  type TaskTerm,
+  type TaskTrackingRecord
+} from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
+import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
 import {
   buildDistributionHistoryTaskNameMap,
   getTermEnabledRecordData,
@@ -43,6 +49,16 @@ type RecycleTaskRow = {
   table?: LegacyTaskTableConfig;
   reason: "deleted" | "completed";
   date: string;
+};
+
+type HolidaysOverview = {
+  holidays: Holiday[];
+};
+
+type HolidayGuideItem = {
+  date: string;
+  labels: string[];
+  authorities: string[];
 };
 
 function normalize(value?: string | null) {
@@ -96,6 +112,52 @@ function todayInput() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setHours(12, 0, 0, 0);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function getHolidayGuideRange() {
+  const start = new Date();
+  start.setHours(12, 0, 0, 0);
+
+  return {
+    start: toDateKey(start),
+    end: toDateKey(addDays(start, 60))
+  };
+}
+
+function getHolidayGuidePeriods(startKey: string, endKey: string) {
+  const [startYear, startMonth] = startKey.split("-").map(Number);
+  const [endYear, endMonth] = endKey.split("-").map(Number);
+  const periods: Array<{ year: number; month: number }> = [];
+
+  if (!startYear || !startMonth || !endYear || !endMonth) {
+    return periods;
+  }
+
+  let cursorYear = startYear;
+  let cursorMonth = startMonth;
+
+  while (cursorYear < endYear || (cursorYear === endYear && cursorMonth <= endMonth)) {
+    periods.push({ year: cursorYear, month: cursorMonth });
+    cursorMonth += 1;
+
+    if (cursorMonth > 12) {
+      cursorMonth = 1;
+      cursorYear += 1;
+    }
+  }
+
+  return periods;
+}
+
 function toDisplayDate(value?: string | null) {
   const date = toDateInput(value);
   if (!date) {
@@ -104,6 +166,54 @@ function toDisplayDate(value?: string | null) {
 
   const [year, month, day] = date.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function buildHolidayGuideItems(holidays: Holiday[], startKey: string, endKey: string) {
+  const grouped = new Map<string, { labels: Set<string>; authorities: Set<string> }>();
+
+  holidays.forEach((holiday) => {
+    const date = toDateInput(holiday.date);
+    if (!date || date < startKey || date > endKey || holiday.source === "WEEKEND") {
+      return;
+    }
+
+    const entry = grouped.get(date) ?? { labels: new Set<string>(), authorities: new Set<string>() };
+    entry.labels.add(holiday.label || "Dia inhabil");
+    entry.authorities.add(holiday.authorityShortName);
+    grouped.set(date, entry);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([date, entry]) => ({
+      date,
+      labels: Array.from(entry.labels).sort((left, right) => left.localeCompare(right)),
+      authorities: Array.from(entry.authorities).sort((left, right) => left.localeCompare(right))
+    }))
+    .sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function summarizeHolidayLabels(labels: string[]) {
+  if (labels.length === 0) {
+    return "Dia inhabil";
+  }
+
+  if (labels.length <= 2) {
+    return labels.join(" / ");
+  }
+
+  return `${labels.slice(0, 2).join(" / ")} +${labels.length - 2}`;
+}
+
+function summarizeHolidayAuthorities(authorities: string[]) {
+  if (authorities.length >= HOLIDAY_AUTHORITIES.length) {
+    return "Todas las autoridades";
+  }
+
+  if (authorities.length <= 3) {
+    return authorities.join(", ");
+  }
+
+  return `${authorities.slice(0, 3).join(", ")} +${authorities.length - 3}`;
 }
 
 function getRowDate(record: TaskTrackingRecord) {
@@ -245,12 +355,8 @@ export function TaskDistributorPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
   const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const canAccessModule = Boolean(
-    executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId)
-  );
   const [activeTab, setActiveTab] = useState<DistributorTab>(
     searchParams.get("tab") === "config" ? "config" : "active"
   );
@@ -263,11 +369,14 @@ export function TaskDistributorPage() {
   const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
   const [wordSearch, setWordSearch] = useState("");
   const [clientSearch, setClientSearch] = useState(searchParams.get("client") ?? "");
+  const [holidayGuideItems, setHolidayGuideItems] = useState<HolidayGuideItem[]>([]);
+  const [holidayGuideLoading, setHolidayGuideLoading] = useState(false);
+  const [holidayGuideError, setHolidayGuideError] = useState<string | null>(null);
   const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadDistributor() {
-    if (!moduleConfig || !canAccessModule) {
+    if (!moduleConfig) {
       return;
     }
 
@@ -290,10 +399,56 @@ export function TaskDistributorPage() {
 
   useEffect(() => {
     void loadDistributor();
-  }, [canAccessModule, moduleConfig]);
+  }, [moduleConfig]);
 
   useEffect(() => {
-    if (!moduleConfig || !canAccessModule) {
+    if (!moduleConfig) {
+      setHolidayGuideItems([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadHolidayGuide() {
+      const { start, end } = getHolidayGuideRange();
+      const periods = getHolidayGuidePeriods(start, end);
+
+      setHolidayGuideLoading(true);
+      setHolidayGuideError(null);
+
+      try {
+        const responses = await Promise.all(
+          periods.map((period) =>
+            apiGet<HolidaysOverview>(`/holidays?year=${period.year}&month=${period.month}`)
+          )
+        );
+        const holidays = responses.flatMap((response) => response.holidays);
+        const items = buildHolidayGuideItems(holidays, start, end);
+
+        if (!cancelled) {
+          setHolidayGuideItems(items);
+        }
+      } catch {
+        if (!cancelled) {
+          setHolidayGuideItems([]);
+          setHolidayGuideError("No se pudieron cargar los dias inhabiles.");
+        }
+      } finally {
+        if (!cancelled) {
+          setHolidayGuideLoading(false);
+        }
+      }
+    }
+
+    void loadHolidayGuide();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleConfig]);
+
+  useEffect(() => {
+    if (!moduleConfig) {
       setResponsibleOptions([]);
       return;
     }
@@ -321,7 +476,7 @@ export function TaskDistributorPage() {
     return () => {
       cancelled = true;
     };
-  }, [canAccessModule, moduleConfig]);
+  }, [moduleConfig]);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -811,20 +966,49 @@ export function TaskDistributorPage() {
     const verification = getTermVerification(moduleConfig, linkedTerm);
 
     return (
-      <div className="tasks-active-term-verifications" aria-label="Verificaciones del termino">
-        {moduleConfig.verificationColumns.map((column) => (
-          <label key={column.key} className="tasks-active-term-verification">
-            <span>{column.label}</span>
-            <select
-              className="tasks-active-term-verification-select"
-              value={verification[column.key] ?? "No"}
-              onChange={(event) => void patchTermVerification(record, table, taskName, column.key, event.target.value)}
-            >
-              <option value="No">No</option>
-              <option value="Si">Si</option>
-            </select>
-          </label>
-        ))}
+      <div className="tasks-active-term-guide-stack">
+        <div className="tasks-active-term-verifications" aria-label="Verificaciones del termino">
+          {moduleConfig.verificationColumns.map((column) => (
+            <label key={column.key} className="tasks-active-term-verification">
+              <span>{column.label}</span>
+              <select
+                className="tasks-active-term-verification-select"
+                value={verification[column.key] ?? "No"}
+                onChange={(event) => void patchTermVerification(record, table, taskName, column.key, event.target.value)}
+              >
+                <option value="No">No</option>
+                <option value="Si">Si</option>
+              </select>
+            </label>
+          ))}
+        </div>
+
+        <div className="tasks-active-holiday-guide" aria-label="Dias inhabiles proximos 60 dias">
+          <div className="tasks-active-holiday-guide-head">
+            <strong>Dias inhabiles</strong>
+            <span>60 dias</span>
+          </div>
+          {holidayGuideLoading ? (
+            <p>Cargando guia...</p>
+          ) : holidayGuideError ? (
+            <p>{holidayGuideError}</p>
+          ) : holidayGuideItems.length === 0 ? (
+            <p>Sin dias inhabiles registrados en los proximos 60 dias.</p>
+          ) : (
+            <div className="tasks-active-holiday-guide-list">
+              {holidayGuideItems.map((holiday) => (
+                <span
+                  key={holiday.date}
+                  className="tasks-active-holiday-guide-chip"
+                  title={`${summarizeHolidayLabels(holiday.labels)} - ${summarizeHolidayAuthorities(holiday.authorities)}`}
+                >
+                  <strong>{toDisplayDate(holiday.date)}</strong>
+                  <small>{summarizeHolidayLabels(holiday.labels)}</small>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -873,7 +1057,7 @@ export function TaskDistributorPage() {
     );
   }
 
-  if (!moduleConfig || !executionModule || !canAccessModule) {
+  if (!moduleConfig) {
     return <Navigate to="/app/tasks" replace />;
   }
 

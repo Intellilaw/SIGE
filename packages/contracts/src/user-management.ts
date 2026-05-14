@@ -13,10 +13,10 @@ export const TEAM_OPTIONS: TeamOption[] = [
   { key: "SETTLEMENTS", label: "Convenios" },
   { key: "FINANCIAL_LAW", label: "Der Financiero" },
   { key: "TAX_COMPLIANCE", label: "Compliance Fiscal" },
+  { key: "AUDIT", label: "Auditoria" },
   { key: "CLIENT_RELATIONS", label: "Comunicación con cliente" },
   { key: "FINANCE", label: "Finanzas" },
   { key: "ADMIN_OPERATIONS", label: "Servicios administrativos" },
-  { key: "AUDIT", label: "Auditoría" },
   { key: "ADMIN", label: "Dirección general" }
 ];
 
@@ -68,8 +68,16 @@ export interface UpdateManagedUserInput {
   isActive?: boolean;
 }
 
-function normalizeText(value: string) {
-  return value
+function normalizeText(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const objectText = ["label", "name", "key", "value"].find((key) => typeof record[key] === "string");
+    if (objectText) {
+      return normalizeText(record[objectText]);
+    }
+  }
+
+  return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -226,20 +234,6 @@ export function getLegacyTeamLabel(team?: Team | null) {
   return TEAM_OPTIONS.find((option) => option.key === team)?.label;
 }
 
-const PRACTICE_TEAM_MODULES: Record<string, string> = {
-  litigio: "litigation",
-  "corporativo y laboral": "corporate-labor",
-  "corporativo laboral": "corporate-labor",
-  convenios: "settlements",
-  "der financiero": "financial-law",
-  "derecho financiero": "financial-law",
-  "compliance fiscal": "tax-compliance"
-};
-
-function getPracticeTeamModuleId(normalizedTeam: string) {
-  return PRACTICE_TEAM_MODULES[normalizedTeam];
-}
-
 export function deriveSystemRole(input: {
   legacyRole: LegacyAccessRole;
   legacyTeam?: string | null;
@@ -250,13 +244,12 @@ export function deriveSystemRole(input: {
   }
 
   const specificRole = normalizeText(input.specificRole ?? "");
-  const normalizedTeam = normalizeText(input.legacyTeam ?? "");
 
   if (specificRole === "direccion general") {
     return "DIRECTOR";
   }
 
-  if (specificRole === "auditor" || normalizedTeam === "auditoria") {
+  if (specificRole === "auditor") {
     return "AUDITOR";
   }
 
@@ -269,87 +262,29 @@ export function deriveSystemRole(input: {
 
 export function derivePermissions(input: {
   legacyRole: LegacyAccessRole;
+  team?: Team | null;
   legacyTeam?: string | null;
   specificRole?: string | null;
 }): string[] {
-  const specificRole = normalizeText(input.specificRole ?? "");
-  const normalizedTeam = normalizeText(input.legacyTeam ?? "");
-  const isFinanceTeam = normalizedTeam === "finanzas" || specificRole === "finanzas";
-  const isClientRelationsTeam = normalizedTeam === "comunicacion con cliente" || specificRole === "comunicacion con cliente";
-  const isAuditTeam = normalizedTeam === "auditoria";
-  const isAdminOperationsTeam = normalizedTeam === "servicios administrativos";
-  const practiceTeamModuleId = getPracticeTeamModuleId(normalizedTeam);
-  const isPracticeTeam = Boolean(practiceTeamModuleId);
+  const permissions = new Set<string>([
+    "dashboard:read",
+    "catalog:read",
+    "commissions:read",
+    "documents-third-party:read",
+    "brief-manager:read",
+    "internal-contracts:read",
+    "labor-file:read",
+    "holidays:read",
+    "kpis:read"
+  ]);
 
-  if (isAuditTeam) {
-    return [
-      "general-expenses:jnls-approval:write",
-      "general-expenses:read"
-    ];
-  }
+  const specificRole = normalizeText(input.specificRole ?? "");
+  const normalizedTeam = normalizeText(input.legacyTeam ?? getLegacyTeamLabel(input.team) ?? "");
+  const isClientRelationsTeam =
+    normalizedTeam === "comunicacion con cliente" || normalizedTeam === "comunicacion con clientes";
 
   if (input.legacyRole === "SUPERADMIN" || specificRole === "direccion general") {
     return ["*"];
-  }
-
-  const permissions = new Set<string>([
-    ...(
-      isAuditTeam
-        ? []
-        : ["dashboard:read"]
-    ),
-    ...(
-      isFinanceTeam || isClientRelationsTeam || isAuditTeam || isAdminOperationsTeam
-        ? []
-        : [
-            "catalog:read",
-            "commissions:read",
-            "documents-third-party:read",
-            "brief-manager:read",
-            "internal-contracts:read",
-            "labor-file:read",
-            "kpis:read"
-          ]
-    )
-  ]);
-
-  if (isPracticeTeam && practiceTeamModuleId) {
-    permissions.delete("catalog:read");
-    permissions.delete("internal-contracts:read");
-    permissions.delete("labor-file:read");
-    permissions.delete("kpis:read");
-    permissions.add("tasks:read");
-    permissions.add(`tasks:${practiceTeamModuleId}`);
-    permissions.add(`execution:${practiceTeamModuleId}`);
-    permissions.add("commissions:read");
-    permissions.add("commissions:own-section:write");
-    permissions.add("daily-documents:read");
-    permissions.add("daily-documents:write");
-    permissions.add("documents-third-party:read");
-    permissions.add("documents-third-party:write");
-    permissions.add("brief-manager:read");
-    permissions.add("brief-manager:write");
-    permissions.add("leads:read");
-    permissions.add("matters:read");
-    permissions.add("finances:read");
-    permissions.add("general-expenses:read");
-  }
-
-  if (isAdminOperationsTeam) {
-    permissions.add("clients:read");
-    permissions.add("clients:write");
-    permissions.add("general-expenses:read");
-    permissions.add("general-expenses:write");
-    permissions.add("budget-planning:read");
-    permissions.add("budget-planning:write");
-    permissions.add("internal-contracts:read");
-    permissions.add("internal-contracts:write");
-    permissions.add("labor-file:read");
-    permissions.add("labor-file:write");
-    permissions.add("daily-documents:read");
-    permissions.add("daily-documents:write");
-    permissions.add("documents-third-party:read");
-    permissions.add("documents-third-party:write");
   }
 
   if (isClientRelationsTeam) {
@@ -362,41 +297,31 @@ export function derivePermissions(input: {
     permissions.add("matters:read");
     permissions.add("matters:write");
     permissions.add("finances:read");
-    permissions.add("general-expenses:read");
-    permissions.add("commissions:read");
-    permissions.add("commissions:client-relations:write");
     permissions.add("internal-contracts:read");
-    permissions.add("internal-contracts:write");
-    permissions.add("daily-documents:read");
-    permissions.add("daily-documents:write");
-    permissions.add("documents-third-party:read");
-    permissions.add("documents-third-party:write");
+    permissions.add("internal-contract-templates:read");
   }
 
-  if (isFinanceTeam) {
+  if (normalizedTeam === "finanzas") {
     permissions.add("clients:read");
-    permissions.add("clients:write");
     permissions.add("quotes:read");
     permissions.add("quotes:write");
-    permissions.add("leads:read");
-    permissions.add("leads:write");
-    permissions.add("matters:read");
     permissions.add("finances:read");
     permissions.add("finances:write");
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
-    permissions.add("budget-planning:read");
-    permissions.add("budget-planning:write");
-    permissions.add("commissions:read");
-    permissions.add("commissions:write");
+    permissions.add("internal-contracts:read");
+    permissions.add("internal-contract-templates:read");
+  }
+
+  if (normalizedTeam === "servicios administrativos") {
+    permissions.add("general-expenses:read");
+    permissions.add("general-expenses:write");
     permissions.add("internal-contracts:read");
     permissions.add("internal-contracts:write");
+    permissions.add("internal-contract-templates:read");
     permissions.add("labor-file:read");
     permissions.add("labor-file:write");
-    permissions.add("daily-documents:read");
-    permissions.add("daily-documents:write");
-    permissions.add("documents-third-party:read");
-    permissions.add("documents-third-party:write");
+    permissions.add("holidays:write");
   }
 
   if (normalizedTeam === "litigio") {
@@ -429,27 +354,32 @@ export function derivePermissions(input: {
     permissions.add("execution:tax-compliance");
   }
 
-  if (!isPracticeTeam && specificRole.includes("(lider)")) {
+  if (specificRole === "auditor") {
+    permissions.add("general-expenses:read");
+    permissions.add("general-expenses:write");
+  }
+
+  if (specificRole.includes("(lider)")) {
     permissions.add("kpis:team-manage");
   }
 
-  if (!isPracticeTeam && specificRole === "litigio (lider)") {
+  if (specificRole === "litigio (lider)") {
     permissions.add("tasks:litigation:additional");
   }
 
-  if (!isPracticeTeam && specificRole === "corporativo-laboral (lider)") {
+  if (specificRole === "corporativo-laboral (lider)") {
     permissions.add("tasks:corporate-labor:additional");
   }
 
-  if (!isPracticeTeam && specificRole === "convenios (lider)") {
+  if (specificRole === "convenios (lider)") {
     permissions.add("tasks:settlements:additional");
   }
 
-  if (!isPracticeTeam && specificRole === "der financiero (lider)") {
+  if (specificRole === "der financiero (lider)") {
     permissions.add("tasks:financial-law:additional");
   }
 
-  if (!isPracticeTeam && specificRole === "compliance fiscal (lider)") {
+  if (specificRole === "compliance fiscal (lider)") {
     permissions.add("tasks:tax-compliance:additional");
   }
 
@@ -458,13 +388,27 @@ export function derivePermissions(input: {
 
 export function deriveEffectivePermissions(input: {
   legacyRole: LegacyAccessRole;
+  team?: Team | null;
   legacyTeam?: string | null;
   specificRole?: string | null;
-  team?: Team | null;
-}) {
-  return derivePermissions({
-    legacyRole: input.legacyRole,
-    legacyTeam: input.legacyTeam ?? getLegacyTeamLabel(input.team),
-    specificRole: input.specificRole
-  });
+  permissions?: string[] | null;
+}): string[] {
+  const explicitPermissions = Array.isArray(input.permissions)
+    ? input.permissions.filter((permission): permission is string => typeof permission === "string")
+    : [];
+  if (explicitPermissions.includes("*")) {
+    return ["*"];
+  }
+
+  const permissions = new Set<string>([
+    ...derivePermissions({
+      legacyRole: input.legacyRole,
+      team: input.team,
+      legacyTeam: input.legacyTeam,
+      specificRole: input.specificRole
+    }),
+    ...explicitPermissions
+  ]);
+
+  return Array.from(permissions).sort();
 }

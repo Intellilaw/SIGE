@@ -3,7 +3,6 @@ import type { Lead, Matter, Quote } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
-import { canWriteModule } from "../auth/permissions";
 
 type ActiveTab = "leads" | "month";
 
@@ -271,7 +270,6 @@ function buildLeadPatch(lead: Lead): LeadPatchPayload {
 
 export function LeadsPage() {
   const { user } = useAuth();
-  const canWriteLeads = canWriteModule(user, "lead-tracking");
   const now = new Date();
   const [activeTab, setActiveTab] = useState<ActiveTab>("leads");
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -361,7 +359,7 @@ export function LeadsPage() {
       const [activeRows, historyRows, quoteRows, shortNames] = await Promise.all([
         apiGet<Lead[]>("/leads"),
         apiGet<Lead[]>("/leads/history"),
-        canWriteLeads ? apiGet<Quote[]>("/quotes") : Promise.resolve([]),
+        apiGet<Quote[]>("/quotes"),
         apiGet<string[]>("/leads/short-names")
       ]);
 
@@ -384,7 +382,7 @@ export function LeadsPage() {
     try {
       const [monthlyRows, quoteRows, shortNames] = await Promise.all([
         apiGet<Lead[]>(`/leads/monthly?year=${selectedYear}&month=${selectedMonth}`),
-        canWriteLeads ? apiGet<Quote[]>("/quotes") : Promise.resolve([]),
+        apiGet<Quote[]>("/quotes"),
         apiGet<string[]>("/leads/short-names")
       ]);
 
@@ -438,10 +436,6 @@ export function LeadsPage() {
   }
 
   async function persistLead(lead: Lead) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     try {
       const updated = await apiPatch<Lead>(`/leads/${lead.id}`, buildLeadPatch(lead));
       syncLeadAcrossViews(updated);
@@ -465,10 +459,6 @@ export function LeadsPage() {
   }
 
   async function handleAddRow() {
-    if (!canWriteLeads) {
-      return;
-    }
-
     try {
       const created = await apiPost<Lead>("/leads", {});
       setActiveItems((items) => sortActive([...items, created]));
@@ -478,10 +468,6 @@ export function LeadsPage() {
   }
 
   async function handleDelete(leadId: string) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     if (!window.confirm("Seguro que deseas eliminar este registro permanentemente?")) {
       return;
     }
@@ -502,7 +488,7 @@ export function LeadsPage() {
   }
 
   async function handleBulkDelete() {
-    if (!canWriteLeads || selectedLeads.size === 0) {
+    if (selectedLeads.size === 0) {
       return;
     }
 
@@ -521,10 +507,6 @@ export function LeadsPage() {
   }
 
   function handleLeadFieldChange(leadId: string, field: keyof LeadPatchPayload, value: string) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     if (field === "quoteNumber") {
       const updated = updateActiveLeadLocal(leadId, (lead) => {
         const cleanValue = normalizeText(value);
@@ -613,10 +595,6 @@ export function LeadsPage() {
   }
 
   function handleLeadBlur(leadId: string) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     const lead = activeItems.find((item) => item.id === leadId);
     if (!lead) {
       return;
@@ -626,10 +604,6 @@ export function LeadsPage() {
   }
 
   async function handleMarkSentToClient(leadId: string) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     const lead = activeItems.find((item) => item.id === leadId);
     if (!lead) {
       return;
@@ -657,10 +631,6 @@ export function LeadsPage() {
   }
 
   async function handleSendToMatters(leadId: string) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     const lead = activeItems.find((item) => item.id === leadId);
     if (!lead) {
       return;
@@ -696,10 +666,6 @@ export function LeadsPage() {
   }
 
   async function handleReturnToActive(leadId: string) {
-    if (!canWriteLeads) {
-      return;
-    }
-
     if (!window.confirm("Regresar este lead a Activos?")) {
       return;
     }
@@ -759,12 +725,10 @@ export function LeadsPage() {
 
             <div className="matters-toolbar matters-active-toolbar">
               <div className="matters-toolbar-actions">
-                {canWriteLeads ? (
-                  <button type="button" className="primary-button" onClick={() => void handleAddRow()}>
-                    + Agregar Fila
-                  </button>
-                ) : null}
-                {canWriteLeads && selectedLeads.size > 0 ? (
+                <button type="button" className="primary-button" onClick={() => void handleAddRow()}>
+                  + Agregar Fila
+                </button>
+                {selectedLeads.size > 0 ? (
                   <button type="button" className="danger-button" onClick={() => void handleBulkDelete()}>
                     Borrar ({selectedLeads.size})
                   </button>
@@ -812,12 +776,8 @@ export function LeadsPage() {
                       <th className="lead-table-checkbox">
                         <input
                           type="checkbox"
-                          disabled={!canWriteLeads}
                           checked={filteredActiveItems.length > 0 && filteredActiveItems.every((item) => selectedLeads.has(item.id))}
                           onChange={(event) => {
-                            if (!canWriteLeads) {
-                              return;
-                            }
                             if (event.target.checked) {
                               setSelectedLeads((current) => new Set([...current, ...filteredActiveItems.map((item) => item.id)]));
                               return;
@@ -879,12 +839,8 @@ export function LeadsPage() {
                             <td className="lead-table-checkbox">
                               <input
                                 type="checkbox"
-                                disabled={!canWriteLeads}
                                 checked={selectedLeads.has(item.id)}
                                 onChange={(event) => {
-                                  if (!canWriteLeads) {
-                                    return;
-                                  }
                                   const next = new Set(selectedLeads);
                                   if (event.target.checked) next.add(item.id);
                                   else next.delete(item.id);
@@ -896,7 +852,6 @@ export function LeadsPage() {
                               <select
                                 className="lead-cell-input"
                                 value={item.commissionAssignee ?? ""}
-                                disabled={!canWriteLeads}
                                 onChange={(event) => {
                                   const updated = updateActiveLeadLocal(item.id, (lead) => ({
                                     ...lead,
@@ -917,7 +872,7 @@ export function LeadsPage() {
                               <input
                                 className={`lead-cell-input ${item.quoteNumber ? "is-readonly" : ""}`}
                                 value={item.clientName}
-                                readOnly={!canWriteLeads || Boolean(item.quoteNumber)}
+                                readOnly={Boolean(item.quoteNumber)}
                                 list={`lead-clients-${item.id}`}
                                 onChange={(event) => handleLeadFieldChange(item.id, "clientName", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
@@ -933,7 +888,7 @@ export function LeadsPage() {
                               <input
                                 className={`lead-cell-input ${item.quoteNumber ? "is-readonly" : ""}`}
                                 value={item.prospectName ?? ""}
-                                readOnly={!canWriteLeads || Boolean(item.quoteNumber)}
+                                readOnly={Boolean(item.quoteNumber)}
                                 onChange={(event) => handleLeadFieldChange(item.id, "prospectName", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -942,7 +897,6 @@ export function LeadsPage() {
                               <select
                                 className="lead-cell-input"
                                 value={item.quoteNumber ?? ""}
-                                disabled={!canWriteLeads}
                                 onChange={(event) => handleLeadFieldChange(item.id, "quoteNumber", event.target.value)}
                               >
                                 <option value="">Manual (Sin cot.)</option>
@@ -964,7 +918,7 @@ export function LeadsPage() {
                               <input
                                 className={`lead-cell-input ${item.quoteNumber ? "is-readonly" : ""}`}
                                 value={item.subject}
-                                readOnly={!canWriteLeads || Boolean(item.quoteNumber)}
+                                readOnly={Boolean(item.quoteNumber)}
                                 onChange={(event) => handleLeadFieldChange(item.id, "subject", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -976,7 +930,7 @@ export function LeadsPage() {
                                 min="0"
                                 step="0.01"
                                 value={Number(item.amountMxn || 0)}
-                                readOnly={!canWriteLeads || Boolean(item.quoteNumber)}
+                                readOnly={Boolean(item.quoteNumber)}
                                 onChange={(event) => handleLeadFieldChange(item.id, "amountMxn", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -985,7 +939,6 @@ export function LeadsPage() {
                               <select
                                 className="lead-cell-input"
                                 value={item.communicationChannel}
-                                disabled={!canWriteLeads}
                                 onChange={(event) => {
                                   const updated = updateActiveLeadLocal(item.id, (lead) => ({
                                     ...lead,
@@ -1005,7 +958,6 @@ export function LeadsPage() {
                               <input
                                 className="lead-cell-input"
                                 value={item.lastInteractionLabel ?? ""}
-                                readOnly={!canWriteLeads}
                                 onChange={(event) => handleLeadFieldChange(item.id, "lastInteractionLabel", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -1015,7 +967,6 @@ export function LeadsPage() {
                                 className="lead-cell-input"
                                 type="date"
                                 value={toDateInput(item.lastInteraction)}
-                                readOnly={!canWriteLeads}
                                 onChange={(event) => handleLeadFieldChange(item.id, "lastInteraction", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -1024,7 +975,6 @@ export function LeadsPage() {
                               <input
                                 className="lead-cell-input"
                                 value={item.nextInteractionLabel ?? ""}
-                                readOnly={!canWriteLeads}
                                 onChange={(event) => handleLeadFieldChange(item.id, "nextInteractionLabel", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -1034,7 +984,6 @@ export function LeadsPage() {
                                 className="lead-cell-input"
                                 type="date"
                                 value={toDateInput(item.nextInteraction)}
-                                readOnly={!canWriteLeads}
                                 onChange={(event) => handleLeadFieldChange(item.id, "nextInteraction", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -1043,7 +992,6 @@ export function LeadsPage() {
                               <input
                                 className="lead-cell-input"
                                 value={item.notes ?? ""}
-                                readOnly={!canWriteLeads}
                                 onChange={(event) => handleLeadFieldChange(item.id, "notes", event.target.value)}
                                 onBlur={() => handleLeadBlur(item.id)}
                               />
@@ -1053,7 +1001,7 @@ export function LeadsPage() {
                                 <button
                                   type="button"
                                   className="primary-button lead-action-button"
-                                  disabled={!canWriteLeads || Boolean(item.sentToClientAt)}
+                                  disabled={Boolean(item.sentToClientAt)}
                                   onClick={() => void handleMarkSentToClient(item.id)}
                                 >
                                   {item.sentToClientAt ? "Ya enviada" : "Enviada a cliente"}
@@ -1061,7 +1009,6 @@ export function LeadsPage() {
                                 <button
                                   type="button"
                                   className="secondary-button lead-action-button"
-                                  disabled={!canWriteLeads}
                                   onClick={() => void handleSendToMatters(item.id)}
                                 >
                                   Enviar a asuntos activos
@@ -1069,7 +1016,7 @@ export function LeadsPage() {
                               </div>
                             </td>
                             <td>
-                              <button type="button" className="danger-button lead-delete-button" disabled={!canWriteLeads} onClick={() => void handleDelete(item.id)}>
+                              <button type="button" className="danger-button lead-delete-button" onClick={() => void handleDelete(item.id)}>
                                 Borrar
                               </button>
                             </td>
@@ -1146,12 +1093,12 @@ export function LeadsPage() {
                             <td>{formatDate(item.sentToMattersAt)}</td>
                             <td>{item.notes || "-"}</td>
                             <td>
-                              <button type="button" className="secondary-button" disabled={!canWriteLeads} onClick={() => void handleReturnToActive(item.id)}>
+                              <button type="button" className="secondary-button" onClick={() => void handleReturnToActive(item.id)}>
                                 Regresar
                               </button>
                             </td>
                             <td>
-                              <button type="button" className="danger-button lead-delete-button" disabled={!canWriteLeads} onClick={() => void handleDelete(item.id)}>
+                              <button type="button" className="danger-button lead-delete-button" onClick={() => void handleDelete(item.id)}>
                                 Borrar
                               </button>
                             </td>
@@ -1274,7 +1221,7 @@ export function LeadsPage() {
                             </span>
                           </td>
                           <td>
-                            <button type="button" className="danger-button lead-delete-button" disabled={!canWriteLeads} onClick={() => void handleDelete(item.id)}>
+                            <button type="button" className="danger-button lead-delete-button" onClick={() => void handleDelete(item.id)}>
                               Borrar
                             </button>
                           </td>

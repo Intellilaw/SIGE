@@ -2,8 +2,6 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { findLegacyTableByAnyName } from "./task-distribution-utils";
@@ -103,16 +101,13 @@ export function TaskTermsPage() {
     const { slug } = useParams();
     const location = useLocation();
     const navigate = useNavigate();
-    const { user } = useAuth();
     const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
-    const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-    const canAccessModule = Boolean(executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId));
     const recurrentMode = location.pathname.endsWith("/terminos-recurrentes");
     const [terms, setTerms] = useState([]);
     const [trackingRecords, setTrackingRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     async function loadTerms() {
-        if (!moduleConfig || !canAccessModule) {
+        if (!moduleConfig) {
             return;
         }
         setLoading(true);
@@ -130,7 +125,7 @@ export function TaskTermsPage() {
     }
     useEffect(() => {
         void loadTerms();
-    }, [canAccessModule, moduleConfig]);
+    }, [moduleConfig]);
     const visibleTermRows = useMemo(() => {
         if (!moduleConfig) {
             return [];
@@ -164,7 +159,7 @@ export function TaskTermsPage() {
         });
         return rows.sort(sortTermRows);
     }, [moduleConfig, recurrentMode, terms, trackingRecords]);
-    if (!moduleConfig || !executionModule || !canAccessModule) {
+    if (!moduleConfig) {
         return _jsx(Navigate, { to: "/app/tasks", replace: true });
     }
     return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/distribuidor`), children: "Abrir Manager de tareas" })] }), _jsxs("h2", { children: [recurrentMode ? "Terminos recurrentes" : "Terminos", " (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "Tabla maestra de terminos. Refleja los terminos activos del Manager de tareas; las filas quedan en rojo si falta responsable, falta fecha de termino o la fecha esta vencida. Las verificaciones se actualizan exclusivamente desde el Manager de tareas." })] }), _jsxs("section", { className: "panel", children: [moduleConfig.hasRecurringTerms && !recurrentMode ? (_jsx("div", { className: "tasks-legacy-toolbar", children: _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/terminos-recurrentes`), children: "Ver terminos recurrentes" }) })) : null, _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: "data-table tasks-legacy-table tasks-terms-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: moduleConfig.termEventLabel }), _jsx("th", { children: "Responsable" }), _jsx("th", { children: moduleConfig.termDateLabel })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 7, className: "centered-inline-message", children: "Cargando terminos..." }) })) : visibleTermRows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 7, className: "centered-inline-message", children: "No hay terminos en esta seccion." }) })) : (visibleTermRows.map((row) => {

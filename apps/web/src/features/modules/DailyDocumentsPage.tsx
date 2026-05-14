@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { Client, DailyDocumentAssignment, DailyDocumentTemplateId } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { canReadModule, canWriteModule } from "../auth/permissions";
 
 type DailyDocumentField = {
   name: string;
@@ -2046,7 +2044,6 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
 }
 
 export function DailyDocumentsPage() {
-  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"generate" | "assigned">("generate");
   const [selectedTemplateId, setSelectedTemplateId] = useState<DailyDocumentTemplateId>(dailyDocumentTemplates[0].id);
   const selectedTemplate = findTemplate(selectedTemplateId);
@@ -2069,8 +2066,6 @@ export function DailyDocumentsPage() {
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [flash, setFlash] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const canRead = canReadModule(user, "daily-documents");
-  const canWrite = canWriteModule(user, "daily-documents");
 
   const values = templateValues[selectedTemplate.id];
   const selectedClient = useMemo(
@@ -2132,13 +2127,8 @@ export function DailyDocumentsPage() {
   }
 
   useEffect(() => {
-    if (!canRead) {
-      setLoadingModuleData(false);
-      return;
-    }
-
     void loadModuleData();
-  }, [canRead]);
+  }, []);
 
   function selectTemplate(templateId: DailyDocumentTemplateId) {
     const nextTemplate = findTemplate(templateId);
@@ -2276,10 +2266,6 @@ export function DailyDocumentsPage() {
   }
 
   async function saveAssignment() {
-    if (!canWrite) {
-      return;
-    }
-
     if (!normalizeText(selectedClientId)) {
       setFlash({ tone: "error", text: "Selecciona un cliente para asignar el documento." });
       return;
@@ -2333,10 +2319,6 @@ export function DailyDocumentsPage() {
   }
 
   async function deleteAssignment(assignment: DailyDocumentAssignment) {
-    if (!canWrite) {
-      return;
-    }
-
     if (!window.confirm(`Seguro que deseas borrar ${assignment.title} de ${assignment.clientName}?`)) {
       return;
     }
@@ -2773,11 +2755,9 @@ export function DailyDocumentsPage() {
                 })}
               </div>
               <div className="daily-doc-save-actions">
-                {canWrite ? (
-                  <button className="primary-button" disabled={savingAssignment} onClick={() => void saveAssignment()} type="button">
-                    {savingAssignment ? "Guardando..." : editingDocumentId ? "Guardar cambios" : "Asignar a cliente"}
-                  </button>
-                ) : null}
+                <button className="primary-button" disabled={savingAssignment} onClick={() => void saveAssignment()} type="button">
+                  {savingAssignment ? "Guardando..." : editingDocumentId ? "Guardar cambios" : "Asignar a cliente"}
+                </button>
                 {editingDocumentId ? (
                   <button className="secondary-button" disabled={savingAssignment} onClick={resetDraft} type="button">
                     Cancelar edicion
@@ -2875,27 +2855,23 @@ export function DailyDocumentsPage() {
                             <td>{new Date(assignment.updatedAt).toLocaleDateString("es-MX")}</td>
                             <td>
                               <div className="table-actions">
-                                {canWrite ? (
-                                  <button className="secondary-button" onClick={() => editAssignment(assignment)} type="button">
-                                    Modificar
-                                  </button>
-                                ) : null}
+                                <button className="secondary-button" onClick={() => editAssignment(assignment)} type="button">
+                                  Modificar
+                                </button>
                                 <button className="secondary-button" onClick={() => void downloadAssignmentWord(assignment)} type="button">
                                   Word
                                 </button>
                                 <button className="secondary-button" onClick={() => void downloadAssignmentPdf(assignment)} type="button">
                                   PDF
                                 </button>
-                                {canWrite ? (
-                                  <button
-                                    className="danger-button"
-                                    disabled={deletingDocumentId === assignment.id}
-                                    onClick={() => void deleteAssignment(assignment)}
-                                    type="button"
-                                  >
-                                    {deletingDocumentId === assignment.id ? "Borrando..." : "Borrar"}
-                                  </button>
-                                ) : null}
+                                <button
+                                  className="danger-button"
+                                  disabled={deletingDocumentId === assignment.id}
+                                  onClick={() => void deleteAssignment(assignment)}
+                                  type="button"
+                                >
+                                  {deletingDocumentId === assignment.id ? "Borrando..." : "Borrar"}
+                                </button>
                               </div>
                             </td>
                           </tr>

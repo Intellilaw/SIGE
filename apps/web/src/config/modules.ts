@@ -7,7 +7,17 @@ export interface AppModuleDefinition {
   description: string;
   phase: "Operativo" | "En preparacion";
   available: boolean;
+  access?: "all" | "emrt-superadmin";
   coverage: string[];
+}
+
+export interface AppModuleAccessUser {
+  role?: string;
+  legacyRole?: string;
+  email?: string;
+  username?: string;
+  displayName?: string;
+  shortName?: string;
 }
 
 export const appModules: AppModuleDefinition[] = [
@@ -28,7 +38,7 @@ export const appModules: AppModuleDefinition[] = [
     label: "Cotizaciones",
     shortLabel: "Cotizaciones",
     icon: "\u{1F4C4}",
-    description: "Generacion, seguimiento y control comercial de propuestas y cotizaciones.",
+    description: "Generación, seguimiento y control comercial de propuestas y cotizaciones.",
     phase: "Operativo",
     available: true,
     coverage: ["Consulta de cotizaciones", "Estados y montos clave"]
@@ -39,10 +49,10 @@ export const appModules: AppModuleDefinition[] = [
     label: "Seguimiento a Leads y Cotizaciones",
     shortLabel: "Leads",
     icon: "\u{1F4C8}",
-    description: "Seguimiento ordenado de leads, canales de contacto y conversion a cotizacion.",
+    description: "Seguimiento ordenado de leads, canales de contacto y conversión a cotización.",
     phase: "Operativo",
     available: true,
-    coverage: ["Pipeline de leads", "Relacion lead-cotizacion"]
+    coverage: ["Pipeline de leads", "Relación lead-cotización"]
   },
   {
     id: "active-matters",
@@ -58,10 +68,10 @@ export const appModules: AppModuleDefinition[] = [
   {
     id: "execution",
     path: "/app/execution",
-    label: "Ejecucion",
-    shortLabel: "Ejecucion",
+    label: "Ejecución",
+    shortLabel: "Ejecución",
     icon: "\u2699\uFE0F",
-    description: "Operacion por equipo para litigio, corporativo, convenios, financiero y compliance fiscal.",
+    description: "Operación por equipo para litigio, corporativo, convenios, financiero y compliance fiscal.",
     phase: "Operativo",
     available: true,
     coverage: ["Tableros por equipo", "Siguientes tareas", "Resaltado por faltantes y vencimientos"]
@@ -72,7 +82,7 @@ export const appModules: AppModuleDefinition[] = [
     label: "Tareas",
     shortLabel: "Tareas",
     icon: "\u2705",
-    description: "Operacion diaria por equipo con vista por integrante, ventanas temporales y tablero de asuntos.",
+    description: "Operación diaria por equipo con vista por integrante, ventanas temporales y tablero de asuntos.",
     phase: "Operativo",
     available: true,
     coverage: ["Entrada por equipo", "Vista diaria por integrante", "Tablero con filas en rojo"]
@@ -127,32 +137,33 @@ export const appModules: AppModuleDefinition[] = [
     label: "KPI'S",
     shortLabel: "KPI'S",
     icon: "\u{1F4CA}",
-    description: "Indicadores operativos y de presentacion para supervision individual y por equipo.",
-    phase: "En preparacion",
-    available: false,
-    coverage: ["KPIs por presentar", "KPIs presentados", "Vista individual y de equipo"]
+    description: "KPI's significa Key Performance Indicators: indicadores clave de desempeño alimentados automaticamente desde seguimiento.",
+    phase: "Operativo",
+    available: true,
+    coverage: ["KPI's por usuario", "Agrupacion por equipo", "Datos automaticos desde seguimiento"]
   },
   {
     id: "general-supervision",
     path: "/app/general-supervision",
-    label: "Supervision general",
-    shortLabel: "Supervision",
+    label: "Supervisión general",
+    shortLabel: "Supervisión",
     icon: "\u{1F441}\uFE0F",
     description: "Vista ejecutiva transversal para direccion, seguimiento y deteccion de cuellos de botella.",
-    phase: "En preparacion",
-    available: false,
-    coverage: ["Panorama ejecutivo", "Seguimiento transversal del despacho"]
+    phase: "Operativo",
+    available: true,
+    access: "emrt-superadmin",
+    coverage: ["Tareas por usuario", "Terminos por equipo", "KPI's semanales fuera de meta"]
   },
   {
     id: "matter-catalog",
     path: "/app/matter-catalog",
-    label: "Catalogo de Asuntos",
-    shortLabel: "Catalogo",
+    label: "Catálogo de Asuntos",
+    shortLabel: "Catálogo",
     icon: "\u{1F4DA}",
     description: "Consulta de asuntos con ID asignado, agrupados por cliente y con borrado permanente para superadmin.",
     phase: "Operativo",
     available: true,
-    coverage: ["Asuntos con ID asignado", "Busqueda por cliente, cotizacion, ID y asunto", "Borrado permanente por superadmin"]
+    coverage: ["Asuntos con ID asignado", "Búsqueda por cliente, cotización, ID y asunto", "Borrado permanente por superadmin"]
   },
   {
     id: "brief-manager",
@@ -171,21 +182,21 @@ export const appModules: AppModuleDefinition[] = [
     label: "Administraci\u00f3n de contratos internos",
     shortLabel: "Contratos",
     icon: "\u{1F4DC}",
-    description: "Carga y control interno de contratos profesionales, laborales y addenda.",
+    description: "Carga y control interno de contratos profesionales, laborales, addenda y machotes.",
     phase: "Operativo",
     available: true,
-    coverage: ["Contratos por cliente", "Contratos laborales por colaborador", "Hitos de pago visibles"]
+    coverage: ["Contratos por cliente", "Contratos laborales por colaborador", "Machotes descargables", "Hitos de pago visibles"]
   },
   {
     id: "labor-file",
     path: "/app/labor-file",
-    label: "Expediente laboral",
-    shortLabel: "Expediente",
+    label: "Expedientes Laborales",
+    shortLabel: "Expedientes",
     icon: "\u{1F4C1}",
-    description: "Repositorio estructurado del expediente laboral con trazabilidad de eventos y anexos.",
-    phase: "En preparacion",
-    available: false,
-    coverage: ["Historial laboral", "Control documental por colaborador"]
+    description: "Repositorio estructurado de contratos, documentos obligatorios y vacaciones por colaborador.",
+    phase: "Operativo",
+    available: true,
+    coverage: ["Expediente por usuario", "Contratos y addenda", "Documentos obligatorios", "Control de vacaciones"]
   },
   {
     id: "daily-documents",
@@ -212,13 +223,13 @@ export const appModules: AppModuleDefinition[] = [
   {
     id: "holidays",
     path: "/app/holidays",
-    label: "Dias inhabiles",
-    shortLabel: "Dias inhabiles",
+    label: "Días inhábiles",
+    shortLabel: "Días inhábiles",
     icon: "\u{1F4C5}",
-    description: "Calendario operativo que impacta terminos, vencimientos y calculos procesales.",
-    phase: "En preparacion",
-    available: false,
-    coverage: ["Calendario operativo", "Impacto en calculo de terminos"]
+    description: "Calendario operativo por organo y empresa que impacta terminos, vencimientos y calculos procesales.",
+    phase: "Operativo",
+    available: true,
+    coverage: ["Calendario por organo y empresa", "Nombres cortos estables", "Impacto en calculo de terminos"]
   },
   {
     id: "users",
@@ -226,7 +237,7 @@ export const appModules: AppModuleDefinition[] = [
     label: "Usuarios",
     shortLabel: "Usuarios",
     icon: "\u{1F464}",
-    description: "Administracion de usuarios, acceso, equipos y gobierno de permisos internos.",
+    description: "Administración de usuarios, acceso, equipos y gobierno de permisos internos.",
     phase: "Operativo",
     available: true,
     coverage: ["Alta de usuarios", "Edicion de nombre corto, equipo y rol especifico", "Permisos y acceso por equipo y perfil"]
@@ -241,6 +252,52 @@ export const navigation = [
     icon: module.icon
   }))
 ];
+
+function normalizeIdentity(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isEmrtIdentity(value?: string | null) {
+  const normalized = normalizeIdentity(value);
+  return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
+}
+
+export function canAccessGeneralSupervision(user?: AppModuleAccessUser | null) {
+  if (!user) {
+    return false;
+  }
+
+  const isSuperadmin = user.role === "SUPERADMIN" || user.legacyRole === "SUPERADMIN";
+  const emailLocalPart = user.email?.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user.email;
+
+  return isSuperadmin && [
+    user.shortName,
+    user.username,
+    user.displayName,
+    user.email,
+    emailLocalPart
+  ].some(isEmrtIdentity);
+}
+
+export function getVisibleAppModules(user?: AppModuleAccessUser | null) {
+  return appModules.filter((module) => module.access !== "emrt-superadmin" || canAccessGeneralSupervision(user));
+}
+
+export function getNavigationForUser(user?: AppModuleAccessUser | null) {
+  return [
+    { path: "/app", label: "Men\u00fa principal", icon: "\u25EB" },
+    ...getVisibleAppModules(user).map((module) => ({
+      path: module.path,
+      label: module.label,
+      icon: module.icon
+    }))
+  ];
+}
 
 export function getModuleById(id: string) {
   return appModules.find((module) => module.id === id);

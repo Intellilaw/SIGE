@@ -2,8 +2,6 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { buildDistributionHistoryTaskNameMap, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { getAdjacentLegacyTaskTable, getLegacyTaskTable, LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { findLegacyTableByAnyName } from "./task-distribution-utils";
@@ -66,10 +64,7 @@ function isRowRed(record, tab, showDateColumn, table, taskNamesByRecordId, histo
 export function TaskLegacyTablePage() {
     const { slug, tableId } = useParams();
     const navigate = useNavigate();
-    const { user } = useAuth();
     const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
-    const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-    const canAccessModule = Boolean(executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId));
     const tableConfig = moduleConfig ? getLegacyTaskTable(moduleConfig, tableId) : undefined;
     const [records, setRecords] = useState([]);
     const [history, setHistory] = useState([]);
@@ -78,13 +73,13 @@ export function TaskLegacyTablePage() {
     const [completedMonth, setCompletedMonth] = useState(currentMonthInput());
     const activeTab = tableConfig?.tabs.find((tab) => tab.key === activeTabKey) ?? tableConfig?.tabs[0];
     useEffect(() => {
-        if (!moduleConfig || !tableConfig || !canAccessModule) {
+        if (!moduleConfig || !tableConfig) {
             return;
         }
         setActiveTabKey(tableConfig.tabs[0]?.key ?? null);
-    }, [canAccessModule, moduleConfig, tableConfig]);
+    }, [moduleConfig, tableConfig]);
     async function loadRecords() {
-        if (!moduleConfig || !tableConfig || !canAccessModule) {
+        if (!moduleConfig || !tableConfig) {
             return;
         }
         setLoading(true);
@@ -102,7 +97,7 @@ export function TaskLegacyTablePage() {
     }
     useEffect(() => {
         void loadRecords();
-    }, [canAccessModule, moduleConfig, tableConfig]);
+    }, [moduleConfig, tableConfig]);
     const taskNamesByRecordId = useMemo(() => buildDistributionHistoryTaskNameMap(history), [history]);
     const visibleRecords = useMemo(() => {
         if (!activeTab || !tableConfig) {
@@ -125,7 +120,7 @@ export function TaskLegacyTablePage() {
             return record.status === (activeTab.status ?? "pendiente");
         });
     }, [activeTab, completedMonth, moduleConfig, records, tableConfig]);
-    if (!moduleConfig || !executionModule || !canAccessModule || !tableConfig || !activeTab) {
+    if (!moduleConfig || !tableConfig || !activeTab) {
         return _jsx(Navigate, { to: "/app/tasks", replace: true });
     }
     const previous = getAdjacentLegacyTaskTable(moduleConfig, tableConfig.slug, -1);

@@ -3,8 +3,6 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import type { TaskAdditionalTask } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
 import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 
@@ -54,12 +52,7 @@ type AdditionalTab = "pendientes" | "concluidas";
 export function TaskAdditionalTasksPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
-  const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const canAccessModule = Boolean(
-    executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId)
-  );
   const [tasks, setTasks] = useState<TaskAdditionalTask[]>([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -85,7 +78,7 @@ export function TaskAdditionalTasksPage() {
   }, [activeTab, completedMonth, tasks]);
 
   async function loadTasks() {
-    if (!moduleConfig || !canAccessModule) {
+    if (!moduleConfig) {
       return;
     }
 
@@ -100,11 +93,11 @@ export function TaskAdditionalTasksPage() {
 
   useEffect(() => {
     void loadTasks();
-  }, [canAccessModule, moduleConfig]);
+  }, [moduleConfig]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!moduleConfig || !canAccessModule) {
+    if (!moduleConfig) {
       return;
     }
 
@@ -153,7 +146,7 @@ export function TaskAdditionalTasksPage() {
     setTasks((current) => current.filter((candidate) => candidate.id !== task.id));
   }
 
-  if (!moduleConfig || !executionModule || !canAccessModule) {
+  if (!moduleConfig) {
     return <Navigate to="/app/tasks" replace />;
   }
 
