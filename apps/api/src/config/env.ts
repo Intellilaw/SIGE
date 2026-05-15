@@ -24,7 +24,9 @@ const envSchema = z.object({
   OPENAI_API_KEY: optionalNonEmptyString,
   OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
   OPENAI_QUOTE_TRANSLATION_MODEL: z.string().min(1).default("gpt-4o-mini"),
-  OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS: z.coerce.number().int().positive().default(45000)
+  OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
+  SSO_SECRET_KEY: z.string().min(32).optional(),
+  BRIEF_MANAGER_SSO_URL: z.string().url().optional()
 });
 
 export const env = envSchema.parse(process.env);

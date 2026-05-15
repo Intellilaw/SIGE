@@ -5,6 +5,7 @@ import { EntryPage } from "./features/auth/EntryPage";
 import { LoginPage } from "./features/auth/LoginPage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
+import { BriefManagerLauncher } from "./features/modules/BriefManagerLauncher";
 import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
 import { HolidaysPage } from "./features/modules/HolidaysPage";
 import { InternalContractsPage } from "./features/modules/InternalContractsPage";
@@ -99,7 +100,7 @@ export default function App() {
             <Route path="commissions" element={<CommissionsPage />} />
             <Route path="general-supervision" element={<GeneralSupervisionPage />} />
             <Route path="matter-catalog" element={<MatterCatalogPage />} />
-            <Route path="brief-manager" element={<ModulePlaceholderPage moduleId="brief-manager" />} />
+            <Route path="brief-manager" element={<BriefManagerLauncher />} />
             <Route path="internal-contracts" element={<InternalContractsPage />} />
             <Route path="labor-file" element={<LaborFilesPage />} />
             <Route path="daily-documents" element={<DailyDocumentsPage />} />

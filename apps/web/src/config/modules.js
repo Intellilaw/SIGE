@@ -150,8 +150,8 @@ export const appModules = [
         shortLabel: "Escritos",
         icon: "\u270D\uFE0F",
         description: "Concentrador para control, versionado y administracion de escritos del despacho.",
-        phase: "En preparacion",
-        available: false,
+        phase: "Operativo",
+        available: true,
         coverage: ["Seguimiento de escritos", "Control documental operativo"]
     },
     {
