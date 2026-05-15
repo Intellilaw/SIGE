@@ -199,6 +199,7 @@ export interface LaborFilesRepository {
   listForUser(userId: string): Promise<LaborFile[]>;
   findById(laborFileId: string): Promise<LaborFile | null>;
   findDocument(documentId: string): Promise<LaborFileDocumentRecord | null>;
+  listDocumentsForContractPrefill(laborFileId: string): Promise<LaborFileDocumentRecord[]>;
   findVacationAcceptanceDocument(eventId: string): Promise<LaborVacationAcceptanceDocumentRecord | null>;
   update(laborFileId: string, payload: LaborFileUpdateInput): Promise<LaborFile>;
   uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord): Promise<LaborFileDocument>;

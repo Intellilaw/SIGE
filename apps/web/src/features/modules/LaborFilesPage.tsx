@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   LABOR_FILE_DOCUMENT_DEFINITIONS,
+  type LaborContractFieldValues,
+  type LaborContractPrefillResult,
   type LaborFile,
   type LaborFileDocument,
   type LaborFileDocumentType,
@@ -43,6 +45,42 @@ const EMPTY_GLOBAL_VACATION_FORM: LaborGlobalVacationDayInput = {
   date: "",
   days: 1,
   description: ""
+};
+
+const EMPTY_CONTRACT_FORM: LaborContractFieldValues = {
+  employeeName: "",
+  rfc: "",
+  curp: "",
+  employeeAddress: "",
+  employeePhone: "",
+  position: "",
+  originalContractDate: "",
+  workdayStart: "09:00",
+  workdayEnd: "18:00",
+  monthlyGrossSalary: "",
+  monthlyGrossSalaryText: "",
+  biweeklyGrossSalary: "",
+  biweeklyGrossSalaryText: "",
+  signingDate: "",
+  signingCity: "Ciudad de México"
+};
+
+const CONTRACT_FIELD_LABELS: Record<keyof LaborContractFieldValues, string> = {
+  employeeName: "Nombre completo",
+  rfc: "RFC",
+  curp: "CURP",
+  employeeAddress: "Domicilio",
+  employeePhone: "Teléfono",
+  position: "Puesto o labor",
+  originalContractDate: "Fecha de ingreso/contrato",
+  workdayStart: "Hora de entrada",
+  workdayEnd: "Hora de salida",
+  monthlyGrossSalary: "Salario mensual",
+  monthlyGrossSalaryText: "Salario mensual en letra",
+  biweeklyGrossSalary: "Pago quincenal",
+  biweeklyGrossSalaryText: "Pago quincenal en letra",
+  signingDate: "Fecha de firma",
+  signingCity: "Ciudad de firma"
 };
 
 function hasPermission(permissions: string[] | undefined, permission: string) {
@@ -151,9 +189,40 @@ function getDocumentLabel(documentType: LaborFileDocumentType) {
 
 function getUploadAccept(documentType: LaborFileDocumentType) {
   const definition = LABOR_FILE_DOCUMENT_DEFINITIONS.find((entry) => entry.type === documentType);
+  if (definition?.wordAllowed) {
+    return ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+
   return definition?.pdfOnly
     ? ".pdf,application/pdf"
     : ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+}
+
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function buildContractFormDefaults(laborFile?: LaborFile): LaborContractFieldValues {
+  return {
+    ...EMPTY_CONTRACT_FORM,
+    employeeName: laborFile?.employeeName ?? "",
+    position: laborFile?.specificRole ?? "",
+    originalContractDate: laborFile?.hireDate.slice(0, 10) ?? "",
+    signingDate: getTodayKey()
+  };
+}
+
+function mergeEditableContractFields(current: LaborContractFieldValues, next: LaborContractFieldValues) {
+  const merged = { ...current };
+
+  for (const field of Object.keys(EMPTY_CONTRACT_FORM) as Array<keyof LaborContractFieldValues>) {
+    const value = next[field]?.trim();
+    if (value) {
+      merged[field] = value;
+    }
+  }
+
+  return merged;
 }
 
 function sortLaborFiles(items: LaborFile[]) {
@@ -226,6 +295,12 @@ export function LaborFilesPage() {
   const [profileForm, setProfileForm] = useState<LaborFileProfileForm>(EMPTY_PROFILE_FORM);
   const [uploadType, setUploadType] = useState<LaborFileDocumentType>("EMPLOYMENT_CONTRACT");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [contractFormOpen, setContractFormOpen] = useState(false);
+  const [contractForm, setContractForm] = useState<LaborContractFieldValues>(EMPTY_CONTRACT_FORM);
+  const [contractPrefillSources, setContractPrefillSources] = useState<LaborContractPrefillResult["sources"]>([]);
+  const [contractPrefillNotes, setContractPrefillNotes] = useState<string[]>([]);
+  const [prefillingContract, setPrefillingContract] = useState(false);
+  const [generatingContract, setGeneratingContract] = useState(false);
   const [vacationForm, setVacationForm] = useState<LaborVacationEventInput>(EMPTY_VACATION_FORM);
   const [vacationRange, setVacationRange] = useState({ startDate: "", endDate: "" });
   const [vacationSingleDate, setVacationSingleDate] = useState("");
@@ -278,6 +353,10 @@ export function LaborFilesPage() {
   useEffect(() => {
     if (!selectedLaborFile) {
       setProfileForm(EMPTY_PROFILE_FORM);
+      setContractForm(EMPTY_CONTRACT_FORM);
+      setContractFormOpen(false);
+      setContractPrefillSources([]);
+      setContractPrefillNotes([]);
       return;
     }
 
@@ -285,6 +364,10 @@ export function LaborFilesPage() {
       hireDate: selectedLaborFile.hireDate.slice(0, 10),
       notes: selectedLaborFile.notes ?? ""
     });
+    setContractForm(buildContractFormDefaults(selectedLaborFile));
+    setContractFormOpen(false);
+    setContractPrefillSources([]);
+    setContractPrefillNotes([]);
     setFlash(null);
   }, [selectedLaborFile?.id]);
 
@@ -372,6 +455,61 @@ export function LaborFilesPage() {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
       setSaving(false);
+    }
+  }
+
+  function updateContractFormField(field: keyof LaborContractFieldValues, value: string) {
+    setContractForm((current) => ({ ...current, [field]: value }));
+    setFlash(null);
+  }
+
+  async function handleContractPrefill() {
+    if (!selectedLaborFile || !canWrite) {
+      return;
+    }
+
+    setPrefillingContract(true);
+    setFlash(null);
+
+    try {
+      const result = await apiPost<LaborContractPrefillResult>(`/labor-files/${selectedLaborFile.id}/contract/prefill`, {});
+      setContractForm((current) => mergeEditableContractFields(current, result.fields));
+      setContractPrefillSources(result.sources);
+      setContractPrefillNotes(result.notes);
+      setFlash({ tone: "success", text: "Formulario prellenado con IA. Revisa y ajusta antes de generar el contrato." });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setPrefillingContract(false);
+    }
+  }
+
+  function handleContractFormOpen() {
+    setContractFormOpen(true);
+    if (selectedLaborFile) {
+      setContractForm((current) => mergeEditableContractFields(buildContractFormDefaults(selectedLaborFile), current));
+    }
+
+    void handleContractPrefill();
+  }
+
+  async function handleContractGenerate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedLaborFile || !canWrite) {
+      return;
+    }
+
+    setGeneratingContract(true);
+    setFlash(null);
+
+    try {
+      await apiPost<LaborFileDocument>(`/labor-files/${selectedLaborFile.id}/contract/generate`, contractForm);
+      setFlash({ tone: "success", text: "Contrato laboral generado y guardado en el expediente." });
+      await loadLaborFiles(selectedLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setGeneratingContract(false);
     }
   }
 
@@ -903,6 +1041,219 @@ export function LaborFilesPage() {
                     />
                   ))}
                 </div>
+              </section>
+
+              <section className="panel labor-file-contract-generator-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Generación de contrato laboral</h2>
+                    <span>Word editable con datos del trabajador y resguardo automático en expediente.</span>
+                  </div>
+                  <span className={`status-pill ${contractDocument ? "status-live" : "status-warning"}`}>
+                    {contractDocument ? "Contrato guardado" : "Pendiente"}
+                  </span>
+                </div>
+
+                {canWrite ? (
+                  <>
+                    <div className="labor-file-contract-generator-summary">
+                      <div>
+                        <strong>{contractDocument?.originalFileName ?? "Sin contrato generado"}</strong>
+                        <span>
+                          {contractDocument
+                            ? `${formatFileSize(contractDocument.fileSizeBytes)} / ${formatDateTime(contractDocument.uploadedAt)}`
+                            : "El formulario puede prellenarse con IA a partir de los documentos cargados."}
+                        </span>
+                      </div>
+                      <div className="labor-file-contract-generator-actions">
+                        <button
+                          className="primary-button"
+                          disabled={prefillingContract || generatingContract}
+                          onClick={handleContractFormOpen}
+                          type="button"
+                        >
+                          {prefillingContract ? "Leyendo documentos..." : "Abrir formulario"}
+                        </button>
+                        {contractDocument ? (
+                          <button
+                            className="secondary-button"
+                            disabled={documentActionId === contractDocument.id}
+                            onClick={() => void handleDocumentDownload(contractDocument, "download")}
+                            type="button"
+                          >
+                            Descargar Word
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {contractFormOpen ? (
+                      <form className="labor-file-contract-form" onSubmit={handleContractGenerate}>
+                        <div className="labor-file-contract-form-head">
+                          <div>
+                            <h3>Información del trabajador</h3>
+                            <span>Los campos prellenados pueden editarse antes de generar el documento.</span>
+                          </div>
+                          <button
+                            className="secondary-button"
+                            disabled={prefillingContract || generatingContract}
+                            onClick={() => void handleContractPrefill()}
+                            type="button"
+                          >
+                            {prefillingContract ? "Prellenando..." : "Prellenar con IA"}
+                          </button>
+                        </div>
+
+                        <div className="labor-file-contract-field-grid">
+                          <label className="form-field">
+                            <span>Nombre completo</span>
+                            <input
+                              required
+                              value={contractForm.employeeName}
+                              onChange={(event) => updateContractFormField("employeeName", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Puesto o labor</span>
+                            <input
+                              required
+                              value={contractForm.position}
+                              onChange={(event) => updateContractFormField("position", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>RFC</span>
+                            <input value={contractForm.rfc} onChange={(event) => updateContractFormField("rfc", event.target.value)} />
+                          </label>
+                          <label className="form-field">
+                            <span>CURP</span>
+                            <input value={contractForm.curp} onChange={(event) => updateContractFormField("curp", event.target.value)} />
+                          </label>
+                          <label className="form-field labor-file-contract-wide-field">
+                            <span>Domicilio</span>
+                            <textarea
+                              value={contractForm.employeeAddress}
+                              onChange={(event) => updateContractFormField("employeeAddress", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Teléfono</span>
+                            <input
+                              value={contractForm.employeePhone}
+                              onChange={(event) => updateContractFormField("employeePhone", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Fecha de ingreso/contrato</span>
+                            <input
+                              type="date"
+                              value={contractForm.originalContractDate}
+                              onChange={(event) => updateContractFormField("originalContractDate", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Hora de entrada</span>
+                            <input
+                              type="time"
+                              value={contractForm.workdayStart}
+                              onChange={(event) => updateContractFormField("workdayStart", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Hora de salida</span>
+                            <input
+                              type="time"
+                              value={contractForm.workdayEnd}
+                              onChange={(event) => updateContractFormField("workdayEnd", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Salario mensual bruto</span>
+                            <input
+                              placeholder="$0.00"
+                              value={contractForm.monthlyGrossSalary}
+                              onChange={(event) => updateContractFormField("monthlyGrossSalary", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Salario mensual en letra</span>
+                            <input
+                              value={contractForm.monthlyGrossSalaryText}
+                              onChange={(event) => updateContractFormField("monthlyGrossSalaryText", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Pago quincenal bruto</span>
+                            <input
+                              placeholder="$0.00"
+                              value={contractForm.biweeklyGrossSalary}
+                              onChange={(event) => updateContractFormField("biweeklyGrossSalary", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Pago quincenal en letra</span>
+                            <input
+                              value={contractForm.biweeklyGrossSalaryText}
+                              onChange={(event) => updateContractFormField("biweeklyGrossSalaryText", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Fecha de firma</span>
+                            <input
+                              type="date"
+                              value={contractForm.signingDate}
+                              onChange={(event) => updateContractFormField("signingDate", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Ciudad de firma</span>
+                            <input
+                              value={contractForm.signingCity}
+                              onChange={(event) => updateContractFormField("signingCity", event.target.value)}
+                            />
+                          </label>
+                        </div>
+
+                        {contractPrefillSources.length > 0 || contractPrefillNotes.length > 0 ? (
+                          <div className="labor-file-contract-prefill-panel">
+                            {contractPrefillSources.length > 0 ? (
+                              <div>
+                                <strong>Campos con soporte documental</strong>
+                                <span>
+                                  {contractPrefillSources.map((source) =>
+                                    `${CONTRACT_FIELD_LABELS[source.field]}${source.originalFileName ? ` (${source.originalFileName})` : ""}`
+                                  ).join(", ")}
+                                </span>
+                              </div>
+                            ) : null}
+                            {contractPrefillNotes.length > 0 ? (
+                              <div>
+                                <strong>Notas IA</strong>
+                                <span>{contractPrefillNotes.join(" ")}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div className="form-actions">
+                          <button className="primary-button" disabled={generatingContract || prefillingContract} type="submit">
+                            {generatingContract ? "Generando..." : "Generar y guardar .docx"}
+                          </button>
+                          <button
+                            className="secondary-button"
+                            disabled={generatingContract || prefillingContract}
+                            onClick={() => setContractFormOpen(false)}
+                            type="button"
+                          >
+                            Cerrar formulario
+                          </button>
+                        </div>
+                      </form>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="centered-inline-message">Solo usuarios con permisos de escritura pueden generar contratos laborales.</div>
+                )}
               </section>
 
               <section className="panel labor-file-vacations-panel">

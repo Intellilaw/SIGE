@@ -58,7 +58,11 @@ import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses
 import { PrismaHolidaysRepository } from "./repositories/holidays.repository";
 import { PrismaInternalContractsRepository } from "./repositories/internal-contracts.repository";
 import { PrismaKpisRepository } from "./repositories/kpis.repository";
-import { PrismaLaborFilesRepository } from "./repositories/labor-files.repository";
+import {
+  LocalLaborFilesRepository,
+  PrismaLaborFilesRepository,
+  ResilientLaborFilesRepository
+} from "./repositories/labor-files.repository";
 import { PrismaLeadsRepository } from "./repositories/leads.repository";
 import { LocalAuthRepository } from "./repositories/local-auth.repository";
 import {
@@ -73,6 +77,7 @@ import { PrismaQuotesRepository } from "./repositories/quotes.repository";
 import { ResilientAuthRepository } from "./repositories/resilient-auth.repository";
 import {
   ResilientClientsRepository,
+  ResilientFinanceRepository,
   ResilientMattersRepository,
   ResilientQuotesRepository,
   ResilientTasksRepository
@@ -83,6 +88,7 @@ import type {
   AuthRepository,
   ClientsRepository,
   DailyDocumentsRepository,
+  FinanceRepository,
   HolidaysRepository,
   InternalContractsRepository,
   LaborFilesRepository,
@@ -105,7 +111,7 @@ declare module "fastify" {
       commissions: PrismaCommissionsRepository;
       dailyDocuments: DailyDocumentsRepository;
       dashboard: PrismaDashboardRepository;
-      finances: PrismaFinanceRepository;
+      finances: FinanceRepository;
       generalExpenses: PrismaGeneralExpensesRepository;
       holidays: HolidaysRepository;
       internalContracts: InternalContractsRepository;
@@ -195,12 +201,22 @@ export async function buildApp() {
     commissions: new PrismaCommissionsRepository(prisma),
     dailyDocuments: new PrismaDailyDocumentsRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
-    finances: new PrismaFinanceRepository(prisma),
+    finances: new ResilientFinanceRepository(
+      new PrismaFinanceRepository(prisma),
+      env.APP_ENV === "development",
+      app.log
+    ),
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
     holidays: new PrismaHolidaysRepository(prisma),
     internalContracts: new PrismaInternalContractsRepository(prisma),
     kpis: new PrismaKpisRepository(prisma),
-    laborFiles: new PrismaLaborFilesRepository(prisma),
+    laborFiles: new ResilientLaborFilesRepository(
+      new PrismaLaborFilesRepository(prisma),
+      env.APP_ENV === "development" && LocalLaborFilesRepository.isAvailable()
+        ? new LocalLaborFilesRepository()
+        : null,
+      app.log
+    ),
     leads: new PrismaLeadsRepository(prisma),
     matters: new ResilientMattersRepository(
       new PrismaMattersRepository(prisma),

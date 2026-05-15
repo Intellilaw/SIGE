@@ -14,6 +14,7 @@ import { COMMISSION_SECTIONS } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { canWriteModule, hasPermission } from "../auth/permissions";
 
 type ActiveTab = "calculation" | "receivers" | "snapshots";
 
@@ -76,6 +77,7 @@ const EMPTY_CALCULATION: SectionCalculation = {
   deductionMxn: 0,
   netTotalMxn: 0
 };
+const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
 
 function normalizeText(value?: string | null) {
   return (value ?? "")
@@ -592,18 +594,43 @@ export function CommissionsPage() {
   const [editingReceiverId, setEditingReceiverId] = useState<string | null>(null);
   const [editingReceiverName, setEditingReceiverName] = useState("");
   const [viewingSnapshot, setViewingSnapshot] = useState<CommissionSnapshot | null>(null);
+  const canWriteCommissions = canWriteModule(user, "commissions");
+  const canWriteClientRelationsCommissions = hasPermission(user, "commissions:client-relations:write");
+  const canWriteOwnCommissionSection = hasPermission(user, "commissions:own-section:write");
+  const canReadClients = hasPermission(user, "clients:read");
 
   const visibleSections = useMemo(() => {
     const userRole = normalizeText(user?.specificRole);
 
-    if (user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
+    if (canWriteCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
       return [...COMMISSION_SECTIONS];
     }
 
+    if (canWriteClientRelationsCommissions) {
+      return COMMISSION_SECTIONS.filter(
+        (section) => normalizeText(section) === normalizeText(CLIENT_RELATIONS_COMMISSION_SECTION)
+      );
+    }
+
     return COMMISSION_SECTIONS.filter((section) => normalizeText(section) === userRole);
-  }, [user?.legacyRole, user?.role, user?.specificRole]);
+  }, [canWriteClientRelationsCommissions, canWriteCommissions, user?.legacyRole, user?.role, user?.specificRole]);
 
   const canAccessCalculation = visibleSections.length > 0;
+  const visibleSectionKeys = useMemo(
+    () => new Set(visibleSections.map((section) => normalizeText(section))),
+    [visibleSections]
+  );
+  const canWriteActiveSection = Boolean(
+    canWriteCommissions ||
+    (
+      canWriteClientRelationsCommissions &&
+      normalizeText(activeSection) === normalizeText(CLIENT_RELATIONS_COMMISSION_SECTION)
+    ) ||
+    (
+      canWriteOwnCommissionSection &&
+      visibleSectionKeys.has(normalizeText(activeSection))
+    )
+  );
 
   useEffect(() => {
     if (visibleSections.length === 0) {
@@ -616,6 +643,12 @@ export function CommissionsPage() {
     }
   }, [activeSection, visibleSections]);
 
+  useEffect(() => {
+    if (activeTab === "receivers" && !canWriteCommissions) {
+      setActiveTab("calculation");
+    }
+  }, [activeTab, canWriteCommissions]);
+
   async function loadBoard() {
     setLoadingBoard(true);
     setErrorMessage(null);
@@ -623,7 +656,7 @@ export function CommissionsPage() {
     try {
       const [overview, clientsResponse] = await Promise.all([
         apiGet<CommissionsOverviewResponse>(`/commissions/overview?year=${selectedYear}&month=${selectedMonth}`),
-        apiGet<Client[]>("/clients")
+        canReadClients ? apiGet<Client[]>("/clients") : Promise.resolve([])
       ]);
 
       setFinanceRecords(overview.financeRecords);
@@ -664,6 +697,10 @@ export function CommissionsPage() {
   );
 
   async function handleCreateReceiver() {
+    if (!canWriteCommissions) {
+      return;
+    }
+
     const name = newReceiverName.trim();
     if (!name) {
       return;
@@ -685,6 +722,10 @@ export function CommissionsPage() {
   }
 
   async function handleUpdateReceiver() {
+    if (!canWriteCommissions) {
+      return;
+    }
+
     if (!editingReceiverId || !editingReceiverName.trim()) {
       return;
     }
@@ -712,6 +753,10 @@ export function CommissionsPage() {
   }
 
   async function handleDeleteReceiver(receiverId: string) {
+    if (!canWriteCommissions) {
+      return;
+    }
+
     if (!window.confirm("Eliminar este receptor puede afectar calculos historicos. Deseas continuar?")) {
       return;
     }
@@ -731,6 +776,10 @@ export function CommissionsPage() {
   }
 
   async function handleCreateSnapshot() {
+    if (!canWriteActiveSection) {
+      return;
+    }
+
     if (!activeSection) {
       setFlash({ tone: "error", text: "Selecciona primero una seccion para guardar la estampa." });
       return;
@@ -772,7 +821,11 @@ export function CommissionsPage() {
     }
   }
 
-  const snapshotCards = loadingSnapshots ? [] : snapshots;
+  const snapshotCards = loadingSnapshots
+    ? []
+    : canWriteCommissions
+      ? snapshots
+      : snapshots.filter((snapshot) => visibleSectionKeys.has(normalizeText(snapshot.section)));
   const activeSectionLabel = activeSection || "Sin seccion";
   const shouldShowDeductionPanel = Boolean(activeSection && normalizeText(activeSection) !== normalizeText("Direccion general"));
   const yearOptions = Array.from({ length: 7 }, (_, index) => 2024 + index);
@@ -806,13 +859,15 @@ export function CommissionsPage() {
           >
             Calculo de comisiones
           </button>
-          <button
-            type="button"
-            className={`commissions-tab ${activeTab === "receivers" ? "is-active" : ""}`}
-            onClick={() => setActiveTab("receivers")}
-          >
-            Receptores
-          </button>
+          {canWriteCommissions ? (
+            <button
+              type="button"
+              className={`commissions-tab ${activeTab === "receivers" ? "is-active" : ""}`}
+              onClick={() => setActiveTab("receivers")}
+            >
+              Receptores
+            </button>
+          ) : null}
           <button
             type="button"
             className={`commissions-tab ${activeTab === "snapshots" ? "is-active" : ""}`}
@@ -878,7 +933,7 @@ export function CommissionsPage() {
                   <button className="secondary-button" type="button" onClick={() => void loadBoard()}>
                     Refrescar
                   </button>
-                  <button className="primary-button" type="button" onClick={() => void handleCreateSnapshot()} disabled={savingSnapshot}>
+                  <button className="primary-button" type="button" onClick={() => void handleCreateSnapshot()} disabled={savingSnapshot || !canWriteActiveSection}>
                     {savingSnapshot ? "Guardando..." : "Guardar estampa"}
                   </button>
                 </div>
@@ -964,6 +1019,7 @@ export function CommissionsPage() {
             <span>{receivers.length} registros</span>
           </div>
 
+          {canWriteCommissions ? (
           <div className="commissions-receiver-form">
             <label className="form-field commissions-receiver-input">
               <span>Nuevo receptor</span>
@@ -984,6 +1040,7 @@ export function CommissionsPage() {
               {savingReceiver ? "Guardando..." : "Agregar receptor"}
             </button>
           </div>
+          ) : null}
 
           <div className="table-scroll">
             <table className="data-table">
@@ -1015,7 +1072,9 @@ export function CommissionsPage() {
                       </td>
                       <td>
                         <div className="table-actions">
-                          {editingReceiverId === receiver.id ? (
+                          {!canWriteCommissions ? (
+                            <span className="muted">Solo lectura</span>
+                          ) : editingReceiverId === receiver.id ? (
                             <>
                               <button className="primary-button" type="button" onClick={() => void handleUpdateReceiver()} disabled={savingReceiver}>
                                 Guardar

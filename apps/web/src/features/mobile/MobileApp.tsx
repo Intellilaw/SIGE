@@ -3,17 +3,21 @@ import type { FormEvent } from "react";
 import { Link, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 import type {
   Client,
+  FinanceRecord,
+  GeneralExpense,
   Lead,
   Matter,
   TaskDistributionEvent,
   TaskDistributionHistory,
   TaskTerm,
-  TaskTrackingRecord
+  TaskTrackingRecord,
+  Team
 } from "@sige/contracts";
-import { APP_VERSION_LABEL, APP_VERSION_TEXT } from "@sige/contracts";
+import { APP_VERSION_LABEL, APP_VERSION_TEXT, TEAM_OPTIONS } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import type { ExecutionModuleDescriptor } from "../execution/execution-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
@@ -35,6 +39,12 @@ type MobileTaskTarget = {
   reportedMonth: string;
 };
 
+type MobileAuthUser = {
+  role: string;
+  legacyRole: string;
+  permissions: string[];
+};
+
 type MobileLeadForm = {
   clientName: string;
   prospectName: string;
@@ -44,6 +54,39 @@ type MobileLeadForm = {
   nextInteractionLabel: string;
   nextInteraction: string;
   notes: string;
+};
+
+type MobileFinanceForm = {
+  clientNumber: string;
+  clientName: string;
+  quoteNumber: string;
+  matterType: FinanceRecord["matterType"];
+  subject: string;
+  responsibleTeam: Team | "";
+  totalMatterMxn: string;
+  workingConcepts: string;
+  conceptFeesMxn: string;
+  previousPaymentsMxn: string;
+  paidThisMonthMxn: string;
+  paymentDate1: string;
+  expenseNotes1: string;
+  expenseAmount1Mxn: string;
+  nextPaymentDate: string;
+  nextPaymentNotes: string;
+  financeComments: string;
+};
+
+type MobileGeneralExpenseDistributionMode = "general" | "without-team" | "team";
+
+type MobileGeneralExpenseForm = {
+  detail: string;
+  amountMxn: string;
+  countsTowardLimit: boolean;
+  distributionMode: MobileGeneralExpenseDistributionMode;
+  team: GeneralExpense["team"];
+  paymentMethod: GeneralExpense["paymentMethod"];
+  bank: GeneralExpense["bank"] | "";
+  recurring: boolean;
 };
 
 const MOBILE_LEAD_CHANNELS: Array<{ value: Lead["communicationChannel"]; label: string }> = [
@@ -57,8 +100,39 @@ const MOBILE_LEAD_CHANNELS: Array<{ value: Lead["communicationChannel"]; label: 
 const TERMS_TABLE_ID = "terminos";
 const RECURRING_TERMS_TABLE_ID = "terminos-recurrentes";
 
+const MOBILE_GENERAL_EXPENSE_TEAMS: Array<{ value: GeneralExpense["team"]; label: string }> = [
+  { value: "Litigio", label: "Litigio" },
+  { value: "Corporativo y laboral", label: "Corporativo y laboral" },
+  { value: "Convenios", label: "Convenios" },
+  { value: "Der Financiero", label: "Der Financiero" },
+  { value: "Compliance Fiscal", label: "Compliance Fiscal" }
+];
+
+const MOBILE_GENERAL_EXPENSE_BANKS: Array<NonNullable<GeneralExpense["bank"]>> = ["Banamex", "HSBC"];
+
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function normalizeResponsibleOption(value?: string | null) {
+  return normalizeText(value).toUpperCase();
+}
+
+function splitResponsibleOptions(value?: string | null) {
+  return normalizeText(value)
+    .split(/[\/,;]/)
+    .map(normalizeResponsibleOption)
+    .filter(Boolean);
+}
+
+function dedupeResponsibleOptions(values: Array<string | undefined | null>) {
+  return Array.from(new Set(values.map(normalizeResponsibleOption).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right)
+  );
+}
+
+function getDefaultResponsibleOption(userShortName?: string | null, moduleDefaultResponsible?: string | null) {
+  return normalizeResponsibleOption(userShortName) || splitResponsibleOptions(moduleDefaultResponsible)[0] || "";
 }
 
 function normalizeComparableText(value?: string | null) {
@@ -113,8 +187,155 @@ function initialLeadForm(): MobileLeadForm {
   };
 }
 
+function initialFinanceForm(): MobileFinanceForm {
+  return {
+    clientNumber: "",
+    clientName: "",
+    quoteNumber: "",
+    matterType: "ONE_TIME",
+    subject: "",
+    responsibleTeam: "",
+    totalMatterMxn: "",
+    workingConcepts: "",
+    conceptFeesMxn: "",
+    previousPaymentsMxn: "",
+    paidThisMonthMxn: "",
+    paymentDate1: todayInput(),
+    expenseNotes1: "",
+    expenseAmount1Mxn: "",
+    nextPaymentDate: "",
+    nextPaymentNotes: "",
+    financeComments: ""
+  };
+}
+
+function initialGeneralExpenseForm(): MobileGeneralExpenseForm {
+  return {
+    detail: "",
+    amountMxn: "",
+    countsTowardLimit: false,
+    distributionMode: "general",
+    team: "Litigio",
+    paymentMethod: "Transferencia",
+    bank: "Banamex",
+    recurring: false
+  };
+}
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error && error.message ? error.message : "Ocurrio un error inesperado.";
+}
+
+function hasMobilePermission(user: MobileAuthUser | null | undefined, permission: string) {
+  return Boolean(user?.permissions.includes("*") || user?.permissions.includes(permission));
+}
+
+function canReadMobileFinances(user?: MobileAuthUser | null) {
+  return canReadModule(user, "finances");
+}
+
+function canWriteMobileFinances(user?: MobileAuthUser | null) {
+  return canWriteModule(user, "finances");
+}
+
+function canReadMobileLeads(user?: MobileAuthUser | null) {
+  return canReadModule(user, "lead-tracking");
+}
+
+function canReadMobileGeneralExpenses(user?: MobileAuthUser | null) {
+  return canReadModule(user, "general-expenses");
+}
+
+function canWriteMobileGeneralExpenses(user?: MobileAuthUser | null) {
+  return canWriteModule(user, "general-expenses");
+}
+
+function canReadMobileExecution(user?: MobileAuthUser | null) {
+  return canReadModule(user, "execution");
+}
+
+function parseMoneyInput(value: string) {
+  const parsed = Number(value.replace(/,/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 2
+  }).format(Number(value || 0));
+}
+
+function getMonthName(month: number) {
+  return [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre"
+  ][month - 1] ?? String(month);
+}
+
+function getTeamLabel(team?: Team | null) {
+  return TEAM_OPTIONS.find((option) => option.key === team)?.label ?? "-";
+}
+
+function getFinanceMatterTypeLabel(type: FinanceRecord["matterType"]) {
+  return type === "RETAINER" ? "Iguala" : "Unico";
+}
+
+function formatDateList(values: Array<string | null | undefined>) {
+  const dates = values.map(toDateInput).filter(Boolean);
+  return dates.length > 0 ? dates.join(" / ") : "-";
+}
+
+function getGeneralExpenseDistributionPatch(form: MobileGeneralExpenseForm) {
+  if (form.distributionMode === "general") {
+    return {
+      team: "General" as GeneralExpense["team"],
+      generalExpense: true,
+      expenseWithoutTeam: false
+    };
+  }
+
+  if (form.distributionMode === "without-team") {
+    return {
+      team: "Sin equipo" as GeneralExpense["team"],
+      generalExpense: false,
+      expenseWithoutTeam: true
+    };
+  }
+
+  return {
+    team: form.team,
+    generalExpense: false,
+    expenseWithoutTeam: false,
+    pctLitigation: form.team === "Litigio" ? 100 : 0,
+    pctCorporateLabor: form.team === "Corporativo y laboral" ? 100 : 0,
+    pctSettlements: form.team === "Convenios" ? 100 : 0,
+    pctFinancialLaw: form.team === "Der Financiero" ? 100 : 0,
+    pctTaxCompliance: form.team === "Compliance Fiscal" ? 100 : 0
+  };
+}
+
+function getGeneralExpenseDistributionLabel(expense: GeneralExpense) {
+  if (expense.generalExpense) {
+    return "Gasto general";
+  }
+
+  if (expense.expenseWithoutTeam) {
+    return "Sin equipo";
+  }
+
+  return expense.team || "Sin equipo";
 }
 
 function getEffectiveClientNumber(matter: Matter, clients: Client[]) {
@@ -332,6 +553,10 @@ function buildDistributionPayload(
 
 export function MobileProtectedLayout() {
   const { user, loading, logout } = useAuth();
+  const showLeads = canReadMobileLeads(user);
+  const showFinances = canReadMobileFinances(user);
+  const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+  const showExecution = canReadMobileExecution(user);
 
   if (loading) {
     return <div className="mobile-centered">Cargando SIGE...</div>;
@@ -357,33 +582,58 @@ export function MobileProtectedLayout() {
 
       <nav className="mobile-tabbar" aria-label="Navegacion movil">
         <NavLink to="/mobile" end>Inicio</NavLink>
-        <NavLink to="/mobile/leads">Leads</NavLink>
-        <NavLink to="/mobile/execution">Ejecucion</NavLink>
-        <NavLink to="/mobile/tracking">Seguimiento</NavLink>
+        {showLeads ? <NavLink to="/mobile/leads">Leads</NavLink> : null}
+        {showFinances ? <NavLink to="/mobile/finances">Finanzas</NavLink> : null}
+        {showGeneralExpenses ? <NavLink to="/mobile/general-expenses">Gastos</NavLink> : null}
+        {showExecution ? <NavLink to="/mobile/execution">Ejecucion</NavLink> : null}
+        {showExecution ? <NavLink to="/mobile/tracking">Seguimiento</NavLink> : null}
       </nav>
     </div>
   );
 }
 
 export function MobileHomePage() {
+  const { user } = useAuth();
+  const showLeads = canReadMobileLeads(user);
+  const showFinances = canReadMobileFinances(user);
+  const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+  const showExecution = canReadMobileExecution(user);
+
   return (
     <section className="mobile-stack">
       <div className="mobile-action-grid">
-        <Link className="mobile-home-action" to="/mobile/leads">
-          Leads
-        </Link>
-        <Link className="mobile-home-action" to="/mobile/execution">
-          Crear tarea
-        </Link>
-        <Link className="mobile-home-action" to="/mobile/tracking">
-          Ver seguimiento
-        </Link>
+        {showLeads ? (
+          <Link className="mobile-home-action" to="/mobile/leads">
+            Leads
+          </Link>
+        ) : null}
+        {showFinances ? (
+          <Link className="mobile-home-action" to="/mobile/finances">
+            Finanzas
+          </Link>
+        ) : null}
+        {showGeneralExpenses ? (
+          <Link className="mobile-home-action" to="/mobile/general-expenses">
+            Gastos generales
+          </Link>
+        ) : null}
+        {showExecution ? (
+          <Link className="mobile-home-action" to="/mobile/execution">
+            Crear tarea
+          </Link>
+        ) : null}
+        {showExecution ? (
+          <Link className="mobile-home-action" to="/mobile/tracking">
+            Ver seguimiento
+          </Link>
+        ) : null}
       </div>
     </section>
   );
 }
 
 export function MobileLeadsPage() {
+  const { user } = useAuth();
   const [form, setForm] = useState<MobileLeadForm>(() => initialLeadForm());
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -391,6 +641,8 @@ export function MobileLeadsPage() {
   const [search, setSearch] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const canRead = canReadMobileLeads(user);
+  const canWrite = canWriteModule(user, "lead-tracking");
 
   const visibleLeads = useMemo(() => {
     const query = normalizeComparableText(search);
@@ -424,8 +676,13 @@ export function MobileLeadsPage() {
   }
 
   useEffect(() => {
+    if (!canRead) {
+      setLoading(false);
+      return;
+    }
+
     void loadLeads();
-  }, []);
+  }, [canRead]);
 
   function updateField<Key extends keyof MobileLeadForm>(field: Key, value: MobileLeadForm[Key]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -434,6 +691,9 @@ export function MobileLeadsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canWrite) {
+      return;
+    }
 
     const clientName = normalizeText(form.clientName);
     const prospectName = normalizeText(form.prospectName);
@@ -480,6 +740,10 @@ export function MobileLeadsPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (!canRead) {
+    return <Navigate to="/mobile" replace />;
   }
 
   return (
@@ -573,7 +837,7 @@ export function MobileLeadsPage() {
           />
         </label>
 
-        <button className="mobile-submit" type="submit" disabled={submitting}>
+        <button className="mobile-submit" type="submit" disabled={submitting || !canWrite}>
           {submitting ? "Guardando..." : "Guardar lead"}
         </button>
       </form>
@@ -625,9 +889,803 @@ export function MobileLeadsPage() {
   );
 }
 
+export function MobileFinancesPage() {
+  const { user } = useAuth();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const canRead = canReadMobileFinances(user);
+  const canWrite = canWriteMobileFinances(user);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [form, setForm] = useState<MobileFinanceForm>(() => initialFinanceForm());
+  const [records, setRecords] = useState<FinanceRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const monthTotals = useMemo(() => {
+    return records.reduce(
+      (totals, record) => {
+        const income = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+        const expenses = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
+        return {
+          income: totals.income + income,
+          expenses: totals.expenses + expenses,
+          pending: totals.pending + Math.max(record.conceptFeesMxn - record.previousPaymentsMxn - income, 0)
+        };
+      },
+      { income: 0, expenses: 0, pending: 0 }
+    );
+  }, [records]);
+
+  const visibleRecords = useMemo(() => {
+    const query = normalizeComparableText(search);
+    const sorted = [...records].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
+
+    if (!query) {
+      return sorted;
+    }
+
+    return sorted.filter((record) =>
+      normalizeComparableText([
+        record.clientNumber,
+        record.clientName,
+        record.quoteNumber,
+        record.subject,
+        record.workingConcepts,
+        record.nextPaymentNotes,
+        record.financeComments
+      ].join(" ")).includes(query)
+    );
+  }, [records, search]);
+
+  async function loadFinanceRecords(year = selectedYear, month = selectedMonth) {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      setRecords(await apiGet<FinanceRecord[]>(`/finances/records?year=${year}&month=${month}`));
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!canRead) {
+      setLoading(false);
+      return;
+    }
+
+    void loadFinanceRecords();
+  }, [canRead, selectedMonth, selectedYear]);
+
+  function updateField<Key extends keyof MobileFinanceForm>(field: Key, value: MobileFinanceForm[Key]) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setSuccessMessage(null);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const clientName = normalizeText(form.clientName);
+    const subject = normalizeText(form.subject);
+    const paidThisMonthMxn = parseMoneyInput(form.paidThisMonthMxn);
+    const conceptFeesMxn = parseMoneyInput(form.conceptFeesMxn) || paidThisMonthMxn;
+    const totalMatterMxn = parseMoneyInput(form.totalMatterMxn) || conceptFeesMxn || paidThisMonthMxn;
+    const expenseAmount1Mxn = parseMoneyInput(form.expenseAmount1Mxn);
+
+    if (!clientName) {
+      setErrorMessage("Captura el cliente.");
+      return;
+    }
+
+    if (!subject) {
+      setErrorMessage("Captura el asunto o concepto.");
+      return;
+    }
+
+    if (!canWrite) {
+      setErrorMessage("Tu usuario no tiene permiso para agregar entradas de Finanzas.");
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const created = await apiPost<FinanceRecord>("/finances/records", {
+        year: selectedYear,
+        month: selectedMonth,
+        clientNumber: normalizeText(form.clientNumber) || null,
+        clientName,
+        quoteNumber: normalizeText(form.quoteNumber) || null,
+        matterType: form.matterType,
+        subject,
+        contractSignedStatus: "NOT_REQUIRED",
+        responsibleTeam: form.responsibleTeam || null,
+        totalMatterMxn,
+        workingConcepts: normalizeText(form.workingConcepts) || subject,
+        conceptFeesMxn,
+        previousPaymentsMxn: parseMoneyInput(form.previousPaymentsMxn),
+        nextPaymentDate: toDateInput(form.nextPaymentDate) || null,
+        nextPaymentNotes: normalizeText(form.nextPaymentNotes) || null,
+        paidThisMonthMxn,
+        paymentDate1: paidThisMonthMxn > 0 ? toDateInput(form.paymentDate1) || todayInput() : null,
+        expenseNotes1: normalizeText(form.expenseNotes1) || null,
+        expenseAmount1Mxn,
+        financeComments: normalizeText(form.financeComments) || "Captura movil"
+      });
+
+      setRecords((items) => [created, ...items.filter((item) => item.id !== created.id)]);
+      setForm(initialFinanceForm());
+      setSuccessMessage("Entrada agregada a Finanzas.");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!canRead) {
+    return (
+      <section className="mobile-stack">
+        <MobilePageTitle title="Finanzas" subtitle="Captura rapida de entradas del mes." />
+        <div className="mobile-alert mobile-alert-error">Tu usuario no tiene permiso para ver Finanzas.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mobile-stack">
+      <MobilePageTitle title="Finanzas" subtitle="Agrega entradas del mes desde el celular." />
+
+      {errorMessage ? <div className="mobile-alert mobile-alert-error">{errorMessage}</div> : null}
+      {successMessage ? <div className="mobile-alert mobile-alert-success">{successMessage}</div> : null}
+
+      <section className="mobile-section">
+        <div className="mobile-section-head">
+          <h2>Periodo</h2>
+          <span>{getMonthName(selectedMonth)} {selectedYear}</span>
+        </div>
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Ano</span>
+            <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+              {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </label>
+          <label className="mobile-field">
+            <span>Mes</span>
+            <select value={selectedMonth} onChange={(event) => setSelectedMonth(Number(event.target.value))}>
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                <option key={month} value={month}>{getMonthName(month)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="mobile-finance-summary-grid">
+          <article>
+            <span>Cobrado</span>
+            <strong>{formatCurrency(monthTotals.income)}</strong>
+          </article>
+          <article>
+            <span>Gastos</span>
+            <strong>{formatCurrency(monthTotals.expenses)}</strong>
+          </article>
+          <article>
+            <span>Pendiente</span>
+            <strong>{formatCurrency(monthTotals.pending)}</strong>
+          </article>
+        </div>
+      </section>
+
+      <form className="mobile-section mobile-form-panel" onSubmit={(event) => void handleSubmit(event)}>
+        <div className="mobile-section-head">
+          <h2>Nueva entrada</h2>
+          <span>Finanzas</span>
+        </div>
+
+        <label className="mobile-field">
+          <span>Cliente</span>
+          <input
+            value={form.clientName}
+            onChange={(event) => updateField("clientName", event.target.value)}
+            placeholder="Nombre del cliente"
+          />
+        </label>
+
+        <label className="mobile-field">
+          <span>Asunto o concepto</span>
+          <input
+            value={form.subject}
+            onChange={(event) => updateField("subject", event.target.value)}
+            placeholder="Que se esta cobrando"
+          />
+        </label>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>No. cliente</span>
+            <input
+              value={form.clientNumber}
+              onChange={(event) => updateField("clientNumber", event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
+          <label className="mobile-field">
+            <span>No. cotizacion</span>
+            <input
+              value={form.quoteNumber}
+              onChange={(event) => updateField("quoteNumber", event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
+        </div>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Tipo</span>
+            <select
+              value={form.matterType}
+              onChange={(event) => updateField("matterType", event.target.value as FinanceRecord["matterType"])}
+            >
+              <option value="ONE_TIME">Unico</option>
+              <option value="RETAINER">Iguala</option>
+            </select>
+          </label>
+          <label className="mobile-field">
+            <span>Equipo</span>
+            <select
+              value={form.responsibleTeam}
+              onChange={(event) => updateField("responsibleTeam", event.target.value as Team | "")}
+            >
+              <option value="">Sin equipo</option>
+              {TEAM_OPTIONS.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label className="mobile-field">
+          <span>Conceptos trabajando</span>
+          <textarea
+            value={form.workingConcepts}
+            onChange={(event) => updateField("workingConcepts", event.target.value)}
+            placeholder="Descripcion breve"
+            rows={2}
+          />
+        </label>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Total asunto</span>
+            <input
+              inputMode="decimal"
+              value={form.totalMatterMxn}
+              onChange={(event) => updateField("totalMatterMxn", event.target.value)}
+              placeholder="0"
+            />
+          </label>
+          <label className="mobile-field">
+            <span>Honorarios</span>
+            <input
+              inputMode="decimal"
+              value={form.conceptFeesMxn}
+              onChange={(event) => updateField("conceptFeesMxn", event.target.value)}
+              placeholder="0"
+            />
+          </label>
+        </div>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Pagos previos</span>
+            <input
+              inputMode="decimal"
+              value={form.previousPaymentsMxn}
+              onChange={(event) => updateField("previousPaymentsMxn", event.target.value)}
+              placeholder="0"
+            />
+          </label>
+          <label className="mobile-field">
+            <span>Cobrado ahora</span>
+            <input
+              inputMode="decimal"
+              value={form.paidThisMonthMxn}
+              onChange={(event) => updateField("paidThisMonthMxn", event.target.value)}
+              placeholder="0"
+            />
+          </label>
+        </div>
+
+        <label className="mobile-field">
+          <span>Fecha de pago</span>
+          <input
+            type="date"
+            value={form.paymentDate1}
+            onChange={(event) => updateField("paymentDate1", event.target.value)}
+          />
+        </label>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Gasto</span>
+            <input
+              inputMode="decimal"
+              value={form.expenseAmount1Mxn}
+              onChange={(event) => updateField("expenseAmount1Mxn", event.target.value)}
+              placeholder="0"
+            />
+          </label>
+          <label className="mobile-field">
+            <span>Detalle gasto</span>
+            <input
+              value={form.expenseNotes1}
+              onChange={(event) => updateField("expenseNotes1", event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
+        </div>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Proximo pago</span>
+            <input
+              type="date"
+              value={form.nextPaymentDate}
+              onChange={(event) => updateField("nextPaymentDate", event.target.value)}
+            />
+          </label>
+          <label className="mobile-field">
+            <span>Detalle</span>
+            <input
+              value={form.nextPaymentNotes}
+              onChange={(event) => updateField("nextPaymentNotes", event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
+        </div>
+
+        <label className="mobile-field">
+          <span>Comentarios</span>
+          <textarea
+            value={form.financeComments}
+            onChange={(event) => updateField("financeComments", event.target.value)}
+            placeholder="Notas para Finanzas"
+            rows={3}
+          />
+        </label>
+
+        <button className="mobile-submit" type="submit" disabled={submitting || !canWrite}>
+          {submitting ? "Guardando..." : "Guardar entrada"}
+        </button>
+      </form>
+
+      <section className="mobile-section">
+        <div className="mobile-section-head">
+          <h2>Entradas del mes</h2>
+          <span>{visibleRecords.length}</span>
+        </div>
+
+        <label className="mobile-field">
+          <span>Buscar</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cliente, asunto, cotizacion..." />
+        </label>
+
+        {loading ? (
+          <div className="mobile-empty">Cargando Finanzas...</div>
+        ) : visibleRecords.length === 0 ? (
+          <div className="mobile-empty">No hay entradas para este periodo.</div>
+        ) : (
+          <div className="mobile-card-list">
+            {visibleRecords.map((record) => {
+              const income = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+              const expenses = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
+
+              return (
+                <article key={record.id} className="mobile-record-card mobile-finance-card">
+                  <div className="mobile-record-card-head">
+                    <strong>{record.clientName || "Sin cliente"}</strong>
+                    <span>{getFinanceMatterTypeLabel(record.matterType)}</span>
+                  </div>
+                  <p>{record.subject || "Sin asunto"}</p>
+                  <dl>
+                    <div>
+                      <dt>Cobrado</dt>
+                      <dd>{formatCurrency(income)}</dd>
+                    </div>
+                    <div>
+                      <dt>Gastos</dt>
+                      <dd>{formatCurrency(expenses)}</dd>
+                    </div>
+                    <div>
+                      <dt>Pago</dt>
+                      <dd>{formatDateList([record.paymentDate1, record.paymentDate2, record.paymentDate3])}</dd>
+                    </div>
+                    <div>
+                      <dt>Equipo</dt>
+                      <dd>{getTeamLabel(record.responsibleTeam)}</dd>
+                    </div>
+                    <div>
+                      <dt>Cotizacion</dt>
+                      <dd>{record.quoteNumber || "-"}</dd>
+                    </div>
+                  </dl>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+export function MobileGeneralExpensesPage() {
+  const { user } = useAuth();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const canRead = canReadMobileGeneralExpenses(user);
+  const canWrite = canWriteMobileGeneralExpenses(user);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [form, setForm] = useState<MobileGeneralExpenseForm>(() => initialGeneralExpenseForm());
+  const [records, setRecords] = useState<GeneralExpense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const monthTotals = useMemo(() => {
+    return records.reduce(
+      (totals, expense) => {
+        const amount = Number(expense.amountMxn || 0);
+        return {
+          total: totals.total + amount,
+          limit: totals.limit + (expense.countsTowardLimit ? amount : 0),
+          paid: totals.paid + (expense.paid ? amount : 0)
+        };
+      },
+      { total: 0, limit: 0, paid: 0 }
+    );
+  }, [records]);
+
+  const visibleRecords = useMemo(() => {
+    const query = normalizeComparableText(search);
+    const sorted = [...records].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
+
+    if (!query) {
+      return sorted;
+    }
+
+    return sorted.filter((expense) =>
+      normalizeComparableText([
+        expense.detail,
+        expense.team,
+        expense.paymentMethod,
+        expense.bank,
+        getGeneralExpenseDistributionLabel(expense)
+      ].join(" ")).includes(query)
+    );
+  }, [records, search]);
+
+  async function loadGeneralExpenses(year = selectedYear, month = selectedMonth) {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      setRecords(await apiGet<GeneralExpense[]>(`/general-expenses?year=${year}&month=${month}`));
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!canRead) {
+      setLoading(false);
+      return;
+    }
+
+    void loadGeneralExpenses();
+  }, [canRead, selectedMonth, selectedYear]);
+
+  function updateField<Key extends keyof MobileGeneralExpenseForm>(field: Key, value: MobileGeneralExpenseForm[Key]) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setSuccessMessage(null);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const detail = normalizeText(form.detail);
+    const amountMxn = parseMoneyInput(form.amountMxn);
+
+    if (!detail) {
+      setErrorMessage("Captura el detalle del gasto.");
+      return;
+    }
+
+    if (amountMxn <= 0) {
+      setErrorMessage("Captura un monto mayor a cero.");
+      return;
+    }
+
+    if (!canWrite) {
+      setErrorMessage("Tu usuario no tiene permiso para agregar gastos generales.");
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const created = await apiPost<GeneralExpense>("/general-expenses", {
+        year: selectedYear,
+        month: selectedMonth
+      });
+      const patch = {
+        detail,
+        amountMxn,
+        countsTowardLimit: form.countsTowardLimit,
+        paymentMethod: form.paymentMethod,
+        bank: form.paymentMethod === "Transferencia" ? form.bank || "Banamex" : null,
+        recurring: form.recurring,
+        ...getGeneralExpenseDistributionPatch(form)
+      };
+      const updated = await apiPatch<GeneralExpense>(`/general-expenses/${created.id}`, patch);
+
+      setRecords((items) => [updated, ...items.filter((item) => item.id !== updated.id)]);
+      setForm(initialGeneralExpenseForm());
+      setSuccessMessage("Gasto agregado.");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!canRead) {
+    return (
+      <section className="mobile-stack">
+        <MobilePageTitle title="Gastos generales" subtitle="Captura rapida de gastos del mes." />
+        <div className="mobile-alert mobile-alert-error">Tu usuario no tiene permiso para ver Gastos generales.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mobile-stack">
+      <MobilePageTitle title="Gastos generales" subtitle="Agrega gastos del mes desde el celular." />
+
+      {errorMessage ? <div className="mobile-alert mobile-alert-error">{errorMessage}</div> : null}
+      {successMessage ? <div className="mobile-alert mobile-alert-success">{successMessage}</div> : null}
+
+      <section className="mobile-section">
+        <div className="mobile-section-head">
+          <h2>Periodo</h2>
+          <span>{getMonthName(selectedMonth)} {selectedYear}</span>
+        </div>
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Ano</span>
+            <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+              {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </label>
+          <label className="mobile-field">
+            <span>Mes</span>
+            <select value={selectedMonth} onChange={(event) => setSelectedMonth(Number(event.target.value))}>
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                <option key={month} value={month}>{getMonthName(month)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="mobile-finance-summary-grid">
+          <article>
+            <span>Total</span>
+            <strong>{formatCurrency(monthTotals.total)}</strong>
+          </article>
+          <article>
+            <span>Limite</span>
+            <strong>{formatCurrency(monthTotals.limit)}</strong>
+          </article>
+          <article>
+            <span>Pagado</span>
+            <strong>{formatCurrency(monthTotals.paid)}</strong>
+          </article>
+        </div>
+      </section>
+
+      <form className="mobile-section mobile-form-panel" onSubmit={(event) => void handleSubmit(event)}>
+        <div className="mobile-section-head">
+          <h2>Nuevo gasto</h2>
+          <span>Movil</span>
+        </div>
+
+        <label className="mobile-field">
+          <span>Detalle</span>
+          <textarea
+            value={form.detail}
+            onChange={(event) => updateField("detail", event.target.value)}
+            placeholder="Concepto del gasto"
+            rows={3}
+          />
+        </label>
+
+        <div className="mobile-two-fields">
+          <label className="mobile-field">
+            <span>Monto</span>
+            <input
+              inputMode="decimal"
+              value={form.amountMxn}
+              onChange={(event) => updateField("amountMxn", event.target.value)}
+              placeholder="0"
+            />
+          </label>
+          <label className="mobile-field">
+            <span>Metodo</span>
+            <select
+              value={form.paymentMethod}
+              onChange={(event) => updateField("paymentMethod", event.target.value as GeneralExpense["paymentMethod"])}
+            >
+              <option value="Transferencia">Transferencia</option>
+              <option value="Efectivo">Efectivo</option>
+            </select>
+          </label>
+        </div>
+
+        {form.paymentMethod === "Transferencia" ? (
+          <label className="mobile-field">
+            <span>Banco</span>
+            <select
+              value={form.bank}
+              onChange={(event) => updateField("bank", event.target.value as GeneralExpense["bank"])}
+            >
+              {MOBILE_GENERAL_EXPENSE_BANKS.map((bank) => (
+                <option key={bank} value={bank}>{bank}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        <div className="mobile-segmented mobile-three-segmented">
+          <button
+            type="button"
+            className={form.distributionMode === "general" ? "is-active" : ""}
+            onClick={() => updateField("distributionMode", "general")}
+          >
+            General
+          </button>
+          <button
+            type="button"
+            className={form.distributionMode === "without-team" ? "is-active" : ""}
+            onClick={() => updateField("distributionMode", "without-team")}
+          >
+            Sin equipo
+          </button>
+          <button
+            type="button"
+            className={form.distributionMode === "team" ? "is-active" : ""}
+            onClick={() => updateField("distributionMode", "team")}
+          >
+            Equipo
+          </button>
+        </div>
+
+        {form.distributionMode === "team" ? (
+          <label className="mobile-field">
+            <span>Equipo</span>
+            <select
+              value={form.team}
+              onChange={(event) => updateField("team", event.target.value as GeneralExpense["team"])}
+            >
+              {MOBILE_GENERAL_EXPENSE_TEAMS.map((team) => (
+                <option key={team.value} value={team.value}>{team.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        <div className="mobile-checkbox-list">
+          <label>
+            <input
+              type="checkbox"
+              checked={form.countsTowardLimit}
+              onChange={(event) => updateField("countsTowardLimit", event.target.checked)}
+            />
+            <span>Cuenta para limite</span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={form.recurring}
+              onChange={(event) => updateField("recurring", event.target.checked)}
+            />
+            <span>Gasto recurrente</span>
+          </label>
+        </div>
+
+        <button className="mobile-submit" type="submit" disabled={submitting || !canWrite}>
+          {submitting ? "Guardando..." : "Guardar gasto"}
+        </button>
+      </form>
+
+      <section className="mobile-section">
+        <div className="mobile-section-head">
+          <h2>Gastos del mes</h2>
+          <span>{visibleRecords.length}</span>
+        </div>
+
+        <label className="mobile-field">
+          <span>Buscar</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Detalle, equipo, banco..." />
+        </label>
+
+        {loading ? (
+          <div className="mobile-empty">Cargando gastos...</div>
+        ) : visibleRecords.length === 0 ? (
+          <div className="mobile-empty">No hay gastos para este periodo.</div>
+        ) : (
+          <div className="mobile-card-list">
+            {visibleRecords.map((expense) => (
+              <article key={expense.id} className="mobile-record-card mobile-expense-card">
+                <div className="mobile-record-card-head">
+                  <strong>{expense.detail || "Sin detalle"}</strong>
+                  <span>{expense.paid ? "Pagado" : "Pendiente"}</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>Monto</dt>
+                    <dd>{formatCurrency(expense.amountMxn)}</dd>
+                  </div>
+                  <div>
+                    <dt>Tipo</dt>
+                    <dd>{getGeneralExpenseDistributionLabel(expense)}</dd>
+                  </div>
+                  <div>
+                    <dt>Metodo</dt>
+                    <dd>{expense.paymentMethod}{expense.bank ? ` / ${expense.bank}` : ""}</dd>
+                  </div>
+                  <div>
+                    <dt>Limite</dt>
+                    <dd>{expense.countsTowardLimit ? "Si" : "No"}</dd>
+                  </div>
+                  <div>
+                    <dt>Recurrente</dt>
+                    <dd>{expense.recurring ? "Si" : "No"}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
 export function MobileExecutionIndexPage() {
   const { user } = useAuth();
   const visibleModules = getVisibleExecutionModules(user);
+
+  if (!canReadMobileExecution(user)) {
+    return <Navigate to="/mobile" replace />;
+  }
 
   if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
     return <Navigate to={`/mobile/execution/${visibleModules[0].slug}`} replace />;
@@ -723,7 +1781,8 @@ export function MobileExecutionTeamPage() {
   const [eventSearch, setEventSearch] = useState("");
   const [eventSearchOpen, setEventSearchOpen] = useState(false);
   const [targets, setTargets] = useState<MobileTaskTarget[]>([]);
-  const [responsible, setResponsible] = useState(user?.shortName || module?.defaultResponsible || "");
+  const [responsible, setResponsible] = useState(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
+  const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
   const eventSearchRef = useRef<HTMLDivElement | null>(null);
@@ -744,6 +1803,19 @@ export function MobileExecutionTeamPage() {
 
     return events.filter((event) => normalizeComparableText(event.name).includes(query));
   }, [eventSearch, events]);
+  const fallbackResponsibleOptions = useMemo(
+    () => splitResponsibleOptions(module?.defaultResponsible),
+    [module?.defaultResponsible]
+  );
+  const moduleResponsibleOptions = useMemo(
+    () => dedupeResponsibleOptions([
+      ...responsibleOptions,
+      ...fallbackResponsibleOptions,
+      user?.shortName,
+      responsible
+    ]),
+    [fallbackResponsibleOptions, responsible, responsibleOptions, user?.shortName]
+  );
 
   async function loadModuleData() {
     if (!module) {
@@ -789,8 +1861,39 @@ export function MobileExecutionTeamPage() {
   }, [module?.moduleId, canAccess]);
 
   useEffect(() => {
-    setResponsible(user?.shortName || module?.defaultResponsible || "");
+    setResponsible(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
   }, [module?.moduleId, user?.shortName]);
+
+  useEffect(() => {
+    if (!module || !canAccess) {
+      setResponsibleOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const team = module.team;
+    const fallbackOptions = splitResponsibleOptions(module.defaultResponsible);
+
+    async function loadResponsibleOptions() {
+      try {
+        const loaded = await apiGet<string[]>(`/users/team-short-names?team=${encodeURIComponent(team)}`);
+        const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions, user?.shortName]);
+        if (!cancelled) {
+          setResponsibleOptions(nextOptions.length > 0 ? nextOptions : fallbackOptions);
+        }
+      } catch {
+        if (!cancelled) {
+          setResponsibleOptions(dedupeResponsibleOptions([...fallbackOptions, user?.shortName]));
+        }
+      }
+    }
+
+    void loadResponsibleOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canAccess, module?.moduleId, module?.team, module?.defaultResponsible, user?.shortName]);
 
   useEffect(() => {
     if (!eventSearchOpen) {
@@ -959,7 +2062,14 @@ export function MobileExecutionTeamPage() {
           <div className="mobile-two-fields">
             <label className="mobile-field">
               <span>Responsable</span>
-              <input value={responsible} onChange={(event) => setResponsible(event.target.value)} />
+              <select value={responsible} onChange={(event) => setResponsible(event.target.value)}>
+                <option value="">Seleccionar responsable</option>
+                {moduleResponsibleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="mobile-field">
               <span>Fecha</span>
@@ -1098,6 +2208,10 @@ export function MobileExecutionTeamPage() {
 export function MobileTrackingIndexPage() {
   const { user } = useAuth();
   const visibleModules = getVisibleExecutionModules(user);
+
+  if (!canReadMobileExecution(user)) {
+    return <Navigate to="/mobile" replace />;
+  }
 
   return (
     <section className="mobile-stack">

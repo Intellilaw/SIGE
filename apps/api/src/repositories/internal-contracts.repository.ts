@@ -11,6 +11,9 @@ import type {
   InternalContractWriteRecord
 } from "./types";
 
+const LABOR_FILE_CONTRACT_DOCUMENT_ID_PREFIX = "labor-file-document:";
+const LABOR_FILE_CONTRACT_DOCUMENT_TYPES = ["EMPLOYMENT_CONTRACT", "ADDENDUM"] as const;
+
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
 }
@@ -65,15 +68,110 @@ function toPrismaBytes(content?: Buffer | null) {
   return bytes;
 }
 
+function normalizeIdentifierSegment(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toUpperCase();
+}
+
+function parseLaborFileDocumentContractId(contractId: string) {
+  const normalized = contractId.includes("%") ? decodeURIComponent(contractId) : contractId;
+  return normalized.startsWith(LABOR_FILE_CONTRACT_DOCUMENT_ID_PREFIX)
+    ? normalized.slice(LABOR_FILE_CONTRACT_DOCUMENT_ID_PREFIX.length)
+    : null;
+}
+
+function buildLaborFileContractNumber(record: {
+  id: string;
+  documentType: string;
+  uploadedAt: Date;
+  laborFile: {
+    employeeName: string;
+    employeeUsername: string;
+    employeeShortName: string | null;
+  };
+}) {
+  const documentKind = record.documentType === "ADDENDUM" ? "ADD" : "LAB";
+  const collaborator = normalizeIdentifierSegment(
+    record.laborFile.employeeShortName || record.laborFile.employeeUsername || record.laborFile.employeeName || "COLABORADOR"
+  );
+  const uploadedDate = record.uploadedAt.toISOString().slice(0, 10).replace(/-/g, "");
+  const serial = record.id.slice(0, 8).toUpperCase();
+
+  return `EXP-${documentKind}-${collaborator}-${uploadedDate}-${serial}`;
+}
+
+function mapLaborFileDocumentToInternalContract(record: {
+  id: string;
+  documentType: string;
+  originalFileName: string;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  uploadedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  laborFile: {
+    employeeName: string;
+    employeeUsername: string;
+    employeeShortName: string | null;
+  };
+}): InternalContract {
+  return {
+    id: `${LABOR_FILE_CONTRACT_DOCUMENT_ID_PREFIX}${record.id}`,
+    contractNumber: buildLaborFileContractNumber(record),
+    contractType: "LABOR",
+    documentKind: record.documentType === "ADDENDUM" ? "ADDENDUM" : "CONTRACT",
+    collaboratorName: record.laborFile.employeeName,
+    originalFileName: record.originalFileName,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    paymentMilestones: [],
+    notes: "Origen: Expedientes Laborales.",
+    createdAt: record.uploadedAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
 export class PrismaInternalContractsRepository implements InternalContractsRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async list() {
-    const records = await this.prisma.internalContract.findMany({
-      orderBy: [{ createdAt: "desc" }, { contractNumber: "asc" }]
-    });
+    const [records, laborFileDocuments] = await Promise.all([
+      this.prisma.internalContract.findMany({
+        orderBy: [{ createdAt: "desc" }, { contractNumber: "asc" }]
+      }),
+      this.prisma.laborFileDocument.findMany({
+        where: {
+          documentType: { in: [...LABOR_FILE_CONTRACT_DOCUMENT_TYPES] }
+        },
+        orderBy: [{ uploadedAt: "desc" }, { originalFileName: "asc" }],
+        select: {
+          id: true,
+          documentType: true,
+          originalFileName: true,
+          fileMimeType: true,
+          fileSizeBytes: true,
+          uploadedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          laborFile: {
+            select: {
+              employeeName: true,
+              employeeUsername: true,
+              employeeShortName: true
+            }
+          }
+        }
+      })
+    ]);
 
-    return records.map(mapInternalContract);
+    return [
+      ...records.map(mapInternalContract),
+      ...laborFileDocuments.map(mapLaborFileDocumentToInternalContract)
+    ];
   }
 
   public async create(payload: InternalContractWriteRecord) {
@@ -114,11 +212,24 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
   }
 
   public async delete(contractId: string) {
+    if (parseLaborFileDocumentContractId(contractId)) {
+      throw new AppError(
+        400,
+        "LABOR_FILE_CONTRACT_DELETE_FROM_LABOR_FILES",
+        "Este contrato viene de Expedientes Laborales. Borralo desde el expediente laboral del trabajador."
+      );
+    }
+
     await this.findOrThrow(contractId);
     await this.prisma.internalContract.delete({ where: { id: contractId } });
   }
 
   public async findDocument(contractId: string) {
+    const laborFileDocumentId = parseLaborFileDocumentContractId(contractId);
+    if (laborFileDocumentId) {
+      return this.findLaborFileContractDocument(laborFileDocumentId);
+    }
+
     const record = await this.prisma.internalContract.findUnique({
       where: { id: contractId },
       select: {
@@ -135,6 +246,41 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
 
     return {
       contractNumber: record.contractNumber,
+      originalFileName: record.originalFileName,
+      fileMimeType: record.fileMimeType,
+      fileContent: Buffer.from(record.fileContent)
+    };
+  }
+
+  private async findLaborFileContractDocument(documentId: string) {
+    const record = await this.prisma.laborFileDocument.findFirst({
+      where: {
+        id: documentId,
+        documentType: { in: [...LABOR_FILE_CONTRACT_DOCUMENT_TYPES] }
+      },
+      select: {
+        id: true,
+        documentType: true,
+        originalFileName: true,
+        fileMimeType: true,
+        fileContent: true,
+        uploadedAt: true,
+        laborFile: {
+          select: {
+            employeeName: true,
+            employeeUsername: true,
+            employeeShortName: true
+          }
+        }
+      }
+    });
+
+    if (!record?.fileContent || !record.originalFileName) {
+      return null;
+    }
+
+    return {
+      contractNumber: buildLaborFileContractNumber(record),
       originalFileName: record.originalFileName,
       fileMimeType: record.fileMimeType,
       fileContent: Buffer.from(record.fileContent)

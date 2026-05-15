@@ -31,6 +31,10 @@ export class LaborFilesService {
     return this.repository.findDocument(documentId);
   }
 
+  public listDocumentsForContractPrefill(laborFileId: string) {
+    return this.repository.listDocumentsForContractPrefill(laborFileId);
+  }
+
   public findVacationAcceptanceDocument(eventId: string) {
     return this.repository.findVacationAcceptanceDocument(eventId);
   }

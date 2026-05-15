@@ -3,6 +3,11 @@ import { deriveEffectivePermissions } from "@sige/contracts";
 import { z } from "zod";
 
 import { getSessionUser, requireAnyPermissions, requireAuth } from "../../core/auth/guards";
+import {
+  laborContractFieldValuesSchema,
+  prefillLaborContractFields,
+  renderLaborContractDocx
+} from "./labor-contract-generator";
 
 const laborFileIdParamsSchema = z.object({
   laborFileId: z.string().min(1)
@@ -40,6 +45,8 @@ const uploadDocumentSchema = z.object({
   fileMimeType: z.string().nullable().optional(),
   fileBase64: z.string().min(1)
 });
+
+const laborContractGenerationSchema = laborContractFieldValuesSchema;
 
 const vacationEventSchema = z.object({
   eventType: z.enum(["PREVIOUS_YEAR_DEDUCTION", "VACATION"]),
@@ -143,6 +150,37 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
       fileMimeType: payload.fileMimeType,
       fileSizeBytes: fileContent.byteLength,
       fileContent
+    });
+  });
+
+  app.post("/labor-files/:laborFileId/contract/prefill", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    const laborFile = await service.findById(params.laborFileId);
+
+    if (!laborFile) {
+      throw new app.errors.AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    const documents = await service.listDocumentsForContractPrefill(params.laborFileId);
+    return prefillLaborContractFields(laborFile, documents);
+  });
+
+  app.post("/labor-files/:laborFileId/contract/generate", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    const payload = laborContractGenerationSchema.parse(request.body ?? {});
+    const laborFile = await service.findById(params.laborFileId);
+
+    if (!laborFile) {
+      throw new app.errors.AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    const generatedContract = await renderLaborContractDocx(laborFile, payload);
+    return service.uploadDocument(params.laborFileId, {
+      documentType: "EMPLOYMENT_CONTRACT",
+      originalFileName: generatedContract.filename,
+      fileMimeType: generatedContract.contentType,
+      fileSizeBytes: generatedContract.buffer.byteLength,
+      fileContent: generatedContract.buffer
     });
   });
 

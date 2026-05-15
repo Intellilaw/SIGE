@@ -32,6 +32,7 @@ type ContractFormState = {
 type InternalContractSection = InternalContractType | "TEMPLATES";
 
 const MODULE_TITLE = "Administraci\u00f3n de contratos internos";
+const LABOR_FILE_CONTRACT_ID_PREFIX = "labor-file-document:";
 
 const SECTION_LABELS: Record<InternalContractSection, string> = {
   PROFESSIONAL_SERVICES: "Contratos de prestaci\u00f3n de servicios profesionales",
@@ -214,6 +215,14 @@ function contractOwnerLabel(contract: InternalContract) {
   }
 
   return contract.collaboratorName ?? "-";
+}
+
+function isLaborFileBackedContract(contract: InternalContract) {
+  return contract.id.startsWith(LABOR_FILE_CONTRACT_ID_PREFIX);
+}
+
+function isPdfFile(file: File) {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 export function InternalContractsPage() {
@@ -445,6 +454,11 @@ export function InternalContractsPage() {
       return;
     }
 
+    if (activeSection === "LABOR" && !isPdfFile(selectedFile)) {
+      setFlash({ tone: "error", text: "Los contratos laborales firmados deben cargarse en PDF." });
+      return;
+    }
+
     setSaving(true);
     setFlash(null);
 
@@ -479,7 +493,7 @@ export function InternalContractsPage() {
     setFlash(null);
 
     try {
-      const { blob, filename } = await apiDownload(`/internal-contracts/${contract.id}/document`);
+      const { blob, filename } = await apiDownload(`/internal-contracts/${encodeURIComponent(contract.id)}/document`);
       downloadBlobFile(blob, filename ?? contract.originalFileName ?? `${contract.contractNumber}.bin`);
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
@@ -503,6 +517,14 @@ export function InternalContractsPage() {
   }
 
   async function handleDelete(contract: InternalContract) {
+    if (isLaborFileBackedContract(contract)) {
+      setFlash({
+        tone: "error",
+        text: "Este PDF viene de Expedientes Laborales. Para borrarlo, usa el expediente laboral del trabajador."
+      });
+      return;
+    }
+
     if (!window.confirm(`Seguro que deseas borrar el contrato ${contract.contractNumber}?`)) {
       return;
     }
@@ -697,7 +719,7 @@ export function InternalContractsPage() {
                   <span>Archivo</span>
                   <input
                     type="file"
-                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt"
+                    accept={activeSection === "LABOR" ? ".pdf,application/pdf" : ".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt"}
                     onChange={handleFileChange}
                     disabled={saving}
                   />
@@ -756,7 +778,13 @@ export function InternalContractsPage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={isTemplateSection ? "Machote, archivo o notas..." : "Contrato, cliente, colaborador, archivo o hito..."}
+                placeholder={
+                  isTemplateSection
+                    ? "Machote, archivo o notas..."
+                    : activeSection === "LABOR"
+                      ? "Contrato, colaborador, expediente o archivo..."
+                      : "Contrato, cliente, colaborador, archivo o hito..."
+                }
                 type="search"
               />
             </label>
@@ -826,9 +854,14 @@ export function InternalContractsPage() {
                     <span className="internal-contract-number">{contract.contractNumber}</span>
                     <h3>{contractOwnerLabel(contract)}</h3>
                   </div>
-                  <span className="status-pill status-live">
-                    {contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato"}
-                  </span>
+                  <div className="internal-contract-card-tags">
+                    <span className="status-pill status-live">
+                      {contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato"}
+                    </span>
+                    {isLaborFileBackedContract(contract) ? (
+                      <span className="status-pill status-migration">Expediente laboral</span>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="internal-contract-meta-grid">
@@ -850,9 +883,9 @@ export function InternalContractsPage() {
                       <li key={milestone.id}>{formatMilestone(milestone)}</li>
                     ))}
                   </ul>
-                ) : (
+                ) : contract.contractType === "PROFESSIONAL_SERVICES" ? (
                   <p className="muted internal-contract-empty-milestones">Sin hitos de pago capturados.</p>
-                )}
+                ) : null}
 
                 {contract.notes ? <p className="internal-contract-notes">{contract.notes}</p> : null}
 
@@ -865,7 +898,7 @@ export function InternalContractsPage() {
                   >
                     {downloadingId === contract.id ? "Descargando..." : "Descargar"}
                   </button>
-                  {canWrite ? (
+                  {canWrite && !isLaborFileBackedContract(contract) ? (
                     <button
                       className="danger-button"
                       type="button"

@@ -2,6 +2,8 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { useAuth } from "../auth/AuthContext";
+import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
 import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 function toDateInput(value) {
@@ -40,7 +42,10 @@ const EMPTY_FORM = {
 export function TaskAdditionalTasksPage() {
     const { slug } = useParams();
     const navigate = useNavigate();
+    const { user } = useAuth();
     const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
+    const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
+    const canAccessModule = Boolean(executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId));
     const [tasks, setTasks] = useState([]);
     const [form, setForm] = useState(EMPTY_FORM);
     const [editingId, setEditingId] = useState(null);
@@ -62,7 +67,7 @@ export function TaskAdditionalTasksPage() {
             .sort((left, right) => toDateInput(left.dueDate).localeCompare(toDateInput(right.dueDate)));
     }, [activeTab, completedMonth, tasks]);
     async function loadTasks() {
-        if (!moduleConfig) {
+        if (!moduleConfig || !canAccessModule) {
             return;
         }
         setLoading(true);
@@ -76,10 +81,10 @@ export function TaskAdditionalTasksPage() {
     }
     useEffect(() => {
         void loadTasks();
-    }, [moduleConfig]);
+    }, [canAccessModule, moduleConfig]);
     async function handleSubmit(event) {
         event.preventDefault();
-        if (!moduleConfig) {
+        if (!moduleConfig || !canAccessModule) {
             return;
         }
         const currentTask = editingId ? tasks.find((task) => task.id === editingId) : undefined;
@@ -122,7 +127,7 @@ export function TaskAdditionalTasksPage() {
         await apiDelete(`/tasks/additional/${task.id}`);
         setTasks((current) => current.filter((candidate) => candidate.id !== task.id));
     }
-    if (!moduleConfig) {
+    if (!moduleConfig || !executionModule || !canAccessModule) {
         return _jsx(Navigate, { to: "/app/tasks", replace: true });
     }
     return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsx("div", { className: "execution-page-topline", children: _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }) }), _jsxs("h2", { children: ["Tareas adicionales (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "Gestion de tareas adicionales con alta, modificacion, conclusion o reactivacion, borrado y resaltado rojo por fecha limite vencida." })] }), _jsx("section", { className: "panel", children: _jsxs("form", { className: "tasks-additional-form", onSubmit: handleSubmit, children: [_jsxs("label", { children: ["Tarea", _jsx("input", { className: "tasks-legacy-input", value: form.task, onChange: (event) => setForm((current) => ({ ...current, task: event.target.value })), required: true })] }), _jsxs("label", { children: ["Responsable", _jsxs("select", { className: "tasks-legacy-input", value: form.responsible, onChange: (event) => setForm((current) => ({ ...current, responsible: event.target.value })), required: true, children: [_jsx("option", { value: "", children: "Seleccionar responsable" }), responsibleOptions.map((responsible) => (_jsx("option", { value: responsible, children: responsible }, responsible)))] })] }), _jsxs("label", { children: ["Responsable 2", _jsxs("select", { className: "tasks-legacy-input", value: form.responsible2, onChange: (event) => setForm((current) => ({ ...current, responsible2: event.target.value })), children: [_jsx("option", { value: "", children: "Sin responsable 2" }), responsibleOptions.map((responsible) => (_jsx("option", { value: responsible, children: responsible }, responsible)))] })] }), _jsxs("label", { children: ["Fecha limite", _jsx("input", { className: "tasks-legacy-input", type: "date", value: form.dueDate, onChange: (event) => setForm((current) => ({ ...current, dueDate: event.target.value })), required: true })] }), _jsxs("label", { className: "tasks-additional-recurring-checkbox", children: [_jsx("input", { type: "checkbox", checked: form.recurring, onChange: (event) => setForm((current) => ({ ...current, recurring: event.target.checked })) }), _jsx("span", { children: "T\u00E9rmino recurrente" })] }), _jsxs("div", { className: "tasks-legacy-actions", children: [_jsx("button", { type: "submit", className: "primary-action-button", children: editingId ? "Guardar cambios" : "Agregar nueva tarea" }), editingId ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => { setEditingId(null); setForm(EMPTY_FORM); }, children: "Cancelar" })) : null] })] }) }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Listado de tareas" }), _jsxs("span", { children: [visibleTasks.length, " tareas"] })] }), _jsxs("div", { className: "tasks-legacy-tabs", children: [_jsx("button", { type: "button", className: activeTab === "pendientes" ? "is-active" : "", onClick: () => setActiveTab("pendientes"), children: "1. Pendientes" }), _jsx("button", { type: "button", className: activeTab === "concluidas" ? "is-active" : "", onClick: () => setActiveTab("concluidas"), children: "2. Concluidas" })] }), activeTab === "concluidas" ? (_jsxs("div", { className: "tasks-legacy-month-filter", children: [_jsxs("label", { className: "form-field tasks-legacy-month-field", children: [_jsx("span", { children: "Mes calendario" }), _jsx("input", { type: "month", value: completedMonth, onChange: (event) => setCompletedMonth(event.target.value || currentMonthInput()) })] }), _jsx("p", { className: "muted", children: "Muestra las tareas adicionales concluidas durante el mes seleccionado." })] })) : null, _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table tasks-additional-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Tarea" }), _jsx("th", { children: "Responsables" }), _jsx("th", { children: "Fecha Limite" }), _jsx("th", { children: "Estatus" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 5, className: "centered-inline-message", children: "Cargando tareas..." }) })) : visibleTasks.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 5, className: "centered-inline-message", children: activeTab === "concluidas" ? "No hay tareas concluidas en el mes seleccionado." : "No hay tareas adicionales pendientes." }) })) : (visibleTasks.map((task) => {

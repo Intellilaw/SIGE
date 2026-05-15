@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { TEAM_OPTIONS } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { canReadModule, canWriteModule, hasPermission } from "../auth/permissions";
 const CHANNEL_OPTIONS = [
     { value: "WHATSAPP", label: "WhatsApp" },
     { value: "TELEGRAM", label: "Telegram" },
@@ -393,7 +394,10 @@ export function MattersPage() {
     const [teamFilter, setTeamFilter] = useState("Todos");
     const [clientSearch, setClientSearch] = useState("");
     const [wordSearch, setWordSearch] = useState("");
-    const canDeleteReadOnlyRows = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+    const canReadMatters = canReadModule(user, "active-matters");
+    const canWriteMatters = canWriteModule(user, "active-matters");
+    const canReadTasks = canReadModule(user, "tasks");
+    const canDeleteReadOnlyRows = hasPermission(user, "*");
     const commissionOptions = useMemo(() => [...new Set([
             ...commissionShortNames,
             normalizeText(user?.shortName).toUpperCase()
@@ -405,10 +409,10 @@ export function MattersPage() {
             const [loadedMatters, loadedDeleted, loadedQuotes, loadedClients, loadedTaskItems, loadedTaskModules, shortNames] = await Promise.all([
                 apiGet("/matters"),
                 apiGet("/matters/recycle-bin"),
-                apiGet("/quotes"),
-                apiGet("/clients"),
-                apiGet("/tasks/items"),
-                apiGet("/tasks/modules"),
+                canWriteMatters ? apiGet("/quotes") : Promise.resolve([]),
+                canWriteMatters ? apiGet("/clients") : Promise.resolve([]),
+                canReadTasks ? apiGet("/tasks/items") : Promise.resolve([]),
+                canReadTasks ? apiGet("/tasks/modules") : Promise.resolve([]),
                 apiGet("/matters/short-names")
             ]);
             setQuotes(sortQuotes(loadedQuotes));
@@ -428,8 +432,12 @@ export function MattersPage() {
         }
     }
     useEffect(() => {
+        if (!canReadMatters) {
+            setLoading(false);
+            return;
+        }
         void loadBoard();
-    }, []);
+    }, [canReadMatters]);
     function syncMatterAcrossViews(updated) {
         setActiveItems((items) => {
             const next = updated.deletedAt ? removeMatter(items, updated.id) : upsertMatter(items, updated);
@@ -457,6 +465,9 @@ export function MattersPage() {
         return updated;
     }
     async function persistMatter(matter) {
+        if (!canWriteMatters) {
+            return;
+        }
         try {
             const updated = await apiPatch(`/matters/${matter.id}`, buildMatterPatch(matter));
             syncMatterAcrossViews(updated);
@@ -467,6 +478,9 @@ export function MattersPage() {
         }
     }
     function handleLocalChange(matterId, field, value) {
+        if (!canWriteMatters) {
+            return;
+        }
         updateMatterLocal(matterId, (matter) => {
             const draft = matter;
             draft[field] = value;
@@ -474,6 +488,9 @@ export function MattersPage() {
         });
     }
     async function handleImmediateChange(matterId, field, value) {
+        if (!canWriteMatters) {
+            return;
+        }
         const updated = updateMatterLocal(matterId, (matter) => {
             const draft = matter;
             draft[field] = value;
@@ -484,6 +501,9 @@ export function MattersPage() {
         }
     }
     async function handleQuoteChange(matterId, quoteNumber) {
+        if (!canWriteMatters) {
+            return;
+        }
         const updated = updateMatterLocal(matterId, (matter) => {
             const cleanQuoteNumber = normalizeText(quoteNumber);
             const linkedQuote = findQuoteByNumber(quotes, cleanQuoteNumber);
@@ -514,6 +534,9 @@ export function MattersPage() {
         }
     }
     function handleBlur(matterId) {
+        if (!canWriteMatters) {
+            return;
+        }
         const matter = activeItems.find((item) => item.id === matterId);
         if (!matter) {
             return;
@@ -521,6 +544,9 @@ export function MattersPage() {
         void persistMatter(matter);
     }
     async function handleAddRow() {
+        if (!canWriteMatters) {
+            return;
+        }
         try {
             const created = await apiPost("/matters", {});
             setActiveItems((items) => sortActiveMatters([...items, created], clients));
@@ -530,6 +556,9 @@ export function MattersPage() {
         }
     }
     async function handleTrash(matterId) {
+        if (!canWriteMatters && !canDeleteReadOnlyRows) {
+            return;
+        }
         if (!window.confirm("Mover este asunto a la papelera?")) {
             return;
         }
@@ -542,6 +571,9 @@ export function MattersPage() {
         }
     }
     async function handleBulkTrash() {
+        if (!canWriteMatters) {
+            return;
+        }
         if (selectedIds.size === 0) {
             return;
         }
@@ -559,6 +591,9 @@ export function MattersPage() {
         }
     }
     async function handleRestore(matterId) {
+        if (!canWriteMatters) {
+            return;
+        }
         if (!window.confirm("Restaurar este asunto a activos?")) {
             return;
         }
@@ -571,6 +606,9 @@ export function MattersPage() {
         }
     }
     async function handleGenerateIdentifier(matterId) {
+        if (!canWriteMatters) {
+            return;
+        }
         const matter = activeItems.find((item) => item.id === matterId);
         if (!matter) {
             return;
@@ -588,6 +626,9 @@ export function MattersPage() {
         }
     }
     async function handleSendToExecution(matterId) {
+        if (!canWriteMatters) {
+            return;
+        }
         const matter = activeItems.find((item) => item.id === matterId);
         if (!matter) {
             return;
@@ -662,5 +703,5 @@ export function MattersPage() {
     }), [deletedItems, clientSearchWords, wordSearchWords, teamFilter, reflections, quotes, clients]);
     const filteredUniqueItems = useMemo(() => filteredItems.filter((item) => item.matterType !== "RETAINER"), [filteredItems]);
     const filteredRetainerItems = useMemo(() => filteredItems.filter((item) => item.matterType === "RETAINER"), [filteredItems]);
-    return (_jsxs("section", { className: "page-stack matters-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Asuntos" }), _jsx("div", { children: _jsx("h2", { children: "Asuntos Activos" }) })] }), _jsx("p", { className: "muted", children: "Tabla operativa de asuntos con separacion entre unicos e igualas, papelera, autollenado desde cotizaciones y validacion visual en rojo cuando falta informacion clave." })] }), errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "1. Asuntos Activos" }), _jsxs("span", { children: [filteredUniqueItems.length + filteredRetainerItems.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar matters-active-toolbar", children: [_jsxs("div", { className: "matters-toolbar-actions", children: [_jsx("button", { type: "button", className: "primary-button", onClick: () => void handleAddRow(), children: "+ Agregar fila" }), selectedIds.size > 0 ? (_jsxs("button", { type: "button", className: "danger-button", onClick: () => void handleBulkTrash(), children: ["Borrar (", selectedIds.size, ")"] })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => void loadBoard(), children: "Refrescar" })] }), _jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters", children: [_jsxs("label", { className: "form-field matters-team-field", children: [_jsx("span", { children: "Equipo" }), _jsxs("select", { value: teamFilter, onChange: (event) => setTeamFilter(event.target.value), children: [_jsx("option", { value: "Todos", children: "Todos" }), EXECUTION_TEAM_OPTIONS.map((option) => (_jsx("option", { value: option.key, children: option.label }, option.key)))] })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, proceso, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "1. Asuntos Activos" }), _jsxs("span", { children: [filteredUniqueItems.length, " unicos"] })] }), _jsx(MatterTable, { items: filteredUniqueItems, loading: loading, quotes: quotes, clients: clients, reflections: reflections, commissionOptions: commissionOptions, selectedIds: selectedIds, readOnly: false, variant: "unique", canDeleteReadOnlyRows: canDeleteReadOnlyRows, onToggleSelection: toggleSelection, onToggleAll: toggleAll, onLocalChange: handleLocalChange, onImmediateChange: handleImmediateChange, onQuoteChange: handleQuoteChange, onBlur: handleBlur, onGenerateIdentifier: handleGenerateIdentifier, onSendToExecution: handleSendToExecution, onTrash: handleTrash })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "2. Igualas por asuntos varios" }), _jsxs("span", { children: [filteredRetainerItems.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Vista de solo lectura. Los renglones siguen mostrando rojo cuando falta informacion operativa o no estan vinculados a ejecucion." }), _jsx(MatterTable, { items: filteredRetainerItems, loading: loading, quotes: quotes, clients: clients, reflections: reflections, commissionOptions: commissionOptions, selectedIds: new Set(), readOnly: true, variant: "retainer", canDeleteReadOnlyRows: canDeleteReadOnlyRows, onToggleSelection: () => undefined, onToggleAll: () => undefined, onLocalChange: handleLocalChange, onImmediateChange: handleImmediateChange, onQuoteChange: handleQuoteChange, onBlur: handleBlur, onGenerateIdentifier: handleGenerateIdentifier, onSendToExecution: handleSendToExecution, onTrash: handleTrash })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de Reciclaje" }), _jsxs("span", { children: [filteredDeletedItems.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table matters-table matters-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Comision cierre" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Equipo" }), _jsx("th", { children: "R1 Int" }), _jsx("th", { children: "Bot TG" }), _jsx("th", { children: "RD" }), _jsx("th", { children: "RF" }), _jsx("th", { children: "R1 Ext" }), _jsx("th", { children: "Chat Fac" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 18, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedItems.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 18, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedItems.map((item) => (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(item, clients) || "-" }), _jsx("td", { children: item.commissionAssignee || "-" }), _jsx("td", { children: item.clientName || "-" }), _jsx("td", { children: item.quoteNumber || "-" }), _jsx("td", { children: item.subject || "-" }), _jsx("td", { children: formatCurrency(Number(item.totalFeesMxn || 0)) }), _jsx("td", { children: getChannelLabel(item.communicationChannel) }), _jsx("td", { children: getTeamLabel(item.responsibleTeam) }), _jsx("td", { children: item.r1InternalCreated ? "Si" : "No" }), _jsx("td", { children: item.telegramBotLinked ? "Si" : "No" }), _jsx("td", { children: item.rdCreated ? "Si" : "No" }), _jsx("td", { children: getRfLabel(item.rfCreated) }), _jsx("td", { children: item.r1ExternalCreated ? "Si" : "No" }), _jsx("td", { children: item.billingChatCreated ? "Si" : "No" }), _jsx("td", { children: item.milestone || "-" }), _jsx("td", { children: item.concluded ? "Si" : "No" }), _jsx("td", { children: item.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(item.id), children: "Regresar" }) })] }, item.id)))) })] }) }) })] })] }));
+    return (_jsxs("section", { className: "page-stack matters-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Asuntos" }), _jsx("div", { children: _jsx("h2", { children: "Asuntos Activos" }) })] }), _jsx("p", { className: "muted", children: "Tabla operativa de asuntos con separacion entre unicos e igualas, papelera, autollenado desde cotizaciones y validacion visual en rojo cuando falta informacion clave." })] }), errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "1. Asuntos Activos" }), _jsxs("span", { children: [filteredUniqueItems.length + filteredRetainerItems.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar matters-active-toolbar", children: [_jsxs("div", { className: "matters-toolbar-actions", children: [canWriteMatters ? (_jsx("button", { type: "button", className: "primary-button", onClick: () => void handleAddRow(), children: "+ Agregar fila" })) : null, canWriteMatters && selectedIds.size > 0 ? (_jsxs("button", { type: "button", className: "danger-button", onClick: () => void handleBulkTrash(), children: ["Borrar (", selectedIds.size, ")"] })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => void loadBoard(), children: "Refrescar" })] }), _jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters", children: [_jsxs("label", { className: "form-field matters-team-field", children: [_jsx("span", { children: "Equipo" }), _jsxs("select", { value: teamFilter, onChange: (event) => setTeamFilter(event.target.value), children: [_jsx("option", { value: "Todos", children: "Todos" }), EXECUTION_TEAM_OPTIONS.map((option) => (_jsx("option", { value: option.key, children: option.label }, option.key)))] })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, proceso, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "1. Asuntos Activos" }), _jsxs("span", { children: [filteredUniqueItems.length, " unicos"] })] }), _jsx(MatterTable, { items: filteredUniqueItems, loading: loading, quotes: quotes, clients: clients, reflections: reflections, commissionOptions: commissionOptions, selectedIds: selectedIds, readOnly: !canWriteMatters, variant: "unique", canDeleteReadOnlyRows: canDeleteReadOnlyRows, onToggleSelection: toggleSelection, onToggleAll: toggleAll, onLocalChange: handleLocalChange, onImmediateChange: handleImmediateChange, onQuoteChange: handleQuoteChange, onBlur: handleBlur, onGenerateIdentifier: handleGenerateIdentifier, onSendToExecution: handleSendToExecution, onTrash: handleTrash })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "2. Igualas por asuntos varios" }), _jsxs("span", { children: [filteredRetainerItems.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Vista de solo lectura. Los renglones siguen mostrando rojo cuando falta informacion operativa o no estan vinculados a ejecucion." }), _jsx(MatterTable, { items: filteredRetainerItems, loading: loading, quotes: quotes, clients: clients, reflections: reflections, commissionOptions: commissionOptions, selectedIds: new Set(), readOnly: true, variant: "retainer", canDeleteReadOnlyRows: canDeleteReadOnlyRows, onToggleSelection: () => undefined, onToggleAll: () => undefined, onLocalChange: handleLocalChange, onImmediateChange: handleImmediateChange, onQuoteChange: handleQuoteChange, onBlur: handleBlur, onGenerateIdentifier: handleGenerateIdentifier, onSendToExecution: handleSendToExecution, onTrash: handleTrash })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de Reciclaje" }), _jsxs("span", { children: [filteredDeletedItems.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table matters-table matters-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Comision cierre" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Equipo" }), _jsx("th", { children: "R1 Int" }), _jsx("th", { children: "Bot TG" }), _jsx("th", { children: "RD" }), _jsx("th", { children: "RF" }), _jsx("th", { children: "R1 Ext" }), _jsx("th", { children: "Chat Fac" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 18, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedItems.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 18, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedItems.map((item) => (_jsxs("tr", { children: [_jsx("td", { children: getEffectiveClientNumber(item, clients) || "-" }), _jsx("td", { children: item.commissionAssignee || "-" }), _jsx("td", { children: item.clientName || "-" }), _jsx("td", { children: item.quoteNumber || "-" }), _jsx("td", { children: item.subject || "-" }), _jsx("td", { children: formatCurrency(Number(item.totalFeesMxn || 0)) }), _jsx("td", { children: getChannelLabel(item.communicationChannel) }), _jsx("td", { children: getTeamLabel(item.responsibleTeam) }), _jsx("td", { children: item.r1InternalCreated ? "Si" : "No" }), _jsx("td", { children: item.telegramBotLinked ? "Si" : "No" }), _jsx("td", { children: item.rdCreated ? "Si" : "No" }), _jsx("td", { children: getRfLabel(item.rfCreated) }), _jsx("td", { children: item.r1ExternalCreated ? "Si" : "No" }), _jsx("td", { children: item.billingChatCreated ? "Si" : "No" }), _jsx("td", { children: item.milestone || "-" }), _jsx("td", { children: item.concluded ? "Si" : "No" }), _jsx("td", { children: item.notes || "-" }), _jsx("td", { children: canWriteMatters ? (_jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(item.id), children: "Regresar" })) : (_jsx("span", { className: "matter-cell-muted", children: "-" })) })] }, item.id)))) })] }) }) })] })] }));
 }

@@ -110,10 +110,11 @@ export interface LaborFileDocumentDefinition {
   requirement: LaborFileDocumentRequirement;
   contractSection?: boolean;
   pdfOnly?: boolean;
+  wordAllowed?: boolean;
 }
 
 export const LABOR_FILE_DOCUMENT_DEFINITIONS: LaborFileDocumentDefinition[] = [
-  { type: "EMPLOYMENT_CONTRACT", label: "Contrato laboral", requirement: "ALWAYS", contractSection: true, pdfOnly: true },
+  { type: "EMPLOYMENT_CONTRACT", label: "Contrato laboral", requirement: "ALWAYS", contractSection: true, wordAllowed: true },
   { type: "ADDENDUM", label: "Addendum", requirement: "OPTIONAL", contractSection: true, pdfOnly: true },
   { type: "PROOF_OF_ADDRESS", label: "Comprobante de domicilio", requirement: "ALWAYS" },
   { type: "TAX_STATUS_CERTIFICATE", label: "Constancia de situación fiscal", requirement: "ALWAYS" },
@@ -160,6 +161,37 @@ export interface LaborGlobalVacationDay {
   description?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LaborContractFieldValues {
+  employeeName: string;
+  rfc: string;
+  curp: string;
+  employeeAddress: string;
+  employeePhone: string;
+  position: string;
+  originalContractDate: string;
+  workdayStart: string;
+  workdayEnd: string;
+  monthlyGrossSalary: string;
+  monthlyGrossSalaryText: string;
+  biweeklyGrossSalary: string;
+  biweeklyGrossSalaryText: string;
+  signingDate: string;
+  signingCity: string;
+}
+
+export interface LaborContractPrefillSource {
+  field: keyof LaborContractFieldValues;
+  documentType?: LaborFileDocumentType;
+  originalFileName?: string;
+  confidence?: "LOW" | "MEDIUM" | "HIGH";
+}
+
+export interface LaborContractPrefillResult {
+  fields: LaborContractFieldValues;
+  sources: LaborContractPrefillSource[];
+  notes: string[];
 }
 
 export interface LaborVacationSummary {

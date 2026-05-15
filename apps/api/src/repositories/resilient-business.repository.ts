@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 
 import type {
   ClientsRepository,
+  FinanceRecordWriteRecord,
+  FinanceRepository,
   MattersRepository,
   MatterWriteRecord,
   QuotesRepository,
@@ -197,6 +199,56 @@ export class ResilientQuotesRepository extends ResilientRepositoryBase implement
 
   public deleteTemplate(templateId: string) {
     return this.withFallback(() => this.primary.deleteTemplate(templateId), () => this.fallback!.deleteTemplate(templateId));
+  }
+}
+
+export class ResilientFinanceRepository extends ResilientRepositoryBase implements FinanceRepository {
+  public constructor(
+    private readonly primary: FinanceRepository,
+    enableFallback: boolean,
+    logger?: { warn: (message: string) => void }
+  ) {
+    super(enableFallback ? {} : null, logger, "finances");
+  }
+
+  public listRecords(year: number, month: number) {
+    return this.withFallback(() => this.primary.listRecords(year, month), () => Promise.resolve([]));
+  }
+
+  public createRecord(year: number, month: number, payload?: FinanceRecordWriteRecord) {
+    return this.primary.createRecord(year, month, payload);
+  }
+
+  public updateRecord(recordId: string, payload: FinanceRecordWriteRecord) {
+    return this.primary.updateRecord(recordId, payload);
+  }
+
+  public deleteRecord(recordId: string) {
+    return this.primary.deleteRecord(recordId);
+  }
+
+  public bulkDelete(recordIds: string[]) {
+    return this.primary.bulkDelete(recordIds);
+  }
+
+  public listSnapshots() {
+    return this.withFallback(() => this.primary.listSnapshots(), () => Promise.resolve([]));
+  }
+
+  public createSnapshot(year: number, month: number) {
+    return this.primary.createSnapshot(year, month);
+  }
+
+  public copyToNextMonth(year: number, month: number) {
+    return this.primary.copyToNextMonth(year, month);
+  }
+
+  public sendMatterToFinance(matterId: string, year: number, month: number) {
+    return this.primary.sendMatterToFinance(matterId, year, month);
+  }
+
+  public listCommissionReceivers() {
+    return this.withFallback(() => this.primary.listCommissionReceivers(), () => Promise.resolve([]));
   }
 }
 

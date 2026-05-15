@@ -4546,8 +4546,17 @@ textarea {
   align-items: start;
 }
 
+.finances-page {
+  --finance-sticky-tabs-height: 68px;
+  --finance-sticky-table-top: var(--finance-sticky-tabs-height);
+}
+
 .finance-tabs-panel {
   padding: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: rgba(255, 255, 255, 0.94);
 }
 
 .finance-tabs,
@@ -4614,6 +4623,27 @@ textarea {
 .finance-card-orange { background: rgba(234, 88, 12, 0.08); color: #c2410c; }
 .finance-card-rose { background: rgba(190, 24, 93, 0.08); color: #9d174d; }
 
+.finance-readonly-fieldset {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+  min-width: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.finance-readonly-fieldset:disabled {
+  opacity: 1;
+}
+
+.finance-readonly-fieldset:disabled input,
+.finance-readonly-fieldset:disabled select,
+.finance-readonly-fieldset:disabled textarea {
+  color: #1f2933;
+  -webkit-text-fill-color: #1f2933;
+  opacity: 1;
+}
+
 .finance-table-shell,
 .finance-active-table-shell {
   overflow-x: auto;
@@ -4621,6 +4651,88 @@ textarea {
   border: 1px solid rgba(31, 41, 51, 0.08);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.82);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.finance-table-shell-sticky {
+  overflow: hidden;
+}
+
+.finance-table-x-nav {
+  height: 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid rgba(31, 41, 51, 0.08);
+  background: rgba(248, 250, 252, 0.94);
+}
+
+.finance-table-x-nav-spacer {
+  height: 1px;
+}
+
+.finance-table-monthly-x-nav-spacer {
+  width: 8600px;
+}
+
+.finance-active-table-x-nav-spacer {
+  width: 2560px;
+}
+
+.finance-table-sticky-head {
+  background: #fff;
+  max-width: 100%;
+  overflow: hidden;
+  position: sticky;
+  top: var(--finance-sticky-table-top, 0);
+  z-index: 3;
+}
+
+.finance-table-sticky-head > table {
+  transform: translateX(calc(var(--finance-table-scroll-left, 0px) * -1));
+  will-change: transform;
+}
+
+.finance-table-sticky-head thead th {
+  position: static;
+  top: auto;
+}
+
+.finance-table-scroll {
+  max-width: 100%;
+  max-height: clamp(360px, calc(100vh - var(--finance-sticky-table-top, 0px) - 210px), 720px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+.finance-table-x-nav,
+.finance-table-scroll {
+  scrollbar-color: #64748b rgba(15, 23, 42, 0.08);
+  scrollbar-width: auto;
+}
+
+.finance-table-x-nav::-webkit-scrollbar,
+.finance-table-scroll::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.finance-table-x-nav::-webkit-scrollbar-track,
+.finance-table-scroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.finance-table-x-nav::-webkit-scrollbar-thumb,
+.finance-table-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid rgba(248, 250, 252, 0.94);
+  border-radius: 999px;
+  background: #64748b;
+}
+
+.finance-table-x-nav::-webkit-scrollbar-thumb:hover,
+.finance-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 .finance-table,
@@ -4630,6 +4742,7 @@ textarea {
 }
 
 .finance-table-monthly { min-width: 8600px; font-size: 0.82rem; }
+.finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
 .finance-table thead th,
@@ -4677,6 +4790,16 @@ textarea {
   gap: 6px;
 }
 
+.finance-target-picker {
+  grid-template-columns: minmax(92px, 0.7fr) minmax(138px, 1.3fr);
+  align-items: center;
+  min-width: 230px;
+}
+
+.finance-target-picker .finance-input {
+  min-width: 0;
+}
+
 .finance-textarea {
   min-width: 180px;
   min-height: 60px;
@@ -4716,6 +4839,35 @@ textarea {
 .finance-pct-ok { color: #166534; font-weight: 800; }
 .finance-pct-danger { color: #991b1b; font-weight: 800; }
 .finance-inline-button { white-space: nowrap; }
+
+.finance-contract-button {
+  width: 100%;
+  justify-content: center;
+  white-space: normal;
+}
+
+.finance-contract-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  width: 100%;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.finance-contract-status-signed {
+  background: rgba(22, 163, 74, 0.1);
+  color: #166534;
+}
+
+.finance-contract-status-pending {
+  background: rgba(220, 38, 38, 0.1);
+  color: #991b1b;
+}
 
 .finance-total-row td {
   background: #243b53;
@@ -6758,6 +6910,13 @@ textarea {
   justify-content: space-between;
 }
 
+.internal-contract-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .internal-contract-card-head h3 {
   color: #243447;
   font-size: 1rem;
@@ -7231,6 +7390,95 @@ textarea {
   padding: 10px 12px;
 }
 
+.labor-file-contract-generator-panel,
+.labor-file-contract-form {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.labor-file-contract-generator-summary {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid rgba(31, 41, 51, 0.07);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 14px;
+}
+
+.labor-file-contract-generator-summary > div:first-child,
+.labor-file-contract-form-head > div,
+.labor-file-contract-prefill-panel > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.labor-file-contract-generator-summary strong,
+.labor-file-contract-form-head h3,
+.labor-file-contract-prefill-panel strong {
+  color: #102a43;
+}
+
+.labor-file-contract-generator-summary span,
+.labor-file-contract-form-head span,
+.labor-file-contract-prefill-panel span {
+  color: #52657a;
+  font-size: 0.88rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.labor-file-contract-generator-actions,
+.labor-file-contract-form-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.labor-file-contract-form {
+  background: linear-gradient(180deg, #fbfcfe 0%, #f7fafc 100%);
+  border: 1px solid rgba(31, 41, 51, 0.1);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.labor-file-contract-form-head h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.labor-file-contract-field-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.labor-file-contract-wide-field {
+  grid-column: 1 / -1;
+}
+
+.labor-file-contract-wide-field textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.labor-file-contract-prefill-panel {
+  background: #ffffff;
+  border: 1px solid rgba(29, 78, 216, 0.12);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
 .labor-file-global-vacation-form {
   align-items: end;
   background: #f8fafb;
@@ -7524,6 +7772,8 @@ textarea {
   .labor-file-profile-grid,
   .labor-file-profile-form,
   .labor-file-upload-form,
+  .labor-file-contract-generator-summary,
+  .labor-file-contract-field-grid,
   .labor-file-global-vacation-form,
   .labor-file-document-row,
   .labor-file-vacation-form,

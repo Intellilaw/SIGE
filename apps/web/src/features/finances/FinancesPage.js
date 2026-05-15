@@ -1,8 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TEAM_OPTIONS } from "@sige/contracts";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { canReadModule, canWriteModule } from "../auth/permissions";
 const MONTHLY_COLUMN_WIDTHS = [
     "56px",
     "120px",
@@ -10,7 +11,6 @@ const MONTHLY_COLUMN_WIDTHS = [
     "140px",
     "110px",
     "360px",
-    "170px",
     "220px",
     "150px",
     "300px",
@@ -52,6 +52,21 @@ const MONTHLY_COLUMN_WIDTHS = [
     "320px",
     "110px"
 ];
+const ACTIVE_COLUMN_WIDTHS = [
+    "120px",
+    "260px",
+    "150px",
+    "110px",
+    "360px",
+    "170px",
+    "150px",
+    "220px",
+    "180px",
+    "220px",
+    "220px",
+    "260px",
+    "140px"
+];
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
         return error.message;
@@ -66,6 +81,16 @@ function normalizeComparableText(value) {
         .toLowerCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
+}
+function getSearchWords(value) {
+    return normalizeComparableText(value).split(/\s+/).filter(Boolean);
+}
+function matchesSearchWords(words, values) {
+    if (words.length === 0) {
+        return true;
+    }
+    const haystack = normalizeComparableText(values.map((value) => String(value ?? "")).join(" "));
+    return words.every((word) => haystack.includes(word));
 }
 function formatCurrency(value) {
     return new Intl.NumberFormat("es-MX", {
@@ -99,6 +124,9 @@ function getMonthName(month) {
 }
 function getMatterTypeLabel(type) {
     return type === "RETAINER" ? "Iguala" : "Unico";
+}
+function getTeamLabel(team) {
+    return TEAM_OPTIONS.find((option) => option.key === team)?.label ?? "";
 }
 function getDefaultPercentages(team) {
     return {
@@ -254,7 +282,12 @@ function MonthSummaryCards({ records }) {
 }
 export function FinancesPage() {
     const { user } = useAuth();
+    const canReadFinances = canReadModule(user, "finances");
+    const canWriteFinances = canWriteModule(user, "finances");
     const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+    const canDeleteFinanceRecords = isSuperadmin || canWriteFinances;
+    const pageRef = useRef(null);
+    const tabsPanelRef = useRef(null);
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
@@ -272,6 +305,41 @@ export function FinancesPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [copyModalOpen, setCopyModalOpen] = useState(false);
+    const [wordSearch, setWordSearch] = useState("");
+    const [clientSearch, setClientSearch] = useState("");
+    useEffect(() => {
+        const page = pageRef.current;
+        const tabsPanel = tabsPanelRef.current;
+        if (!page || !tabsPanel) {
+            return;
+        }
+        const syncStickyTableOffset = () => {
+            const tabsHeight = Math.ceil(tabsPanel.getBoundingClientRect().height);
+            page.style.setProperty("--finance-sticky-tabs-height", `${tabsHeight}px`);
+            page.style.setProperty("--finance-sticky-table-top", `${tabsHeight}px`);
+        };
+        syncStickyTableOffset();
+        const resizeObserver = new ResizeObserver(syncStickyTableOffset);
+        resizeObserver.observe(tabsPanel);
+        window.addEventListener("resize", syncStickyTableOffset);
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener("resize", syncStickyTableOffset);
+        };
+    }, []);
+    function handleFinanceTableScroll(event) {
+        const source = event.currentTarget;
+        const shell = source.closest(".finance-table-shell-sticky");
+        if (!shell) {
+            return;
+        }
+        shell.style.setProperty("--finance-table-scroll-left", `${source.scrollLeft}px`);
+        shell.querySelectorAll(".finance-table-scroll, .finance-table-x-nav").forEach((element) => {
+            if (element !== source && element.scrollLeft !== source.scrollLeft) {
+                element.scrollLeft = source.scrollLeft;
+            }
+        });
+    }
     const clientNumberByName = useMemo(() => {
         const lookup = new Map();
         clients.forEach((client) => {
@@ -298,9 +366,67 @@ export function FinancesPage() {
             return left.createdAt.localeCompare(right.createdAt);
         });
     }, [activeMatters, clientNumberByName]);
-    const uniqueMatters = useMemo(() => sortedActiveMatters.filter((matter) => matter.matterType !== "RETAINER"), [sortedActiveMatters]);
-    const retainerMatters = useMemo(() => sortedActiveMatters.filter((matter) => matter.matterType === "RETAINER"), [sortedActiveMatters]);
+    const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
+    const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
+    const filteredActiveMatters = useMemo(() => sortedActiveMatters.filter((matter) => {
+        const effectiveClientNumber = resolveClientNumber(matter.clientName, matter.clientNumber);
+        return (matchesSearchWords(clientSearchWords, [matter.clientName, effectiveClientNumber]) &&
+            matchesSearchWords(wordSearchWords, [
+                effectiveClientNumber,
+                matter.clientName,
+                matter.quoteNumber,
+                getMatterTypeLabel(matter.matterType),
+                matter.subject,
+                formatCurrency(matter.totalFeesMxn),
+                matter.commissionAssignee,
+                getTeamLabel(matter.responsibleTeam),
+                toDateInput(matter.nextPaymentDate),
+                getMonthName(matter.transferMonth),
+                matter.transferYear
+            ]));
+    }), [clientNumberByName, clientSearchWords, sortedActiveMatters, wordSearchWords]);
+    const filteredRecords = useMemo(() => records.filter((record) => {
+        const stats = calculateFinanceStats(record);
+        const effectiveClientNumber = resolveClientNumber(record.clientName, record.clientNumber);
+        return (matchesSearchWords(clientSearchWords, [record.clientName, effectiveClientNumber]) &&
+            matchesSearchWords(wordSearchWords, [
+                effectiveClientNumber,
+                record.clientName,
+                record.quoteNumber,
+                getMatterTypeLabel(record.matterType),
+                record.subject,
+                getTeamLabel(record.responsibleTeam),
+                record.workingConcepts,
+                record.nextPaymentNotes,
+                record.clientCommissionRecipient,
+                record.closingCommissionRecipient,
+                record.milestone,
+                record.financeComments,
+                toDateInput(record.nextPaymentDate),
+                formatDateList([record.paymentDate1, record.paymentDate2, record.paymentDate3]),
+                record.totalMatterMxn,
+                record.conceptFeesMxn,
+                record.previousPaymentsMxn,
+                stats.remainingMxn,
+                stats.totalPaidMxn,
+                stats.dueTodayMxn,
+                stats.netFeesMxn,
+                stats.netProfitMxn,
+                record.pctLitigation,
+                record.pctCorporateLabor,
+                record.pctSettlements,
+                record.pctFinancialLaw,
+                record.pctTaxCompliance,
+                record.concluded
+            ]));
+    }), [clientNumberByName, clientSearchWords, records, wordSearchWords]);
+    const uniqueMatters = useMemo(() => filteredActiveMatters.filter((matter) => matter.matterType !== "RETAINER"), [filteredActiveMatters]);
+    const retainerMatters = useMemo(() => filteredActiveMatters.filter((matter) => matter.matterType === "RETAINER"), [filteredActiveMatters]);
     async function loadCurrentMonthPresence() {
+        if (!canReadFinances) {
+            setCurrentMonthMatchKeys(new Set());
+            return;
+        }
         const currentRecords = await apiGet(`/finances/records?year=${currentYear}&month=${currentMonth}`);
         const nextKeys = new Set();
         currentRecords.forEach((record) => {
@@ -309,12 +435,21 @@ export function FinancesPage() {
         setCurrentMonthMatchKeys(nextKeys);
     }
     async function loadMonthlyView() {
+        if (!canReadFinances) {
+            setRecords([]);
+            setClients([]);
+            setReceivers([]);
+            setSelectedIds(new Set());
+            setLoading(false);
+            setError("No tienes permisos para consultar Finanzas.");
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
             const [nextRecords, nextClients, nextReceivers] = await Promise.all([
                 apiGet(`/finances/records?year=${selectedYear}&month=${selectedMonth}`),
-                apiGet("/clients"),
+                canWriteFinances ? apiGet("/clients") : Promise.resolve([]),
                 apiGet("/finances/commission-receivers")
             ]);
             setRecords(nextRecords);
@@ -330,6 +465,12 @@ export function FinancesPage() {
         }
     }
     async function loadSnapshotsView() {
+        if (!canReadFinances) {
+            setSnapshots([]);
+            setLoading(false);
+            setError("No tienes permisos para consultar Finanzas.");
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
@@ -344,12 +485,19 @@ export function FinancesPage() {
         }
     }
     async function loadActiveMattersView() {
+        if (!canReadFinances) {
+            setClients([]);
+            setActiveMatters([]);
+            setLoading(false);
+            setError("No tienes permisos para consultar Finanzas.");
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
             const [matters, nextClients] = await Promise.all([
                 apiGet("/matters"),
-                apiGet("/clients")
+                canWriteFinances ? apiGet("/clients") : Promise.resolve([])
             ]);
             setClients(nextClients);
             setActiveMatters(matters.map((matter) => ({
@@ -376,7 +524,7 @@ export function FinancesPage() {
             return;
         }
         void loadActiveMattersView();
-    }, [activeTab, selectedMonth, selectedYear]);
+    }, [activeTab, canReadFinances, selectedMonth, selectedYear]);
     function resolveClientNumber(clientName, fallback) {
         return clientNumberByName.get(normalizeComparableText(clientName)) ?? normalizeText(fallback);
     }
@@ -421,15 +569,11 @@ export function FinancesPage() {
         const missing = requiredChecks.filter((field) => !field.present).map((field) => field.label);
         const today = new Date();
         const todayValue = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-        const isContractPending = record.contractSignedStatus === "NO";
         const isDateUrgent = Boolean(record.nextPaymentDate && toDateInput(record.nextPaymentDate) <= todayValue && stats.dueTodayMxn > 1);
         const isPctInvalid = stats.pctSum !== 100;
         const reasons = [];
         if (missing.length > 0) {
             reasons.push(`Faltan datos requeridos: ${missing.join(", ")}.`);
-        }
-        if (isContractPending) {
-            reasons.push("Contrato firmado en NO.");
         }
         if (isDateUrgent) {
             reasons.push("Atencion: tarea urgente (atrasada/hoy no pagada).");
@@ -449,6 +593,9 @@ export function FinancesPage() {
         setRecords((current) => current.map((record) => (record.id === recordId ? { ...record, ...normalizedPatch } : record)));
     }
     async function persistRecordPatch(recordId, patch) {
+        if (!canWriteFinances) {
+            return;
+        }
         try {
             const updated = await apiPatch(`/finances/records/${recordId}`, patch);
             setRecords((current) => current.map((record) => (record.id === recordId ? updated : record)));
@@ -458,6 +605,9 @@ export function FinancesPage() {
         }
     }
     async function handleMatterNextPaymentDateChange(matterId, value) {
+        if (!canWriteFinances) {
+            return;
+        }
         const previous = activeMatters;
         setActiveMatters((current) => current.map((matter) => (matter.id === matterId ? { ...matter, nextPaymentDate: value || undefined } : matter)));
         try {
@@ -472,9 +622,15 @@ export function FinancesPage() {
         }
     }
     function updateMatterTransferTarget(matterId, field, value) {
+        if (!canWriteFinances) {
+            return;
+        }
         setActiveMatters((current) => current.map((matter) => (matter.id === matterId ? { ...matter, [field]: value } : matter)));
     }
     async function handleSendMatterToFinance(matter) {
+        if (!canWriteFinances) {
+            return;
+        }
         try {
             await apiPost("/finances/send-matter", {
                 matterId: matter.id,
@@ -504,15 +660,26 @@ export function FinancesPage() {
     }
     function toggleAllRecords() {
         setSelectedIds((current) => {
-            if (current.size === records.length && records.length > 0) {
-                return new Set();
+            const visibleIds = filteredRecords.map((record) => record.id);
+            if (visibleIds.length === 0) {
+                return current;
             }
-            return new Set(records.map((record) => record.id));
+            const hasEveryVisibleRecord = visibleIds.every((id) => current.has(id));
+            const next = new Set(current);
+            visibleIds.forEach((id) => {
+                if (hasEveryVisibleRecord) {
+                    next.delete(id);
+                }
+                else {
+                    next.add(id);
+                }
+            });
+            return next;
         });
     }
     async function handleDeleteRecord(recordId) {
-        if (!isSuperadmin) {
-            window.alert("Solo los superadministradores pueden borrar registros.");
+        if (!canDeleteFinanceRecords) {
+            window.alert("Solo el equipo de Finanzas puede borrar registros.");
             return;
         }
         if (!window.confirm("Borrar este registro?")) {
@@ -532,8 +699,8 @@ export function FinancesPage() {
         }
     }
     async function handleBulkDelete() {
-        if (!isSuperadmin) {
-            window.alert("Solo los superadministradores pueden borrar registros.");
+        if (!canDeleteFinanceRecords) {
+            window.alert("Solo el equipo de Finanzas puede borrar registros.");
             return;
         }
         if (selectedIds.size === 0) {
@@ -552,6 +719,9 @@ export function FinancesPage() {
         }
     }
     async function handleCreateSnapshot() {
+        if (!canWriteFinances) {
+            return;
+        }
         try {
             await apiPost("/finances/snapshots", {
                 year: selectedYear,
@@ -564,6 +734,9 @@ export function FinancesPage() {
         }
     }
     async function handleCopyToNextMonth() {
+        if (!canWriteFinances) {
+            return;
+        }
         try {
             const result = await apiPost("/finances/records/copy-to-next-month", {
                 year: selectedYear,
@@ -579,7 +752,8 @@ export function FinancesPage() {
         }
     }
     function renderMonthlyTable() {
-        const totals = records.reduce((acc, record) => {
+        const allVisibleSelected = filteredRecords.length > 0 && filteredRecords.every((record) => selectedIds.has(record.id));
+        const totals = filteredRecords.reduce((acc, record) => {
             const stats = calculateFinanceStats(record);
             return {
                 totalMatterMxn: acc.totalMatterMxn + record.totalMatterMxn,
@@ -629,41 +803,41 @@ export function FinancesPage() {
             financeCommissionMxn: 0,
             netProfitMxn: 0
         });
-        return (_jsx("div", { className: "finance-table-shell", children: _jsxs("table", { className: "finance-table finance-table-monthly", children: [_jsx("colgroup", { children: MONTHLY_COLUMN_WIDTHS.map((width, index) => (_jsx("col", { style: { width } }, `finance-monthly-col-${index}`))) }), _jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: _jsx("input", { type: "checkbox", checked: records.length > 0 && selectedIds.size === records.length, onChange: toggleAllRecords }) }), _jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Contrato firmado" }), _jsx("th", { children: "Equipo Responsable" }), _jsx("th", { children: "Total Asunto" }), _jsx("th", { children: "Conceptos trabajando" }), _jsx("th", { children: "Honorarios conceptos" }), _jsx("th", { children: "Pagos previos" }), _jsx("th", { children: "Remanente esperado este mes" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Detalle Fecha" }), _jsx("th", { children: "Pagado este mes" }), _jsx("th", { children: "Fecha Pago Real" }), _jsx("th", { children: "Adeudado hoy" }), _jsx("th", { children: "Honorarios netos" }), _jsx("th", { children: "Comision cliente 20%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Comision cierre 10%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Ingresos menos 20% y 10%" }), _jsx("th", { children: "% Litigio" }), _jsx("th", { children: "% Corp-Lab" }), _jsx("th", { children: "% Convenios" }), _jsx("th", { children: "% Der Fin" }), _jsx("th", { children: "% Compl. Fis." }), _jsx("th", { children: "SUM %" }), _jsx("th", { children: "COM. EJEC. LITIGIO (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. LITIGIO (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (LIDER 10%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (COLAB 1%)" }), _jsx("th", { children: "Com. Com. Cliente (1% Neto)" }), _jsx("th", { children: "Com. Finanzas (1% Neto)" }), _jsx("th", { children: "Utilidad neta" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" }), _jsx("th", { children: "Accion" })] }) }), _jsxs("tbody", { children: [records.map((record) => {
-                                const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
-                                const isSelected = selectedIds.has(record.id);
-                                const rowClassName = `${shouldHighlight ? "finance-row-danger" : ""} ${isSelected ? "finance-row-selected" : ""}`.trim();
-                                return (_jsxs("tr", { className: rowClassName, title: reason, children: [_jsx("td", { className: "finance-cell-checkbox", children: _jsx("input", { type: "checkbox", checked: isSelected, onChange: () => toggleRecordSelection(record.id) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: effectiveClientNumber, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.clientName, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.quoteNumber ?? "", readOnly: true }) }), _jsx("td", { children: _jsx("span", { className: `finance-type-pill ${record.matterType === "RETAINER" ? "is-retainer" : ""}`, children: getMatterTypeLabel(record.matterType) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.subject, readOnly: true }) }), _jsx("td", { children: _jsxs("select", { className: `finance-input ${record.contractSignedStatus === "NO" ? "finance-select-danger" : ""}`, value: record.contractSignedStatus, onChange: (event) => {
-                                                    const contractSignedStatus = event.target.value;
-                                                    updateRecordLocal(record.id, { contractSignedStatus });
-                                                    void persistRecordPatch(record.id, { contractSignedStatus });
-                                                }, children: [_jsx("option", { value: "NO", children: "NO" }), _jsx("option", { value: "YES", children: "SI" }), _jsx("option", { value: "NOT_REQUIRED", children: "No es necesario" })] }) }), _jsx("td", { children: record.matterType === "RETAINER" ? (_jsxs("select", { className: "finance-input", value: record.responsibleTeam ?? "", onChange: (event) => {
-                                                    const responsibleTeam = (event.target.value || null);
-                                                    const percentages = getDefaultPercentages(responsibleTeam);
-                                                    updateRecordLocal(record.id, { responsibleTeam, ...percentages });
-                                                    void persistRecordPatch(record.id, { responsibleTeam, ...percentages });
-                                                }, children: [_jsx("option", { value: "", children: "Seleccionar..." }), TEAM_OPTIONS.filter((option) => ["LITIGATION", "CORPORATE_LABOR", "SETTLEMENTS", "FINANCIAL_LAW", "TAX_COMPLIANCE"].includes(option.key)).map((option) => (_jsx("option", { value: option.key, children: option.label }, option.key)))] })) : (_jsx("input", { className: "finance-input finance-input-readonly", value: TEAM_OPTIONS.find((option) => option.key === record.responsibleTeam)?.label ?? "", readOnly: true })) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly finance-input-number", value: record.totalMatterMxn, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input", value: record.workingConcepts ?? "", onChange: (event) => updateRecordLocal(record.id, { workingConcepts: event.target.value }), onBlur: (event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.conceptFeesMxn, onChange: (event) => updateRecordLocal(record.id, { conceptFeesMxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { conceptFeesMxn: Number(event.target.value || 0) }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.previousPaymentsMxn, onChange: (event) => updateRecordLocal(record.id, { previousPaymentsMxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { previousPaymentsMxn: Number(event.target.value || 0) }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly finance-input-number", value: stats.remainingMxn, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", type: "date", value: toDateInput(record.nextPaymentDate), readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input", value: record.nextPaymentNotes ?? "", onChange: (event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value }), onBlur: (event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value }) }) }), _jsx("td", { children: _jsxs("div", { className: "finance-stack", children: [_jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.paidThisMonthMxn, onChange: (event) => updateRecordLocal(record.id, { paidThisMonthMxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { paidThisMonthMxn: Number(event.target.value || 0) }) }), _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.payment2Mxn, onChange: (event) => updateRecordLocal(record.id, { payment2Mxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { payment2Mxn: Number(event.target.value || 0) }) }), _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.payment3Mxn, onChange: (event) => updateRecordLocal(record.id, { payment3Mxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { payment3Mxn: Number(event.target.value || 0) }) })] }) }), _jsx("td", { children: _jsxs("div", { className: "finance-stack", children: [_jsx("input", { className: "finance-input", type: "date", value: toDateInput(record.paymentDate1), onChange: (event) => updateRecordLocal(record.id, { paymentDate1: event.target.value || null }), onBlur: (event) => void persistRecordPatch(record.id, { paymentDate1: event.target.value || null }) }), _jsx("input", { className: "finance-input", type: "date", value: toDateInput(record.paymentDate2), onChange: (event) => updateRecordLocal(record.id, { paymentDate2: event.target.value || null }), onBlur: (event) => void persistRecordPatch(record.id, { paymentDate2: event.target.value || null }) }), _jsx("input", { className: "finance-input", type: "date", value: toDateInput(record.paymentDate3), onChange: (event) => updateRecordLocal(record.id, { paymentDate3: event.target.value || null }), onBlur: (event) => void persistRecordPatch(record.id, { paymentDate3: event.target.value || null }) })] }) }), _jsx("td", { children: _jsx("input", { className: `finance-input finance-input-readonly finance-input-number ${stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""}`, value: stats.dueTodayMxn, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly finance-input-number finance-cell-positive", value: stats.netFeesMxn, readOnly: true }) }), _jsx("td", { children: formatCurrency(stats.clientCommissionMxn) }), _jsx("td", { children: _jsxs("select", { className: "finance-input", value: record.clientCommissionRecipient ?? "", onChange: (event) => { const clientCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { clientCommissionRecipient }); void persistRecordPatch(record.id, { clientCommissionRecipient }); }, children: [_jsx("option", { value: "", children: "Seleccionar..." }), receivers.map((receiver) => _jsx("option", { value: receiver.name, children: receiver.name }, receiver.id))] }) }), _jsx("td", { children: formatCurrency(stats.closingCommissionMxn) }), _jsx("td", { children: _jsxs("select", { className: "finance-input", value: record.closingCommissionRecipient ?? "", onChange: (event) => { const closingCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { closingCommissionRecipient }); void persistRecordPatch(record.id, { closingCommissionRecipient }); }, children: [_jsx("option", { value: "", children: "Seleccionar..." }), receivers.map((receiver) => _jsx("option", { value: receiver.name, children: receiver.name }, receiver.id))] }) }), _jsx("td", { className: "finance-total-cell", children: formatCurrency(stats.netFeesMxn - stats.clientCommissionMxn - stats.closingCommissionMxn) }), [
-                                            ["pctLitigation", record.pctLitigation],
-                                            ["pctCorporateLabor", record.pctCorporateLabor],
-                                            ["pctSettlements", record.pctSettlements],
-                                            ["pctFinancialLaw", record.pctFinancialLaw],
-                                            ["pctTaxCompliance", record.pctTaxCompliance]
-                                        ].map(([field, value]) => (_jsx("td", { children: _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", max: "100", step: "1", value: value, onChange: (event) => updateRecordLocal(record.id, { [field]: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { [field]: Number(event.target.value || 0) }) }) }, field))), _jsxs("td", { className: stats.pctSum === 100 ? "finance-pct-ok" : "finance-pct-danger", children: [stats.pctSum, "%"] }), _jsx("td", { children: formatCurrency(stats.litigationLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.litigationCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.corporateLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.corporateCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.settlementsLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.settlementsCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.financialLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.financialCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.taxLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.taxCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.clientRelationsCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.financeCommissionMxn) }), _jsx("td", { className: "finance-profit-cell", children: formatCurrency(stats.netProfitMxn) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.milestone ?? "", readOnly: true }) }), _jsx("td", { className: "finance-cell-checkbox", children: _jsx("input", { type: "checkbox", checked: record.concluded, onChange: (event) => { updateRecordLocal(record.id, { concluded: event.target.checked }); void persistRecordPatch(record.id, { concluded: event.target.checked }); } }) }), _jsx("td", { children: _jsx("textarea", { className: "finance-input finance-textarea", value: record.financeComments ?? "", onChange: (event) => updateRecordLocal(record.id, { financeComments: event.target.value }), onBlur: (event) => void persistRecordPatch(record.id, { financeComments: event.target.value }) }) }), _jsx("td", { children: _jsx("button", { className: "danger-button finance-inline-button", type: "button", onClick: () => void handleDeleteRecord(record.id), children: "Borrar" }) })] }, record.id));
-                            }), !loading && records.length === 0 ? (_jsx("tr", { children: _jsx("td", { className: "centered-inline-message", colSpan: 47, children: "Sin registros para esta fecha." }) })) : null] }), _jsx("tfoot", { children: _jsxs("tr", { className: "finance-total-row", children: [_jsx("td", { colSpan: 8, children: "Totales" }), _jsx("td", { children: formatCurrency(totals.totalMatterMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.conceptFeesMxn) }), _jsx("td", { children: formatCurrency(totals.previousPaymentsMxn) }), _jsx("td", { children: formatCurrency(totals.remainingMxn) }), _jsx("td", { colSpan: 2 }), _jsx("td", { children: formatCurrency(totals.totalPaidMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.dueTodayMxn) }), _jsx("td", { children: formatCurrency(totals.netFeesMxn) }), _jsx("td", { children: formatCurrency(totals.clientCommissionMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.closingCommissionMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.netFeesMxn - totals.clientCommissionMxn - totals.closingCommissionMxn) }), _jsx("td", { colSpan: 6 }), _jsx("td", { children: formatCurrency(totals.litigationLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.litigationCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.corporateLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.corporateCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.settlementsLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.settlementsCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.financialLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.financialCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.taxLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.taxCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.clientRelationsCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.financeCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.netProfitMxn) }), _jsx("td", { colSpan: 4 })] }) })] }) }));
+        const renderMonthlyColGroup = () => (_jsx("colgroup", { children: MONTHLY_COLUMN_WIDTHS.map((width, index) => (_jsx("col", { style: { width } }, `finance-monthly-col-${index}`))) }));
+        const renderMonthlyHeader = () => (_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: _jsx("input", { type: "checkbox", checked: allVisibleSelected, onChange: toggleAllRecords }) }), _jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Equipo Responsable" }), _jsx("th", { children: "Total Asunto" }), _jsx("th", { children: "Conceptos trabajando" }), _jsx("th", { children: "Honorarios conceptos" }), _jsx("th", { children: "Pagos previos" }), _jsx("th", { children: "Remanente esperado este mes" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Detalle Fecha" }), _jsx("th", { children: "Pagado este mes" }), _jsx("th", { children: "Fecha Pago Real" }), _jsx("th", { children: "Adeudado hoy" }), _jsx("th", { children: "Honorarios netos" }), _jsx("th", { children: "Comision cliente 20%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Comision cierre 10%" }), _jsx("th", { children: "Para quien" }), _jsx("th", { children: "Ingresos menos 20% y 10%" }), _jsx("th", { children: "% Litigio" }), _jsx("th", { children: "% Corp-Lab" }), _jsx("th", { children: "% Convenios" }), _jsx("th", { children: "% Der Fin" }), _jsx("th", { children: "% Compl. Fis." }), _jsx("th", { children: "SUM %" }), _jsx("th", { children: "COM. EJEC. LITIGIO (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. LITIGIO (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CORP-LAB (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. CONVENIOS (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (LIDER 10%)" }), _jsx("th", { children: "COM. EJEC. DER FIN (COLAB 1%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (LIDER 8%)" }), _jsx("th", { children: "COM. EJEC. COMPL FIS (COLAB 1%)" }), _jsx("th", { children: "Com. Com. Cliente (1% Neto)" }), _jsx("th", { children: "Com. Finanzas (1% Neto)" }), _jsx("th", { children: "Utilidad neta" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "Concluyo?" }), _jsx("th", { children: "Comentarios" }), _jsx("th", { children: "Accion" })] }) }));
+        return (_jsx("fieldset", { className: "finance-readonly-fieldset", disabled: !canWriteFinances, children: _jsxs("div", { className: "finance-table-shell finance-table-shell-sticky", children: [_jsx("div", { className: "finance-table-x-nav", onScroll: handleFinanceTableScroll, "aria-label": "Desplazamiento horizontal de la tabla mensual", children: _jsx("div", { className: "finance-table-x-nav-spacer finance-table-monthly-x-nav-spacer" }) }), _jsx("div", { className: "finance-table-sticky-head", children: _jsxs("table", { className: "finance-table finance-table-monthly", children: [renderMonthlyColGroup(), renderMonthlyHeader()] }) }), _jsx("div", { className: "finance-table-scroll", onScroll: handleFinanceTableScroll, children: _jsxs("table", { className: "finance-table finance-table-monthly", children: [renderMonthlyColGroup(), _jsxs("tbody", { children: [filteredRecords.map((record) => {
+                                            const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
+                                            const isSelected = selectedIds.has(record.id);
+                                            const rowClassName = `${shouldHighlight ? "finance-row-danger" : ""} ${isSelected ? "finance-row-selected" : ""}`.trim();
+                                            return (_jsxs("tr", { className: rowClassName, title: reason, children: [_jsx("td", { className: "finance-cell-checkbox", children: _jsx("input", { type: "checkbox", checked: isSelected, onChange: () => toggleRecordSelection(record.id) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: effectiveClientNumber, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.clientName, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.quoteNumber ?? "", readOnly: true }) }), _jsx("td", { children: _jsx("span", { className: `finance-type-pill ${record.matterType === "RETAINER" ? "is-retainer" : ""}`, children: getMatterTypeLabel(record.matterType) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.subject, readOnly: true }) }), _jsx("td", { children: record.matterType === "RETAINER" ? (_jsxs("select", { className: "finance-input", value: record.responsibleTeam ?? "", onChange: (event) => {
+                                                                const responsibleTeam = (event.target.value || null);
+                                                                const percentages = getDefaultPercentages(responsibleTeam);
+                                                                updateRecordLocal(record.id, { responsibleTeam, ...percentages });
+                                                                void persistRecordPatch(record.id, { responsibleTeam, ...percentages });
+                                                            }, children: [_jsx("option", { value: "", children: "Seleccionar..." }), TEAM_OPTIONS.filter((option) => ["LITIGATION", "CORPORATE_LABOR", "SETTLEMENTS", "FINANCIAL_LAW", "TAX_COMPLIANCE"].includes(option.key)).map((option) => (_jsx("option", { value: option.key, children: option.label }, option.key)))] })) : (_jsx("input", { className: "finance-input finance-input-readonly", value: TEAM_OPTIONS.find((option) => option.key === record.responsibleTeam)?.label ?? "", readOnly: true })) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly finance-input-number", value: record.totalMatterMxn, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input", value: record.workingConcepts ?? "", onChange: (event) => updateRecordLocal(record.id, { workingConcepts: event.target.value }), onBlur: (event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.conceptFeesMxn, onChange: (event) => updateRecordLocal(record.id, { conceptFeesMxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { conceptFeesMxn: Number(event.target.value || 0) }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.previousPaymentsMxn, onChange: (event) => updateRecordLocal(record.id, { previousPaymentsMxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { previousPaymentsMxn: Number(event.target.value || 0) }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly finance-input-number", value: stats.remainingMxn, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", type: "date", value: toDateInput(record.nextPaymentDate), readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input", value: record.nextPaymentNotes ?? "", onChange: (event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value }), onBlur: (event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value }) }) }), _jsx("td", { children: _jsxs("div", { className: "finance-stack", children: [_jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.paidThisMonthMxn, onChange: (event) => updateRecordLocal(record.id, { paidThisMonthMxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { paidThisMonthMxn: Number(event.target.value || 0) }) }), _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.payment2Mxn, onChange: (event) => updateRecordLocal(record.id, { payment2Mxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { payment2Mxn: Number(event.target.value || 0) }) }), _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", step: "0.01", value: record.payment3Mxn, onChange: (event) => updateRecordLocal(record.id, { payment3Mxn: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { payment3Mxn: Number(event.target.value || 0) }) })] }) }), _jsx("td", { children: _jsxs("div", { className: "finance-stack", children: [_jsx("input", { className: "finance-input", type: "date", value: toDateInput(record.paymentDate1), onChange: (event) => updateRecordLocal(record.id, { paymentDate1: event.target.value || null }), onBlur: (event) => void persistRecordPatch(record.id, { paymentDate1: event.target.value || null }) }), _jsx("input", { className: "finance-input", type: "date", value: toDateInput(record.paymentDate2), onChange: (event) => updateRecordLocal(record.id, { paymentDate2: event.target.value || null }), onBlur: (event) => void persistRecordPatch(record.id, { paymentDate2: event.target.value || null }) }), _jsx("input", { className: "finance-input", type: "date", value: toDateInput(record.paymentDate3), onChange: (event) => updateRecordLocal(record.id, { paymentDate3: event.target.value || null }), onBlur: (event) => void persistRecordPatch(record.id, { paymentDate3: event.target.value || null }) })] }) }), _jsx("td", { children: _jsx("input", { className: `finance-input finance-input-readonly finance-input-number ${stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""}`, value: stats.dueTodayMxn, readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly finance-input-number finance-cell-positive", value: stats.netFeesMxn, readOnly: true }) }), _jsx("td", { children: formatCurrency(stats.clientCommissionMxn) }), _jsx("td", { children: _jsxs("select", { className: "finance-input", value: record.clientCommissionRecipient ?? "", onChange: (event) => { const clientCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { clientCommissionRecipient }); void persistRecordPatch(record.id, { clientCommissionRecipient }); }, children: [_jsx("option", { value: "", children: "Seleccionar..." }), receivers.map((receiver) => _jsx("option", { value: receiver.name, children: receiver.name }, receiver.id))] }) }), _jsx("td", { children: formatCurrency(stats.closingCommissionMxn) }), _jsx("td", { children: _jsxs("select", { className: "finance-input", value: record.closingCommissionRecipient ?? "", onChange: (event) => { const closingCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { closingCommissionRecipient }); void persistRecordPatch(record.id, { closingCommissionRecipient }); }, children: [_jsx("option", { value: "", children: "Seleccionar..." }), receivers.map((receiver) => _jsx("option", { value: receiver.name, children: receiver.name }, receiver.id))] }) }), _jsx("td", { className: "finance-total-cell", children: formatCurrency(stats.netFeesMxn - stats.clientCommissionMxn - stats.closingCommissionMxn) }), [
+                                                        ["pctLitigation", record.pctLitigation],
+                                                        ["pctCorporateLabor", record.pctCorporateLabor],
+                                                        ["pctSettlements", record.pctSettlements],
+                                                        ["pctFinancialLaw", record.pctFinancialLaw],
+                                                        ["pctTaxCompliance", record.pctTaxCompliance]
+                                                    ].map(([field, value]) => (_jsx("td", { children: _jsx("input", { className: "finance-input finance-input-number", type: "number", min: "0", max: "100", step: "1", value: value, onChange: (event) => updateRecordLocal(record.id, { [field]: Number(event.target.value || 0) }), onBlur: (event) => void persistRecordPatch(record.id, { [field]: Number(event.target.value || 0) }) }) }, field))), _jsxs("td", { className: stats.pctSum === 100 ? "finance-pct-ok" : "finance-pct-danger", children: [stats.pctSum, "%"] }), _jsx("td", { children: formatCurrency(stats.litigationLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.litigationCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.corporateLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.corporateCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.settlementsLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.settlementsCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.financialLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.financialCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.taxLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.taxCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.clientRelationsCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.financeCommissionMxn) }), _jsx("td", { className: "finance-profit-cell", children: formatCurrency(stats.netProfitMxn) }), _jsx("td", { children: _jsx("input", { className: "finance-input finance-input-readonly", value: record.milestone ?? "", readOnly: true }) }), _jsx("td", { className: "finance-cell-checkbox", children: _jsx("input", { type: "checkbox", checked: record.concluded, onChange: (event) => { updateRecordLocal(record.id, { concluded: event.target.checked }); void persistRecordPatch(record.id, { concluded: event.target.checked }); } }) }), _jsx("td", { children: _jsx("textarea", { className: "finance-input finance-textarea", value: record.financeComments ?? "", onChange: (event) => updateRecordLocal(record.id, { financeComments: event.target.value }), onBlur: (event) => void persistRecordPatch(record.id, { financeComments: event.target.value }) }) }), _jsx("td", { children: _jsx("button", { className: "danger-button finance-inline-button", type: "button", onClick: () => void handleDeleteRecord(record.id), children: "Borrar" }) })] }, record.id));
+                                        }), !loading && filteredRecords.length === 0 ? (_jsx("tr", { children: _jsx("td", { className: "centered-inline-message", colSpan: 46, children: "Sin registros para esta fecha." }) })) : null] }), _jsx("tfoot", { children: _jsxs("tr", { className: "finance-total-row", children: [_jsx("td", { colSpan: 7, children: "Totales" }), _jsx("td", { children: formatCurrency(totals.totalMatterMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.conceptFeesMxn) }), _jsx("td", { children: formatCurrency(totals.previousPaymentsMxn) }), _jsx("td", { children: formatCurrency(totals.remainingMxn) }), _jsx("td", { colSpan: 2 }), _jsx("td", { children: formatCurrency(totals.totalPaidMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.dueTodayMxn) }), _jsx("td", { children: formatCurrency(totals.netFeesMxn) }), _jsx("td", { children: formatCurrency(totals.clientCommissionMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.closingCommissionMxn) }), _jsx("td", {}), _jsx("td", { children: formatCurrency(totals.netFeesMxn - totals.clientCommissionMxn - totals.closingCommissionMxn) }), _jsx("td", { colSpan: 6 }), _jsx("td", { children: formatCurrency(totals.litigationLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.litigationCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.corporateLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.corporateCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.settlementsLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.settlementsCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.financialLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.financialCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.taxLeaderCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.taxCollaboratorCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.clientRelationsCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.financeCommissionMxn) }), _jsx("td", { children: formatCurrency(totals.netProfitMxn) }), _jsx("td", { colSpan: 4 })] }) })] }) })] }) }));
     }
     function renderActiveMattersTable(items, variant) {
-        return (_jsx("div", { className: "finance-active-table-shell", children: _jsxs("table", { className: "finance-active-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Honorarios Totales" }), _jsx("th", { children: "Comision cierre" }), _jsx("th", { children: "Equipo Responsable" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Destino (Finanzas)" }), _jsx("th", { children: "Accion" })] }) }), _jsxs("tbody", { children: [items.map((matter) => {
-                                const highlight = shouldHighlightMatter(matter);
-                                const targetDate = new Date(matter.transferYear, matter.transferMonth - 1, 1);
-                                const currentDate = new Date(currentYear, currentMonth - 1, 1);
-                                const disabled = targetDate > currentDate;
-                                return (_jsxs("tr", { className: highlight ? "finance-row-danger" : variant === "retainer" ? "finance-row-retainer" : "", title: highlight ? getMatterHighlightMessage() : "", children: [_jsx("td", { children: resolveClientNumber(matter.clientName, matter.clientNumber) }), _jsx("td", { children: matter.clientName }), _jsx("td", { children: matter.quoteNumber ?? "-" }), _jsx("td", { children: _jsx("span", { className: `finance-type-pill ${matter.matterType === "RETAINER" ? "is-retainer" : ""}`, children: getMatterTypeLabel(matter.matterType) }) }), _jsx("td", { children: matter.subject }), _jsx("td", { children: formatCurrency(matter.totalFeesMxn) }), _jsx("td", { children: matter.commissionAssignee ?? "-" }), _jsx("td", { children: TEAM_OPTIONS.find((option) => option.key === matter.responsibleTeam)?.label ?? "-" }), _jsx("td", { children: _jsx("input", { className: "finance-input", type: "date", value: toDateInput(matter.nextPaymentDate), onChange: (event) => void handleMatterNextPaymentDateChange(matter.id, event.target.value) }) }), _jsx("td", { children: _jsxs("div", { className: "finance-target-picker", children: [_jsx("select", { className: "finance-input", value: matter.transferYear, onChange: (event) => updateMatterTransferTarget(matter.id, "transferYear", Number(event.target.value)), children: [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => _jsx("option", { value: year, children: year }, year)) }), _jsx("select", { className: "finance-input", value: matter.transferMonth, onChange: (event) => updateMatterTransferTarget(matter.id, "transferMonth", Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] }) }), _jsx("td", { children: _jsx("button", { className: `finance-send-button ${variant === "retainer" ? "is-retainer" : ""}`, disabled: disabled, onClick: () => void handleSendMatterToFinance(matter), type: "button", children: "Enviar" }) })] }, matter.id));
-                            }), !loading && items.length === 0 ? (_jsx("tr", { children: _jsx("td", { className: "centered-inline-message", colSpan: 11, children: variant === "retainer" ? "No hay igualas activas." : "No hay asuntos unicos activos." }) })) : null] })] }) }));
+        const renderActiveColGroup = () => (_jsx("colgroup", { children: ACTIVE_COLUMN_WIDTHS.map((width, index) => (_jsx("col", { style: { width } }, `finance-active-col-${index}`))) }));
+        const renderActiveHeader = () => (_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Honorarios Totales" }), _jsx("th", { children: "Comision cierre" }), _jsx("th", { children: "Equipo Responsable" }), _jsx("th", { children: "Generar contrato" }), _jsx("th", { children: "Estatus del contrato de PSP" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Destino (Finanzas)" }), _jsx("th", { children: "Accion" })] }) }));
+        return (_jsx("fieldset", { className: "finance-readonly-fieldset", disabled: !canWriteFinances, children: _jsxs("div", { className: "finance-active-table-shell finance-table-shell-sticky", children: [_jsx("div", { className: "finance-table-x-nav", onScroll: handleFinanceTableScroll, "aria-label": "Desplazamiento horizontal de asuntos activos", children: _jsx("div", { className: "finance-table-x-nav-spacer finance-active-table-x-nav-spacer" }) }), _jsx("div", { className: "finance-table-sticky-head", children: _jsxs("table", { className: "finance-active-table", children: [renderActiveColGroup(), renderActiveHeader()] }) }), _jsx("div", { className: "finance-table-scroll", onScroll: handleFinanceTableScroll, children: _jsxs("table", { className: "finance-active-table", children: [renderActiveColGroup(), _jsxs("tbody", { children: [items.map((matter) => {
+                                            const highlight = shouldHighlightMatter(matter);
+                                            const targetDate = new Date(matter.transferYear, matter.transferMonth - 1, 1);
+                                            const currentDate = new Date(currentYear, currentMonth - 1, 1);
+                                            const disabled = targetDate > currentDate;
+                                            return (_jsxs("tr", { className: highlight ? "finance-row-danger" : variant === "retainer" ? "finance-row-retainer" : "", title: highlight ? getMatterHighlightMessage() : "", children: [_jsx("td", { children: resolveClientNumber(matter.clientName, matter.clientNumber) }), _jsx("td", { children: matter.clientName }), _jsx("td", { children: matter.quoteNumber ?? "-" }), _jsx("td", { children: _jsx("span", { className: `finance-type-pill ${matter.matterType === "RETAINER" ? "is-retainer" : ""}`, children: getMatterTypeLabel(matter.matterType) }) }), _jsx("td", { children: matter.subject }), _jsx("td", { children: formatCurrency(matter.totalFeesMxn) }), _jsx("td", { children: matter.commissionAssignee ?? "-" }), _jsx("td", { children: TEAM_OPTIONS.find((option) => option.key === matter.responsibleTeam)?.label ?? "-" }), _jsx("td", { children: _jsx("button", { className: "secondary-button finance-contract-button", type: "button", children: "Generar contrato" }) }), _jsx("td", { children: _jsx("span", { className: "finance-contract-status finance-contract-status-pending", children: "No firmado" }) }), _jsx("td", { children: _jsx("input", { className: "finance-input", type: "date", value: toDateInput(matter.nextPaymentDate), onChange: (event) => void handleMatterNextPaymentDateChange(matter.id, event.target.value) }) }), _jsx("td", { children: _jsxs("div", { className: "finance-target-picker", children: [_jsx("select", { className: "finance-input", value: matter.transferYear, onChange: (event) => updateMatterTransferTarget(matter.id, "transferYear", Number(event.target.value)), children: [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => _jsx("option", { value: year, children: year }, year)) }), _jsx("select", { className: "finance-input", value: matter.transferMonth, onChange: (event) => updateMatterTransferTarget(matter.id, "transferMonth", Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] }) }), _jsx("td", { children: _jsx("button", { className: `finance-send-button ${variant === "retainer" ? "is-retainer" : ""}`, disabled: disabled, onClick: () => void handleSendMatterToFinance(matter), type: "button", children: "Enviar" }) })] }, matter.id));
+                                        }), !loading && items.length === 0 ? (_jsx("tr", { children: _jsx("td", { className: "centered-inline-message", colSpan: 13, children: variant === "retainer" ? "No hay igualas activas." : "No hay asuntos unicos activos." }) })) : null] })] }) })] }) }));
     }
     function renderSnapshots() {
         return (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Estampas guardadas" }), _jsxs("span", { children: [snapshots.length, " registros"] })] }), _jsx("div", { className: "finance-snapshot-grid", children: snapshots.length === 0 ? (_jsx("p", { className: "muted", children: "No hay estampas guardadas aun." })) : (snapshots.map((snapshot) => (_jsxs("article", { className: "finance-snapshot-card", children: [_jsxs("div", { className: "finance-snapshot-head", children: [_jsx("strong", { children: snapshot.title }), _jsx("span", { children: new Date(snapshot.createdAt).toLocaleDateString("es-MX") })] }), _jsxs("dl", { className: "finance-snapshot-stats", children: [_jsx("dt", { children: "Ingresos" }), _jsx("dd", { children: formatCurrency(snapshot.totalIncomeMxn) }), _jsx("dt", { children: "Egresos" }), _jsx("dd", { children: formatCurrency(snapshot.totalExpenseMxn) }), _jsx("dt", { children: "Balance" }), _jsx("dd", { children: formatCurrency(snapshot.balanceMxn) })] }), snapshot.snapshotData?.enrichedRecords?.length ? (_jsx("button", { className: "secondary-button", type: "button", onClick: () => setViewingSnapshot(snapshot), children: "Ver detalle completo" })) : null] }, snapshot.id)))) })] }));
     }
-    return (_jsxs("section", { className: "page-stack finances-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Finanzas" }), _jsx("div", { children: _jsx("h2", { children: "Finanzas" }) })] }), _jsx("p", { className: "muted", children: "Asuntos activos con envio a Finanzas, vista mensual operativa, copiado al siguiente mes, estampas historicas y validacion visual en rojo." })] }), error ? _jsx("div", { className: "message-banner message-error", children: error }) : null, _jsx("section", { className: "panel finance-tabs-panel", children: _jsxs("div", { className: "finance-tabs", children: [_jsx("button", { className: `finance-tab ${activeTab === "active-matters" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("active-matters"), children: "1. Asuntos activos" }), _jsx("button", { className: `finance-tab ${activeTab === "monthly-view" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("monthly-view"), children: "2. Ver mes" }), _jsx("button", { className: `finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("snapshots"), children: "3. Estampas guardadas" })] }) }), activeTab === "active-matters" ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "1. Asuntos Activos (Unicos)" }), _jsxs("span", { children: [uniqueMatters.length, " registros"] })] }), renderActiveMattersTable(uniqueMatters, "unique")] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "2. Igualas por asuntos varios" }), _jsxs("span", { children: [retainerMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los renglones siguen mostrando rojo cuando falta la fecha de proximo pago o el asunto ya debia estar visible en el mes actual." }), renderActiveMattersTable(retainerMatters, "retainer")] })] })) : null, activeTab === "monthly-view" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "finance-toolbar", children: [_jsxs("div", { className: "finance-toolbar-group", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => _jsx("option", { value: year, children: year }, year)) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] })] }), _jsxs("div", { className: "finance-toolbar-actions", children: [selectedIds.size > 0 ? _jsxs("button", { className: "danger-button", type: "button", onClick: () => void handleBulkDelete(), children: ["Borrar (", selectedIds.size, ")"] }) : null, _jsx("button", { className: "secondary-button", type: "button", onClick: () => void handleCreateSnapshot(), children: "Guardar estampa" }), _jsx("button", { className: "primary-button", type: "button", onClick: () => setCopyModalOpen(true), children: "Copiar todo al mes siguiente" })] })] }), _jsx(MonthSummaryCards, { records: records }), renderMonthlyTable()] })) : null, activeTab === "snapshots" ? renderSnapshots() : null, copyModalOpen ? (_jsx("div", { className: "finance-modal-backdrop", children: _jsxs("div", { className: "finance-modal", children: [_jsx("h3", { children: "Advertencia" }), _jsx("p", { children: "Esta accion borrara todos los registros existentes del siguiente mes y los reemplazara con los registros actuales." }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", onClick: () => setCopyModalOpen(false), children: "Cancelar" }), _jsx("button", { className: "danger-button", type: "button", onClick: () => void handleCopyToNextMonth(), children: "Continuar" })] })] }) })) : null, viewingSnapshot ? (_jsx("div", { className: "finance-modal-backdrop", children: _jsxs("div", { className: "finance-modal finance-modal-wide", children: [_jsxs("div", { className: "finance-modal-head", children: [_jsxs("div", { children: [_jsx("h3", { children: viewingSnapshot.title }), _jsxs("p", { className: "muted", children: ["Guardado: ", new Date(viewingSnapshot.createdAt).toLocaleString("es-MX")] })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => setViewingSnapshot(null), children: "Cerrar" })] }), _jsx("div", { className: "finance-table-shell", children: _jsxs("table", { className: "finance-table finance-table-snapshot", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No." }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cot." }), _jsx("th", { children: "Responsable" }), _jsx("th", { children: "Tipo Asunto" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Total Asunto" }), _jsx("th", { children: "Conceptos" }), _jsx("th", { children: "Hon. Conceptos" }), _jsx("th", { children: "Pagos Previos" }), _jsx("th", { children: "Remanente" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Semana" }), _jsx("th", { children: "Pagado este mes" }), _jsx("th", { children: "Fecha Pago Real" }), _jsx("th", { children: "Adeudado" }), _jsx("th", { children: "Netos" }), _jsx("th", { children: "Comm Cliente (20%)" }), _jsx("th", { children: "Comm Cierre (10%)" }), _jsx("th", { children: "Ut. Neta" })] }) }), _jsx("tbody", { children: (viewingSnapshot.snapshotData?.enrichedRecords ?? []).map((record, index) => {
+    return (_jsxs("section", { className: "page-stack finances-page", ref: pageRef, children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Finanzas" }), _jsx("div", { children: _jsx("h2", { children: "Finanzas" }) })] }), _jsx("p", { className: "muted", children: "Asuntos activos con envio a Finanzas, vista mensual operativa, copiado al siguiente mes, estampas historicas y validacion visual en rojo." })] }), error ? _jsx("div", { className: "message-banner message-error", children: error }) : null, _jsx("section", { className: "panel finance-tabs-panel", ref: tabsPanelRef, children: _jsxs("div", { className: "finance-tabs", children: [_jsx("button", { className: `finance-tab ${activeTab === "active-matters" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("active-matters"), children: "1. Asuntos activos" }), _jsx("button", { className: `finance-tab ${activeTab === "monthly-view" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("monthly-view"), children: "2. Ver mes" }), _jsx("button", { className: `finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("snapshots"), children: "3. Estampas guardadas" })] }) }), activeTab !== "snapshots" ? (_jsxs("section", { className: "panel finance-search-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: activeTab === "monthly-view" ? "Registros de finanzas" : "Asuntos en finanzas" }), _jsxs("span", { children: [activeTab === "monthly-view" ? filteredRecords.length : filteredActiveMatters.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar finance-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters finance-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "Cotizacion, asunto, equipo, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente o palabra dentro de la vista actual." }) })] })] })) : null, activeTab === "active-matters" ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "1. Asuntos Activos (Unicos)" }), _jsxs("span", { children: [uniqueMatters.length, " registros"] })] }), renderActiveMattersTable(uniqueMatters, "unique")] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "2. Igualas por asuntos varios" }), _jsxs("span", { children: [retainerMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los renglones siguen mostrando rojo cuando falta la fecha de proximo pago o el asunto ya debia estar visible en el mes actual." }), renderActiveMattersTable(retainerMatters, "retainer")] })] })) : null, activeTab === "monthly-view" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "finance-toolbar", children: [_jsxs("div", { className: "finance-toolbar-group", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => _jsx("option", { value: year, children: year }, year)) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] })] }), _jsxs("div", { className: "finance-toolbar-actions", children: [selectedIds.size > 0 ? (_jsxs("button", { className: "danger-button", type: "button", onClick: () => void handleBulkDelete(), disabled: !canDeleteFinanceRecords, children: ["Borrar (", selectedIds.size, ")"] })) : null, _jsx("button", { className: "secondary-button", type: "button", onClick: () => void handleCreateSnapshot(), disabled: !canWriteFinances, children: "Guardar estampa" }), _jsx("button", { className: "primary-button", type: "button", onClick: () => setCopyModalOpen(true), disabled: !canWriteFinances, children: "Copiar todo al mes siguiente" })] })] }), _jsx(MonthSummaryCards, { records: filteredRecords }), renderMonthlyTable()] })) : null, activeTab === "snapshots" ? renderSnapshots() : null, copyModalOpen ? (_jsx("div", { className: "finance-modal-backdrop", children: _jsxs("div", { className: "finance-modal", children: [_jsx("h3", { children: "Advertencia" }), _jsx("p", { children: "Esta accion borrara todos los registros existentes del siguiente mes y los reemplazara con los registros actuales." }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", onClick: () => setCopyModalOpen(false), children: "Cancelar" }), _jsx("button", { className: "danger-button", type: "button", onClick: () => void handleCopyToNextMonth(), disabled: !canWriteFinances, children: "Continuar" })] })] }) })) : null, viewingSnapshot ? (_jsx("div", { className: "finance-modal-backdrop", children: _jsxs("div", { className: "finance-modal finance-modal-wide", children: [_jsxs("div", { className: "finance-modal-head", children: [_jsxs("div", { children: [_jsx("h3", { children: viewingSnapshot.title }), _jsxs("p", { className: "muted", children: ["Guardado: ", new Date(viewingSnapshot.createdAt).toLocaleString("es-MX")] })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => setViewingSnapshot(null), children: "Cerrar" })] }), _jsx("div", { className: "finance-table-shell", children: _jsxs("table", { className: "finance-table finance-table-snapshot", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No." }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cot." }), _jsx("th", { children: "Responsable" }), _jsx("th", { children: "Tipo Asunto" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Total Asunto" }), _jsx("th", { children: "Conceptos" }), _jsx("th", { children: "Hon. Conceptos" }), _jsx("th", { children: "Pagos Previos" }), _jsx("th", { children: "Remanente" }), _jsx("th", { children: "Fecha de proximo pago" }), _jsx("th", { children: "Semana" }), _jsx("th", { children: "Pagado este mes" }), _jsx("th", { children: "Fecha Pago Real" }), _jsx("th", { children: "Adeudado" }), _jsx("th", { children: "Netos" }), _jsx("th", { children: "Comm Cliente (20%)" }), _jsx("th", { children: "Comm Cierre (10%)" }), _jsx("th", { children: "Ut. Neta" })] }) }), _jsx("tbody", { children: (viewingSnapshot.snapshotData?.enrichedRecords ?? []).map((record, index) => {
                                             const stats = calculateFinanceStats(record);
                                             const paymentDates = formatDateList([record.paymentDate1, record.paymentDate2, record.paymentDate3]);
                                             return (_jsxs("tr", { children: [_jsx("td", { children: index + 1 }), _jsx("td", { children: record.clientName }), _jsx("td", { children: record.quoteNumber ?? "-" }), _jsx("td", { children: TEAM_OPTIONS.find((option) => option.key === record.responsibleTeam)?.label ?? "-" }), _jsx("td", { children: getMatterTypeLabel(record.matterType) }), _jsx("td", { children: record.subject }), _jsx("td", { children: "Ingreso" }), _jsx("td", { children: formatCurrency(record.totalMatterMxn) }), _jsx("td", { children: record.workingConcepts ?? "-" }), _jsx("td", { children: formatCurrency(record.conceptFeesMxn) }), _jsx("td", { children: formatCurrency(record.previousPaymentsMxn) }), _jsx("td", { children: formatCurrency(stats.remainingMxn) }), _jsx("td", { children: toDateInput(record.nextPaymentDate) || "-" }), _jsx("td", { children: "-" }), _jsx("td", { children: formatCurrency(stats.totalPaidMxn) }), _jsx("td", { children: paymentDates }), _jsx("td", { children: formatCurrency(stats.dueTodayMxn) }), _jsx("td", { children: formatCurrency(stats.netFeesMxn) }), _jsx("td", { children: formatCurrency(stats.clientCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.closingCommissionMxn) }), _jsx("td", { children: formatCurrency(stats.netProfitMxn) })] }, `${viewingSnapshot.id}-${record.id}`));
