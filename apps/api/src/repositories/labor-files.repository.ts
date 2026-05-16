@@ -118,6 +118,10 @@ const LABOR_CONTRACT_MIME_TYPES = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ]);
+const VACATION_ACCEPTANCE_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+]);
 const CONTRACT_PREFILL_DOCUMENT_TYPES = new Set<LaborFileDocumentType>([
   "PROOF_OF_ADDRESS",
   "TAX_STATUS_CERTIFICATE",
@@ -246,6 +250,10 @@ function isDocxFile(payload: Pick<LaborFileDocumentUploadRecord, "fileMimeType" 
   const filename = normalizeText(payload.originalFileName).toLowerCase();
   return mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
     filename.endsWith(".docx");
+}
+
+function isVacationAcceptanceFile(payload: Pick<LaborFileDocumentUploadRecord, "fileMimeType" | "originalFileName">) {
+  return isPdfFile(payload) || isDocxFile(payload);
 }
 
 function validateDocumentType(documentType: LaborFileDocumentType) {
@@ -579,11 +587,15 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
 
     if (payload.eventType === "VACATION") {
       if (!acceptanceOriginalFileName || !acceptanceFileContent?.byteLength) {
-        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_PDF_REQUIRED", "Carga el formato de aceptación de vacaciones en PDF.");
+        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "Carga el formato de aceptacion de vacaciones en PDF o DOCX.");
       }
 
-      if (!isPdfFile({ originalFileName: acceptanceOriginalFileName, fileMimeType: acceptanceFileMimeType })) {
-        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_PDF_REQUIRED", "El formato de aceptación de vacaciones debe ser PDF.");
+      if (!isVacationAcceptanceFile({ originalFileName: acceptanceOriginalFileName, fileMimeType: acceptanceFileMimeType })) {
+        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "El formato de aceptacion de vacaciones debe ser PDF o DOCX.");
+      }
+
+      if (acceptanceFileMimeType && !VACATION_ACCEPTANCE_MIME_TYPES.has(acceptanceFileMimeType)) {
+        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "El formato de aceptacion de vacaciones debe ser PDF o DOCX.");
       }
     }
 
@@ -1031,11 +1043,15 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
 
     if (payload.eventType === "VACATION") {
       if (!acceptanceOriginalFileName || !acceptanceFileContent?.byteLength) {
-        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_PDF_REQUIRED", "Carga el formato de aceptacion de vacaciones en PDF.");
+        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "Carga el formato de aceptacion de vacaciones en PDF o DOCX.");
       }
 
-      if (!isPdfFile({ originalFileName: acceptanceOriginalFileName, fileMimeType: acceptanceFileMimeType })) {
-        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_PDF_REQUIRED", "El formato de aceptacion de vacaciones debe ser PDF.");
+      if (!isVacationAcceptanceFile({ originalFileName: acceptanceOriginalFileName, fileMimeType: acceptanceFileMimeType })) {
+        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "El formato de aceptacion de vacaciones debe ser PDF o DOCX.");
+      }
+
+      if (acceptanceFileMimeType && !VACATION_ACCEPTANCE_MIME_TYPES.has(acceptanceFileMimeType)) {
+        throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "El formato de aceptacion de vacaciones debe ser PDF o DOCX.");
       }
     }
 

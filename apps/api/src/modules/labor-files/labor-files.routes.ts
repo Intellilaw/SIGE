@@ -8,6 +8,11 @@ import {
   prefillLaborContractFields,
   renderLaborContractDocx
 } from "./labor-contract-generator";
+import {
+  DOCX_MIME_TYPE,
+  laborVacationFormatFieldValuesSchema,
+  renderLaborVacationFormatDocx
+} from "./labor-vacation-format-generator";
 
 const laborFileIdParamsSchema = z.object({
   laborFileId: z.string().min(1)
@@ -47,6 +52,7 @@ const uploadDocumentSchema = z.object({
 });
 
 const laborContractGenerationSchema = laborContractFieldValuesSchema;
+const laborVacationFormatGenerationSchema = laborVacationFormatFieldValuesSchema;
 
 const vacationEventSchema = z.object({
   eventType: z.enum(["PREVIOUS_YEAR_DEDUCTION", "VACATION"]),
@@ -181,6 +187,29 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
       fileMimeType: generatedContract.contentType,
       fileSizeBytes: generatedContract.buffer.byteLength,
       fileContent: generatedContract.buffer
+    });
+  });
+
+  app.post("/labor-files/:laborFileId/vacation-format/generate", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    const payload = laborVacationFormatGenerationSchema.parse(request.body ?? {});
+    const laborFile = await service.findById(params.laborFileId);
+
+    if (!laborFile) {
+      throw new app.errors.AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    const generatedFormat = await renderLaborVacationFormatDocx(laborFile, payload);
+    return service.createVacationEvent(params.laborFileId, {
+      eventType: "VACATION",
+      vacationDates: generatedFormat.fields.vacationDates,
+      days: generatedFormat.fields.vacationDates.length,
+      startDate: generatedFormat.fields.vacationDates[0] ?? null,
+      endDate: generatedFormat.fields.vacationDates[generatedFormat.fields.vacationDates.length - 1] ?? null,
+      description: generatedFormat.fields.description || null,
+      acceptanceOriginalFileName: generatedFormat.filename,
+      acceptanceFileMimeType: DOCX_MIME_TYPE,
+      acceptanceFileBase64: generatedFormat.buffer.toString("base64")
     });
   });
 

@@ -1840,12 +1840,18 @@ textarea {
 .primary-button,
 .primary-action-button,
 .secondary-button,
+.ghost-button,
 .danger-button {
   border: none;
   border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 12px 18px;
   font-weight: 700;
+  line-height: 1.15;
   cursor: pointer;
+  text-align: center;
 }
 
 .primary-button,
@@ -1859,6 +1865,11 @@ textarea {
   color: #1d4ed8;
 }
 
+.ghost-button {
+  background: #eef3ff;
+  color: #2443d8;
+}
+
 .danger-button {
   background: rgba(180, 35, 24, 0.12);
   color: #b42318;
@@ -1867,6 +1878,7 @@ textarea {
 .primary-button:disabled,
 .primary-action-button:disabled,
 .secondary-button:disabled,
+.ghost-button:disabled,
 .danger-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -7247,6 +7259,7 @@ textarea {
 .labor-file-profile-panel,
 .labor-file-upload-panel,
 .labor-file-global-vacation-panel,
+.labor-file-vacation-format-panel,
 .labor-file-vacations-panel {
   display: grid;
   gap: 18px;
@@ -7391,13 +7404,16 @@ textarea {
 }
 
 .labor-file-contract-generator-panel,
-.labor-file-contract-form {
+.labor-file-contract-form,
+.labor-file-vacation-format-panel,
+.labor-file-vacation-format-form {
   display: grid;
   gap: 18px;
   min-width: 0;
 }
 
-.labor-file-contract-generator-summary {
+.labor-file-contract-generator-summary,
+.labor-file-vacation-format-summary {
   align-items: center;
   background: #f8fafb;
   border: 1px solid rgba(31, 41, 51, 0.07);
@@ -7410,7 +7426,9 @@ textarea {
 }
 
 .labor-file-contract-generator-summary > div:first-child,
+.labor-file-vacation-format-summary > div:first-child,
 .labor-file-contract-form-head > div,
+.labor-file-vacation-format-form-head > div,
 .labor-file-contract-prefill-panel > div {
   display: grid;
   gap: 4px;
@@ -7418,13 +7436,17 @@ textarea {
 }
 
 .labor-file-contract-generator-summary strong,
+.labor-file-vacation-format-summary strong,
 .labor-file-contract-form-head h3,
+.labor-file-vacation-format-form-head h3,
 .labor-file-contract-prefill-panel strong {
   color: #102a43;
 }
 
 .labor-file-contract-generator-summary span,
+.labor-file-vacation-format-summary span,
 .labor-file-contract-form-head span,
+.labor-file-vacation-format-form-head span,
 .labor-file-contract-prefill-panel span {
   color: #52657a;
   font-size: 0.88rem;
@@ -7433,7 +7455,9 @@ textarea {
 }
 
 .labor-file-contract-generator-actions,
-.labor-file-contract-form-head {
+.labor-file-vacation-format-actions,
+.labor-file-contract-form-head,
+.labor-file-vacation-format-form-head {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
@@ -7442,26 +7466,104 @@ textarea {
   min-width: 0;
 }
 
-.labor-file-contract-form {
+.labor-file-contract-form,
+.labor-file-vacation-format-form {
   background: linear-gradient(180deg, #fbfcfe 0%, #f7fafc 100%);
   border: 1px solid rgba(31, 41, 51, 0.1);
   border-radius: 8px;
   padding: 16px;
 }
 
-.labor-file-contract-form-head h3 {
+.labor-file-contract-form-head h3,
+.labor-file-vacation-format-form-head h3 {
   font-size: 1rem;
   margin: 0;
 }
 
-.labor-file-contract-field-grid {
+.labor-file-vacation-format-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.labor-file-vacation-format-stats > div {
+  background: #ffffff;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-left: 4px solid #1d4ed8;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.labor-file-vacation-format-stats > div:nth-child(2) {
+  border-left-color: #0f766e;
+}
+
+.labor-file-vacation-format-stats > div:nth-child(3) {
+  border-left-color: #a06d00;
+}
+
+.labor-file-vacation-format-stats span {
+  color: #52657a;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.labor-file-vacation-format-stats strong {
+  color: #102a43;
+  font-size: 1.45rem;
+  line-height: 1.05;
+}
+
+.labor-file-vacation-format-section {
+  background: #ffffff;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.labor-file-vacation-format-section-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.labor-file-vacation-format-section-title h4 {
+  color: #102a43;
+  font-size: 0.98rem;
+  margin: 0;
+}
+
+.labor-file-vacation-format-section-title span {
+  color: #52657a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.labor-file-vacation-format-section .labor-file-vacation-date-group {
+  background: #f8fafb;
+}
+
+.labor-file-contract-field-grid,
+.labor-file-vacation-format-field-grid {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
 }
 
-.labor-file-contract-wide-field {
+.labor-file-contract-wide-field,
+.labor-file-vacation-format-wide-field {
   grid-column: 1 / -1;
 }
 
@@ -7498,8 +7600,11 @@ textarea {
 
 .labor-file-global-vacation-form .form-field,
 .labor-file-vacation-form .form-field,
+.labor-file-vacation-format-form .form-field,
 .labor-file-vacation-form input,
+.labor-file-vacation-format-form input,
 .labor-file-vacation-form button,
+.labor-file-vacation-format-form button,
 .labor-file-global-vacation-form input {
   min-width: 0;
 }
@@ -7718,11 +7823,13 @@ textarea {
 }
 
 .labor-file-vacation-form .primary-button,
+.labor-file-vacation-format-form .primary-button,
 .labor-file-global-vacation-form .primary-button {
   justify-self: end;
 }
 
-.labor-file-vacation-form .primary-button {
+.labor-file-vacation-form .primary-button,
+.labor-file-vacation-format-form .primary-button {
   min-width: 180px;
 }
 
@@ -7750,8 +7857,19 @@ textarea {
 }
 
 .labor-file-vacation-event .table-actions {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   justify-content: flex-end;
   min-width: 0;
+  width: 150px;
+}
+
+.labor-file-vacation-event .table-actions button {
+  min-height: 40px;
+  padding: 10px 16px;
+  width: 100%;
 }
 
 .labor-file-vacation-event strong {
@@ -7774,6 +7892,9 @@ textarea {
   .labor-file-upload-form,
   .labor-file-contract-generator-summary,
   .labor-file-contract-field-grid,
+  .labor-file-vacation-format-summary,
+  .labor-file-vacation-format-stats,
+  .labor-file-vacation-format-field-grid,
   .labor-file-global-vacation-form,
   .labor-file-document-row,
   .labor-file-vacation-form,

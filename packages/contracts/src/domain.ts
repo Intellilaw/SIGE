@@ -194,6 +194,23 @@ export interface LaborContractPrefillResult {
   notes: string[];
 }
 
+export interface LaborVacationFormatFieldValues {
+  employeeName: string;
+  requestDate: string;
+  vacationDates: string[];
+  vacationDays: number;
+  enjoymentText: string;
+  interestedName: string;
+  authorizerName: string;
+  hireDate: string;
+  vacationYearStartDate: string;
+  completedYearsLabel: string;
+  entitlementDays: number;
+  pendingDays: number;
+  enjoyedDays: number;
+  description: string;
+}
+
 export interface LaborVacationSummary {
   hireDate: string;
   currentYearStartDate: string;

@@ -9,7 +9,8 @@ import {
   type LaborGlobalVacationDay,
   type LaborGlobalVacationDayInput,
   type LaborVacationEvent,
-  type LaborVacationEventInput
+  type LaborVacationEventInput,
+  type LaborVacationFormatFieldValues
 } from "@sige/contracts";
 
 import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
@@ -44,6 +45,26 @@ const EMPTY_VACATION_FORM: LaborVacationEventInput = {
 const EMPTY_GLOBAL_VACATION_FORM: LaborGlobalVacationDayInput = {
   date: "",
   days: 1,
+  description: ""
+};
+
+const VACATION_FORMAT_AUTHORIZER = "Mayra Rubí Ordóñez Mendoza";
+const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+const EMPTY_VACATION_FORMAT_FORM: LaborVacationFormatFieldValues = {
+  employeeName: "",
+  requestDate: "",
+  vacationDates: [],
+  vacationDays: 1,
+  enjoymentText: "",
+  interestedName: "",
+  authorizerName: VACATION_FORMAT_AUTHORIZER,
+  hireDate: "",
+  vacationYearStartDate: "",
+  completedYearsLabel: "",
+  entitlementDays: 0,
+  pendingDays: 0,
+  enjoyedDays: 0,
   description: ""
 };
 
@@ -278,6 +299,72 @@ function formatVacationEventDates(event: LaborVacationEvent) {
   return dates.map(formatDate).join(", ");
 }
 
+function formatVacationFormatDatesText(dates: string[]) {
+  const sortedDates = sortDateKeys(dates);
+  if (sortedDates.length === 0) {
+    return "";
+  }
+
+  if (sortedDates.length === 1) {
+    return `el ${formatDate(sortedDates[0])}`;
+  }
+
+  const rangeDates = enumerateDateKeys(sortedDates[0], sortedDates[sortedDates.length - 1]);
+  if (rangeDates.length === sortedDates.length) {
+    return `del ${formatDate(sortedDates[0])} al ${formatDate(sortedDates[sortedDates.length - 1])}`;
+  }
+
+  return sortedDates.map(formatDate).join(", ");
+}
+
+function buildVacationFormatFormDefaults(laborFile?: LaborFile): LaborVacationFormatFieldValues {
+  return {
+    ...EMPTY_VACATION_FORMAT_FORM,
+    employeeName: laborFile?.employeeName ?? "",
+    requestDate: getTodayKey(),
+    interestedName: laborFile?.employeeName ?? "",
+    hireDate: laborFile?.hireDate.slice(0, 10) ?? "",
+    vacationYearStartDate: laborFile?.vacationSummary.currentYearStartDate ?? "",
+    completedYearsLabel: laborFile?.vacationSummary.completedYearsLabel ?? "",
+    entitlementDays: laborFile?.vacationSummary.entitlementDays ?? 0,
+    pendingDays: laborFile?.vacationSummary.remainingDays ?? 0,
+    enjoyedDays: laborFile?.vacationSummary.usedDays ?? 0
+  };
+}
+
+function mergeVacationFormatDates(
+  current: LaborVacationFormatFieldValues,
+  laborFile: LaborFile | undefined,
+  dates: string[]
+): LaborVacationFormatFieldValues {
+  const vacationDates = sortDateKeys(dates);
+  const vacationDays = vacationDates.length;
+  return {
+    ...current,
+    vacationDates,
+    vacationDays: vacationDays || current.vacationDays,
+    enjoymentText: formatVacationFormatDatesText(vacationDates) || current.enjoymentText,
+    pendingDays: laborFile ? Math.max(0, laborFile.vacationSummary.remainingDays - vacationDays) : current.pendingDays,
+    enjoyedDays: laborFile ? laborFile.vacationSummary.usedDays + vacationDays : current.enjoyedDays
+  };
+}
+
+function isPdfFile(file: File) {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function isDocxFile(file: File) {
+  return file.type === DOCX_MIME_TYPE || file.name.toLowerCase().endsWith(".docx");
+}
+
+function getVacationAcceptanceMimeType(file: File) {
+  if (isDocxFile(file)) {
+    return DOCX_MIME_TYPE;
+  }
+
+  return file.type || "application/pdf";
+}
+
 function getEmployeeSecondaryLabel(laborFile: LaborFile) {
   if (laborFile.employeeShortName) {
     return laborFile.employeeShortName;
@@ -301,6 +388,11 @@ export function LaborFilesPage() {
   const [contractPrefillNotes, setContractPrefillNotes] = useState<string[]>([]);
   const [prefillingContract, setPrefillingContract] = useState(false);
   const [generatingContract, setGeneratingContract] = useState(false);
+  const [vacationFormatFormOpen, setVacationFormatFormOpen] = useState(false);
+  const [vacationFormatForm, setVacationFormatForm] = useState<LaborVacationFormatFieldValues>(EMPTY_VACATION_FORMAT_FORM);
+  const [vacationFormatRange, setVacationFormatRange] = useState({ startDate: "", endDate: "" });
+  const [vacationFormatSingleDate, setVacationFormatSingleDate] = useState("");
+  const [generatingVacationFormat, setGeneratingVacationFormat] = useState(false);
   const [vacationForm, setVacationForm] = useState<LaborVacationEventInput>(EMPTY_VACATION_FORM);
   const [vacationRange, setVacationRange] = useState({ startDate: "", endDate: "" });
   const [vacationSingleDate, setVacationSingleDate] = useState("");
@@ -357,6 +449,10 @@ export function LaborFilesPage() {
       setContractFormOpen(false);
       setContractPrefillSources([]);
       setContractPrefillNotes([]);
+      setVacationFormatForm(EMPTY_VACATION_FORMAT_FORM);
+      setVacationFormatFormOpen(false);
+      setVacationFormatRange({ startDate: "", endDate: "" });
+      setVacationFormatSingleDate("");
       return;
     }
 
@@ -368,6 +464,10 @@ export function LaborFilesPage() {
     setContractFormOpen(false);
     setContractPrefillSources([]);
     setContractPrefillNotes([]);
+    setVacationFormatForm(buildVacationFormatFormDefaults(selectedLaborFile));
+    setVacationFormatFormOpen(false);
+    setVacationFormatRange({ startDate: "", endDate: "" });
+    setVacationFormatSingleDate("");
     setFlash(null);
   }, [selectedLaborFile?.id]);
 
@@ -484,7 +584,12 @@ export function LaborFilesPage() {
     }
   }
 
-  function handleContractFormOpen() {
+  function handleContractFormToggle() {
+    if (contractFormOpen) {
+      setContractFormOpen(false);
+      return;
+    }
+
     setContractFormOpen(true);
     if (selectedLaborFile) {
       setContractForm((current) => mergeEditableContractFields(buildContractFormDefaults(selectedLaborFile), current));
@@ -510,6 +615,113 @@ export function LaborFilesPage() {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
       setGeneratingContract(false);
+    }
+  }
+
+  function updateVacationFormatFormField<K extends keyof LaborVacationFormatFieldValues>(
+    field: K,
+    value: LaborVacationFormatFieldValues[K]
+  ) {
+    setVacationFormatForm((current) => ({ ...current, [field]: value }));
+    setFlash(null);
+  }
+
+  function handleVacationFormatFormToggle() {
+    if (vacationFormatFormOpen) {
+      setVacationFormatFormOpen(false);
+      return;
+    }
+
+    setVacationFormatFormOpen(true);
+    if (selectedLaborFile) {
+      setVacationFormatForm((current) => ({
+        ...buildVacationFormatFormDefaults(selectedLaborFile),
+        ...current,
+        vacationDates: current.vacationDates
+      }));
+    }
+  }
+
+  function handleVacationFormatFormReset() {
+    if (!selectedLaborFile) {
+      return;
+    }
+
+    setVacationFormatForm(buildVacationFormatFormDefaults(selectedLaborFile));
+    setVacationFormatRange({ startDate: "", endDate: "" });
+    setVacationFormatSingleDate("");
+    setFlash(null);
+  }
+
+  function addVacationFormatDates(dates: string[]) {
+    if (dates.length === 0) {
+      setFlash({ tone: "error", text: "Selecciona al menos un día de vacaciones para el formato." });
+      return;
+    }
+
+    setVacationFormatForm((current) =>
+      mergeVacationFormatDates(current, selectedLaborFile, [...current.vacationDates, ...dates])
+    );
+    setFlash(null);
+  }
+
+  function handleVacationFormatRangeAdd() {
+    if (!vacationFormatRange.startDate || !vacationFormatRange.endDate) {
+      setFlash({ tone: "error", text: "Captura el inicio y fin del rango de vacaciones." });
+      return;
+    }
+
+    const dates = enumerateDateKeys(vacationFormatRange.startDate, vacationFormatRange.endDate);
+    if (dates.length === 0) {
+      setFlash({ tone: "error", text: "La fecha final no puede ser anterior a la inicial." });
+      return;
+    }
+
+    addVacationFormatDates(dates);
+    setVacationFormatRange({ startDate: "", endDate: "" });
+  }
+
+  function handleVacationFormatSingleDateAdd() {
+    if (!vacationFormatSingleDate) {
+      setFlash({ tone: "error", text: "Selecciona un día de vacaciones." });
+      return;
+    }
+
+    addVacationFormatDates([vacationFormatSingleDate]);
+    setVacationFormatSingleDate("");
+  }
+
+  function handleVacationFormatDateRemove(date: string) {
+    setVacationFormatForm((current) =>
+      mergeVacationFormatDates(current, selectedLaborFile, current.vacationDates.filter((entry) => entry !== date))
+    );
+  }
+
+  async function handleVacationFormatGenerate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedLaborFile || !canWrite) {
+      return;
+    }
+
+    if (vacationFormatForm.vacationDates.length === 0) {
+      setFlash({ tone: "error", text: "Agrega al menos un día de vacaciones para generar el formato." });
+      return;
+    }
+
+    setGeneratingVacationFormat(true);
+    setFlash(null);
+
+    try {
+      await apiPost<LaborVacationEvent>(`/labor-files/${selectedLaborFile.id}/vacation-format/generate`, vacationFormatForm);
+      setFlash({ tone: "success", text: "Formato de vacaciones generado, guardado y contabilizado." });
+      setVacationFormatForm(buildVacationFormatFormDefaults(selectedLaborFile));
+      setVacationFormatRange({ startDate: "", endDate: "" });
+      setVacationFormatSingleDate("");
+      await loadLaborFiles(selectedLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setGeneratingVacationFormat(false);
     }
   }
 
@@ -611,13 +823,12 @@ export function LaborFilesPage() {
       }
 
       if (!vacationAcceptanceFile) {
-        setFlash({ tone: "error", text: "Carga el formato de aceptación de vacaciones en PDF." });
+        setFlash({ tone: "error", text: "Carga el formato de aceptación de vacaciones en PDF o Word." });
         return;
       }
 
-      const isPdf = vacationAcceptanceFile.type === "application/pdf" || vacationAcceptanceFile.name.toLowerCase().endsWith(".pdf");
-      if (!isPdf) {
-        setFlash({ tone: "error", text: "El formato de aceptación debe ser PDF." });
+      if (!isPdfFile(vacationAcceptanceFile) && !isDocxFile(vacationAcceptanceFile)) {
+        setFlash({ tone: "error", text: "El formato de aceptación debe ser PDF o Word." });
         return;
       }
 
@@ -629,7 +840,7 @@ export function LaborFilesPage() {
         startDate: selectedVacationDates[0] ?? null,
         endDate: selectedVacationDates[selectedVacationDates.length - 1] ?? null,
         acceptanceOriginalFileName: vacationAcceptanceFile.name,
-        acceptanceFileMimeType: vacationAcceptanceFile.type || "application/pdf",
+        acceptanceFileMimeType: getVacationAcceptanceMimeType(vacationAcceptanceFile),
         acceptanceFileBase64: await fileToBase64(vacationAcceptanceFile),
         description: vacationForm.description || null
       });
@@ -739,6 +950,16 @@ export function LaborFilesPage() {
   const contractDocument = selectedLaborFile
     ? getLatestDocument(selectedLaborFile.documents, "EMPLOYMENT_CONTRACT")
     : undefined;
+  const latestVacationFormatEvent = selectedLaborFile?.vacationEvents
+    .filter((event) => event.acceptanceOriginalFileName)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const vacationFormatSelectedDays = vacationFormatForm.vacationDates.length;
+  const vacationFormatProjectedPending = selectedLaborFile
+    ? Math.max(0, selectedLaborFile.vacationSummary.remainingDays - vacationFormatSelectedDays)
+    : vacationFormatForm.pendingDays;
+  const vacationFormatProjectedEnjoyed = selectedLaborFile
+    ? selectedLaborFile.vacationSummary.usedDays + vacationFormatSelectedDays
+    : vacationFormatForm.enjoyedDays;
   const addenda = selectedLaborFile?.documents
     .filter((document) => document.documentType === "ADDENDUM")
     .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt)) ?? [];
@@ -1068,22 +1289,12 @@ export function LaborFilesPage() {
                       <div className="labor-file-contract-generator-actions">
                         <button
                           className="primary-button"
-                          disabled={prefillingContract || generatingContract}
-                          onClick={handleContractFormOpen}
+                          disabled={generatingContract}
+                          onClick={handleContractFormToggle}
                           type="button"
                         >
-                          {prefillingContract ? "Leyendo documentos..." : "Abrir formulario"}
+                          {contractFormOpen ? "Cerrar formulario" : prefillingContract ? "Leyendo documentos..." : "Abrir formulario"}
                         </button>
-                        {contractDocument ? (
-                          <button
-                            className="secondary-button"
-                            disabled={documentActionId === contractDocument.id}
-                            onClick={() => void handleDocumentDownload(contractDocument, "download")}
-                            type="button"
-                          >
-                            Descargar Word
-                          </button>
-                        ) : null}
                       </div>
                     </div>
 
@@ -1239,6 +1450,16 @@ export function LaborFilesPage() {
                           <button className="primary-button" disabled={generatingContract || prefillingContract} type="submit">
                             {generatingContract ? "Generando..." : "Generar y guardar .docx"}
                           </button>
+                          {contractDocument ? (
+                            <button
+                              className="secondary-button"
+                              disabled={documentActionId === contractDocument.id}
+                              onClick={() => void handleDocumentDownload(contractDocument, "download")}
+                              type="button"
+                            >
+                              Descargar Word
+                            </button>
+                          ) : null}
                           <button
                             className="secondary-button"
                             disabled={generatingContract || prefillingContract}
@@ -1253,6 +1474,280 @@ export function LaborFilesPage() {
                   </>
                 ) : (
                   <div className="centered-inline-message">Solo usuarios con permisos de escritura pueden generar contratos laborales.</div>
+                )}
+              </section>
+
+              <section className="panel labor-file-vacation-format-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Generación de formato de vacaciones</h2>
+                    <span>Word editable con los días solicitados y resguardo automático en el movimiento de vacaciones.</span>
+                  </div>
+                  <span className={`status-pill ${latestVacationFormatEvent ? "status-live" : "status-warning"}`}>
+                    {latestVacationFormatEvent ? "Formato guardado" : "Pendiente"}
+                  </span>
+                </div>
+
+                {canWrite ? (
+                  <>
+                    <div className="labor-file-vacation-format-summary">
+                      <div>
+                        <strong>{latestVacationFormatEvent?.acceptanceOriginalFileName ?? "Sin formato generado"}</strong>
+                        <span>
+                          {latestVacationFormatEvent
+                            ? `${latestVacationFormatEvent.days} días / ${formatVacationEventDates(latestVacationFormatEvent)}`
+                            : "Abre el formulario, selecciona los días y genera el Word del formato de vacaciones."}
+                        </span>
+                      </div>
+                      <div className="labor-file-vacation-format-actions">
+                        <button
+                          className="primary-button"
+                          disabled={generatingVacationFormat}
+                          onClick={handleVacationFormatFormToggle}
+                          type="button"
+                        >
+                          {vacationFormatFormOpen ? "Cerrar formulario" : "Abrir formulario"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {vacationFormatFormOpen ? (
+                      <form className="labor-file-vacation-format-form" onSubmit={handleVacationFormatGenerate}>
+                        <div className="labor-file-vacation-format-form-head">
+                          <div>
+                            <h3>Datos del formato</h3>
+                            <span>Formulario editable para generar el Word en hoja membretada y guardarlo en el expediente.</span>
+                          </div>
+                          <button
+                            className="ghost-button"
+                            disabled={generatingVacationFormat}
+                            onClick={handleVacationFormatFormReset}
+                            type="button"
+                          >
+                            Restaurar datos
+                          </button>
+                        </div>
+
+                        <div className="labor-file-vacation-format-stats">
+                          <div>
+                            <span>Días solicitados</span>
+                            <strong>{vacationFormatSelectedDays || vacationFormatForm.vacationDays}</strong>
+                          </div>
+                          <div>
+                            <span>Quedarían pendientes</span>
+                            <strong>{vacationFormatProjectedPending}</strong>
+                          </div>
+                          <div>
+                            <span>Disfrutados acumulados</span>
+                            <strong>{vacationFormatProjectedEnjoyed}</strong>
+                          </div>
+                        </div>
+
+                        <div className="labor-file-vacation-format-section">
+                          <div className="labor-file-vacation-format-section-title">
+                            <h4>Selección de días</h4>
+                            <span>{vacationFormatSelectedDays} días en el formato</span>
+                          </div>
+
+                          <div className="labor-file-vacation-date-tools">
+                            <div className="labor-file-vacation-date-group is-range">
+                              <h3>Días continuos</h3>
+                              <div className="labor-file-vacation-date-row">
+                                <label className="form-field">
+                                  <span>Inicio</span>
+                                  <input
+                                    type="date"
+                                    value={vacationFormatRange.startDate}
+                                    onChange={(event) => setVacationFormatRange((current) => ({ ...current, startDate: event.target.value }))}
+                                  />
+                                </label>
+                                <label className="form-field">
+                                  <span>Fin</span>
+                                  <input
+                                    type="date"
+                                    value={vacationFormatRange.endDate}
+                                    onChange={(event) => setVacationFormatRange((current) => ({ ...current, endDate: event.target.value }))}
+                                  />
+                                </label>
+                                <button className="secondary-button" onClick={handleVacationFormatRangeAdd} type="button">
+                                  Agregar rango
+                                </button>
+                              </div>
+                            </div>
+                            <div className="labor-file-vacation-date-group is-single">
+                              <h3>Día suelto</h3>
+                              <div className="labor-file-vacation-date-row">
+                                <label className="form-field">
+                                  <span>Fecha</span>
+                                  <input
+                                    type="date"
+                                    value={vacationFormatSingleDate}
+                                    onChange={(event) => setVacationFormatSingleDate(event.target.value)}
+                                  />
+                                </label>
+                                <button className="secondary-button" onClick={handleVacationFormatSingleDateAdd} type="button">
+                                  Agregar día
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="labor-file-vacation-selected-days">
+                            {vacationFormatForm.vacationDates.length === 0 ? (
+                              <div className="centered-inline-message">Agrega días continuos o salteados.</div>
+                            ) : (
+                              <div className="labor-file-vacation-day-chips">
+                                {vacationFormatForm.vacationDates.map((date) => (
+                                  <button key={date} onClick={() => handleVacationFormatDateRemove(date)} type="button">
+                                    {formatDate(date)} <span>Quitar</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="labor-file-vacation-format-section">
+                          <div className="labor-file-vacation-format-section-title">
+                            <h4>Información del documento</h4>
+                            <span>Todos los campos pueden editarse antes de generar</span>
+                          </div>
+                          <div className="labor-file-vacation-format-field-grid">
+                          <label className="form-field">
+                            <span>Nombre</span>
+                            <input
+                              required
+                              value={vacationFormatForm.employeeName}
+                              onChange={(event) => updateVacationFormatFormField("employeeName", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Fecha del formato</span>
+                            <input
+                              required
+                              type="date"
+                              value={vacationFormatForm.requestDate}
+                              onChange={(event) => updateVacationFormatFormField("requestDate", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Días de vacaciones</span>
+                            <input
+                              min="1"
+                              type="number"
+                              value={vacationFormatForm.vacationDays}
+                              onChange={(event) => updateVacationFormatFormField("vacationDays", Number(event.target.value))}
+                            />
+                          </label>
+                          <label className="form-field labor-file-vacation-format-wide-field">
+                            <span>Texto "A disfrutar"</span>
+                            <input
+                              value={vacationFormatForm.enjoymentText}
+                              onChange={(event) => updateVacationFormatFormField("enjoymentText", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>El interesado</span>
+                            <input
+                              value={vacationFormatForm.interestedName}
+                              onChange={(event) => updateVacationFormatFormField("interestedName", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Autoriza</span>
+                            <input
+                              value={vacationFormatForm.authorizerName}
+                              onChange={(event) => updateVacationFormatFormField("authorizerName", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Fecha de ingreso</span>
+                            <input
+                              type="date"
+                              value={vacationFormatForm.hireDate}
+                              onChange={(event) => updateVacationFormatFormField("hireDate", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Fecha de inicio</span>
+                            <input
+                              type="date"
+                              value={vacationFormatForm.vacationYearStartDate}
+                              onChange={(event) => updateVacationFormatFormField("vacationYearStartDate", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Años cumplidos</span>
+                            <input
+                              value={vacationFormatForm.completedYearsLabel}
+                              onChange={(event) => updateVacationFormatFormField("completedYearsLabel", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Días que corresponden</span>
+                            <input
+                              min="0"
+                              type="number"
+                              value={vacationFormatForm.entitlementDays}
+                              onChange={(event) => updateVacationFormatFormField("entitlementDays", Number(event.target.value))}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Días pendientes</span>
+                            <input
+                              min="0"
+                              type="number"
+                              value={vacationFormatForm.pendingDays}
+                              onChange={(event) => updateVacationFormatFormField("pendingDays", Number(event.target.value))}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Días disfrutados</span>
+                            <input
+                              min="0"
+                              type="number"
+                              value={vacationFormatForm.enjoyedDays}
+                              onChange={(event) => updateVacationFormatFormField("enjoyedDays", Number(event.target.value))}
+                            />
+                          </label>
+                          <label className="form-field labor-file-vacation-format-wide-field">
+                            <span>Descripción</span>
+                            <input
+                              value={vacationFormatForm.description}
+                              onChange={(event) => updateVacationFormatFormField("description", event.target.value)}
+                            />
+                          </label>
+                          </div>
+                        </div>
+
+                        <div className="form-actions">
+                          <button className="primary-button" disabled={generatingVacationFormat} type="submit">
+                            {generatingVacationFormat ? "Generando..." : "Generar, guardar y contabilizar"}
+                          </button>
+                          {latestVacationFormatEvent ? (
+                            <button
+                              className="secondary-button"
+                              disabled={vacationFileActionId === latestVacationFormatEvent.id}
+                              onClick={() => void handleVacationAcceptanceDownload(latestVacationFormatEvent, "download")}
+                              type="button"
+                            >
+                              Descargar formato
+                            </button>
+                          ) : null}
+                          <button
+                            className="secondary-button"
+                            disabled={generatingVacationFormat}
+                            onClick={() => setVacationFormatFormOpen(false)}
+                            type="button"
+                          >
+                            Cerrar formulario
+                          </button>
+                        </div>
+                      </form>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="centered-inline-message">Solo usuarios con permisos de escritura pueden generar formatos de vacaciones.</div>
                 )}
               </section>
 
@@ -1332,8 +1827,13 @@ export function LaborFilesPage() {
                       )}
                     </div>
                     <label className="form-field labor-file-vacation-file">
-                      <span>Formato de aceptación (PDF)</span>
-                      <input accept=".pdf,application/pdf" required type="file" onChange={handleVacationAcceptanceFileChange} />
+                      <span>Formato de aceptación (PDF o Word)</span>
+                      <input
+                        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        required
+                        type="file"
+                        onChange={handleVacationAcceptanceFileChange}
+                      />
                     </label>
                     <label className="form-field labor-file-vacation-description">
                       <span>Descripción</span>
@@ -1371,7 +1871,7 @@ export function LaborFilesPage() {
                               onClick={() => void handleVacationAcceptanceDownload(event, "open")}
                               type="button"
                             >
-                              Abrir PDF
+                              Abrir formato
                             </button>
                             <button
                               className="ghost-button"
