@@ -3,6 +3,8 @@ import type { KpiMetric, KpiMetricStatus, KpiOverview, KpiTeamSummary } from "@s
 
 import { apiGet } from "../../api/http-client";
 
+type KpiViewMode = "monthly" | "daily";
+
 const MONTH_NAMES = [
   "Enero",
   "Febrero",
@@ -128,6 +130,70 @@ function KpiMetricRow(props: { metric: KpiMetric }) {
   );
 }
 
+function KpiDailyMetricTable(props: { metric: KpiMetric }) {
+  const { metric } = props;
+  const failedDays = metric.dailyBreakdown.filter((entry) => entry.status === "missed").length;
+  const warningDays = metric.dailyBreakdown.filter((entry) => entry.status === "warning").length;
+
+  return (
+    <section className="kpis-daily-metric">
+      <div className="kpis-daily-metric-head">
+        <div>
+          <strong>{metric.label}</strong>
+          <p>{metric.description}</p>
+        </div>
+        <span className={failedDays > 0 ? "is-alert" : warningDays > 0 ? "is-warning" : ""}>
+          {failedDays > 0 ? `${failedDays} dias con falla` : warningDays > 0 ? `${warningDays} en observacion` : "Sin fallas"}
+        </span>
+      </div>
+
+      {metric.dailyBreakdown.length > 0 ? (
+        <div className="table-scroll">
+          <table className="data-table kpis-daily-table">
+            <thead>
+              <tr>
+                <th>Dia</th>
+                <th>Resultado</th>
+                <th>Real</th>
+                <th>Meta del dia/corte</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metric.dailyBreakdown.map((entry) => (
+                <tr key={`${metric.id}-${entry.date}`} className={`kpis-daily-row is-${entry.status}`}>
+                  <td>{formatDate(entry.date)}</td>
+                  <td>
+                    <KpiStatusBadge status={entry.status} />
+                  </td>
+                  <td>{entry.actualLabel}</td>
+                  <td>{entry.targetLabel}</td>
+                  <td>
+                    <div className="kpis-daily-detail">
+                      <span>{entry.helper}</span>
+                      {entry.incidents.length > 0 ? (
+                        <ul>
+                          {entry.incidents.map((incident) => (
+                            <li key={`${incident.sourceType}-${incident.id}-${incident.reason}`}>
+                              {incident.clientName} - {incident.taskName}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="kpis-empty-user">No hay dias habiles evaluados para esta metrica en el periodo seleccionado.</div>
+      )}
+    </section>
+  );
+}
+
 function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolean }) {
   if (props.loading) {
     return (
@@ -190,6 +256,65 @@ function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolea
   );
 }
 
+function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: boolean }) {
+  if (props.loading) {
+    return (
+      <section className="panel">
+        <div className="centered-inline-message">Cargando detalle diario...</div>
+      </section>
+    );
+  }
+
+  if (!props.team) {
+    return (
+      <section className="panel">
+        <div className="centered-inline-message">No hay usuarios para mostrar.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="panel kpis-team-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Detalle diario - {props.team.teamLabel}</h2>
+          <p className="muted">Cumplimiento diario calculado desde seguimiento, terminos, dias inhabiles y vacaciones.</p>
+        </div>
+        <span>{props.team.users.length} usuarios</span>
+      </div>
+
+      <div className="kpis-user-list">
+        {props.team.users.map((user) => (
+          <article key={user.userId} className={`kpis-user-block ${user.configured ? "" : "is-unconfigured"}`}>
+            <header className="kpis-user-head">
+              <div>
+                <h3>
+                  {user.displayName}
+                  {user.shortName ? <span>{user.shortName}</span> : null}
+                </h3>
+                <p>{user.specificRole ?? user.teamLabel}</p>
+              </div>
+              <span className={`kpis-user-state ${user.configured ? "is-configured" : "is-pending"}`}>
+                {user.configured ? `${user.metrics.length} KPI's` : "KPI's pendientes"}
+              </span>
+            </header>
+
+            {user.configured ? (
+              <div className="kpis-daily-metric-list">
+                {user.metrics.map((metric) => (
+                  <KpiDailyMetricTable key={metric.id} metric={metric} />
+                ))}
+              </div>
+            ) : (
+              <div className="kpis-empty-user">No hay KPI's definidos para desglosar por dia.</div>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function KpisPage() {
   const currentPeriod = getCurrentPeriod();
   const [selectedYear, setSelectedYear] = useState(currentPeriod.year);
@@ -198,6 +323,7 @@ export function KpisPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTeamKey, setActiveTeamKey] = useState<string>("");
+  const [viewMode, setViewMode] = useState<KpiViewMode>("monthly");
 
   async function loadOverview() {
     setLoading(true);
@@ -262,6 +388,22 @@ export function KpisPage() {
 
       <section className="panel kpis-toolbar-panel">
         <div className="kpis-toolbar">
+          <div className="kpis-view-tabs" role="tablist" aria-label="Vista de KPI's">
+            <button
+              type="button"
+              className={`kpis-view-tab ${viewMode === "monthly" ? "is-active" : ""}`}
+              onClick={() => setViewMode("monthly")}
+            >
+              Mensual
+            </button>
+            <button
+              type="button"
+              className={`kpis-view-tab ${viewMode === "daily" ? "is-active" : ""}`}
+              onClick={() => setViewMode("daily")}
+            >
+              Diaria
+            </button>
+          </div>
           <label className="form-field">
             <span>Ano</span>
             <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
@@ -335,14 +477,18 @@ export function KpisPage() {
               >
                 <strong>{team.teamLabel}</strong>
                 <span>
-                  {team.users.length} usuarios · {team.missedMetricsCount} fuera de meta
+                  {team.users.length} usuarios - {team.missedMetricsCount} fuera de meta
                 </span>
               </button>
             ))}
           </div>
         </aside>
 
-        <KpiTeamPanel team={activeTeam} loading={loading} />
+        {viewMode === "monthly" ? (
+          <KpiTeamPanel team={activeTeam} loading={loading} />
+        ) : (
+          <KpiTeamDailyPanel team={activeTeam} loading={loading} />
+        )}
       </div>
     </section>
   );

@@ -32,6 +32,7 @@ function isAuthorizedSupervisor(user: ReturnType<typeof getSessionUser>) {
 export const generalSupervisionRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.GeneralSupervisionService({
     tasks: app.repositories.tasks,
+    matters: app.repositories.matters,
     users: app.repositories.users,
     kpis: app.repositories.kpis
   });

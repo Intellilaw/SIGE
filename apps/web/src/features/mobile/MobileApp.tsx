@@ -13,13 +13,16 @@ import type {
   TaskTrackingRecord,
   Team
 } from "@sige/contracts";
-import { APP_VERSION_LABEL, APP_VERSION_TEXT, TEAM_OPTIONS } from "@sige/contracts";
+import { APP_VERSION_BADGE, TEAM_OPTIONS } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import type { ExecutionModuleDescriptor } from "../execution/execution-config";
+import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisionPage";
+import { KpisPage } from "../kpis/KpisPage";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import type { TaskDashboardMember } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
@@ -44,6 +47,10 @@ type MobileTaskTarget = {
 type MobileAuthUser = {
   role: string;
   legacyRole: string;
+  email?: string;
+  username?: string;
+  displayName?: string;
+  shortName?: string;
   permissions: string[];
 };
 
@@ -254,6 +261,14 @@ function canReadMobileLeads(user?: MobileAuthUser | null) {
 
 function canReadMobileGeneralExpenses(user?: MobileAuthUser | null) {
   return canReadModule(user, "general-expenses");
+}
+
+function canReadMobileKpis(user?: MobileAuthUser | null) {
+  return canReadModule(user, "kpis");
+}
+
+function canReadMobileGeneralSupervision(user?: MobileAuthUser | null) {
+  return canReadModule(user, "general-supervision") && canAccessGeneralSupervision(user);
 }
 
 function canWriteMobileGeneralExpenses(user?: MobileAuthUser | null) {
@@ -566,6 +581,8 @@ export function MobileProtectedLayout() {
   const showLeads = canReadMobileLeads(user);
   const showFinances = canReadMobileFinances(user);
   const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+  const showKpis = canReadMobileKpis(user);
+  const showGeneralSupervision = canReadMobileGeneralSupervision(user);
   const showExecution = canReadMobileExecution(user);
 
   if (loading) {
@@ -580,7 +597,7 @@ export function MobileProtectedLayout() {
     <div className="mobile-app-shell">
       <header className="mobile-topbar">
         <div>
-          <strong>SIGE movil <span className="mobile-topbar-version">{APP_VERSION_LABEL}</span></strong>
+          <strong>SIGE movil <span className="mobile-topbar-version">{APP_VERSION_BADGE}</span></strong>
           <span>{user.displayName}</span>
         </div>
         <button type="button" onClick={logout}>Salir</button>
@@ -595,6 +612,8 @@ export function MobileProtectedLayout() {
         {showLeads ? <NavLink to="/mobile/leads">Leads</NavLink> : null}
         {showFinances ? <NavLink to="/mobile/finances">Finanzas</NavLink> : null}
         {showGeneralExpenses ? <NavLink to="/mobile/general-expenses">Gastos</NavLink> : null}
+        {showKpis ? <NavLink to="/mobile/kpis">KPI's</NavLink> : null}
+        {showGeneralSupervision ? <NavLink to="/mobile/general-supervision">Supervision</NavLink> : null}
         {showExecution ? <NavLink to="/mobile/execution">Ejecucion</NavLink> : null}
         {showExecution ? <NavLink to="/mobile/tracking">Seguimiento</NavLink> : null}
       </nav>
@@ -607,6 +626,8 @@ export function MobileHomePage() {
   const showLeads = canReadMobileLeads(user);
   const showFinances = canReadMobileFinances(user);
   const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+  const showKpis = canReadMobileKpis(user);
+  const showGeneralSupervision = canReadMobileGeneralSupervision(user);
   const showExecution = canReadMobileExecution(user);
 
   return (
@@ -627,6 +648,16 @@ export function MobileHomePage() {
             Gastos generales
           </Link>
         ) : null}
+        {showKpis ? (
+          <Link className="mobile-home-action" to="/mobile/kpis">
+            KPI's
+          </Link>
+        ) : null}
+        {showGeneralSupervision ? (
+          <Link className="mobile-home-action" to="/mobile/general-supervision">
+            Supervision general
+          </Link>
+        ) : null}
         {showExecution ? (
           <Link className="mobile-home-action" to="/mobile/execution">
             Crear tarea
@@ -638,6 +669,34 @@ export function MobileHomePage() {
           </Link>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+export function MobileKpisPage() {
+  const { user } = useAuth();
+
+  if (!canReadMobileKpis(user)) {
+    return <Navigate to="/mobile" replace />;
+  }
+
+  return (
+    <section className="mobile-embedded-module">
+      <KpisPage />
+    </section>
+  );
+}
+
+export function MobileGeneralSupervisionPage() {
+  const { user } = useAuth();
+
+  if (!canReadMobileGeneralSupervision(user)) {
+    return <Navigate to="/mobile" replace />;
+  }
+
+  return (
+    <section className="mobile-embedded-module">
+      <GeneralSupervisionPage />
     </section>
   );
 }

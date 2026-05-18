@@ -15,6 +15,7 @@ export const TEAM_OPTIONS: TeamOption[] = [
   { key: "TAX_COMPLIANCE", label: "Compliance Fiscal" },
   { key: "AUDIT", label: "Auditoria" },
   { key: "CLIENT_RELATIONS", label: "Comunicación con cliente" },
+  { key: "SALES", label: "Ventas" },
   { key: "FINANCE", label: "Finanzas" },
   { key: "ADMIN_OPERATIONS", label: "Servicios administrativos" },
   { key: "ADMIN", label: "Dirección general" }
@@ -34,6 +35,7 @@ export const SPECIFIC_ROLE_OPTIONS = [
   "Compliance Fiscal (colaborador)",
   "Finanzas",
   "Comunicación con cliente",
+  "Ventas",
   "Auditor",
   "Proyectista 1",
   "Proyectista 2"
@@ -282,6 +284,7 @@ export function derivePermissions(input: {
   const normalizedTeam = normalizeText(input.legacyTeam ?? getLegacyTeamLabel(input.team) ?? "");
   const isClientRelationsTeam =
     normalizedTeam === "comunicacion con cliente" || normalizedTeam === "comunicacion con clientes";
+  const isSalesTeam = normalizedTeam === "ventas";
 
   if (input.legacyRole === "SUPERADMIN" || specificRole === "direccion general") {
     return ["*"];
@@ -299,6 +302,18 @@ export function derivePermissions(input: {
     permissions.add("finances:read");
     permissions.add("internal-contracts:read");
     permissions.add("internal-contract-templates:read");
+  }
+
+  if (isSalesTeam) {
+    permissions.add("clients:read");
+    permissions.add("clients:write");
+    permissions.add("quotes:read");
+    permissions.add("quotes:write");
+    permissions.add("leads:read");
+    permissions.add("leads:write");
+    permissions.add("matters:read");
+    permissions.add("sales:read");
+    permissions.add("sales:write");
   }
 
   if (normalizedTeam === "finanzas") {

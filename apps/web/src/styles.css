@@ -386,8 +386,23 @@ textarea {
   font-size: 0.95rem;
 }
 
+.nav-link-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.nav-link-content-version {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
 .nav-link-label {
   min-width: 0;
+  flex: 1;
+  line-height: 1.25;
 }
 
 .nav-link.active {
@@ -515,11 +530,11 @@ textarea {
 }
 
 .app-version-badge-sidebar {
-  min-width: 72px;
-  padding-inline: 12px;
-  font-size: 0.84rem;
-  margin-left: auto;
+  min-width: auto;
+  padding: 6px 12px;
+  font-size: 0.8rem;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .panel-header {
@@ -3834,6 +3849,236 @@ textarea {
   flex-wrap: wrap;
 }
 
+.sales-page {
+  max-width: 1480px;
+}
+
+.sales-hero .module-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  height: 48px;
+  border-radius: 8px;
+  color: #173f6b;
+  font-size: 0.92rem;
+}
+
+.sales-dashboard-list {
+  gap: 18px;
+}
+
+.sales-dashboard-table {
+  min-width: 980px;
+}
+
+.sales-product-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: #102a43;
+}
+
+.sales-product-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.sales-priority-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.sales-priority-pill.is-alta {
+  background: rgba(180, 35, 24, 0.14);
+  color: #b42318;
+}
+
+.sales-priority-pill.is-media {
+  background: rgba(212, 160, 23, 0.18);
+  color: #8b5e00;
+}
+
+.sales-priority-pill.is-normal {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.sales-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.sales-product-card {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  min-height: 142px;
+  padding: 14px;
+  border: 1px solid rgba(31, 41, 51, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #1f2933;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.sales-product-card:hover,
+.sales-product-card.is-selected {
+  transform: translateY(-2px);
+  border-color: rgba(29, 78, 216, 0.3);
+  box-shadow: 0 16px 34px rgba(31, 41, 51, 0.09);
+}
+
+.sales-product-logo-shell {
+  min-width: 0;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: #ffffff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.sales-product-logo-shell img {
+  width: 100%;
+  max-height: 96px;
+  object-fit: contain;
+  padding: 8px;
+}
+
+.sales-product-monogram {
+  width: 68px;
+  height: 68px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  font-weight: 900;
+}
+
+.sales-product-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.sales-product-card-copy strong {
+  color: #102a43;
+  font-size: 1.06rem;
+}
+
+.sales-product-card-copy span {
+  color: #52606d;
+}
+
+.sales-product-task-summary {
+  justify-self: start;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(29, 78, 216, 0.1);
+  color: #1d4ed8 !important;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.sales-product-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.sales-product-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.sales-selected-product-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.sales-selected-product-head h2,
+.sales-selected-product-head p {
+  margin: 0;
+}
+
+.sales-selected-product-logo {
+  width: 154px;
+  min-height: 84px;
+  border: 2px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: #ffffff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.sales-selected-product-logo img {
+  width: 100%;
+  object-fit: contain;
+  padding: 8px;
+}
+
+.sales-selected-product-logo span {
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.sales-date-field {
+  max-width: 240px;
+}
+
+.sales-copy-field textarea {
+  min-height: 224px;
+  line-height: 1.55;
+}
+
+.sales-report-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sales-report-entry {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.sales-report-entry strong {
+  color: #102a43;
+}
+
+.sales-report-entry span,
+.sales-report-entry small {
+  color: #52606d;
+}
+
+.sales-empty-report {
+  margin: 0;
+  border: 1px dashed rgba(31, 41, 51, 0.14);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.7);
+}
+
 .tasks-legacy-toolbar,
 .tasks-legacy-actions {
   display: flex;
@@ -5339,6 +5584,34 @@ textarea {
   gap: 16px;
 }
 
+.kpis-view-tabs {
+  align-self: end;
+  background: #e2e8f0;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.kpis-view-tab {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #475569;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  min-height: 42px;
+  padding: 8px 14px;
+}
+
+.kpis-view-tab.is-active {
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  color: #0f766e;
+}
+
 .kpis-toolbar .form-field {
   min-width: 180px;
 }
@@ -5530,6 +5803,84 @@ textarea {
   background: #fff;
 }
 
+.kpis-daily-metric-list {
+  display: grid;
+  gap: 18px;
+}
+
+.kpis-daily-metric {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+}
+
+.kpis-daily-metric-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.kpis-daily-metric-head strong {
+  color: #102a43;
+}
+
+.kpis-daily-metric-head p {
+  color: #64748b;
+  margin: 6px 0 0;
+}
+
+.kpis-daily-metric-head > span {
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  font-size: 0.82rem;
+  font-weight: 900;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.kpis-daily-metric-head > span.is-warning {
+  background: rgba(180, 83, 9, 0.12);
+  color: #b45309;
+}
+
+.kpis-daily-metric-head > span.is-alert {
+  background: rgba(190, 18, 60, 0.12);
+  color: #be123c;
+}
+
+.kpis-daily-table {
+  min-width: 940px;
+  background: #fff;
+}
+
+.kpis-daily-table td {
+  vertical-align: top;
+}
+
+.kpis-daily-row.is-missed td {
+  background: rgba(255, 241, 242, 0.76);
+}
+
+.kpis-daily-row.is-warning td {
+  background: rgba(255, 247, 237, 0.82);
+}
+
+.kpis-daily-detail {
+  display: grid;
+  gap: 6px;
+  min-width: 280px;
+}
+
+.kpis-daily-detail ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .kpis-metric-row {
   display: grid;
   gap: 14px;
@@ -5615,7 +5966,7 @@ textarea {
 }
 
 .supervision-summary-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .supervision-bucket-grid {
@@ -5627,6 +5978,7 @@ textarea {
 }
 
 .supervision-summary-card,
+.supervision-task-overview,
 .supervision-bucket-card,
 .supervision-kpi-period,
 .supervision-user-group {
@@ -5662,6 +6014,10 @@ textarea {
   border-color: rgba(29, 78, 216, 0.22);
 }
 
+.supervision-summary-card.is-overdue {
+  border-color: rgba(190, 18, 60, 0.24);
+}
+
 .supervision-summary-card.is-terms {
   border-color: rgba(180, 83, 9, 0.24);
 }
@@ -5680,6 +6036,120 @@ textarea {
   gap: 12px;
   min-height: 280px;
   padding: 14px;
+}
+
+.supervision-task-overview {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.supervision-task-overview-head {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.supervision-task-stat {
+  display: grid;
+  gap: 4px;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 14px;
+}
+
+.supervision-task-stat.is-total {
+  background: #f8fafc;
+}
+
+.supervision-task-stat.is-overdue {
+  background: #fff1f2;
+}
+
+.supervision-task-stat span,
+.supervision-task-user-main span,
+.supervision-task-counts span {
+  color: #64748b;
+}
+
+.supervision-task-stat strong {
+  color: #0f172a;
+  font-size: 1.8rem;
+  line-height: 1.1;
+}
+
+.supervision-task-user-list {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.supervision-task-user-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.supervision-task-user-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.supervision-task-user-main h4 {
+  margin: 0;
+  color: #102a43;
+}
+
+.supervision-task-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(74px, 1fr));
+  gap: 8px;
+}
+
+.supervision-task-counts span {
+  display: grid;
+  gap: 2px;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.supervision-task-counts strong {
+  color: #173f6b;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.supervision-task-counts .is-total strong {
+  color: #0f172a;
+}
+
+.supervision-task-counts .is-overdue strong {
+  color: #be123c;
+}
+
+.supervision-task-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.supervision-task-dashboard-link {
+  min-height: 36px;
+  white-space: nowrap;
 }
 
 .supervision-bucket-head,
@@ -5821,7 +6291,7 @@ textarea {
   min-height: 100vh;
   background: #f7fafc;
   color: #172033;
-  padding: 64px 14px 92px;
+  padding: 64px 14px 132px;
 }
 
 .mobile-centered {
@@ -5934,6 +6404,10 @@ textarea {
 .mobile-content {
   max-width: 720px;
   margin: 0 auto;
+}
+
+.mobile-embedded-module {
+  min-width: 0;
 }
 
 .mobile-hero,
@@ -6579,6 +7053,15 @@ textarea {
   .tasks-distributor-config-layout,
   .tasks-active-target-fields {
     grid-template-columns: 1fr;
+  }
+
+  .supervision-task-overview-head,
+  .supervision-task-user-row {
+    grid-template-columns: 1fr;
+  }
+
+  .supervision-task-link-list {
+    justify-content: flex-start;
   }
 
   .daily-doc-actions {
@@ -7996,5 +8479,26 @@ textarea {
   .holidays-day-badges span {
     font-size: 0.62rem;
     padding-inline: 5px;
+  }
+}
+
+@media (max-width: 960px) {
+  .sales-product-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-selected-product-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .sales-product-card {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-product-logo-shell {
+    min-height: 92px;
   }
 }

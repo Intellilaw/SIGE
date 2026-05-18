@@ -3,6 +3,7 @@ const MODULE_ACCESS = {
     quotes: { read: ["quotes:read", "quotes:write"], write: ["quotes:write"] },
     "lead-tracking": { read: ["leads:read", "leads:write"], write: ["leads:write"] },
     "active-matters": { read: ["matters:read", "matters:write"], write: ["matters:write"] },
+    sales: { read: ["sales:read", "sales:write"], write: ["sales:write"] },
     execution: {
         read: [
             "execution:litigation",

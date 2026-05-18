@@ -4,6 +4,7 @@ import {
   type KpiMetricStatus,
   type LegacyTaskStatus,
   type ManagedUser,
+  type Matter,
   type TaskAdditionalTask,
   type TaskItem,
   type TaskModuleDefinition,
@@ -11,9 +12,10 @@ import {
   type TaskTrackingRecord
 } from "@sige/contracts";
 
-import type { KpiAccessScope, KpisRepository, TasksRepository, UsersRepository } from "../../repositories/types";
+import type { KpiAccessScope, KpisRepository, MattersRepository, TasksRepository, UsersRepository } from "../../repositories/types";
 
 type SupervisionBucketKey = "today" | "tomorrow" | "restOfWeek";
+type TaskSummaryKey = "today" | "overdue";
 type KpiPeriodKey = "lastWeek" | "currentWeek";
 
 interface DateRange {
@@ -68,9 +70,20 @@ interface SupervisionTermCandidate {
   originPath: string;
 }
 
-interface GroupedUserTasks extends SupervisionUserReference {
+interface SupervisionTaskDashboardLink {
+  moduleId: string;
+  label: string;
+  path: string;
   total: number;
-  tasks: SupervisionTaskCandidate[];
+  today: number;
+  overdue: number;
+}
+
+interface GroupedUserTaskSummary extends SupervisionUserReference {
+  total: number;
+  today: number;
+  overdue: number;
+  dashboardLinks: SupervisionTaskDashboardLink[];
 }
 
 interface GroupedTeamTerms {
@@ -109,6 +122,33 @@ const TASK_MODULE_SLUGS: Record<string, string> = {
 const OPEN_LEGACY_STATUSES: LegacyTaskStatus[] = ["pendiente"];
 const OPEN_TASK_STATES: TaskItem["state"][] = ["PENDING", "IN_PROGRESS"];
 const KPI_ALERT_STATUSES: KpiMetricStatus[] = ["missed", "warning"];
+const LITIGATION_MODULE_ID = "litigation";
+const LITIGATION_TEAM = "LITIGATION";
+const LITIGATION_MISSING_NEXT_TASK_OWNER = "LAMR";
+const TASK_VERIFICATION_COLUMNS: Record<string, Array<{ key: string; label: string }>> = {
+  litigation: [
+    { key: "verificado_meoo", label: "V. MEOO" },
+    { key: "verificado_lamr", label: "V. LAMR" },
+    { key: "verificado_ekpo", label: "V. EKPO" },
+    { key: "verificado_nbsg", label: "V. NBSG" }
+  ],
+  "corporate-labor": [
+    { key: "verificado_crv", label: "V. CRV" },
+    { key: "verificado_cagc", label: "V. CAGC" }
+  ],
+  settlements: [
+    { key: "verificado_lider", label: "V. MLDM" },
+    { key: "verificado_colaborador", label: "V. CAOG" }
+  ],
+  "financial-law": [
+    { key: "verificado_lider", label: "V. RJVO" },
+    { key: "verificado_colaborador", label: "V. HKMG" }
+  ],
+  "tax-compliance": [
+    { key: "verificado_lider", label: "V. MPC" },
+    { key: "verificado_colaborador", label: "V. YMAH" }
+  ]
+};
 
 function normalizeText(value?: string | null) {
   return (value ?? "")
@@ -174,6 +214,19 @@ function getStringDataValue(data: unknown, keys: string[]) {
   return undefined;
 }
 
+function isVerificationValueComplete(value?: string | null) {
+  return ["si", "yes"].includes(normalizeKey(value));
+}
+
+function getVerificationResponsible(column: { key: string; label: string }) {
+  const labelAlias = column.label.replace(/^v\.\s*/i, "").trim();
+  if (labelAlias) {
+    return labelAlias;
+  }
+
+  return column.key.replace(/^verificado[_-]?/i, "").replace(/[_-]+/g, " ").trim();
+}
+
 function statusLabel(status: LegacyTaskStatus | TaskItem["state"]) {
   if (status === "presentado") {
     return "Presentado";
@@ -225,6 +278,60 @@ function getRecordSourceLabel(module: TaskModuleDefinition | undefined, record: 
     ?? record.sourceTable
     ?? record.tableCode
     ?? "Seguimiento";
+}
+
+function normalizeMatterIdentity(value?: string | null) {
+  return (value ?? "").trim();
+}
+
+function matterKeyMatches(recordValue: string | undefined | null, matterValues: string[]) {
+  const normalizedRecordValue = normalizeMatterIdentity(recordValue);
+  return Boolean(normalizedRecordValue && matterValues.includes(normalizedRecordValue));
+}
+
+function getMatterIdentityValues(matter: Matter) {
+  return [
+    matter.id,
+    matter.matterNumber,
+    matter.matterIdentifier
+  ].map(normalizeMatterIdentity).filter(Boolean);
+}
+
+function isCompletedTrackingRecord(record: TaskTrackingRecord) {
+  return record.status === "presentado" || record.status === "concluida";
+}
+
+function hasActiveLinkedTrackingRecord(matter: Matter, records: TaskTrackingRecord[]) {
+  const matterValues = getMatterIdentityValues(matter);
+
+  return records.some((record) =>
+    !record.deletedAt
+    && !isCompletedTrackingRecord(record)
+    && (
+      matterKeyMatches(record.matterId, matterValues)
+      || matterKeyMatches(record.matterNumber, matterValues)
+      || matterKeyMatches(record.matterIdentifier, matterValues)
+    )
+  );
+}
+
+function hasActiveStandaloneTerm(matter: Matter, terms: TaskTerm[]) {
+  const matterValues = getMatterIdentityValues(matter);
+
+  return terms.some((term) =>
+    !term.deletedAt
+    && !term.sourceRecordId
+    && term.status === "pendiente"
+    && (
+      matterKeyMatches(term.matterId, matterValues)
+      || matterKeyMatches(term.matterNumber, matterValues)
+      || matterKeyMatches(term.matterIdentifier, matterValues)
+    )
+  );
+}
+
+function hasExecutionNextTask(matter: Matter, records: TaskTrackingRecord[], terms: TaskTerm[]) {
+  return hasActiveLinkedTrackingRecord(matter, records) || hasActiveStandaloneTerm(matter, terms);
 }
 
 function splitResponsibleAliases(value?: string | null) {
@@ -312,6 +419,14 @@ function isDateInRange(dateKey: string, range: DateRange | KpiDateRange) {
   return Boolean(dateKey) && dateKey >= range.startDate && dateKey <= range.endDate;
 }
 
+function getTaskSummaryKey(dateKey: string, todayKey: string): TaskSummaryKey | undefined {
+  if (!dateKey || dateKey < todayKey) {
+    return "overdue";
+  }
+
+  return dateKey === todayKey ? "today" : undefined;
+}
+
 function sortTasks<T extends { dueDate?: string; termDate?: string; clientName: string; taskLabel?: string; termLabel?: string }>(items: T[]) {
   return items.sort((left, right) =>
     (left.dueDate ?? left.termDate ?? "").localeCompare(right.dueDate ?? right.termDate ?? "")
@@ -349,28 +464,71 @@ function buildKpiRanges(todayKey: string): KpiDateRange[] {
   ];
 }
 
-function groupTasksByUser(
-  range: DateRange,
+function getUserDashboardPath(moduleId: string, user: SupervisionUserReference) {
+  const basePath = getModulePath(moduleId);
+  if (basePath === "/app/tasks" || !user.shortName) {
+    return basePath;
+  }
+
+  return `${basePath}?member=${encodeURIComponent(user.shortName)}&timeframe=hoy`;
+}
+
+function buildTaskOverviewByUser(
+  todayKey: string,
   tasks: SupervisionTaskCandidate[],
   aliasLookup: Map<string, SupervisionUserReference>
 ) {
-  const groups = new Map<string, GroupedUserTasks>();
+  const groups = new Map<
+    string,
+    GroupedUserTaskSummary & { linkLookup: Map<string, SupervisionTaskDashboardLink> }
+  >();
 
-  sortTasks(tasks.filter((task) => isDateInRange(task.dueDate, range))).forEach((task) => {
+  sortTasks(tasks).forEach((task) => {
+    const summaryKey = getTaskSummaryKey(task.dueDate, todayKey);
+    if (!summaryKey) {
+      return;
+    }
+
     resolveResponsibleUsers(task.responsible, aliasLookup).forEach((user) => {
       const group = groups.get(user.userId) ?? {
         ...user,
         total: 0,
-        tasks: []
+        today: 0,
+        overdue: 0,
+        dashboardLinks: [],
+        linkLookup: new Map<string, SupervisionTaskDashboardLink>()
+      };
+      const link = group.linkLookup.get(task.moduleId) ?? {
+        moduleId: task.moduleId,
+        label: task.moduleLabel,
+        path: getUserDashboardPath(task.moduleId, user),
+        total: 0,
+        today: 0,
+        overdue: 0
       };
 
-      group.tasks.push(task);
+      group[summaryKey] += 1;
       group.total += 1;
+      link[summaryKey] += 1;
+      link.total += 1;
+      group.linkLookup.set(task.moduleId, link);
       groups.set(user.userId, group);
     });
   });
 
-  return Array.from(groups.values()).sort((left, right) => left.displayName.localeCompare(right.displayName));
+  const users = Array.from(groups.values())
+    .map(({ linkLookup, ...user }) => ({
+      ...user,
+      dashboardLinks: Array.from(linkLookup.values()).sort((left, right) => left.label.localeCompare(right.label))
+    }))
+    .sort((left, right) => right.total - left.total || left.displayName.localeCompare(right.displayName));
+
+  return {
+    todayTotal: users.reduce((total, user) => total + user.today, 0),
+    overdueTotal: users.reduce((total, user) => total + user.overdue, 0),
+    total: users.reduce((total, user) => total + user.total, 0),
+    users
+  };
 }
 
 function groupTermsByTeam(range: DateRange, terms: SupervisionTermCandidate[]) {
@@ -430,8 +588,11 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
 function buildTaskCandidates(input: {
   taskItems: TaskItem[];
   trackingRecords: TaskTrackingRecord[];
+  terms: TaskTerm[];
   additionalTasks: TaskAdditionalTask[];
+  matters: Matter[];
   moduleDefinitions: Map<string, TaskModuleDefinition>;
+  todayKey: string;
 }) {
   const candidates: SupervisionTaskCandidate[] = [];
 
@@ -440,9 +601,6 @@ function buildTaskCandidates(input: {
     .forEach((task) => {
       const module = input.moduleDefinitions.get(task.moduleId);
       const dueDate = toDateKey(task.dueDate);
-      if (!dueDate) {
-        return;
-      }
 
       candidates.push({
         id: `task-item:${task.id}`,
@@ -464,10 +622,7 @@ function buildTaskCandidates(input: {
     .filter((record) => OPEN_LEGACY_STATUSES.includes(record.status) && !record.deletedAt)
     .forEach((record) => {
       const module = input.moduleDefinitions.get(record.moduleId);
-      const dueDate = toDateKey(record.dueDate);
-      if (!dueDate) {
-        return;
-      }
+      const dueDate = toDateKey(record.dueDate || record.termDate);
 
       const sourceLabel = getRecordSourceLabel(module, record);
 
@@ -492,9 +647,6 @@ function buildTaskCandidates(input: {
     .forEach((task) => {
       const module = input.moduleDefinitions.get(task.moduleId);
       const dueDate = toDateKey(task.dueDate);
-      if (!dueDate) {
-        return;
-      }
 
       const responsible = [task.responsible, task.responsible2].filter(Boolean).join("/");
 
@@ -511,6 +663,58 @@ function buildTaskCandidates(input: {
         statusLabel: statusLabel(task.status),
         sourceLabel: task.recurring ? "Tarea adicional recurrente" : "Tarea adicional",
         originPath: getModulePath(task.moduleId, "/adicionales")
+      });
+    });
+
+  input.terms
+    .filter((term) => !term.deletedAt)
+    .forEach((term) => {
+      const module = input.moduleDefinitions.get(term.moduleId);
+      const sourcePath = term.sourceRecordId
+        ? getModulePath(term.moduleId, "/distribuidor")
+        : getModulePath(term.moduleId, term.recurring ? "/terminos-recurrentes" : "/terminos");
+
+      (TASK_VERIFICATION_COLUMNS[term.moduleId] ?? [])
+        .filter((column) => !isVerificationValueComplete(term.verification[column.key]))
+        .forEach((column) => {
+          const responsible = getVerificationResponsible(column);
+
+          candidates.push({
+            id: `term-verification:${term.id}:${column.key}`,
+            moduleId: term.moduleId,
+            moduleLabel: getModuleLabel(module, term.moduleId),
+            teamLabel: getTeamLabelFromModule(module, term.moduleId),
+            taskLabel: `Verificar termino: ${term.pendingTaskLabel || term.eventName || "Termino sin nombre"}`,
+            clientName: term.clientName || "-",
+            subject: term.subject || "-",
+            responsible,
+            dueDate: input.todayKey,
+            statusLabel: "Pendiente",
+            sourceLabel: "Verificacion de termino",
+            originPath: sourcePath
+          });
+        });
+    });
+
+  const litigationModule = input.moduleDefinitions.get(LITIGATION_MODULE_ID);
+  input.matters
+    .filter((matter) => matter.responsibleTeam === LITIGATION_TEAM)
+    .filter((matter) => !matter.deletedAt && !matter.concluded)
+    .filter((matter) => !hasExecutionNextTask(matter, input.trackingRecords, input.terms))
+    .forEach((matter) => {
+      candidates.push({
+        id: `litigation-missing-next-task:${matter.id}`,
+        moduleId: LITIGATION_MODULE_ID,
+        moduleLabel: getModuleLabel(litigationModule, LITIGATION_MODULE_ID),
+        teamLabel: getTeamLabelFromModule(litigationModule, LITIGATION_MODULE_ID),
+        taskLabel: "Agregar una tarea en Siguiente tarea",
+        clientName: matter.clientName || "-",
+        subject: matter.subject || "-",
+        responsible: LITIGATION_MISSING_NEXT_TASK_OWNER,
+        dueDate: input.todayKey,
+        statusLabel: "Pendiente",
+        sourceLabel: "Ejecucion / Litigio",
+        originPath: "/app/execution/litigio"
       });
     });
 
@@ -587,6 +791,7 @@ export class GeneralSupervisionService {
   public constructor(
     private readonly repositories: {
       tasks: TasksRepository;
+      matters: MattersRepository;
       users: UsersRepository;
       kpis: KpisRepository;
     }
@@ -599,10 +804,11 @@ export class GeneralSupervisionService {
     const currentWeekStart = getWeekStartKey(todayKey);
     const currentWeekEnd = addDaysKey(currentWeekStart, 6);
 
-    const [storedModules, taskItems, trackingRecords, users] = await Promise.all([
+    const [storedModules, taskItems, trackingRecords, matters, users] = await Promise.all([
       this.repositories.tasks.listModules(),
       this.repositories.tasks.listTasks(),
       this.repositories.tasks.listTrackingRecords({ includeDeleted: false }),
+      this.repositories.matters.list(),
       this.repositories.users.list()
     ]);
 
@@ -620,8 +826,11 @@ export class GeneralSupervisionService {
     const taskCandidates = buildTaskCandidates({
       taskItems,
       trackingRecords,
+      terms: allTerms,
       additionalTasks: allAdditionalTasks,
-      moduleDefinitions
+      matters,
+      moduleDefinitions,
+      todayKey
     });
     const termCandidates = buildTermCandidates({
       terms: allTerms,
@@ -639,14 +848,7 @@ export class GeneralSupervisionService {
       )
     );
 
-    const taskBuckets = dashboardRanges.map((range) => {
-      const usersWithTasks = groupTasksByUser(range, taskCandidates, aliasLookup);
-      return {
-        ...range,
-        total: usersWithTasks.reduce((total, user) => total + user.total, 0),
-        users: usersWithTasks
-      };
-    });
+    const taskOverview = buildTaskOverviewByUser(todayKey, taskCandidates, aliasLookup);
     const termBuckets = dashboardRanges.map((range) => {
       const teams = groupTermsByTeam(range, termCandidates);
       return {
@@ -662,11 +864,11 @@ export class GeneralSupervisionService {
       today: todayKey,
       currentWeekStart,
       currentWeekEnd,
-      taskBuckets,
+      taskOverview,
       termBuckets,
       kpiPeriods,
       summary: {
-        tasks: taskBuckets.reduce((total, bucket) => total + bucket.total, 0),
+        tasks: taskOverview.total,
         terms: termBuckets.reduce((total, bucket) => total + bucket.total, 0),
         kpiAlerts: kpiPeriods.reduce((total, period) => total + period.totalMetrics, 0)
       }

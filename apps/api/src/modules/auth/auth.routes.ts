@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { getSessionUser, requireAuth } from "../../core/auth/guards";
 import { PASSWORD_POLICY_MESSAGE } from "../../core/auth/password-policy";
+import { createManagerDeEscritosSsoUrl } from "../../core/auth/sso-ticket";
 import { hashToken, issueTokenPair } from "../../core/auth/token-service";
 import {
   clearAuthCookies,
@@ -119,5 +120,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   app.get("/auth/me", { preHandler: [requireAuth] }, async (request) => {
     const user = getSessionUser(request);
     return service.getProfile(user.id);
+  });
+
+  app.get("/auth/sso/manager-de-escritos", { preHandler: [requireAuth] }, async (request) => {
+    const user = await service.getProfile(getSessionUser(request).id);
+    if (!user.isActive || user.passwordResetRequired) {
+      throw new app.errors.AppError(403, "SSO_USER_NOT_ALLOWED", "This account cannot open Manager de escritos.");
+    }
+
+    try {
+      return createManagerDeEscritosSsoUrl(user, app.config);
+    } catch {
+      throw new app.errors.AppError(503, "SSO_NOT_CONFIGURED", "Manager de escritos SSO is not configured.");
+    }
   });
 };

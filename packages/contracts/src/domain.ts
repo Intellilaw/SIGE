@@ -1,6 +1,7 @@
 export type Team =
   | "ADMIN"
   | "CLIENT_RELATIONS"
+  | "SALES"
   | "FINANCE"
   | "LITIGATION"
   | "CORPORATE_LABOR"
@@ -677,6 +678,19 @@ export interface KpiMetric {
   helper: string;
   sourceDescription: string;
   sourceTables: string[];
+  incidents: KpiIncident[];
+  dailyBreakdown: KpiDailyMetric[];
+}
+
+export interface KpiDailyMetric {
+  date: string;
+  status: KpiMetricStatus;
+  value: number;
+  target: number;
+  unit: string;
+  actualLabel: string;
+  targetLabel: string;
+  helper: string;
   incidents: KpiIncident[];
 }
 

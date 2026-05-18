@@ -6,19 +6,13 @@ import { apiGet } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 
-interface SupervisionTask {
-  id: string;
+interface SupervisionTaskDashboardLink {
   moduleId: string;
-  moduleLabel: string;
-  teamLabel: string;
-  taskLabel: string;
-  clientName: string;
-  subject: string;
-  responsible: string;
-  dueDate: string;
-  statusLabel: string;
-  sourceLabel: string;
-  originPath: string;
+  label: string;
+  path: string;
+  total: number;
+  today: number;
+  overdue: number;
 }
 
 interface SupervisionTerm {
@@ -36,14 +30,16 @@ interface SupervisionTerm {
   originPath: string;
 }
 
-interface SupervisionUserGroup {
+interface SupervisionTaskUserSummary {
   userId: string;
   displayName: string;
   shortName?: string;
   teamLabel: string;
   specificRole?: string;
   total: number;
-  tasks: SupervisionTask[];
+  today: number;
+  overdue: number;
+  dashboardLinks: SupervisionTaskDashboardLink[];
 }
 
 interface SupervisionTeamGroup {
@@ -53,13 +49,11 @@ interface SupervisionTeamGroup {
   terms: SupervisionTerm[];
 }
 
-interface SupervisionTaskBucket {
-  key: "today" | "tomorrow" | "restOfWeek";
-  label: string;
-  startDate: string;
-  endDate: string;
+interface SupervisionTaskOverview {
+  todayTotal: number;
+  overdueTotal: number;
   total: number;
-  users: SupervisionUserGroup[];
+  users: SupervisionTaskUserSummary[];
 }
 
 interface SupervisionTermBucket {
@@ -96,7 +90,7 @@ interface GeneralSupervisionOverview {
   today: string;
   currentWeekStart: string;
   currentWeekEnd: string;
-  taskBuckets: SupervisionTaskBucket[];
+  taskOverview: SupervisionTaskOverview;
   termBuckets: SupervisionTermBucket[];
   kpiPeriods: SupervisionKpiPeriod[];
   summary: {
@@ -161,39 +155,58 @@ function EmptyState(props: { children: string }) {
   return <div className="supervision-empty-state">{props.children}</div>;
 }
 
-function TaskBucketPanel({ bucket }: { bucket: SupervisionTaskBucket }) {
+function formatTaskCount(value: number) {
+  return `${value} ${value === 1 ? "tarea" : "tareas"}`;
+}
+
+function TaskOverviewPanel({ overview }: { overview: SupervisionTaskOverview }) {
   return (
-    <article className="supervision-bucket-card">
-      <header className="supervision-bucket-head">
-        <div>
-          <h3>{bucket.label}</h3>
-          <span>{formatDateRange(bucket.startDate, bucket.endDate)}</span>
+    <article className="supervision-task-overview">
+      <header className="supervision-task-overview-head">
+        <div className="supervision-task-stat is-total">
+          <span>Total critico</span>
+          <strong>{overview.total}</strong>
         </div>
-        <strong>{bucket.total}</strong>
+        <div className="supervision-task-stat is-today">
+          <span>Para hoy</span>
+          <strong>{overview.todayTotal}</strong>
+        </div>
+        <div className="supervision-task-stat is-overdue">
+          <span>Vencidas / sin fecha</span>
+          <strong>{overview.overdueTotal}</strong>
+        </div>
       </header>
 
-      <div className="supervision-group-list">
-        {bucket.users.length === 0 ? (
-          <EmptyState>Sin tareas en esta ventana.</EmptyState>
+      <div className="supervision-task-user-list">
+        {overview.users.length === 0 ? (
+          <EmptyState>Sin tareas urgentes por usuario.</EmptyState>
         ) : (
-          bucket.users.map((user) => (
-            <section key={user.userId} className="supervision-user-group">
-              <div className="supervision-group-head">
-                <div>
-                  <h4>{user.displayName}</h4>
-                  <span>{user.shortName ?? user.teamLabel}</span>
-                </div>
-                <strong>{user.total}</strong>
+          overview.users.map((user) => (
+            <section key={user.userId} className="supervision-task-user-row">
+              <div className="supervision-task-user-main">
+                <h4>{user.displayName}</h4>
+                <span>{user.shortName ?? user.teamLabel}</span>
               </div>
 
-              <div className="supervision-row-list">
-                {user.tasks.map((task) => (
-                  <Link key={task.id} className="supervision-list-row" to={task.originPath}>
-                    <div>
-                      <strong>{task.taskLabel}</strong>
-                      <EntityMeta clientName={task.clientName} subject={task.subject} sourceLabel={task.sourceLabel} />
-                    </div>
-                    <span>{formatShortDate(task.dueDate)}</span>
+              <div className="supervision-task-counts" aria-label={`${user.displayName}: ${formatTaskCount(user.total)} criticas, ${formatTaskCount(user.today)} para hoy y ${formatTaskCount(user.overdue)} vencidas`}>
+                <span className="is-total">
+                  <strong>{user.total}</strong>
+                  Total
+                </span>
+                <span>
+                  <strong>{user.today}</strong>
+                  Hoy
+                </span>
+                <span className="is-overdue">
+                  <strong>{user.overdue}</strong>
+                  Vencidas
+                </span>
+              </div>
+
+              <div className="supervision-task-link-list">
+                {user.dashboardLinks.map((link) => (
+                  <Link key={link.moduleId} className="secondary-button supervision-task-dashboard-link" to={link.path}>
+                    {user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label}
                   </Link>
                 ))}
               </div>
@@ -359,7 +372,8 @@ export function GeneralSupervisionPage() {
     }
 
     return [
-      { label: "Tareas por hacer", value: overview.summary.tasks, tone: "tasks" },
+      { label: "Tareas para hoy", value: overview.taskOverview.todayTotal, tone: "tasks" },
+      { label: "Vencidas / sin fecha", value: overview.taskOverview.overdueTotal, tone: "overdue" },
       { label: "Terminos abiertos", value: overview.summary.terms, tone: "terms" },
       { label: "KPI's fuera de meta", value: overview.summary.kpiAlerts, tone: "kpis" }
     ];
@@ -404,13 +418,11 @@ export function GeneralSupervisionPage() {
           <section className="panel supervision-panel">
             <div className="panel-header">
               <h2>Tareas por usuario</h2>
-              <span>{overview.summary.tasks} tareas</span>
+              <span>
+                {overview.taskOverview.total} criticas: {overview.taskOverview.todayTotal} hoy / {overview.taskOverview.overdueTotal} vencidas o sin fecha
+              </span>
             </div>
-            <div className="supervision-bucket-grid">
-              {overview.taskBuckets.map((bucket) => (
-                <TaskBucketPanel key={bucket.key} bucket={bucket} />
-              ))}
-            </div>
+            <TaskOverviewPanel overview={overview.taskOverview} />
           </section>
 
           <section className="panel supervision-panel">

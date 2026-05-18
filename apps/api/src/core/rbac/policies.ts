@@ -6,6 +6,8 @@ export const BASE_PERMISSIONS = {
   quotesWrite: "quotes:write",
   leadsRead: "leads:read",
   leadsWrite: "leads:write",
+  salesRead: "sales:read",
+  salesWrite: "sales:write",
   mattersRead: "matters:read",
   mattersWrite: "matters:write",
   financesRead: "finances:read",

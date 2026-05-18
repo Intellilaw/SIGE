@@ -88,6 +88,17 @@ export const appModules: AppModuleDefinition[] = [
     coverage: ["Entrada por equipo", "Vista diaria por integrante", "Tablero con filas en rojo"]
   },
   {
+    id: "sales",
+    path: "/app/sales",
+    label: "Ventas",
+    shortLabel: "Ventas",
+    icon: "\u{1F4E3}",
+    description: "Productos comerciales, estrategia general de marketing y reporte diario de tareas de venta.",
+    phase: "Operativo",
+    available: true,
+    coverage: ["Productos", "Estrategia de marketing", "Reporte diario", "Dashboard de tareas de IR"]
+  },
+  {
     id: "finances",
     path: "/app/finances",
     label: "Finanzas",
@@ -172,9 +183,9 @@ export const appModules: AppModuleDefinition[] = [
     shortLabel: "Escritos",
     icon: "\u270D\uFE0F",
     description: "Concentrador para control, versionado y administracion de escritos del despacho.",
-    phase: "En preparacion",
-    available: false,
-    coverage: ["Seguimiento de escritos", "Control documental operativo"]
+    phase: "Operativo",
+    available: true,
+    coverage: ["Acceso directo con sesion SIGE", "Seguimiento de escritos", "Control documental operativo"]
   },
   {
     id: "internal-contracts",

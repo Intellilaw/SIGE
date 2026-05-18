@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Client, Matter, TaskAdditionalTask, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
@@ -41,6 +41,8 @@ const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: str
   { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
+const LITIGATION_MISSING_NEXT_TASK_DASHBOARD_OWNER = "LAMR";
+const LITIGATION_MODULE_ID = "litigation";
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
@@ -181,6 +183,63 @@ function isCompletedTrackingRecord(table: LegacyTaskTableConfig | undefined, rec
   return table?.mode === "workflow" && record.workflowStage >= table.tabs.length;
 }
 
+function matterKeyMatches(recordValue: string | undefined | null, matterValues: string[]) {
+  const normalizedRecordValue = normalizeText(recordValue);
+  return Boolean(normalizedRecordValue && matterValues.includes(normalizedRecordValue));
+}
+
+function getMatterIdentityValues(matter: Matter) {
+  return [
+    matter.id,
+    matter.matterNumber,
+    matter.matterIdentifier
+  ].map(normalizeText).filter(Boolean);
+}
+
+function hasActiveLinkedTrackingRecord(
+  matter: Matter,
+  records: TaskTrackingRecord[],
+  tableLookup: Map<string, LegacyTaskTableConfig>
+) {
+  const matterValues = getMatterIdentityValues(matter);
+
+  return records.some((record) => {
+    const table = resolveRecordTable(tableLookup, record);
+    return !record.deletedAt
+      && !isCompletedTrackingRecord(table, record)
+      && (
+        matterKeyMatches(record.matterId, matterValues)
+        || matterKeyMatches(record.matterNumber, matterValues)
+        || matterKeyMatches(record.matterIdentifier, matterValues)
+      );
+  });
+}
+
+function hasActiveStandaloneTerm(matter: Matter, terms: TaskTerm[]) {
+  const matterValues = getMatterIdentityValues(matter);
+
+  return terms.some((term) =>
+    !term.deletedAt
+    && !term.sourceRecordId
+    && term.status === "pendiente"
+    && (
+      matterKeyMatches(term.matterId, matterValues)
+      || matterKeyMatches(term.matterNumber, matterValues)
+      || matterKeyMatches(term.matterIdentifier, matterValues)
+    )
+  );
+}
+
+function hasExecutionNextTask(
+  matter: Matter,
+  records: TaskTrackingRecord[],
+  terms: TaskTerm[],
+  tableLookup: Map<string, LegacyTaskTableConfig>
+) {
+  return hasActiveLinkedTrackingRecord(matter, records, tableLookup)
+    || hasActiveStandaloneTerm(matter, terms);
+}
+
 function getTrackingDateCandidates(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
   const dates = [toDateInput(record.dueDate)];
   const termDate = toDateInput(record.termDate);
@@ -237,6 +296,9 @@ function isTrackingDashboardRed(
 export function TasksTeamPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const focusedMemberId = searchParams.get("member");
+  const focusedTimeframe = searchParams.get("timeframe");
   const { user } = useAuth();
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const visibleModules = getVisibleExecutionModules(user);
@@ -252,6 +314,19 @@ export function TasksTeamPage() {
   const [expandedView, setExpandedView] = useState<{ memberId: string; timeframe: DashboardTimeframe } | null>(null);
 
   const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+
+  useEffect(() => {
+    const isValidTimeframe = TIMEFRAMES.some((candidate) => candidate.id === focusedTimeframe);
+
+    if (!dashboardConfig || !focusedMemberId || !isValidTimeframe) {
+      return;
+    }
+
+    const member = dashboardConfig.members.find((candidate) => candidate.id === focusedMemberId);
+    if (member) {
+      setExpandedView({ memberId: member.id, timeframe: focusedTimeframe as DashboardTimeframe });
+    }
+  }, [dashboardConfig, focusedMemberId, focusedTimeframe]);
 
   useEffect(() => {
     if (!module || !canAccess) {
@@ -448,12 +523,43 @@ export function TasksTeamPage() {
       });
   }
 
+  function buildMissingExecutionNextTaskRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
+    if (
+      module?.moduleId !== LITIGATION_MODULE_ID ||
+      member.id !== LITIGATION_MISSING_NEXT_TASK_DASHBOARD_OWNER ||
+      timeframe !== "hoy"
+    ) {
+      return [];
+    }
+
+    const today = getLocalDateInput();
+
+    return matters
+      .filter((matter) => !matter.concluded)
+      .filter((matter) => !hasExecutionNextTask(matter, trackingRecords, terms, tableLookup))
+      .map((matter) => ({
+        taskId: `litigation-missing-next-task-${matter.id}`,
+        clientNumber: getEffectiveClientNumber(matter, clients) || "-",
+        clientName: matter.clientName || "-",
+        subject: matter.subject || "-",
+        specificProcess: matter.specificProcess || "-",
+        taskLabel: "Agregar una tarea en Siguiente tarea",
+        typeLabel: "Falta siguiente tarea",
+        displayDate: today,
+        originLabel: "Ejecucion / Litigio",
+        originPath: "/app/execution/litigio",
+        actionLabel: "Ir a Ejecucion",
+        highlighted: true
+      }));
+  }
+
   function buildRows(member: TaskDashboardMember, timeframe: DashboardTimeframe) {
     return [
       ...buildTrackingRows(member, timeframe),
       ...buildTermRows(member, timeframe),
       ...buildTermVerificationRows(member, timeframe),
-      ...buildAdditionalRows(member, timeframe)
+      ...buildAdditionalRows(member, timeframe),
+      ...buildMissingExecutionNextTaskRows(member, timeframe)
     ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
   }
 

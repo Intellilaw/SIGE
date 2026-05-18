@@ -1,11 +1,14 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { APP_VERSION_LABEL, APP_VERSION_TEXT, TEAM_OPTIONS } from "@sige/contracts";
+import { APP_VERSION_BADGE, TEAM_OPTIONS } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
+import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisionPage";
+import { KpisPage } from "../kpis/KpisPage";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import { buildDistributionHistoryTaskNameMap, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
@@ -144,6 +147,12 @@ function canReadMobileLeads(user) {
 }
 function canReadMobileGeneralExpenses(user) {
     return canReadModule(user, "general-expenses");
+}
+function canReadMobileKpis(user) {
+    return canReadModule(user, "kpis");
+}
+function canReadMobileGeneralSupervision(user) {
+    return canReadModule(user, "general-supervision") && canAccessGeneralSupervision(user);
 }
 function canWriteMobileGeneralExpenses(user) {
     return canWriteModule(user, "general-expenses");
@@ -389,6 +398,8 @@ export function MobileProtectedLayout() {
     const showLeads = canReadMobileLeads(user);
     const showFinances = canReadMobileFinances(user);
     const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+    const showKpis = canReadMobileKpis(user);
+    const showGeneralSupervision = canReadMobileGeneralSupervision(user);
     const showExecution = canReadMobileExecution(user);
     if (loading) {
         return _jsx("div", { className: "mobile-centered", children: "Cargando SIGE..." });
@@ -396,15 +407,31 @@ export function MobileProtectedLayout() {
     if (!user) {
         return _jsx(Navigate, { to: "/intranet-login?redirect=/mobile", replace: true });
     }
-    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_LABEL })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
+    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
 }
 export function MobileHomePage() {
     const { user } = useAuth();
     const showLeads = canReadMobileLeads(user);
     const showFinances = canReadMobileFinances(user);
     const showGeneralExpenses = canReadMobileGeneralExpenses(user);
+    const showKpis = canReadMobileKpis(user);
+    const showGeneralSupervision = canReadMobileGeneralSupervision(user);
     const showExecution = canReadMobileExecution(user);
-    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
+    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showKpis ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/kpis", children: "KPI's" })) : null, showGeneralSupervision ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-supervision", children: "Supervision general" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
+}
+export function MobileKpisPage() {
+    const { user } = useAuth();
+    if (!canReadMobileKpis(user)) {
+        return _jsx(Navigate, { to: "/mobile", replace: true });
+    }
+    return (_jsx("section", { className: "mobile-embedded-module", children: _jsx(KpisPage, {}) }));
+}
+export function MobileGeneralSupervisionPage() {
+    const { user } = useAuth();
+    if (!canReadMobileGeneralSupervision(user)) {
+        return _jsx(Navigate, { to: "/mobile", replace: true });
+    }
+    return (_jsx("section", { className: "mobile-embedded-module", children: _jsx(GeneralSupervisionPage, {}) }));
 }
 export function MobileDashboardIndexPage() {
     const { user } = useAuth();

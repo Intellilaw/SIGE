@@ -19,10 +19,14 @@ export function AppShell() {
                 <span className="nav-link-icon" aria-hidden="true">
                   {item.icon}
                 </span>
-                <span className="nav-link-label">{item.label}</span>
                 {item.path === "/app" ? (
-                  <span className="app-version-badge app-version-badge-sidebar">{APP_VERSION_LABEL}</span>
-                ) : null}
+                  <span className="nav-link-content nav-link-content-version">
+                    <span className="nav-link-label">{item.label}</span>
+                    <span className="app-version-badge app-version-badge-sidebar">{APP_VERSION_LABEL}</span>
+                  </span>
+                ) : (
+                  <span className="nav-link-label">{item.label}</span>
+                )}
               </NavLink>
             ))}
           </nav>

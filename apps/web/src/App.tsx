@@ -6,10 +6,10 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
 import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
+import { BriefManagerRedirectPage } from "./features/modules/BriefManagerRedirectPage";
 import { HolidaysPage } from "./features/modules/HolidaysPage";
 import { InternalContractsPage } from "./features/modules/InternalContractsPage";
 import { LaborFilesPage } from "./features/modules/LaborFilesPage";
-import { ModulePlaceholderPage } from "./features/modules/ModulePlaceholderPage";
 import { ThirdPartyDocumentsPage } from "./features/modules/ThirdPartyDocumentsPage";
 import { AppShell } from "./features/shell/AppShell";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
@@ -33,12 +33,17 @@ import { FinancesPage } from "./features/finances/FinancesPage";
 import { GeneralSupervisionPage } from "./features/general-supervision/GeneralSupervisionPage";
 import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
 import { KpisPage } from "./features/kpis/KpisPage";
+import { SalesPage } from "./features/sales/SalesPage";
 import {
   MobileExecutionIndexPage,
   MobileExecutionTeamPage,
   MobileDashboardIndexPage,
   MobileDashboardModulePage,
+  MobileFinancesPage,
+  MobileGeneralExpensesPage,
+  MobileGeneralSupervisionPage,
   MobileHomePage,
+  MobileKpisPage,
   MobileLeadsPage,
   MobileProtectedLayout,
   MobileTrackingIndexPage,
@@ -73,6 +78,10 @@ export default function App() {
           <Route path="/mobile" element={<MobileProtectedLayout />}>
             <Route index element={<MobileHomePage />} />
             <Route path="leads" element={<MobileLeadsPage />} />
+            <Route path="finances" element={<MobileFinancesPage />} />
+            <Route path="general-expenses" element={<MobileGeneralExpensesPage />} />
+            <Route path="kpis" element={<MobileKpisPage />} />
+            <Route path="general-supervision" element={<MobileGeneralSupervisionPage />} />
             <Route path="execution" element={<MobileExecutionIndexPage />} />
             <Route path="execution/:slug" element={<MobileExecutionTeamPage />} />
             <Route path="dashboard" element={<MobileDashboardIndexPage />} />
@@ -96,6 +105,7 @@ export default function App() {
             <Route path="tasks/:slug/terminos-recurrentes" element={<TaskTermsPage />} />
             <Route path="tasks/:slug/:tableId" element={<TaskLegacyTablePage />} />
             <Route path="tasks/:slug" element={<TasksTeamPage />} />
+            <Route path="sales" element={<SalesPage />} />
             <Route path="kpis" element={<KpisPage />} />
             <Route path="finances" element={<FinancesPage />} />
             <Route path="budget-planning" element={<BudgetPlanningPage />} />
@@ -103,7 +113,7 @@ export default function App() {
             <Route path="commissions" element={<CommissionsPage />} />
             <Route path="general-supervision" element={<GeneralSupervisionPage />} />
             <Route path="matter-catalog" element={<MatterCatalogPage />} />
-            <Route path="brief-manager" element={<ModulePlaceholderPage moduleId="brief-manager" />} />
+            <Route path="brief-manager" element={<BriefManagerRedirectPage />} />
             <Route path="internal-contracts" element={<InternalContractsPage />} />
             <Route path="labor-file" element={<LaborFilesPage />} />
             <Route path="daily-documents" element={<DailyDocumentsPage />} />

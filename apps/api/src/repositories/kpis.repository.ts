@@ -147,6 +147,7 @@ interface PeriodContext {
   businessDaysElapsed: number;
   periodComplete: boolean;
   excludedDateKeys: Set<string>;
+  evaluatedDateKeys: string[];
 }
 
 interface DeadlineSource {
@@ -262,6 +263,13 @@ function countBusinessDays(startKey: string, endKey: string, holidayKeys: Set<st
     const day = dateFromKey(key).getUTCDay();
     return day !== 0 && day !== 6 && !holidayKeys.has(key) && !excludedDateKeys.has(key);
   }).length;
+}
+
+function getBusinessDateKeys(startKey: string, endKey: string, holidayKeys: Set<string>, excludedDateKeys = new Set<string>()) {
+  return enumerateDateKeys(startKey, endKey).filter((key) => {
+    const day = dateFromKey(key).getUTCDay();
+    return day !== 0 && day !== 6 && !holidayKeys.has(key) && !excludedDateKeys.has(key);
+  });
 }
 
 function formatDecimal(value: number, maximumFractionDigits = 1) {
@@ -406,7 +414,8 @@ function buildUserPeriod(period: PeriodContext, vacationKeys: Set<string>, holid
     ...period,
     businessDaysInPeriod: countBusinessDays(period.startKey, period.endKey, holidayKeys, vacationKeys),
     businessDaysElapsed: countBusinessDays(period.startKey, period.cutoffKey, holidayKeys, vacationKeys),
-    excludedDateKeys: vacationKeys
+    excludedDateKeys: vacationKeys,
+    evaluatedDateKeys: getBusinessDateKeys(period.startKey, period.cutoffKey, holidayKeys, vacationKeys)
   };
 }
 
@@ -642,6 +651,121 @@ function buildDeadlineIncidents(input: {
   );
 }
 
+function getProductionDailyTarget(
+  targetCadence: "six-per-week" | "five-per-day" | "one-per-two-business-days",
+  businessDayIndex: number
+) {
+  if (targetCadence === "six-per-week") {
+    return (businessDayIndex / 5) * 6;
+  }
+
+  if (targetCadence === "five-per-day") {
+    return 5;
+  }
+
+  return Math.floor(businessDayIndex / 2);
+}
+
+function getProductionDailyTargetLabel(
+  targetCadence: "six-per-week" | "five-per-day" | "one-per-two-business-days",
+  target: number
+) {
+  if (targetCadence === "five-per-day") {
+    return "5 escritos esperados en el dia";
+  }
+
+  if (targetCadence === "one-per-two-business-days" && target === 0) {
+    return "Primer dia habil del bloque; la meta vence al segundo dia habil";
+  }
+
+  return `Meta acumulada al corte diario: ${formatDecimal(target)} escritos`;
+}
+
+function buildProductionDailyBreakdown(input: {
+  completedRecords: TrackingRecord[];
+  period: PeriodContext;
+  targetCadence: "six-per-week" | "five-per-day" | "one-per-two-business-days";
+}) {
+  const recordsByDate = new Map<string, TrackingRecord[]>();
+  input.completedRecords.forEach((record) => {
+    const completionKey = getCompletionKey(record);
+    const records = recordsByDate.get(completionKey) ?? [];
+    records.push(record);
+    recordsByDate.set(completionKey, records);
+  });
+
+  let accumulatedValue = 0;
+
+  return input.period.evaluatedDateKeys.map((dateKey, index) => {
+    const dayValue = recordsByDate.get(dateKey)?.length ?? 0;
+    accumulatedValue += dayValue;
+    const businessDayIndex = index + 1;
+    const target = getProductionDailyTarget(input.targetCadence, businessDayIndex);
+    const value = input.targetCadence === "five-per-day" ? dayValue : accumulatedValue;
+    const missingValue = Math.max(0, target - value);
+    const status: KpiMetricStatus = value >= target
+      ? "met"
+      : dateKey === input.period.todayKey && !input.period.periodComplete
+        ? "warning"
+        : "missed";
+    const helper = status === "met"
+      ? input.targetCadence === "five-per-day"
+        ? "Meta del dia cumplida con la informacion registrada en seguimiento."
+        : "Ritmo acumulado cumplido con la informacion registrada en seguimiento."
+      : status === "warning"
+        ? `El dia sigue en curso; faltan ${formatDecimal(missingValue)} escritos para la meta de referencia.`
+        : input.targetCadence === "five-per-day"
+          ? `Faltaron ${formatDecimal(missingValue)} escritos para cumplir la meta del dia.`
+          : `Faltaron ${formatDecimal(missingValue)} escritos para cumplir el ritmo acumulado al corte de este dia.`;
+
+    return {
+      date: dateKey,
+      status,
+      value,
+      target,
+      unit: "escritos",
+      actualLabel: input.targetCadence === "five-per-day"
+        ? `${dayValue} escritos registrados en el dia`
+        : `${dayValue} escritos del dia; ${accumulatedValue} acumulados`,
+      targetLabel: getProductionDailyTargetLabel(input.targetCadence, target),
+      helper,
+      incidents: []
+    } satisfies KpiMetric["dailyBreakdown"][number];
+  });
+}
+
+function getIncidentDateKey(incident: KpiIncident) {
+  return incident.termDate ?? incident.dueDate ?? "";
+}
+
+function buildDeadlineDailyBreakdown(input: {
+  incidents: KpiIncident[];
+  period: PeriodContext;
+}) {
+  const incidentDateKeys = input.incidents
+    .map(getIncidentDateKey)
+    .filter((dateKey) => isDateInRange(dateKey, input.period.startKey, input.period.cutoffKey));
+  const dateKeys = Array.from(new Set([...input.period.evaluatedDateKeys, ...incidentDateKeys])).sort();
+
+  return dateKeys.map((dateKey) => {
+    const incidents = input.incidents.filter((incident) => getIncidentDateKey(incident) === dateKey);
+
+    return {
+      date: dateKey,
+      status: incidents.length > 0 ? "missed" : "met",
+      value: incidents.length,
+      target: 0,
+      unit: "incidencias",
+      actualLabel: `${incidents.length} incidencias`,
+      targetLabel: "0 incidencias esperadas en el dia",
+      helper: incidents.length > 0
+        ? "Se detectaron terminos vencidos o presentados fuera de termino en este dia."
+        : "No se detectaron terminos vencidos ni presentaciones tardias en este dia.",
+      incidents
+    } satisfies KpiMetric["dailyBreakdown"][number];
+  });
+}
+
 function buildProductionMetric(input: {
   id: string;
   label: string;
@@ -707,7 +831,12 @@ function buildProductionMetric(input: {
     helper: `${businessDays} dias habiles evaluados automaticamente desde seguimiento.`,
     sourceDescription: input.sourceDescription,
     sourceTables: input.sourceTables,
-    incidents: []
+    incidents: [],
+    dailyBreakdown: buildProductionDailyBreakdown({
+      completedRecords,
+      period: input.period,
+      targetCadence: input.targetCadence
+    })
   } satisfies KpiMetric;
 }
 
@@ -741,7 +870,11 @@ function buildDeadlineMetric(input: {
     helper: "Se compara fecha de termino contra estado, fecha de presentacion y corte del periodo.",
     sourceDescription: input.sourceDescription,
     sourceTables: input.sourceTables,
-    incidents
+    incidents,
+    dailyBreakdown: buildDeadlineDailyBreakdown({
+      incidents,
+      period: input.period
+    })
   } satisfies KpiMetric;
 }
 
@@ -753,7 +886,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildProductionMetric({
         id: "meoo-escritos-fondo-semanales",
         label: "Escritos de fondo semanales",
-        description: "Que, en promedio, genere 6 escritos de fondo a la semana.",
+        description: "Se deben generar, en promedio, 6 escritos de fondo a la semana.",
         aliases,
         trackingRecords,
         period,
@@ -765,7 +898,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildDeadlineMetric({
         id: "meoo-terminos-escritos-fondo",
         label: "Terminos de escritos de fondo",
-        description: "Que no se le venza ningun termino en los escritos de fondo.",
+        description: "Se debe evitar que venza ningun termino en los escritos de fondo.",
         aliases,
         trackingRecords,
         terms,
@@ -783,7 +916,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildProductionMetric({
         id: "lamr-escritos-diarios",
         label: "Escritos no de fondo diarios",
-        description: "Que realice y presente 5 escritos no de fondo diarios.",
+        description: "Se deben realizar y presentar 5 escritos no de fondo diarios.",
         aliases,
         trackingRecords,
         period,
@@ -795,7 +928,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildDeadlineMetric({
         id: "lamr-terminos-escritos",
         label: "Terminos de escritos no de fondo",
-        description: "Que no se le venza ningun termino en escritos que deben ser presentados no de fondo.",
+        description: "Se debe evitar que venza ningun termino en escritos que deben ser presentados no de fondo.",
         aliases,
         trackingRecords,
         terms,
@@ -807,7 +940,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildDeadlineMetric({
         id: "lamr-terminos-prevenciones",
         label: "Terminos de desahogo de prevenciones",
-        description: "Que no se le venza ningun termino en desahogo de prevenciones.",
+        description: "Se debe evitar que venza ningun termino en desahogo de prevenciones.",
         aliases,
         trackingRecords,
         terms,
@@ -819,7 +952,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildDeadlineMetric({
         id: "lamr-otros-terminos",
         label: "Otros terminos a su cargo",
-        description: "Que no se le venza ningun otro termino que sea su responsabilidad.",
+        description: "Se debe evitar que venza ningun otro termino que sea su responsabilidad.",
         aliases,
         trackingRecords,
         terms,
@@ -837,7 +970,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildProductionMetric({
         id: "ekpo-escritos-fondo-dos-dias",
         label: "Escritos de fondo cada 2 dias habiles",
-        description: "Que elabore un escrito de fondo por cada 2 dias habiles maximo.",
+        description: "Se debe elaborar un escrito de fondo por cada 2 dias habiles maximo.",
         aliases,
         trackingRecords,
         period,
@@ -849,7 +982,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildDeadlineMetric({
         id: "ekpo-terminos-prevenciones",
         label: "Terminos de desahogo de prevenciones",
-        description: "Que no se le venza ningun termino en desahogo de prevenciones a su cargo.",
+        description: "Se debe evitar que venza ningun termino en desahogo de prevenciones a su cargo.",
         aliases,
         trackingRecords,
         terms,
@@ -867,7 +1000,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildProductionMetric({
         id: "nbsg-escritos-fondo-dos-dias",
         label: "Escritos de fondo cada 2 dias habiles",
-        description: "Que elabore un escrito de fondo por cada 2 dias habiles maximo.",
+        description: "Se debe elaborar un escrito de fondo por cada 2 dias habiles maximo.",
         aliases,
         trackingRecords,
         period,
@@ -879,7 +1012,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
       buildDeadlineMetric({
         id: "nbsg-terminos-prevenciones",
         label: "Terminos de desahogo de prevenciones",
-        description: "Que no se le venza ningun termino en desahogo de prevenciones a su cargo.",
+        description: "Se debe evitar que venza ningun termino en desahogo de prevenciones a su cargo.",
         aliases,
         trackingRecords,
         terms,
@@ -989,7 +1122,8 @@ export class PrismaKpisRepository implements KpisRepository {
       businessDaysInPeriod,
       businessDaysElapsed,
       periodComplete: endKey < todayKey,
-      excludedDateKeys: new Set()
+      excludedDateKeys: new Set(),
+      evaluatedDateKeys: getBusinessDateKeys(startKey, cutoffKey, holidayKeys)
     };
 
     const userSummaries = (users as UserRecord[])
