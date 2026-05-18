@@ -475,6 +475,8 @@ export interface Matter {
   executionLinkedAt?: string;
   executionPrompt?: string;
   holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName;
+  internalTelegramGroupId?: string;
+  internalTelegramGroupName?: string;
   nextAction?: string;
   nextActionDueAt?: string;
   nextActionSource?: string;

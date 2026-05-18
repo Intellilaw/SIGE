@@ -325,6 +325,8 @@ export interface MatterWriteRecord {
   executionLinkedAt?: string | null;
   executionPrompt?: string | null;
   holidayAuthorityShortName?: Matter["holidayAuthorityShortName"] | null;
+  internalTelegramGroupId?: string | null;
+  internalTelegramGroupName?: string | null;
   nextAction?: string | null;
   nextActionDueAt?: string | null;
   nextActionSource?: string | null;

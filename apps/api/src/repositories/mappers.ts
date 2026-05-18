@@ -879,6 +879,8 @@ export function mapMatter(record: {
   executionLinkedAt: Date | null;
   executionPrompt: string | null;
   holidayAuthorityShortName: string | null;
+  internalTelegramGroupId: string | null;
+  internalTelegramGroupName: string | null;
   nextAction: string | null;
   nextActionDueAt: Date | null;
   nextActionSource: string | null;
@@ -918,6 +920,8 @@ export function mapMatter(record: {
     executionLinkedAt: record.executionLinkedAt?.toISOString(),
     executionPrompt: record.executionPrompt ?? undefined,
     holidayAuthorityShortName: (record.holidayAuthorityShortName ?? undefined) as Matter["holidayAuthorityShortName"],
+    internalTelegramGroupId: record.internalTelegramGroupId ?? undefined,
+    internalTelegramGroupName: record.internalTelegramGroupName ?? undefined,
     nextAction: record.nextAction ?? undefined,
     nextActionDueAt: record.nextActionDueAt?.toISOString(),
     nextActionSource: record.nextActionSource ?? undefined,

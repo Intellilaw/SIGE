@@ -305,6 +305,8 @@ model Matter {
   executionLinkedAt    DateTime?
   executionPrompt      String?
   holidayAuthorityShortName String?
+  internalTelegramGroupId String?
+  internalTelegramGroupName String?
   nextAction           String?
   nextActionDueAt      DateTime?
   nextActionSource     String?

@@ -161,6 +161,8 @@ export class PrismaMattersRepository implements MattersRepository {
         executionLinkedAt: parseDateValue(payload.executionLinkedAt),
         executionPrompt: normalizeOptionalText(payload.executionPrompt),
         holidayAuthorityShortName: normalizeHolidayAuthority(payload.holidayAuthorityShortName),
+        internalTelegramGroupId: normalizeOptionalText(payload.internalTelegramGroupId),
+        internalTelegramGroupName: normalizeOptionalText(payload.internalTelegramGroupName),
         nextAction: normalizeOptionalText(payload.nextAction),
         nextActionDueAt: parseDateValue(payload.nextActionDueAt),
         nextActionSource: normalizeOptionalText(payload.nextActionSource),
@@ -594,6 +596,12 @@ export class PrismaMattersRepository implements MattersRepository {
     }
     if (hasOwn(payload, "holidayAuthorityShortName")) {
       data.holidayAuthorityShortName = normalizeHolidayAuthority(payload.holidayAuthorityShortName);
+    }
+    if (hasOwn(payload, "internalTelegramGroupId")) {
+      data.internalTelegramGroupId = normalizeOptionalText(payload.internalTelegramGroupId);
+    }
+    if (hasOwn(payload, "internalTelegramGroupName")) {
+      data.internalTelegramGroupName = normalizeOptionalText(payload.internalTelegramGroupName);
     }
     if (hasOwn(payload, "nextAction")) {
       data.nextAction = normalizeOptionalText(payload.nextAction);

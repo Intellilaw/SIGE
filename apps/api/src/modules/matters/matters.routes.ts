@@ -43,6 +43,8 @@ const matterSchema = z.object({
   executionLinkedAt: z.string().nullable().optional(),
   executionPrompt: z.string().nullable().optional(),
   holidayAuthorityShortName: executionHolidayAuthoritySchema.nullable().optional(),
+  internalTelegramGroupId: z.string().nullable().optional(),
+  internalTelegramGroupName: z.string().nullable().optional(),
   nextAction: z.string().nullable().optional(),
   nextActionDueAt: z.string().nullable().optional(),
   nextActionSource: z.string().nullable().optional(),
@@ -84,7 +86,13 @@ function isExecutionMatterPatch(value: unknown) {
     return false;
   }
 
-  const allowedKeys = new Set(["executionPrompt", "concluded", "notes", "holidayAuthorityShortName"]);
+  const allowedKeys = new Set([
+    "executionPrompt",
+    "concluded",
+    "notes",
+    "holidayAuthorityShortName",
+    "internalTelegramGroupId"
+  ]);
   const keys = Object.keys(value);
   return keys.length > 0 && keys.every((key) => allowedKeys.has(key));
 }

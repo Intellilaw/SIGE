@@ -31,6 +31,7 @@ import { BudgetPlanningPage } from "./features/budget-planning/BudgetPlanningPag
 import { CommissionsPage } from "./features/commissions/CommissionsPage";
 import { FinancesPage } from "./features/finances/FinancesPage";
 import { GeneralSupervisionPage } from "./features/general-supervision/GeneralSupervisionPage";
+import { RusconiIntelligencePage } from "./features/rusconi-intelligence/RusconiIntelligencePage";
 import { GeneralExpensesPage } from "./features/workbench/GeneralExpensesPage";
 import { KpisPage } from "./features/kpis/KpisPage";
 import { SalesPage } from "./features/sales/SalesPage";
@@ -112,6 +113,7 @@ export default function App() {
             <Route path="general-expenses" element={<GeneralExpensesPage />} />
             <Route path="commissions" element={<CommissionsPage />} />
             <Route path="general-supervision" element={<GeneralSupervisionPage />} />
+            <Route path="rusconi-intelligence" element={<RusconiIntelligencePage />} />
             <Route path="matter-catalog" element={<MatterCatalogPage />} />
             <Route path="brief-manager" element={<BriefManagerRedirectPage />} />
             <Route path="internal-contracts" element={<InternalContractsPage />} />

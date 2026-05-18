@@ -22,6 +22,7 @@ import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "./executio
 type MatterPatchPayload = {
   executionPrompt?: string | null;
   holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName | null;
+  internalTelegramGroupId?: string | null;
   concluded?: boolean;
   notes?: string | null;
 };
@@ -119,6 +120,8 @@ function matchesWordSearch(
       matter.notes,
       matter.milestone,
       matter.holidayAuthorityShortName,
+      matter.internalTelegramGroupId,
+      matter.internalTelegramGroupName,
       matter.nextAction,
       matter.nextActionSource,
       toDateInput(matter.nextActionDueAt),
@@ -860,6 +863,9 @@ export function ExecutionTeamWorkspace({
 
     void persistMatter(matterId, {
       executionPrompt: normalizeText(matter.executionPrompt) ? matter.executionPrompt ?? null : null,
+      internalTelegramGroupId: normalizeText(matter.internalTelegramGroupId)
+        ? matter.internalTelegramGroupId ?? null
+        : null,
       notes: normalizeText(matter.notes) ? matter.notes ?? null : null
     });
   }
@@ -1095,6 +1101,8 @@ export function ExecutionTeamWorkspace({
                   <th>Origen</th>
                   <th>Ir a tareas activas</th>
                   <th>Órgano para efectos de días inhábiles</th>
+                  <th>ID del grupo interno de Telegram</th>
+                  <th>Nombre del grupo interno de Telegram</th>
                   <th>Comentarios LLM</th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
@@ -1104,13 +1112,13 @@ export function ExecutionTeamWorkspace({
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={17} className="centered-inline-message">
+                    <td colSpan={19} className="centered-inline-message">
                       Cargando ejecucion...
                     </td>
                   </tr>
                 ) : filteredMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={17} className="centered-inline-message">
+                    <td colSpan={19} className="centered-inline-message">
                       No hay asuntos del equipo en esta vista.
                     </td>
                   </tr>
@@ -1243,6 +1251,23 @@ export function ExecutionTeamWorkspace({
                             </select>
                           </td>
                           <td>
+                            <input
+                              className="lead-cell-input execution-telegram-id-input"
+                              value={matter.internalTelegramGroupId || ""}
+                              onChange={(event) => handleLocalChange(matter.id, "internalTelegramGroupId", event.target.value)}
+                              onBlur={() => handleBlur(matter.id)}
+                              placeholder="-100..."
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="lead-cell-input matter-cell-readonly execution-telegram-name-input"
+                              value={matter.internalTelegramGroupName || ""}
+                              readOnly
+                              placeholder="Pendiente de bot"
+                            />
+                          </td>
+                          <td>
                             <textarea
                               className="lead-cell-input execution-textarea"
                               value={matter.executionPrompt || ""}
@@ -1275,7 +1300,7 @@ export function ExecutionTeamWorkspace({
                     })}
 
                     <tr className="execution-table-note">
-                      <td colSpan={17}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
+                      <td colSpan={19}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
                     </tr>
                   </>
                 )}

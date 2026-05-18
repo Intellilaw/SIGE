@@ -166,6 +166,18 @@ export const appModules: AppModuleDefinition[] = [
     coverage: ["Tareas por usuario", "Terminos por equipo", "KPI's semanales fuera de meta"]
   },
   {
+    id: "rusconi-intelligence",
+    path: "/app/rusconi-intelligence",
+    label: "Rusconi Intelligence",
+    shortLabel: "RI",
+    icon: "RI",
+    description: "Centro de inteligencia para gobernar conexiones LLM, prompts y contexto de supervision transversal del SIGE.",
+    phase: "Operativo",
+    available: true,
+    access: "emrt-superadmin",
+    coverage: ["Distintivo RI por conexion", "Prompt y contexto por ID", "Politica de modelo OpenAI frontier"]
+  },
+  {
     id: "matter-catalog",
     path: "/app/matter-catalog",
     label: "Catálogo de Asuntos",
