@@ -15,6 +15,7 @@
     "build:android:production": "npx eas-cli build --platform android --profile production"
   },
   "dependencies": {
+    "@sige/contracts": "0.1.0",
     "expo": "~54.0.34",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",

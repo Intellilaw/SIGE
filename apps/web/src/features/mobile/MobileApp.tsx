@@ -20,6 +20,8 @@ import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import type { ExecutionModuleDescriptor } from "../execution/execution-config";
+import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
+import type { TaskDashboardMember } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import {
   buildDistributionHistoryTaskNameMap,
@@ -124,6 +126,12 @@ function splitResponsibleOptions(value?: string | null) {
     .split(/[\/,;]/)
     .map(normalizeResponsibleOption)
     .filter(Boolean);
+}
+
+function mobileResponsibleMatches(value: string | null | undefined, member: TaskDashboardMember, sharedAliases: string[]) {
+  const normalizedValues = splitResponsibleOptions(value);
+  const normalizedAliases = new Set([...member.aliases, member.id, member.name, ...sharedAliases].map(normalizeResponsibleOption));
+  return normalizedValues.some((option) => normalizedAliases.has(option)) || normalizedAliases.has(normalizeResponsibleOption(value));
 }
 
 function dedupeResponsibleOptions(values: Array<string | undefined | null>) {
@@ -630,6 +638,125 @@ export function MobileHomePage() {
           </Link>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+export function MobileDashboardIndexPage() {
+  const { user } = useAuth();
+  const visibleModules = getVisibleExecutionModules(user);
+
+  if (!canReadMobileExecution(user)) {
+    return <Navigate to="/mobile" replace />;
+  }
+
+  return (
+    <section className="mobile-stack">
+      <MobilePageTitle title="Dashboard" subtitle="Vista rapida de pendientes por equipo." />
+      <div className="mobile-card-list">
+        {visibleModules.map((module) => (
+          <Link key={module.moduleId} className="mobile-module-card" to={`/mobile/dashboard/${module.slug}`}>
+            <strong>{module.label}</strong>
+            <span>Ver dashboard</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function MobileDashboardModulePage() {
+  const { slug } = useParams();
+  const { user } = useAuth();
+  const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
+  const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
+  const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
+  const visibleModules = getVisibleExecutionModules(user);
+  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const [records, setRecords] = useState<TaskTrackingRecord[]>([]);
+  const [terms, setTerms] = useState<TaskTerm[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!module || !legacyConfig || !dashboardConfig || !canAccess) {
+      setLoading(false);
+      return;
+    }
+
+    async function loadDashboard() {
+      setLoading(true);
+      setErrorMessage(null);
+      try {
+        const [loadedRecords, loadedTerms] = await Promise.all([
+          apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${module!.moduleId}`),
+          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${module!.moduleId}`)
+        ]);
+        setRecords(loadedRecords);
+        setTerms(loadedTerms);
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void loadDashboard();
+  }, [module?.moduleId, legacyConfig, dashboardConfig, canAccess]);
+
+  if (!module || !legacyConfig || !canAccess) {
+    return <Navigate to="/mobile/dashboard" replace />;
+  }
+
+  const sharedAliases = dashboardConfig?.sharedResponsibleAliases ?? [];
+  const activeRecords = records.filter(isPendingRecord);
+  const activeTerms = buildVisibleTerms(legacyConfig, terms, records, false).filter(isPendingRecord);
+  const memberSummaries = (dashboardConfig?.members ?? []).map((member) => {
+    const memberRecords = activeRecords.filter((record) => mobileResponsibleMatches(record.responsible, member, sharedAliases));
+    const memberTerms = activeTerms.filter((term) => mobileResponsibleMatches(term.responsible, member, sharedAliases));
+    const nextItem = sortByDate([...memberRecords, ...memberTerms])[0];
+
+    return {
+      member,
+      trackingCount: memberRecords.length,
+      termsCount: memberTerms.length,
+      totalCount: memberRecords.length + memberTerms.length,
+      nextDate: nextItem ? getRecordDate(nextItem) : ""
+    };
+  });
+
+  return (
+    <section className="mobile-stack">
+      <MobilePageTitle title={`Dashboard ${module.label}`} subtitle="Pendientes activos por responsable." />
+      <div className="mobile-action-grid">
+        <Link className="mobile-home-action" to={`/mobile/tracking/${module.slug}`}>
+          Tablas
+        </Link>
+        <Link className="mobile-home-action" to={`/mobile/tracking/${module.slug}/${TERMS_TABLE_ID}`}>
+          Terminos
+        </Link>
+      </div>
+
+      {errorMessage ? <div className="mobile-alert mobile-alert-error">{errorMessage}</div> : null}
+
+      {loading ? (
+        <div className="mobile-empty">Cargando dashboard...</div>
+      ) : memberSummaries.length === 0 ? (
+        <div className="mobile-empty">No hay dashboard configurado para este equipo.</div>
+      ) : (
+        <div className="mobile-card-list">
+          {memberSummaries.map((summary) => (
+            <article key={summary.member.id} className="mobile-record-card">
+              <strong>{summary.member.name}</strong>
+              <span>{summary.totalCount} pendientes activos</span>
+              <small>
+                {summary.trackingCount} tareas | {summary.termsCount} terminos
+                {summary.nextDate ? ` | Proxima fecha ${summary.nextDate}` : ""}
+              </small>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

@@ -12,7 +12,7 @@
         "image": "latest"
       },
       "env": {
-        "EXPO_PUBLIC_SIGE_MOBILE_URL": "https://www.pruebasb.online/mobile"
+        "EXPO_PUBLIC_SIGE_MOBILE_URL": "https://intellilaw.ai/mobile"
       }
     },
     "preview": {
@@ -22,7 +22,7 @@
         "image": "latest"
       },
       "env": {
-        "EXPO_PUBLIC_SIGE_MOBILE_URL": "https://www.pruebasb.online/mobile"
+        "EXPO_PUBLIC_SIGE_MOBILE_URL": "https://intellilaw.ai/mobile"
       }
     },
     "production": {
@@ -32,7 +32,7 @@
         "image": "latest"
       },
       "env": {
-        "EXPO_PUBLIC_SIGE_MOBILE_URL": "https://www.pruebasb.online/mobile"
+        "EXPO_PUBLIC_SIGE_MOBILE_URL": "https://intellilaw.ai/mobile"
       }
     }
   },

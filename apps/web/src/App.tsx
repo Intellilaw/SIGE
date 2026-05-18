@@ -36,6 +36,8 @@ import { KpisPage } from "./features/kpis/KpisPage";
 import {
   MobileExecutionIndexPage,
   MobileExecutionTeamPage,
+  MobileDashboardIndexPage,
+  MobileDashboardModulePage,
   MobileHomePage,
   MobileLeadsPage,
   MobileProtectedLayout,
@@ -73,6 +75,8 @@ export default function App() {
             <Route path="leads" element={<MobileLeadsPage />} />
             <Route path="execution" element={<MobileExecutionIndexPage />} />
             <Route path="execution/:slug" element={<MobileExecutionTeamPage />} />
+            <Route path="dashboard" element={<MobileDashboardIndexPage />} />
+            <Route path="dashboard/:slug" element={<MobileDashboardModulePage />} />
             <Route path="tracking" element={<MobileTrackingIndexPage />} />
             <Route path="tracking/:slug" element={<MobileTrackingModulePage />} />
             <Route path="tracking/:slug/:tableId" element={<MobileTrackingTablePage />} />

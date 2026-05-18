@@ -1,9 +1,10 @@
 import type { ExpoConfig } from "expo/config";
+import { APP_VERSION } from "@sige/contracts";
 
 const config: ExpoConfig = {
   name: "SIGE Mobile",
   slug: "sige-mobile",
-  version: "0.1.1",
+  version: APP_VERSION,
   orientation: "portrait",
   icon: "./assets/app-icon.png",
   userInterfaceStyle: "light",
@@ -15,7 +16,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.intellilaw.sige.mobile",
-    versionCode: 2,
+    versionCode: 4,
     adaptiveIcon: {
       foregroundImage: "./assets/app-icon.png",
       backgroundColor: "#ffffff"

@@ -6,6 +6,7 @@ import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
+import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import { buildDistributionHistoryTaskNameMap, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
 import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
@@ -37,6 +38,11 @@ function splitResponsibleOptions(value) {
         .split(/[\/,;]/)
         .map(normalizeResponsibleOption)
         .filter(Boolean);
+}
+function mobileResponsibleMatches(value, member, sharedAliases) {
+    const normalizedValues = splitResponsibleOptions(value);
+    const normalizedAliases = new Set([...member.aliases, member.id, member.name, ...sharedAliases].map(normalizeResponsibleOption));
+    return normalizedValues.some((option) => normalizedAliases.has(option)) || normalizedAliases.has(normalizeResponsibleOption(value));
 }
 function dedupeResponsibleOptions(values) {
     return Array.from(new Set(values.map(normalizeResponsibleOption).filter(Boolean))).sort((left, right) => left.localeCompare(right));
@@ -399,6 +405,71 @@ export function MobileHomePage() {
     const showGeneralExpenses = canReadMobileGeneralExpenses(user);
     const showExecution = canReadMobileExecution(user);
     return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
+}
+export function MobileDashboardIndexPage() {
+    const { user } = useAuth();
+    const visibleModules = getVisibleExecutionModules(user);
+    if (!canReadMobileExecution(user)) {
+        return _jsx(Navigate, { to: "/mobile", replace: true });
+    }
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Dashboard", subtitle: "Vista rapida de pendientes por equipo." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/dashboard/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Ver dashboard" })] }, module.moduleId))) })] }));
+}
+export function MobileDashboardModulePage() {
+    const { slug } = useParams();
+    const { user } = useAuth();
+    const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
+    const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
+    const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
+    const visibleModules = getVisibleExecutionModules(user);
+    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const [records, setRecords] = useState([]);
+    const [terms, setTerms] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState(null);
+    useEffect(() => {
+        if (!module || !legacyConfig || !dashboardConfig || !canAccess) {
+            setLoading(false);
+            return;
+        }
+        async function loadDashboard() {
+            setLoading(true);
+            setErrorMessage(null);
+            try {
+                const [loadedRecords, loadedTerms] = await Promise.all([
+                    apiGet(`/tasks/tracking-records?moduleId=${module.moduleId}`),
+                    apiGet(`/tasks/terms?moduleId=${module.moduleId}`)
+                ]);
+                setRecords(loadedRecords);
+                setTerms(loadedTerms);
+            }
+            catch (error) {
+                setErrorMessage(toErrorMessage(error));
+            }
+            finally {
+                setLoading(false);
+            }
+        }
+        void loadDashboard();
+    }, [module?.moduleId, legacyConfig, dashboardConfig, canAccess]);
+    if (!module || !legacyConfig || !canAccess) {
+        return _jsx(Navigate, { to: "/mobile/dashboard", replace: true });
+    }
+    const sharedAliases = dashboardConfig?.sharedResponsibleAliases ?? [];
+    const activeRecords = records.filter(isPendingRecord);
+    const activeTerms = buildVisibleTerms(legacyConfig, terms, records, false).filter(isPendingRecord);
+    const memberSummaries = (dashboardConfig?.members ?? []).map((member) => {
+        const memberRecords = activeRecords.filter((record) => mobileResponsibleMatches(record.responsible, member, sharedAliases));
+        const memberTerms = activeTerms.filter((term) => mobileResponsibleMatches(term.responsible, member, sharedAliases));
+        const nextItem = sortByDate([...memberRecords, ...memberTerms])[0];
+        return {
+            member,
+            trackingCount: memberRecords.length,
+            termsCount: memberTerms.length,
+            totalCount: memberRecords.length + memberTerms.length,
+            nextDate: nextItem ? getRecordDate(nextItem) : ""
+        };
+    });
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: `Dashboard ${module.label}`, subtitle: "Pendientes activos por responsable." }), _jsxs("div", { className: "mobile-action-grid", children: [_jsx(Link, { className: "mobile-home-action", to: `/mobile/tracking/${module.slug}`, children: "Tablas" }), _jsx(Link, { className: "mobile-home-action", to: `/mobile/tracking/${module.slug}/${TERMS_TABLE_ID}`, children: "Terminos" })] }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando dashboard..." })) : memberSummaries.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay dashboard configurado para este equipo." })) : (_jsx("div", { className: "mobile-card-list", children: memberSummaries.map((summary) => (_jsxs("article", { className: "mobile-record-card", children: [_jsx("strong", { children: summary.member.name }), _jsxs("span", { children: [summary.totalCount, " pendientes activos"] }), _jsxs("small", { children: [summary.trackingCount, " tareas | ", summary.termsCount, " terminos", summary.nextDate ? ` | Proxima fecha ${summary.nextDate}` : ""] })] }, summary.member.id))) }))] }));
 }
 export function MobileLeadsPage() {
     const { user } = useAuth();

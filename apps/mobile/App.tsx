@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import { APP_VERSION_TEXT } from "@sige/contracts";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,7 +13,7 @@ import {
 import { WebView } from "react-native-webview";
 import type { WebViewNavigation } from "react-native-webview";
 
-const DEFAULT_SIGE_MOBILE_URL = "https://www.pruebasb.online/mobile";
+const DEFAULT_SIGE_MOBILE_URL = "https://intellilaw.ai/mobile";
 const SIGE_MOBILE_URL = process.env.EXPO_PUBLIC_SIGE_MOBILE_URL?.trim() || DEFAULT_SIGE_MOBILE_URL;
 
 function withCacheBuster(url: string, nonce: number) {
@@ -68,6 +69,7 @@ export default function App() {
         <View>
           <Text style={styles.eyebrow}>SIGE</Text>
           <Text style={styles.title}>Mobile</Text>
+          <Text style={styles.version}>{APP_VERSION_TEXT}</Text>
         </View>
         <Pressable style={styles.headerButton} onPress={reload}>
           <Text style={styles.headerButtonText}>Recargar</Text>
@@ -136,6 +138,12 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 18,
     fontWeight: "800"
+  },
+  version: {
+    color: "#cbd5e1",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2
   },
   headerButton: {
     borderColor: "rgba(255,255,255,0.28)",
