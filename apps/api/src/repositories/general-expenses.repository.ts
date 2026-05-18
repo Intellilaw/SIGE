@@ -13,6 +13,7 @@ import type {
 const DEFAULT_TEAM: GeneralExpense["team"] = "Sin equipo";
 const DEFAULT_PAYMENT_METHOD: GeneralExpense["paymentMethod"] = "Transferencia";
 const DEFAULT_BANK: NonNullable<GeneralExpense["bank"]> = "Banamex";
+const DEFAULT_HAS_VAT = true;
 const DEFAULT_MONTH_RANGE = { min: 1, max: 12 };
 const LOCKED_AFTER_APPROVAL_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "detail",
@@ -27,6 +28,7 @@ const LOCKED_AFTER_APPROVAL_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "pctTaxCompliance",
   "paymentMethod",
   "bank",
+  "hasVat",
   "recurring"
 ];
 const PCT_KEYS: Array<keyof Pick<
@@ -107,6 +109,18 @@ function normalizeBank(method: GeneralExpense["paymentMethod"], bank?: GeneralEx
   return bank === "HSBC" ? "HSBC" : bank === "Banamex" ? "Banamex" : DEFAULT_BANK;
 }
 
+function normalizeHasVat(
+  method: GeneralExpense["paymentMethod"],
+  hasVat?: boolean | null,
+  fallback = DEFAULT_HAS_VAT
+) {
+  if (method !== "Transferencia") {
+    return false;
+  }
+
+  return typeof hasVat === "boolean" ? hasVat : fallback;
+}
+
 function isSuperadmin(actor: GeneralExpenseActor) {
   return actor.role === "SUPERADMIN" || actor.legacyRole === "SUPERADMIN" || actor.permissions.includes("*");
 }
@@ -182,6 +196,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         pctTaxCompliance: new Prisma.Decimal(0),
         paymentMethod: DEFAULT_PAYMENT_METHOD,
         bank: DEFAULT_BANK,
+        hasVat: DEFAULT_HAS_VAT,
         recurring: false,
         approvedByEmrt: false,
         paidByEmrtAt: null,
@@ -252,6 +267,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         pctTaxCompliance: row.pctTaxCompliance,
         paymentMethod: row.paymentMethod,
         bank: row.bank,
+        hasVat: normalizeHasVat(row.paymentMethod as GeneralExpense["paymentMethod"], row.hasVat, DEFAULT_HAS_VAT),
         recurring: true,
         approvedByEmrt: false,
         paidByEmrtAt: null,
@@ -393,6 +409,13 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "paymentMethod")) {
       data.paymentMethod = nextPaymentMethod;
+    }
+
+    if (hasOwn(payload, "hasVat") || hasOwn(payload, "paymentMethod")) {
+      const nextHasVat = hasOwn(payload, "hasVat")
+        ? normalizeHasVat(nextPaymentMethod, payload.hasVat, current.hasVat)
+        : normalizeHasVat(nextPaymentMethod, current.hasVat, current.hasVat);
+      data.hasVat = nextHasVat;
     }
 
     if (hasOwn(payload, "bank") || hasOwn(payload, "paymentMethod")) {

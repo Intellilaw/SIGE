@@ -1073,6 +1073,7 @@ export function mapGeneralExpense(record: {
   pctTaxCompliance: Prisma.Decimal;
   paymentMethod: string;
   bank: string | null;
+  hasVat: boolean;
   recurring: boolean;
   approvedByEmrt: boolean;
   paidByEmrtAt: Date | null;
@@ -1099,6 +1100,7 @@ export function mapGeneralExpense(record: {
     pctTaxCompliance: Number(record.pctTaxCompliance),
     paymentMethod: record.paymentMethod as GeneralExpense["paymentMethod"],
     bank: (record.bank ?? undefined) as GeneralExpense["bank"],
+    hasVat: record.hasVat,
     recurring: record.recurring,
     approvedByEmrt: record.approvedByEmrt,
     paidByEmrtAt: record.paidByEmrtAt?.toISOString(),

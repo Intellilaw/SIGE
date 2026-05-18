@@ -34,6 +34,27 @@ function countRows(parsed: ExportPayload, tableName: string) {
   return parsed.tables[tableName]?.length ?? 0;
 }
 
+function getLegacyMatterIdentifier(row: LegacyRow) {
+  return (
+    normalizeText(pickFirst(row, ["id_asunto", "matter_identifier", "matter_number"])) ||
+    normalizeText(pickFirst(row, ["id", "active_matter_id"]))
+  );
+}
+
+function countExecutionOnlyMatterRows(parsed: ExportPayload) {
+  const activeMatterIdentifiers = new Set(
+    (parsed.tables.active_matters ?? []).map(getLegacyMatterIdentifier).filter(Boolean)
+  );
+
+  return LEGACY_EXECUTION_MODULES.reduce((sum, module) => {
+    const rows = parsed.tables[module.matterTable] ?? [];
+    return sum + rows.filter((row) => {
+      const identifier = getLegacyMatterIdentifier(row);
+      return identifier && !activeMatterIdentifiers.has(identifier);
+    }).length;
+  }, 0);
+}
+
 function buildImportCounts() {
   return {
     archivedRows: 0,
@@ -63,7 +84,7 @@ function buildPlannedCounts(parsed: ExportPayload) {
   counts.quoteTemplates = countRows(parsed, "quote_types");
   counts.quotes = countRows(parsed, "quotes");
   counts.leads = countRows(parsed, "leads_tracking");
-  counts.matters = countRows(parsed, "active_matters");
+  counts.matters = countRows(parsed, "active_matters") + countExecutionOnlyMatterRows(parsed);
   counts.financeRecords = countRows(parsed, "finance_records");
   counts.financeSnapshots = countRows(parsed, "finance_snapshots");
   counts.generalExpenses = countRows(parsed, "gastos_generales");
@@ -137,6 +158,11 @@ function stablePlaceholderId(prefix: string, value: string) {
     .slice(0, 16);
 
   return `${prefix}-${digest}`;
+}
+
+function stableScopedLegacyId(prefix: string, scope: string, row: LegacyRow) {
+  const sourceId = normalizeText(row.id);
+  return stablePlaceholderId(prefix, `${scope}:${sourceId || JSON.stringify(row)}`);
 }
 
 function normalizeText(value: unknown) {
@@ -529,6 +555,10 @@ async function seedTaskModules() {
 async function clearImportedDomain() {
   await prisma.legacyImportArchive.deleteMany();
   await prisma.legacyImportBatch.deleteMany();
+  await prisma.dailyDocumentAssignment.deleteMany();
+  await prisma.internalContract.deleteMany();
+  await prisma.budgetPlanSnapshot.deleteMany();
+  await prisma.budgetPlan.deleteMany();
   await prisma.taskDistributionHistory.deleteMany();
   await prisma.taskDistributionEvent.deleteMany();
   await prisma.taskAdditionalTask.deleteMany();
@@ -617,7 +647,7 @@ async function main() {
   type ImportedClient = { id: string; clientNumber: string; name: string };
   const importedClients = new Map<string, ImportedClient>();
   const importedClientsByName = new Map<string, ImportedClient>();
-  let nextClientSequence = 1000;
+  let nextClientSequence = 0;
 
   async function upsertImportedClient(input: {
     legacyId: string;
@@ -695,7 +725,7 @@ async function main() {
     }
 
     const clientNumber =
-      normalizeText(explicitClientNumber) || String(++nextClientSequence).padStart(4, "0");
+      normalizeText(explicitClientNumber) || String(++nextClientSequence);
     const id = stablePlaceholderId("legacy-client", `${clientNumber}:${name}`);
 
     const created = await upsertImportedClient({
@@ -917,6 +947,29 @@ async function main() {
   }
 
   const mattersByNumber = new Map<string, string>();
+  const mattersByModuleAndIdentifier = new Map<string, string>();
+
+  function registerMatterLookup(input: {
+    id: string;
+    moduleId?: string | null;
+    matterNumber?: string | null;
+    matterIdentifier?: string | null;
+  }) {
+    if (input.matterNumber) {
+      mattersByNumber.set(input.matterNumber, input.id);
+    }
+    if (input.matterIdentifier) {
+      mattersByNumber.set(input.matterIdentifier, input.id);
+    }
+    if (input.moduleId) {
+      for (const key of [input.matterNumber, input.matterIdentifier]) {
+        if (key) {
+          mattersByModuleAndIdentifier.set(`${input.moduleId}:${key}`, input.id);
+        }
+      }
+    }
+  }
+
   for (const row of parsed.tables.active_matters ?? []) {
     const id = normalizeText(row.id) || stablePlaceholderId("legacy-matter", JSON.stringify(row));
     const client = await ensureClient(pickFirst(row, ["cliente", "client_name"]), row.numero_cliente);
@@ -1027,11 +1080,90 @@ async function main() {
       }
     });
 
-    mattersByNumber.set(matterNumber, id);
-    if (matterIdentifier) {
-      mattersByNumber.set(matterIdentifier, id);
-    }
+    registerMatterLookup({
+      id,
+      moduleId: executionModule,
+      matterNumber,
+      matterIdentifier
+    });
     report.counts.matters += 1;
+  }
+
+  for (const module of LEGACY_EXECUTION_MODULES) {
+    for (const row of parsed.tables[module.matterTable] ?? []) {
+      const matterIdentifier = getLegacyMatterIdentifier(row);
+      if (!matterIdentifier || mattersByModuleAndIdentifier.has(`${module.moduleId}:${matterIdentifier}`)) {
+        continue;
+      }
+
+      const id = stableScopedLegacyId("legacy-execution-matter", module.matterTable, row);
+      const client = await ensureClient(
+        pickFirst(row, ["cliente", "client_name"]),
+        pickFirst(row, ["numero_cliente", "client_number"])
+      );
+      const matterNumber = getMatterNumber(row, id);
+      const responsibleTeam = mapTeam(module.label);
+
+      await prisma.matter.upsert({
+        where: { id },
+        update: {
+          matterNumber,
+          clientId: client.id,
+          clientNumber: client.clientNumber,
+          clientName: client.name,
+          quoteNumber: normalizeOptionalText(pickFirst(row, ["numero_cotizacion", "quote_number"])),
+          matterType: mapQuoteType(pickFirst(row, ["matter_type", "quote_type"])),
+          subject: normalizeText(pickFirst(row, ["asunto", "subject"])),
+          specificProcess: normalizeOptionalText(
+            pickFirst(row, ["proceso_especifico", "specific_process"])
+          ),
+          responsibleTeam,
+          communicationChannel: mapCommunicationChannel(
+            pickFirst(row, ["canal_comunicacion", "communication_channel"])
+          ),
+          matterIdentifier,
+          executionLinkedModule: module.moduleId,
+          executionLinkedAt: normalizeDate(pickFirst(row, ["updated_at", "created_at"])) ?? new Date(),
+          stage: "EXECUTION",
+          origin: "MANUAL",
+          notes: normalizeOptionalText(pickFirst(row, ["comentarios", "notes"])),
+          deletedAt: normalizeDate(row.deleted_at)
+        },
+        create: {
+          id,
+          matterNumber,
+          clientId: client.id,
+          clientNumber: client.clientNumber,
+          clientName: client.name,
+          quoteNumber: normalizeOptionalText(pickFirst(row, ["numero_cotizacion", "quote_number"])),
+          matterType: mapQuoteType(pickFirst(row, ["matter_type", "quote_type"])),
+          subject: normalizeText(pickFirst(row, ["asunto", "subject"])),
+          specificProcess: normalizeOptionalText(
+            pickFirst(row, ["proceso_especifico", "specific_process"])
+          ),
+          responsibleTeam,
+          communicationChannel: mapCommunicationChannel(
+            pickFirst(row, ["canal_comunicacion", "communication_channel"])
+          ),
+          matterIdentifier,
+          executionLinkedModule: module.moduleId,
+          executionLinkedAt: normalizeDate(pickFirst(row, ["updated_at", "created_at"])) ?? new Date(),
+          stage: "EXECUTION",
+          origin: "MANUAL",
+          notes: normalizeOptionalText(pickFirst(row, ["comentarios", "notes"])),
+          deletedAt: normalizeDate(row.deleted_at),
+          createdAt: normalizeDate(pickFirst(row, ["created_at"])) ?? new Date()
+        }
+      });
+
+      registerMatterLookup({
+        id,
+        moduleId: module.moduleId,
+        matterNumber,
+        matterIdentifier
+      });
+      report.counts.matters += 1;
+    }
   }
 
   for (const row of parsed.tables.finance_records ?? []) {
@@ -1377,11 +1509,15 @@ async function main() {
 
     const termsRows = parsed.tables[module.termsTable] ?? [];
     for (const row of termsRows) {
-      const id = normalizeText(row.id) || stablePlaceholderId("legacy-term", JSON.stringify(row));
+      const id = stableScopedLegacyId("legacy-term", module.termsTable, row);
       const matterKey =
         normalizeText(pickFirst(row, ["matter_identifier", "id_asunto", "matter_number"])) ||
         normalizeText(pickFirst(row, ["id_asunto", "matter_number"]));
-      const matterId = matterKey ? mattersByNumber.get(matterKey) ?? null : null;
+      const matterId = matterKey
+        ? mattersByModuleAndIdentifier.get(`${module.moduleId}:${matterKey}`) ??
+          mattersByNumber.get(matterKey) ??
+          null
+        : null;
       const verification = {
         ...Object.fromEntries(module.verificationKeys.map((key) => [key, "No"])),
         ...collectVerificationValues(row)
@@ -1472,11 +1608,15 @@ async function main() {
 
     for (const sourceTable of module.sourceTables) {
       for (const row of parsed.tables[sourceTable.sourceTable] ?? []) {
-        const id = normalizeText(row.id) || stablePlaceholderId("legacy-task-record", JSON.stringify(row));
+        const id = stableScopedLegacyId("legacy-task-record", sourceTable.sourceTable, row);
         const matterKey =
           normalizeText(pickFirst(row, ["matter_identifier", "id_asunto", "matter_number"])) ||
           normalizeText(pickFirst(row, ["id_asunto", "matter_number"]));
-        const matterId = matterKey ? mattersByNumber.get(matterKey) ?? null : null;
+        const matterId = matterKey
+          ? mattersByModuleAndIdentifier.get(`${module.moduleId}:${matterKey}`) ??
+            mattersByNumber.get(matterKey) ??
+            null
+          : null;
 
         await prisma.taskTrackingRecord.upsert({
           where: { id },
@@ -1583,7 +1723,7 @@ async function main() {
     }
 
     for (const row of parsed.tables[module.eventsTable] ?? []) {
-      const id = normalizeText(row.id) || stablePlaceholderId("legacy-event", JSON.stringify(row));
+      const id = stableScopedLegacyId("legacy-event", module.eventsTable, row);
       await prisma.taskDistributionEvent.upsert({
         where: { id },
         update: {
@@ -1614,7 +1754,7 @@ async function main() {
     }
 
     for (const row of parsed.tables[module.historyTable] ?? []) {
-      const id = normalizeText(row.id) || stablePlaceholderId("legacy-history", JSON.stringify(row));
+      const id = stableScopedLegacyId("legacy-history", module.historyTable, row);
       const createdIds = parseStringRecord(pickFirst(row, ["created_ids", "createdIds"]));
       const targetTables = parseStringArray(pickFirst(row, ["target_tables", "targetTables"]));
       const eventNamesPerTable = parseStringArray(
@@ -1623,7 +1763,11 @@ async function main() {
       const matterKey =
         normalizeText(pickFirst(row, ["matter_identifier", "id_asunto", "matter_number"])) ||
         normalizeText(pickFirst(row, ["id_asunto", "matter_number"]));
-      const matterId = matterKey ? mattersByNumber.get(matterKey) ?? null : null;
+      const matterId = matterKey
+        ? mattersByModuleAndIdentifier.get(`${module.moduleId}:${matterKey}`) ??
+          mattersByNumber.get(matterKey) ??
+          null
+        : null;
 
       await prisma.taskDistributionHistory.upsert({
         where: { id },
@@ -1681,7 +1825,7 @@ async function main() {
     }
 
     for (const row of parsed.tables[module.additionalTasksTable] ?? []) {
-      const id = normalizeText(row.id) || stablePlaceholderId("legacy-additional-task", JSON.stringify(row));
+      const id = stableScopedLegacyId("legacy-additional-task", module.additionalTasksTable, row);
       await prisma.taskAdditionalTask.upsert({
         where: { id },
         update: {

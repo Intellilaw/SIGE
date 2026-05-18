@@ -86,6 +86,7 @@ type MobileGeneralExpenseForm = {
   team: GeneralExpense["team"];
   paymentMethod: GeneralExpense["paymentMethod"];
   bank: GeneralExpense["bank"] | "";
+  hasVat: boolean;
   recurring: boolean;
 };
 
@@ -218,6 +219,7 @@ function initialGeneralExpenseForm(): MobileGeneralExpenseForm {
     team: "Litigio",
     paymentMethod: "Transferencia",
     bank: "Banamex",
+    hasVat: true,
     recurring: false
   };
 }
@@ -1441,6 +1443,7 @@ export function MobileGeneralExpensesPage() {
         countsTowardLimit: form.countsTowardLimit,
         paymentMethod: form.paymentMethod,
         bank: form.paymentMethod === "Transferencia" ? form.bank || "Banamex" : null,
+        hasVat: form.paymentMethod === "Transferencia" ? form.hasVat : false,
         recurring: form.recurring,
         ...getGeneralExpenseDistributionPatch(form)
       };
@@ -1541,7 +1544,14 @@ export function MobileGeneralExpensesPage() {
             <span>Metodo</span>
             <select
               value={form.paymentMethod}
-              onChange={(event) => updateField("paymentMethod", event.target.value as GeneralExpense["paymentMethod"])}
+              onChange={(event) => {
+                const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
+                setForm((current) => ({
+                  ...current,
+                  paymentMethod: nextMethod,
+                  hasVat: nextMethod === "Transferencia" ? current.hasVat : false
+                }));
+              }}
             >
               <option value="Transferencia">Transferencia</option>
               <option value="Efectivo">Efectivo</option>
@@ -1550,17 +1560,28 @@ export function MobileGeneralExpensesPage() {
         </div>
 
         {form.paymentMethod === "Transferencia" ? (
-          <label className="mobile-field">
-            <span>Banco</span>
-            <select
-              value={form.bank}
-              onChange={(event) => updateField("bank", event.target.value as GeneralExpense["bank"])}
-            >
-              {MOBILE_GENERAL_EXPENSE_BANKS.map((bank) => (
-                <option key={bank} value={bank}>{bank}</option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="mobile-field">
+              <span>Banco</span>
+              <select
+                value={form.bank}
+                onChange={(event) => updateField("bank", event.target.value as GeneralExpense["bank"])}
+              >
+                {MOBILE_GENERAL_EXPENSE_BANKS.map((bank) => (
+                  <option key={bank} value={bank}>{bank}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mobile-field mobile-inline-checkbox">
+              <input
+                type="checkbox"
+                checked={form.hasVat}
+                onChange={(event) => updateField("hasVat", event.target.checked)}
+              />
+              <span>Con IVA</span>
+            </label>
+          </>
         ) : null}
 
         <div className="mobile-segmented mobile-three-segmented">
@@ -1659,7 +1680,11 @@ export function MobileGeneralExpensesPage() {
                   </div>
                   <div>
                     <dt>Metodo</dt>
-                    <dd>{expense.paymentMethod}{expense.bank ? ` / ${expense.bank}` : ""}</dd>
+                    <dd>
+                      {expense.paymentMethod}
+                      {expense.bank ? ` / ${expense.bank}` : ""}
+                      {expense.paymentMethod === "Transferencia" ? expense.hasVat ? " / Con IVA" : " / Sin IVA" : ""}
+                    </dd>
                   </div>
                   <div>
                     <dt>Limite</dt>

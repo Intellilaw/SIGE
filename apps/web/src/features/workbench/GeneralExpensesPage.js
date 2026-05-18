@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
@@ -105,7 +105,7 @@ function canReviewJnls(input) {
         Boolean(input.permissions?.includes("general-expenses:jnls-approval:write")));
 }
 function getIvaAmount(expense) {
-    if (expense.paymentMethod === "Efectivo") {
+    if (expense.paymentMethod === "Efectivo" || !expense.hasVat) {
         return null;
     }
     const amount = Number(expense.amountMxn || 0);
@@ -262,6 +262,9 @@ function applyLocalPatch(expense, patch) {
     if (Object.prototype.hasOwnProperty.call(patch, "bank") && patch.bank == null) {
         next.bank = undefined;
     }
+    if (patch.paymentMethod === "Efectivo") {
+        next.hasVat = false;
+    }
     if (Object.prototype.hasOwnProperty.call(patch, "paidByEmrtAt") && !patch.paidByEmrtAt) {
         next.paidByEmrtAt = undefined;
     }
@@ -273,6 +276,7 @@ function applyLocalPatch(expense, patch) {
 export function GeneralExpensesPage() {
     const { user } = useAuth();
     const now = new Date();
+    const expensePatchSequenceRef = useRef({});
     const [activeTab, setActiveTab] = useState("registro");
     const [selectedYear, setSelectedYear] = useState(now.getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -359,11 +363,19 @@ export function GeneralExpensesPage() {
             return;
         }
         updateExpenseLocal(expenseId, localPatch);
+        const requestSequence = (expensePatchSequenceRef.current[expenseId] ?? 0) + 1;
+        expensePatchSequenceRef.current[expenseId] = requestSequence;
         try {
             const updated = await apiPatch(`/general-expenses/${expenseId}`, payload);
+            if (expensePatchSequenceRef.current[expenseId] !== requestSequence) {
+                return;
+            }
             setRecords((items) => replaceExpense(items, updated));
         }
         catch (error) {
+            if (expensePatchSequenceRef.current[expenseId] !== requestSequence) {
+                return;
+            }
             setErrorMessage(toErrorMessage(error));
             await loadRecords();
         }
@@ -545,12 +557,13 @@ export function GeneralExpensesPage() {
                                                             const ivaAmount = getIvaAmount(expense);
                                                             const { sum } = getDistributionPct(expense);
                                                             const pctDisabled = !canWrite || expense.approvedByEmrt || expense.generalExpense || expense.expenseWithoutTeam;
+                                                            const vatCheckboxDisabled = !canWrite || expense.approvedByEmrt || expense.paymentMethod !== "Transferencia";
                                                             const rowIncomplete = isRowIncomplete(expense);
                                                             const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableNumber(Number(expense.amountMxn || 0));
-                                                            return (_jsxs("tr", { className: rowIncomplete ? "general-expense-row-danger" : undefined, children: [_jsx("td", { className: "general-expense-row-index", children: index + 1 }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-textarea", value: drafts[expense.id]?.detail ?? expense.detail ?? "", onChange: (event) => setDraft(expense.id, "detail", event.target.value), onBlur: () => void flushDraftField(expense.id, "detail"), rows: 2, disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsx("input", { className: "general-expense-input general-expense-number-input", type: "number", min: "0", step: "0.01", value: draftAmount, onChange: (event) => setDraft(expense.id, "amountMxn", event.target.value), onBlur: () => void flushDraftField(expense.id, "amountMxn"), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsx("div", { className: `general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`, children: ivaAmount !== null ? formatCurrency(ivaAmount) : "-" }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.countsTowardLimit, onChange: (event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked }), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: `general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`, children: expense.countsTowardLimit ? formatCurrency(runningLimit) : "-" }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.generalExpense, onChange: (event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.expenseWithoutTeam, onChange: (event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), DISTRIBUTION_FIELDS.map((field) => (_jsx("td", { children: _jsxs("div", { className: "general-expense-percent-field", children: [_jsx("input", { className: "general-expense-input general-expense-percent-input", type: "number", min: "0", max: "100", step: "0.01", value: drafts[expense.id]?.[field.key] ?? formatEditableNumber(Number(expense[field.key] || 0)), onChange: (event) => setDraft(expense.id, field.key, event.target.value), onBlur: () => void flushDraftField(expense.id, field.key), disabled: pctDisabled }), _jsx("span", { children: "%" })] }) }, `${expense.id}-${field.key}`))), _jsx("td", { className: `general-expense-percent-sum ${sum === 100 ? "is-valid" : "is-invalid"}`, children: expense.expenseWithoutTeam ? "" : `${sum}%` }), _jsx("td", { children: _jsx("select", { className: "general-expense-input", value: expense.paymentMethod, onChange: (event) => {
+                                                            return (_jsxs("tr", { className: rowIncomplete ? "general-expense-row-danger" : undefined, children: [_jsx("td", { className: "general-expense-row-index", children: index + 1 }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-textarea", value: drafts[expense.id]?.detail ?? expense.detail ?? "", onChange: (event) => setDraft(expense.id, "detail", event.target.value), onBlur: () => void flushDraftField(expense.id, "detail"), rows: 2, disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "number", min: "0", step: "0.01", value: draftAmount, onChange: (event) => setDraft(expense.id, "amountMxn", event.target.value), onBlur: () => void flushDraftField(expense.id, "amountMxn"), disabled: !canWrite || expense.approvedByEmrt })] }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-vat-stack", children: [_jsx("div", { className: `general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`, children: ivaAmount !== null ? formatCurrency(ivaAmount) : "-" }), expense.paymentMethod === "Transferencia" ? (_jsxs("label", { className: `general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`, children: [_jsx("input", { type: "checkbox", checked: expense.hasVat, onChange: (event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked }), disabled: vatCheckboxDisabled }), _jsx("span", { children: "Con IVA" })] })) : null] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.countsTowardLimit, onChange: (event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked }), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: `general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`, children: expense.countsTowardLimit ? formatCurrency(runningLimit) : "-" }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.generalExpense, onChange: (event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.expenseWithoutTeam, onChange: (event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), DISTRIBUTION_FIELDS.map((field) => (_jsx("td", { children: _jsxs("div", { className: "general-expense-percent-field", children: [_jsx("input", { className: "general-expense-input general-expense-percent-input", type: "number", min: "0", max: "100", step: "0.01", value: drafts[expense.id]?.[field.key] ?? formatEditableNumber(Number(expense[field.key] || 0)), onChange: (event) => setDraft(expense.id, field.key, event.target.value), onBlur: () => void flushDraftField(expense.id, field.key), disabled: pctDisabled }), _jsx("span", { children: "%" })] }) }, `${expense.id}-${field.key}`))), _jsx("td", { className: `general-expense-percent-sum ${sum === 100 ? "is-valid" : "is-invalid"}`, children: expense.expenseWithoutTeam ? "" : `${sum}%` }), _jsx("td", { children: _jsx("select", { className: "general-expense-input", value: expense.paymentMethod, onChange: (event) => {
                                                                                 const nextMethod = event.target.value;
                                                                                 const localPatch = nextMethod === "Efectivo"
-                                                                                    ? { paymentMethod: nextMethod, bank: null }
+                                                                                    ? { paymentMethod: nextMethod, bank: null, hasVat: false }
                                                                                     : { paymentMethod: nextMethod };
                                                                                 void persistExpensePatch(expense.id, localPatch, localPatch);
                                                                             }, disabled: !canWrite || expense.approvedByEmrt, children: PAYMENT_METHOD_OPTIONS.map((method) => (_jsx("option", { value: method, children: method }, method))) }) }), _jsx("td", { children: _jsxs("select", { className: "general-expense-input", value: expense.bank ?? "", onChange: (event) => void persistExpensePatch(expense.id, {

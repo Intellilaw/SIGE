@@ -740,6 +740,7 @@ export interface GeneralExpense {
   pctTaxCompliance: number;
   paymentMethod: GeneralExpensePaymentMethod;
   bank?: GeneralExpenseBank;
+  hasVat: boolean;
   recurring: boolean;
   approvedByEmrt: boolean;
   paidByEmrtAt?: string;

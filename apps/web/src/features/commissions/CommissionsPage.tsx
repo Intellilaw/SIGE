@@ -408,7 +408,7 @@ function calculateSection(
       return sum + expense.amountMxn;
     }
 
-    const isGeneralExpense = expense.generalExpense || normalizeText(expense.team) === normalizeText("General");
+    const isGeneralExpense = normalizeText(expense.team) === normalizeText("General");
     if (isGeneralExpense) {
       return sum + (expense.amountMxn / 5);
     }

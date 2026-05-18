@@ -1,0 +1,15 @@
+{
+  "installCommand": "npm install",
+  "buildCommand": "npm run build --workspace @sige/web",
+  "outputDirectory": "apps/web/dist",
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://api.pruebasb.online/api/v1/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

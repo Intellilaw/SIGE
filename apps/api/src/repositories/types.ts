@@ -369,6 +369,7 @@ export interface GeneralExpenseUpdateRecord {
   pctTaxCompliance?: number;
   paymentMethod?: GeneralExpense["paymentMethod"];
   bank?: GeneralExpense["bank"] | null;
+  hasVat?: boolean;
   recurring?: boolean;
   approvedByEmrt?: boolean;
   paidByEmrtAt?: string | null;

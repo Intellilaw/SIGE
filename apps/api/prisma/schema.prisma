@@ -342,6 +342,7 @@ model GeneralExpense {
   pctTaxCompliance   Decimal   @default(0)
   paymentMethod      String    @default("Transferencia")
   bank               String?
+  hasVat             Boolean   @default(true)
   recurring          Boolean   @default(false)
   approvedByEmrt     Boolean   @default(false)
   paidByEmrtAt       DateTime? @db.Date

@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,7 @@ const repoRoot = path.resolve(apiRoot, "../..");
 const localDataDirectory = path.join(repoRoot, ".local-postgres", "data");
 const localLogPath = path.join(repoRoot, ".local-postgres", "postgres.stderr.log");
 const prismaCliPath = path.join(repoRoot, "node_modules", "prisma", "build", "index.js");
+const generatedPrismaClientPath = path.join(repoRoot, "node_modules", ".prisma", "client", "index.js");
 
 const DEFAULT_PG_CTL_PATHS = [
   process.env.POSTGRES_BIN_DIR ? path.join(process.env.POSTGRES_BIN_DIR, "pg_ctl.exe") : null,
@@ -80,6 +82,15 @@ function run(command: string, args: string[]) {
   });
 }
 
+async function ensureLocalPrismaEngineIsEnabled() {
+  const generatedClient = await fs.readFile(generatedPrismaClientPath, "utf8");
+  const patchedClient = generatedClient.replace('"copyEngine": false', '"copyEngine": true');
+
+  if (patchedClient !== generatedClient) {
+    await fs.writeFile(generatedPrismaClientPath, patchedClient);
+  }
+}
+
 async function findPgCtl() {
   for (const pgCtlPath of DEFAULT_PG_CTL_PATHS) {
     try {
@@ -141,6 +152,7 @@ async function main() {
   }
 
   await run(process.execPath, [prismaCliPath, "generate"]);
+  await ensureLocalPrismaEngineIsEnabled();
   const api = startApi();
 
   if (target && pgCtlPath) {

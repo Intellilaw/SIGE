@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GeneralExpense } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
@@ -30,6 +30,7 @@ type GeneralExpensePatchPayload = {
   pctTaxCompliance?: number;
   paymentMethod?: GeneralExpense["paymentMethod"];
   bank?: GeneralExpense["bank"] | null;
+  hasVat?: boolean;
   recurring?: boolean;
   approvedByEmrt?: boolean;
   paidByEmrtAt?: string | null;
@@ -183,7 +184,7 @@ function canReviewJnls(input: {
 }
 
 function getIvaAmount(expense: GeneralExpense) {
-  if (expense.paymentMethod === "Efectivo") {
+  if (expense.paymentMethod === "Efectivo" || !expense.hasVat) {
     return null;
   }
 
@@ -348,6 +349,10 @@ function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayl
     next.bank = undefined;
   }
 
+  if (patch.paymentMethod === "Efectivo") {
+    next.hasVat = false;
+  }
+
   if (Object.prototype.hasOwnProperty.call(patch, "paidByEmrtAt") && !patch.paidByEmrtAt) {
     next.paidByEmrtAt = undefined;
   }
@@ -362,6 +367,7 @@ function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayl
 export function GeneralExpensesPage() {
   const { user } = useAuth();
   const now = new Date();
+  const expensePatchSequenceRef = useRef<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState<ActiveTab>("registro");
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -467,11 +473,21 @@ export function GeneralExpensesPage() {
     }
 
     updateExpenseLocal(expenseId, localPatch);
+    const requestSequence = (expensePatchSequenceRef.current[expenseId] ?? 0) + 1;
+    expensePatchSequenceRef.current[expenseId] = requestSequence;
 
     try {
       const updated = await apiPatch<GeneralExpense>(`/general-expenses/${expenseId}`, payload);
+      if (expensePatchSequenceRef.current[expenseId] !== requestSequence) {
+        return;
+      }
+
       setRecords((items) => replaceExpense(items, updated));
     } catch (error) {
+      if (expensePatchSequenceRef.current[expenseId] !== requestSequence) {
+        return;
+      }
+
       setErrorMessage(toErrorMessage(error));
       await loadRecords();
     }
@@ -853,6 +869,7 @@ export function GeneralExpensesPage() {
                           const ivaAmount = getIvaAmount(expense);
                           const { sum } = getDistributionPct(expense);
                           const pctDisabled = !canWrite || expense.approvedByEmrt || expense.generalExpense || expense.expenseWithoutTeam;
+                          const vatCheckboxDisabled = !canWrite || expense.approvedByEmrt || expense.paymentMethod !== "Transferencia";
                           const rowIncomplete = isRowIncomplete(expense);
                           const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableNumber(Number(expense.amountMxn || 0));
 
@@ -870,20 +887,36 @@ export function GeneralExpensesPage() {
                                 />
                               </td>
                               <td>
-                                <input
-                                  className="general-expense-input general-expense-number-input"
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={draftAmount}
-                                  onChange={(event) => setDraft(expense.id, "amountMxn", event.target.value)}
-                                  onBlur={() => void flushDraftField(expense.id, "amountMxn")}
-                                  disabled={!canWrite || expense.approvedByEmrt}
-                                />
+                                <div className="general-expense-currency-input">
+                                  <span aria-hidden="true">$</span>
+                                  <input
+                                    className="general-expense-input general-expense-number-input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={draftAmount}
+                                    onChange={(event) => setDraft(expense.id, "amountMxn", event.target.value)}
+                                    onBlur={() => void flushDraftField(expense.id, "amountMxn")}
+                                    disabled={!canWrite || expense.approvedByEmrt}
+                                  />
+                                </div>
                               </td>
                               <td>
-                                <div className={`general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`}>
-                                  {ivaAmount !== null ? formatCurrency(ivaAmount) : "-"}
+                                <div className="general-expense-vat-stack">
+                                  <div className={`general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`}>
+                                    {ivaAmount !== null ? formatCurrency(ivaAmount) : "-"}
+                                  </div>
+                                  {expense.paymentMethod === "Transferencia" ? (
+                                    <label className={`general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={expense.hasVat}
+                                        onChange={(event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked })}
+                                        disabled={vatCheckboxDisabled}
+                                      />
+                                      <span>Con IVA</span>
+                                    </label>
+                                  ) : null}
                                 </div>
                               </td>
                               <td className="general-expense-checkbox-cell">
@@ -941,7 +974,7 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => {
                                     const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
                                     const localPatch = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null }
+                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false }
                                       : { paymentMethod: nextMethod };
                                     void persistExpensePatch(expense.id, localPatch, localPatch);
                                   }}

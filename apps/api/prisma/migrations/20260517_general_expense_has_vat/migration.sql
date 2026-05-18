@@ -1,0 +1,1 @@
+ALTER TABLE "GeneralExpense" ADD COLUMN "hasVat" BOOLEAN NOT NULL DEFAULT true;

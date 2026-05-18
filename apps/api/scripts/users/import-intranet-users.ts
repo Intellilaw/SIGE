@@ -200,18 +200,20 @@ function parseCommandLine() {
   const { values } = parseArgs({
     options: {
       input: { type: "string" },
+      "input-url": { type: "string" },
       report: { type: "string" },
       apply: { type: "boolean", default: false }
     },
     allowPositionals: false
   });
 
-  if (!values.input) {
-    throw new Error("Missing required --input argument.");
+  if (!values.input && !values["input-url"]) {
+    throw new Error("Missing required --input or --input-url argument.");
   }
 
   return {
-    inputPath: path.resolve(repoRoot, values.input),
+    inputPath: values.input ? path.resolve(repoRoot, values.input) : null,
+    inputUrl: values["input-url"] ?? null,
     reportPath: path.resolve(
       repoRoot,
       values.report ?? "runtime-logs/intranet-users-import-report.json"
@@ -220,9 +222,26 @@ function parseCommandLine() {
   };
 }
 
+async function readInputPayload(inputPath: string | null, inputUrl: string | null) {
+  if (inputUrl) {
+    const response = await fetch(inputUrl);
+    if (!response.ok) {
+      throw new Error(`Unable to download user migration input: ${response.status} ${response.statusText}`);
+    }
+
+    return response.text();
+  }
+
+  if (!inputPath) {
+    throw new Error("Missing required --input or --input-url argument.");
+  }
+
+  return readFile(inputPath, "utf8");
+}
+
 async function main() {
-  const { inputPath, reportPath, apply } = parseCommandLine();
-  const fileContents = await readFile(inputPath, "utf8");
+  const { inputPath, inputUrl, reportPath, apply } = parseCommandLine();
+  const fileContents = await readInputPayload(inputPath, inputUrl);
   const parsedExport = exportFileSchema.parse(JSON.parse(fileContents));
 
   const skippedPublicUsers: string[] = [];
@@ -297,45 +316,36 @@ async function main() {
     const plannedUsersByEmail = new Map(plannedUsers.map((entry) => [entry.email, entry] as const));
 
     for (const user of importableUsers.map((entry) => plannedUsersByEmail.get(entry.email) ?? entry)) {
-      const existing = await prisma.user.findUnique({ where: { email: user.email } });
+      const existing = await prisma.user.findUnique({
+        where: { email: user.email },
+        select: { email: true }
+      });
       const operation = existing ? "update" : "create";
-      const passwordHash = hashPassword(randomBytes(32).toString("hex"));
+      const passwordHash = existing ? null : hashPassword(randomBytes(32).toString("hex"));
+      const commonData = {
+        username: user.username,
+        displayName: user.displayName,
+        shortName: user.shortName ?? null,
+        role: user.role,
+        legacyRole: user.legacyRole,
+        team: user.team ?? null,
+        legacyTeam: user.legacyTeam ?? null,
+        specificRole: user.specificRole ?? null,
+        permissions: user.permissions,
+        isActive: true,
+        lastLoginAt: user.lastLoginAt ?? null,
+        emailConfirmedAt: user.emailConfirmedAt ?? new Date()
+      };
 
       if (apply) {
         await prisma.user.upsert({
           where: { email: user.email },
-          update: {
-            username: user.username,
-            displayName: user.displayName,
-            shortName: user.shortName ?? null,
-            role: user.role,
-            legacyRole: user.legacyRole,
-            team: user.team ?? null,
-            legacyTeam: user.legacyTeam ?? null,
-            specificRole: user.specificRole ?? null,
-            permissions: user.permissions,
-            isActive: true,
-            passwordResetRequired: true,
-            lastLoginAt: user.lastLoginAt ?? null,
-            emailConfirmedAt: user.emailConfirmedAt ?? new Date(),
-            passwordHash
-          },
+          update: commonData,
           create: {
-            email: user.email,
-            username: user.username,
-            displayName: user.displayName,
-            shortName: user.shortName ?? null,
-            role: user.role,
-            legacyRole: user.legacyRole,
-            team: user.team ?? null,
-            legacyTeam: user.legacyTeam ?? null,
-            specificRole: user.specificRole ?? null,
-            permissions: user.permissions,
-            isActive: true,
+            ...commonData,
             passwordResetRequired: true,
-            lastLoginAt: user.lastLoginAt ?? null,
-            emailConfirmedAt: user.emailConfirmedAt ?? new Date(),
-            passwordHash,
+            email: user.email,
+            passwordHash: passwordHash ?? hashPassword(randomBytes(32).toString("hex")),
             createdAt: user.createdAt ?? new Date()
           }
         });
@@ -353,7 +363,9 @@ async function main() {
         internalTeam: user.team ?? null,
         permissions: user.permissions,
         usernameSource: user.usernameSource,
-        passwordStrategy: "metadata-only-random-password-force-reset"
+        passwordStrategy: existing
+          ? "existing-password-preserved"
+          : "metadata-only-random-password-force-reset"
       });
     }
   } finally {
@@ -366,9 +378,9 @@ async function main() {
     executedAt: new Date().toISOString(),
     mode: apply ? "apply" : "dry-run",
     passwordStrategy: {
-      type: "metadata-only-random-password-force-reset",
+      type: "preserve-existing-passwords-create-new-users-with-reset",
       description:
-        "The importer never copies legacy passwords. Every imported account receives a random unknown password hash, forcing a reset before productive use."
+        "The importer never copies legacy passwords. Existing SIGE users keep their password; newly created accounts receive a random unknown password hash and must reset before productive use."
     },
     summary: {
       totalUsersInFile: parsedExport.users.length,

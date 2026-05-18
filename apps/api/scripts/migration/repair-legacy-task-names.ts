@@ -58,6 +58,11 @@ function stablePlaceholderId(prefix: string, value: string) {
   return `${prefix}-${digest}`;
 }
 
+function stableScopedLegacyId(prefix: string, scope: string, row: LegacyRow) {
+  const sourceId = normalizeText(row.id);
+  return stablePlaceholderId(prefix, `${scope}:${sourceId || JSON.stringify(row)}`);
+}
+
 function normalizeText(value: unknown) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? String(value) : "";
@@ -103,17 +108,19 @@ function legacyPendingTaskLabel(row: LegacyRow) {
   );
 }
 
-function taskRecordCandidateIds(row: LegacyRow) {
+function taskRecordCandidateIds(row: LegacyRow, sourceTable: string) {
   return [
     normalizeText(row.id),
-    stablePlaceholderId("legacy-task-record", JSON.stringify(row))
+    stablePlaceholderId("legacy-task-record", JSON.stringify(row)),
+    stableScopedLegacyId("legacy-task-record", sourceTable, row)
   ].filter(Boolean);
 }
 
-function termCandidateIds(row: LegacyRow) {
+function termCandidateIds(row: LegacyRow, termsTable: string) {
   return [
     normalizeText(row.id),
-    stablePlaceholderId("legacy-term", JSON.stringify(row))
+    stablePlaceholderId("legacy-term", JSON.stringify(row)),
+    stableScopedLegacyId("legacy-term", termsTable, row)
   ].filter(Boolean);
 }
 
@@ -141,7 +148,7 @@ async function main() {
 
         const result = await prisma.taskTrackingRecord.updateMany({
           where: {
-            id: { in: taskRecordCandidateIds(row) },
+            id: { in: taskRecordCandidateIds(row, sourceTable.sourceTable) },
             taskName: { in: ["", "Tarea legacy"] }
           },
           data: { taskName }
@@ -164,7 +171,7 @@ async function main() {
 
       const result = await prisma.taskTerm.updateMany({
         where: {
-          id: { in: termCandidateIds(row) },
+          id: { in: termCandidateIds(row, module.termsTable) },
           OR: [
             { eventName: { in: ["", "Termino legacy"] } },
             { pendingTaskLabel: { in: ["", "Tarea legacy"] } },

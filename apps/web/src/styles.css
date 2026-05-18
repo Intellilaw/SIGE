@@ -2980,6 +2980,25 @@ textarea {
   min-width: 130px;
 }
 
+.general-expense-currency-input {
+  position: relative;
+  min-width: 130px;
+}
+
+.general-expense-currency-input > span {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.general-expense-currency-input .general-expense-number-input {
+  padding-left: 30px;
+}
+
 .general-expense-readonly-cell {
   min-height: 44px;
   display: flex;
@@ -2995,6 +3014,27 @@ textarea {
 .general-expense-readonly-cell.is-disabled {
   background: #f5f7fa;
   color: #94a3b8;
+}
+
+.general-expense-vat-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.general-expense-inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: #334e68;
+}
+
+.general-expense-inline-checkbox input {
+  margin: 0;
+}
+
+.general-expense-inline-checkbox.is-disabled {
+  opacity: 0.6;
 }
 
 .general-expense-row-danger td {
@@ -6247,6 +6287,18 @@ textarea {
 
 .mobile-field textarea {
   resize: vertical;
+}
+
+.mobile-inline-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-inline-checkbox input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
 }
 
 .mobile-event-search-field {

@@ -36,6 +36,7 @@ const updateSchema = z.object({
   pctTaxCompliance: z.number().optional(),
   paymentMethod: z.enum(["Transferencia", "Efectivo"]).optional(),
   bank: z.enum(["Banamex", "HSBC"]).nullable().optional(),
+  hasVat: z.boolean().optional(),
   recurring: z.boolean().optional(),
   approvedByEmrt: z.boolean().optional(),
   paidByEmrtAt: z.string().nullable().optional(),
