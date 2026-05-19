@@ -10,6 +10,7 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "eas-build-post-install": "npm run build --workspace @sige/contracts",
     "build:android:development": "npx eas-cli build --platform android --profile development",
     "build:android:preview": "npx eas-cli build --platform android --profile preview",
     "build:android:production": "npx eas-cli build --platform android --profile production"

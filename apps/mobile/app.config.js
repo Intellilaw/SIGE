@@ -1,10 +1,24 @@
-import type { ExpoConfig } from "expo/config";
-import { APP_VERSION } from "@sige/contracts";
+const fs = require("node:fs");
+const path = require("node:path");
 
-const config: ExpoConfig = {
+function readCentralAppVersion() {
+  const versionFile = path.resolve(__dirname, "../../packages/contracts/src/app-version.ts");
+  const source = fs.readFileSync(versionFile, "utf8");
+  const match = source.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+
+  if (!match) {
+    throw new Error(`Could not read APP_VERSION from ${versionFile}`);
+  }
+
+  return match[1];
+}
+
+const appVersion = readCentralAppVersion();
+
+module.exports = {
   name: "SIGE Mobile",
   slug: "sige-mobile",
-  version: APP_VERSION,
+  version: appVersion,
   orientation: "portrait",
   icon: "./assets/app-icon.png",
   userInterfaceStyle: "light",
@@ -28,5 +42,3 @@ const config: ExpoConfig = {
     }
   }
 };
-
-export default config;

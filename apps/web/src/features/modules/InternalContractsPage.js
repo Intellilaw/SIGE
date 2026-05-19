@@ -4,6 +4,32 @@ import { apiDelete, apiDownload, apiGet, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 const MODULE_TITLE = "Administraci\u00f3n de contratos internos";
 const LABOR_FILE_CONTRACT_ID_PREFIX = "labor-file-document:";
+const BUNDLED_CONTRACT_TEMPLATES = [
+    {
+        id: "bundled-work-contract-2026-05-18",
+        title: "Contrato de trabajo (18.05.2026)",
+        originalFileName: "Contrato de trabajo (18.05.2026).docx",
+        fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        fileSizeBytes: 33393,
+        notes: "Machote base de empresa.",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+        downloadUrl: "/internal-contract-templates/contrato-de-trabajo-2026-05-18.docx",
+        isBundled: true
+    },
+    {
+        id: "bundled-psp-contract-2024-09-10",
+        title: "Contrato de PSP (RC) (10.09.2024)",
+        originalFileName: "Contrato de PSP (RC) (10.09.2024).docx",
+        fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        fileSizeBytes: 117650,
+        notes: "Machote base de empresa.",
+        createdAt: "2024-09-10T00:00:00.000Z",
+        updatedAt: "2024-09-10T00:00:00.000Z",
+        downloadUrl: "/internal-contract-templates/contrato-psp-rc-2024-09-10.docx",
+        isBundled: true
+    }
+];
 const SECTION_LABELS = {
     PROFESSIONAL_SERVICES: "Contratos de prestaci\u00f3n de servicios profesionales",
     LABOR: "Contratos laborales",
@@ -216,11 +242,23 @@ export function InternalContractsPage() {
             setActiveSection(visibleSections[0]);
         }
     }, [activeSection, visibleSections]);
+    const displayTemplates = useMemo(() => {
+        const bundledTemplates = BUNDLED_CONTRACT_TEMPLATES.filter((bundledTemplate) => {
+            const bundledTitle = normalizeSearchValue(bundledTemplate.title);
+            const bundledFilename = normalizeSearchValue(bundledTemplate.originalFileName);
+            return !templates.some((template) => {
+                const title = normalizeSearchValue(template.title);
+                const filename = normalizeSearchValue(template.originalFileName);
+                return title === bundledTitle || filename === bundledFilename;
+            });
+        });
+        return sortContractTemplates([...bundledTemplates, ...templates]);
+    }, [templates]);
     const sectionCounts = useMemo(() => ({
         PROFESSIONAL_SERVICES: contracts.filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES").length,
         LABOR: contracts.filter((contract) => contract.contractType === "LABOR").length,
-        TEMPLATES: templates.length
-    }), [contracts, templates]);
+        TEMPLATES: displayTemplates.length
+    }), [contracts, displayTemplates]);
     const filteredContracts = useMemo(() => {
         if (activeSection === "TEMPLATES") {
             return [];
@@ -247,9 +285,9 @@ export function InternalContractsPage() {
     const filteredTemplates = useMemo(() => {
         const search = normalizeSearchValue(query);
         if (!search) {
-            return sortContractTemplates(templates);
+            return displayTemplates;
         }
-        return sortContractTemplates(templates.filter((template) => {
+        return sortContractTemplates(displayTemplates.filter((template) => {
             const haystack = normalizeSearchValue([
                 template.title,
                 template.originalFileName,
@@ -257,7 +295,7 @@ export function InternalContractsPage() {
             ].filter(Boolean).join(" "));
             return haystack.includes(search);
         }));
-    }, [query, templates]);
+    }, [displayTemplates, query]);
     const selectedClientQuotes = useMemo(() => sortQuotes(quotes.filter((quote) => quote.clientId === form.clientId)), [form.clientId, quotes]);
     const selectedQuote = useMemo(() => selectedClientQuotes.find((quote) => quote.quoteNumber === form.contractNumber), [form.contractNumber, selectedClientQuotes]);
     const selectedQuoteTitle = quoteTitleLabel(selectedQuote);
@@ -411,6 +449,14 @@ export function InternalContractsPage() {
         setDownloadingId(template.id);
         setFlash(null);
         try {
+            if (template.downloadUrl) {
+                const response = await fetch(template.downloadUrl);
+                if (!response.ok) {
+                    throw new Error("No se pudo descargar el machote.");
+                }
+                downloadBlobFile(await response.blob(), template.originalFileName);
+                return;
+            }
             const { blob, filename } = await apiDownload(`/internal-contracts/templates/${template.id}/document`);
             downloadBlobFile(blob, filename ?? template.originalFileName);
         }
@@ -447,6 +493,10 @@ export function InternalContractsPage() {
         }
     }
     async function handleTemplateDelete(template) {
+        if (template.isBundled) {
+            setFlash({ tone: "error", text: "Este machote base viene incluido en la plataforma y no se borra desde aqui." });
+            return;
+        }
         if (!window.confirm(`Seguro que deseas borrar el machote ${template.title}?`)) {
             return;
         }
@@ -491,5 +541,5 @@ export function InternalContractsPage() {
                                                 ? "Machote, archivo o notas..."
                                                 : activeSection === "LABOR"
                                                     ? "Contrato, colaborador, expediente o archivo..."
-                                                    : "Contrato, titulo, cliente, colaborador o archivo...", type: "search" })] }) }), _jsxs("div", { className: "internal-contracts-list", "aria-live": "polite", children: [loading ? (_jsx("div", { className: "centered-inline-message", children: isTemplateSection ? "Cargando machotes..." : "Cargando contratos..." })) : null, !loading && isTemplateSection && filteredTemplates.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay machotes cargados." })) : null, !loading && !isTemplateSection && filteredContracts.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay contratos en esta seccion." })) : null, !loading && isTemplateSection && filteredTemplates.map((template) => (_jsxs("article", { className: "internal-contract-card", children: [_jsxs("div", { className: "internal-contract-card-head", children: [_jsxs("div", { children: [_jsx("span", { className: "internal-contract-number", children: template.title }), _jsx("h3", { children: template.originalFileName })] }), _jsx("span", { className: "status-pill status-live", children: "Machote" })] }), _jsxs("div", { className: "internal-contract-meta-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "Archivo" }), _jsx("strong", { children: template.originalFileName }), _jsx("small", { children: formatFileSize(template.fileSizeBytes) })] }), _jsxs("div", { children: [_jsx("span", { children: "Alta" }), _jsx("strong", { children: formatDate(template.createdAt) }), _jsx("small", { children: template.fileMimeType ?? "Tipo no registrado" })] })] }), template.notes ? _jsx("p", { className: "internal-contract-notes", children: template.notes }) : null, _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === template.id, onClick: () => void handleTemplateDownload(template), children: downloadingId === template.id ? "Descargando..." : "Descargar" }), canUploadTemplate ? (_jsx("button", { className: "danger-button", type: "button", disabled: deletingId === template.id, onClick: () => void handleTemplateDelete(template), children: deletingId === template.id ? "Borrando..." : "Borrar" })) : null] })] }, template.id))), !loading && !isTemplateSection && activeSection !== "PROFESSIONAL_SERVICES" && filteredContracts.map((contract) => renderContractCard(contract)), !loading && activeSection === "PROFESSIONAL_SERVICES" && groupedProfessionalContracts.map((group) => (_jsxs("section", { className: "internal-contract-group", children: [_jsxs("div", { className: "internal-contract-group-head", children: [_jsx("h3", { children: group.label }), _jsxs("span", { children: [group.contracts.length, " contrato", group.contracts.length === 1 ? "" : "s"] })] }), _jsx("div", { className: "internal-contract-group-list", children: group.contracts.map((contract) => renderContractCard(contract)) })] }, group.key)))] })] })] })] }));
+                                                    : "Contrato, titulo, cliente, colaborador o archivo...", type: "search" })] }) }), _jsxs("div", { className: "internal-contracts-list", "aria-live": "polite", children: [loading ? (_jsx("div", { className: "centered-inline-message", children: isTemplateSection ? "Cargando machotes..." : "Cargando contratos..." })) : null, !loading && isTemplateSection && filteredTemplates.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay machotes cargados." })) : null, !loading && !isTemplateSection && filteredContracts.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay contratos en esta seccion." })) : null, !loading && isTemplateSection && filteredTemplates.map((template) => (_jsxs("article", { className: "internal-contract-card", children: [_jsxs("div", { className: "internal-contract-card-head", children: [_jsxs("div", { children: [_jsx("span", { className: "internal-contract-number", children: template.title }), _jsx("h3", { children: template.originalFileName })] }), _jsx("span", { className: "status-pill status-live", children: "Machote" })] }), _jsxs("div", { className: "internal-contract-meta-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "Archivo" }), _jsx("strong", { children: template.originalFileName }), _jsx("small", { children: formatFileSize(template.fileSizeBytes) })] }), _jsxs("div", { children: [_jsx("span", { children: "Alta" }), _jsx("strong", { children: formatDate(template.createdAt) }), _jsx("small", { children: template.fileMimeType ?? "Tipo no registrado" })] })] }), template.notes ? _jsx("p", { className: "internal-contract-notes", children: template.notes }) : null, _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === template.id, onClick: () => void handleTemplateDownload(template), children: downloadingId === template.id ? "Descargando..." : "Descargar" }), canUploadTemplate && !template.isBundled ? (_jsx("button", { className: "danger-button", type: "button", disabled: deletingId === template.id, onClick: () => void handleTemplateDelete(template), children: deletingId === template.id ? "Borrando..." : "Borrar" })) : null] })] }, template.id))), !loading && !isTemplateSection && activeSection !== "PROFESSIONAL_SERVICES" && filteredContracts.map((contract) => renderContractCard(contract)), !loading && activeSection === "PROFESSIONAL_SERVICES" && groupedProfessionalContracts.map((group) => (_jsxs("section", { className: "internal-contract-group", children: [_jsxs("div", { className: "internal-contract-group-head", children: [_jsx("h3", { children: group.label }), _jsxs("span", { children: [group.contracts.length, " contrato", group.contracts.length === 1 ? "" : "s"] })] }), _jsx("div", { className: "internal-contract-group-list", children: group.contracts.map((contract) => renderContractCard(contract)) })] }, group.key)))] })] })] })] }));
 }

@@ -13,7 +13,7 @@ import {
 import { WebView } from "react-native-webview";
 import type { WebViewNavigation } from "react-native-webview";
 
-const DEFAULT_SIGE_MOBILE_URL = "https://intellilaw.ai/mobile";
+const DEFAULT_SIGE_MOBILE_URL = "https://www.intellilaw.ai/mobile";
 const SIGE_MOBILE_URL = process.env.EXPO_PUBLIC_SIGE_MOBILE_URL?.trim() || DEFAULT_SIGE_MOBILE_URL;
 
 function withCacheBuster(url: string, nonce: number) {

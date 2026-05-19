@@ -30,9 +30,39 @@ type ContractFormState = {
 };
 
 type InternalContractSection = InternalContractType | "TEMPLATES";
+type DisplayInternalContractTemplate = InternalContractTemplate & {
+  downloadUrl?: string;
+  isBundled?: boolean;
+};
 
 const MODULE_TITLE = "Administraci\u00f3n de contratos internos";
 const LABOR_FILE_CONTRACT_ID_PREFIX = "labor-file-document:";
+const BUNDLED_CONTRACT_TEMPLATES: DisplayInternalContractTemplate[] = [
+  {
+    id: "bundled-work-contract-2026-05-18",
+    title: "Contrato de trabajo (18.05.2026)",
+    originalFileName: "Contrato de trabajo (18.05.2026).docx",
+    fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    fileSizeBytes: 33393,
+    notes: "Machote base de empresa.",
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z",
+    downloadUrl: "/internal-contract-templates/contrato-de-trabajo-2026-05-18.docx",
+    isBundled: true
+  },
+  {
+    id: "bundled-psp-contract-2024-09-10",
+    title: "Contrato de PSP (RC) (10.09.2024)",
+    originalFileName: "Contrato de PSP (RC) (10.09.2024).docx",
+    fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    fileSizeBytes: 117650,
+    notes: "Machote base de empresa.",
+    createdAt: "2024-09-10T00:00:00.000Z",
+    updatedAt: "2024-09-10T00:00:00.000Z",
+    downloadUrl: "/internal-contract-templates/contrato-psp-rc-2024-09-10.docx",
+    isBundled: true
+  }
+];
 
 const SECTION_LABELS: Record<InternalContractSection, string> = {
   PROFESSIONAL_SERVICES: "Contratos de prestaci\u00f3n de servicios profesionales",
@@ -151,7 +181,7 @@ function groupProfessionalServicesContractsByClient(items: InternalContract[]) {
   );
 }
 
-function sortContractTemplates(items: InternalContractTemplate[]) {
+function sortContractTemplates<T extends InternalContractTemplate>(items: T[]) {
   return [...items].sort((left, right) =>
     left.title.localeCompare(right.title, "es-MX", { numeric: true, sensitivity: "base" })
   );
@@ -300,11 +330,27 @@ export function InternalContractsPage() {
     }
   }, [activeSection, visibleSections]);
 
+  const displayTemplates = useMemo<DisplayInternalContractTemplate[]>(() => {
+    const bundledTemplates = BUNDLED_CONTRACT_TEMPLATES.filter((bundledTemplate) => {
+      const bundledTitle = normalizeSearchValue(bundledTemplate.title);
+      const bundledFilename = normalizeSearchValue(bundledTemplate.originalFileName);
+
+      return !templates.some((template) => {
+        const title = normalizeSearchValue(template.title);
+        const filename = normalizeSearchValue(template.originalFileName);
+
+        return title === bundledTitle || filename === bundledFilename;
+      });
+    });
+
+    return sortContractTemplates([...bundledTemplates, ...templates]);
+  }, [templates]);
+
   const sectionCounts = useMemo(() => ({
     PROFESSIONAL_SERVICES: contracts.filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES").length,
     LABOR: contracts.filter((contract) => contract.contractType === "LABOR").length,
-    TEMPLATES: templates.length
-  }), [contracts, templates]);
+    TEMPLATES: displayTemplates.length
+  }), [contracts, displayTemplates]);
 
   const filteredContracts = useMemo(() => {
     if (activeSection === "TEMPLATES") {
@@ -341,10 +387,10 @@ export function InternalContractsPage() {
     const search = normalizeSearchValue(query);
 
     if (!search) {
-      return sortContractTemplates(templates);
+      return displayTemplates;
     }
 
-    return sortContractTemplates(templates.filter((template) => {
+    return sortContractTemplates(displayTemplates.filter((template) => {
       const haystack = normalizeSearchValue([
         template.title,
         template.originalFileName,
@@ -353,7 +399,7 @@ export function InternalContractsPage() {
 
       return haystack.includes(search);
     }));
-  }, [query, templates]);
+  }, [displayTemplates, query]);
 
   const selectedClientQuotes = useMemo(
     () => sortQuotes(quotes.filter((quote) => quote.clientId === form.clientId)),
@@ -533,11 +579,21 @@ export function InternalContractsPage() {
     }
   }
 
-  async function handleTemplateDownload(template: InternalContractTemplate) {
+  async function handleTemplateDownload(template: DisplayInternalContractTemplate) {
     setDownloadingId(template.id);
     setFlash(null);
 
     try {
+      if (template.downloadUrl) {
+        const response = await fetch(template.downloadUrl);
+        if (!response.ok) {
+          throw new Error("No se pudo descargar el machote.");
+        }
+
+        downloadBlobFile(await response.blob(), template.originalFileName);
+        return;
+      }
+
       const { blob, filename } = await apiDownload(`/internal-contracts/templates/${template.id}/document`);
       downloadBlobFile(blob, filename ?? template.originalFileName);
     } catch (error) {
@@ -574,7 +630,12 @@ export function InternalContractsPage() {
     }
   }
 
-  async function handleTemplateDelete(template: InternalContractTemplate) {
+  async function handleTemplateDelete(template: DisplayInternalContractTemplate) {
+    if (template.isBundled) {
+      setFlash({ tone: "error", text: "Este machote base viene incluido en la plataforma y no se borra desde aqui." });
+      return;
+    }
+
     if (!window.confirm(`Seguro que deseas borrar el machote ${template.title}?`)) {
       return;
     }
@@ -972,7 +1033,7 @@ export function InternalContractsPage() {
                   >
                     {downloadingId === template.id ? "Descargando..." : "Descargar"}
                   </button>
-                  {canUploadTemplate ? (
+                  {canUploadTemplate && !template.isBundled ? (
                     <button
                       className="danger-button"
                       type="button"
