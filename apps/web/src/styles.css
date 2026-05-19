@@ -5232,6 +5232,11 @@ textarea {
   color: #991b1b;
 }
 
+.finance-contract-status-missing {
+  background: rgba(180, 83, 9, 0.12);
+  color: #92400e;
+}
+
 .finance-total-row td {
   background: #243b53;
   color: #fff;
@@ -5314,6 +5319,73 @@ textarea {
 .finance-modal-wide {
   width: min(1400px, 100%);
   max-height: 90vh;
+}
+
+.finance-contract-modal {
+  overflow-y: auto;
+}
+
+.finance-contract-form {
+  display: grid;
+  gap: 20px;
+}
+
+.finance-contract-summary-grid {
+  gap: 14px;
+}
+
+.finance-contract-form-section {
+  display: grid;
+  gap: 14px;
+}
+
+.finance-contract-section-head {
+  align-items: end;
+}
+
+.finance-contract-field-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.finance-contract-wide-field {
+  grid-column: 1 / -1;
+}
+
+.finance-contract-wide-field textarea {
+  min-height: 110px;
+}
+
+.finance-contract-table-shell {
+  margin-top: 0;
+}
+
+.finance-contract-detail-table {
+  min-width: 920px;
+}
+
+.finance-contract-milestones {
+  display: grid;
+  gap: 10px;
+}
+
+.finance-contract-milestones > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.finance-contract-milestone-chip {
+  align-items: center;
+  background: rgba(15, 118, 110, 0.1);
+  border-radius: 999px;
+  color: #0f766e;
+  display: inline-flex;
+  font-size: 0.92rem;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 6px 12px;
 }
 
 .quotes-detail-modal {
@@ -7847,6 +7919,35 @@ textarea {
   gap: 14px;
 }
 
+.internal-contract-group {
+  display: grid;
+  gap: 12px;
+}
+
+.internal-contract-group-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.internal-contract-group-head h3 {
+  color: #243447;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.internal-contract-group-head span {
+  color: #52657a;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.internal-contract-group-list {
+  display: grid;
+  gap: 14px;
+}
+
 .internal-contract-card {
   background: #ffffff;
   border: 1px solid rgba(31, 41, 51, 0.09);
@@ -7875,6 +7976,14 @@ textarea {
   color: #243447;
   font-size: 1rem;
   margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.internal-contract-title {
+  color: #52657a;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 6px 0 0;
   overflow-wrap: anywhere;
 }
 
@@ -8828,6 +8937,7 @@ textarea {
   .internal-contracts-layout,
   .internal-contracts-form-grid,
   .internal-contract-meta-grid,
+  .finance-contract-field-grid,
   .labor-files-layout,
   .labor-file-profile-grid,
   .labor-file-profile-form,
@@ -8848,6 +8958,11 @@ textarea {
 
   .internal-contract-card-head {
     align-items: stretch;
+    flex-direction: column;
+  }
+
+  .internal-contract-group-head {
+    align-items: flex-start;
     flex-direction: column;
   }
 

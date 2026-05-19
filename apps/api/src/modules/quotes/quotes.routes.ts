@@ -108,6 +108,16 @@ const quoteExportParamsSchema = z.object({
   format: z.enum(["pdf", "word"])
 });
 
+function buildContentDisposition(filename: string) {
+  const fallback = filename
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]+/g, "_")
+    .replace(/["\\]/g, "_");
+
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 export const quotesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.QuotesService(app.repositories.quotes);
   const readGuards = [requireAuth, requireAnyPermissions(["quotes:read", "quotes:write"])];
@@ -144,7 +154,7 @@ export const quotesRoutes: FastifyPluginAsync = async (app) => {
 
     const file = await exportQuoteDocument(quote, params.format);
     reply.header("Content-Type", file.contentType);
-    reply.header("Content-Disposition", `attachment; filename="${file.filename}"`);
+    reply.header("Content-Disposition", buildContentDisposition(file.filename));
     return reply.send(file.buffer);
   });
   app.post("/quotes/templates", { preHandler: writeGuards }, async (request) => {

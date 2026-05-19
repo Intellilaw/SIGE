@@ -15,7 +15,22 @@ const clientIdParamsSchema = z.object({
 
 export const clientsRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.ClientsService(app.repositories.clients);
-  const readGuards = [requireAuth, requireAnyPermissions(["clients:read", "clients:write", "daily-documents:write"])];
+  const executionReadPermissions = [
+    "execution:litigation",
+    "execution:corporate-labor",
+    "execution:settlements",
+    "execution:financial-law",
+    "execution:tax-compliance"
+  ];
+  const readGuards = [
+    requireAuth,
+    requireAnyPermissions([
+      "clients:read",
+      "clients:write",
+      "daily-documents:write",
+      ...executionReadPermissions
+    ])
+  ];
   const writeGuards = [requireAuth, requireAnyPermissions(["clients:write"])];
 
   app.get("/clients", { preHandler: readGuards }, async () => service.list());

@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
 
 import type {
   LaborContractFieldValues,
@@ -6,6 +7,7 @@ import type {
   LaborFile,
   LaborFileDocumentType
 } from "@sige/contracts";
+import JSZip from "jszip";
 import {
   AlignmentType,
   BorderStyle,
@@ -27,6 +29,7 @@ import type { LaborFileDocumentRecord } from "../../repositories/types";
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_PREFILL_FILE_BYTES = 18 * 1024 * 1024;
+const LABOR_CONTRACT_TEMPLATE_URL = new URL("../../../templates/contrato-laboral-base.docx", import.meta.url);
 
 const laborContractFieldNames = [
   "employeeName",
@@ -40,6 +43,10 @@ const laborContractFieldNames = [
   "workdayEnd",
   "monthlyGrossSalary",
   "monthlyGrossSalaryText",
+  "attendanceBonus",
+  "attendanceBonusText",
+  "punctualityBonus",
+  "punctualityBonusText",
   "biweeklyGrossSalary",
   "biweeklyGrossSalaryText",
   "signingDate",
@@ -58,6 +65,10 @@ const EMPTY_LABOR_CONTRACT_FIELDS: LaborContractFieldValues = {
   workdayEnd: "",
   monthlyGrossSalary: "",
   monthlyGrossSalaryText: "",
+  attendanceBonus: "",
+  attendanceBonusText: "",
+  punctualityBonus: "",
+  punctualityBonusText: "",
   biweeklyGrossSalary: "",
   biweeklyGrossSalaryText: "",
   signingDate: "",
@@ -76,6 +87,10 @@ export const laborContractFieldValuesSchema = z.object({
   workdayEnd: z.string().max(20).default(""),
   monthlyGrossSalary: z.string().max(80).default(""),
   monthlyGrossSalaryText: z.string().max(250).default(""),
+  attendanceBonus: z.string().max(80).default(""),
+  attendanceBonusText: z.string().max(250).default(""),
+  punctualityBonus: z.string().max(80).default(""),
+  punctualityBonusText: z.string().max(250).default(""),
   biweeklyGrossSalary: z.string().max(80).default(""),
   biweeklyGrossSalaryText: z.string().max(250).default(""),
   signingDate: z.string().max(30).default(""),
@@ -152,6 +167,10 @@ const fieldLabels: Record<keyof LaborContractFieldValues, string> = {
   workdayEnd: "Hora de salida",
   monthlyGrossSalary: "Salario mensual bruto",
   monthlyGrossSalaryText: "Salario mensual en letra",
+  attendanceBonus: "Bono de asistencia",
+  attendanceBonusText: "Bono de asistencia en letra",
+  punctualityBonus: "Bono de puntualidad",
+  punctualityBonusText: "Bono de puntualidad en letra",
   biweeklyGrossSalary: "Pago quincenal bruto",
   biweeklyGrossSalaryText: "Pago quincenal en letra",
   signingDate: "Fecha de firma",
@@ -207,6 +226,10 @@ export function buildLaborContractDefaultFields(laborFile: LaborFile): LaborCont
     workdayEnd: "18:00",
     monthlyGrossSalary: "",
     monthlyGrossSalaryText: "",
+    attendanceBonus: "",
+    attendanceBonusText: "",
+    punctualityBonus: "",
+    punctualityBonusText: "",
     biweeklyGrossSalary: "",
     biweeklyGrossSalaryText: "",
     signingDate: currentDateKey(),
@@ -784,7 +807,180 @@ function sanitizeFilenamePart(value: string) {
     .slice(0, 80) || "trabajador";
 }
 
+function escapeXmlText(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function replaceParagraphText(paragraphXml: string, text: string) {
+  const openingTag = paragraphXml.match(/^<w:p[^>]*>/)?.[0] ?? "<w:p>";
+  const paragraphProperties = paragraphXml.match(/<w:pPr[\s\S]*?<\/w:pPr>/)?.[0] ?? "";
+  const firstRunProperties = paragraphXml.match(/<w:rPr[\s\S]*?<\/w:rPr>/)?.[0] ?? "";
+
+  return `${openingTag}${paragraphProperties}<w:r>${firstRunProperties}<w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r></w:p>`;
+}
+
+function decodeXmlText(value: string) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function getParagraphText(paragraphXml: string) {
+  return Array.from(paragraphXml.matchAll(/<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g))
+    .map((match) => decodeXmlText(match[1]))
+    .join("")
+    .trim();
+}
+
+function replaceParagraphs(documentXml: string, replacements: Array<{
+  match: (text: string) => boolean;
+  text: string;
+}>) {
+  const applied = new Set<number>();
+
+  return documentXml.replace(/<w:p[\s\S]*?<\/w:p>/g, (paragraphXml) => {
+    const paragraphText = getParagraphText(paragraphXml);
+    const replacementIndex = replacements.findIndex((replacement, index) => !applied.has(index) && replacement.match(paragraphText));
+
+    if (replacementIndex === -1) {
+      return paragraphXml;
+    }
+
+    applied.add(replacementIndex);
+    return replaceParagraphText(paragraphXml, replacements[replacementIndex].text);
+  });
+}
+
+function formatBonusAmount(explicitAmount: string, monthlySalary: string) {
+  if (normalizeText(explicitAmount)) {
+    return formatMoney(explicitAmount);
+  }
+
+  const monthlyAmount = parseMoney(monthlySalary);
+  return monthlyAmount ? formatMoney(String(monthlyAmount * 0.1)) : "__________";
+}
+
+function formatBonusText(explicitAmount: string, explicitText: string, monthlySalary: string) {
+  const normalizedText = normalizeText(explicitText);
+  if (normalizedText) {
+    return normalizedText;
+  }
+
+  const amount = normalizeText(explicitAmount) || (() => {
+    const monthlyAmount = parseMoney(monthlySalary);
+    return monthlyAmount ? String(monthlyAmount * 0.1) : "";
+  })();
+
+  return formatMoneyText(amount, "");
+}
+
+function buildContractTemplateParagraphs(fields: LaborContractFieldValues, laborFile: LaborFile) {
+  const employeeName = textOrBlank(fields.employeeName, laborFile.employeeName);
+  const position = textOrBlank(fields.position);
+  const originalContractDate = formatLongDate(fields.originalContractDate);
+  const signingDate = formatLongDate(fields.signingDate);
+  const signingCity = textOrBlank(fields.signingCity, "Ciudad de México");
+  const monthlySalary = formatMoney(fields.monthlyGrossSalary);
+  const monthlySalaryText = formatMoneyText(fields.monthlyGrossSalary, fields.monthlyGrossSalaryText);
+  const attendanceBonus = formatBonusAmount(fields.attendanceBonus, fields.monthlyGrossSalary);
+  const attendanceBonusText = formatBonusText(fields.attendanceBonus, fields.attendanceBonusText, fields.monthlyGrossSalary);
+  const punctualityBonus = formatBonusAmount(fields.punctualityBonus, fields.monthlyGrossSalary);
+  const punctualityBonusText = formatBonusText(fields.punctualityBonus, fields.punctualityBonusText, fields.monthlyGrossSalary);
+  const workday = `${formatTime(fields.workdayStart)} a las ${formatTime(fields.workdayEnd)}`;
+
+  return [
+    {
+      match: (text: string) => text.startsWith("CONTRATO INDIVIDUAL DE TRABAJO POR TIEMPO INDETERMINADO"),
+      text: `CONTRATO INDIVIDUAL DE TRABAJO POR TIEMPO INDETERMINADO CON PERIODO DE PRUEBA, QUE CELEBRAN POR UNA PARTE ${employeeName.toUpperCase()} EN CALIDAD DE TRABAJADOR (EL ‘TRABAJADOR’), Y POR LA OTRA PARTE RUSCONI LEGAL AND TAX TECHNOLOGY S.A. DE C.V., A TRAVÉS DE SU REPRESENTANTE LEGAL, EDUARDO MIGUEL RUSCONI TRUJILLO, EN CALIDAD DE PATRÓN (‘RC’), AL TENOR DE LAS DECLARACIONES Y CLÁUSULAS SIGUIENTES.`
+    },
+    {
+      match: (text: string) => text.startsWith("TERCERA. Información del Trabajador."),
+      text: `TERCERA. Información del Trabajador. El Trabajador es una persona física con Registro Federal de Contribuyentes ${textOrBlank(fields.rfc)} y con Clave Única de Registro de Población ${textOrBlank(fields.curp)}.`
+    },
+    {
+      match: (text: string) => text.startsWith("CUARTA. Domicilio del Trabajador."),
+      text: `CUARTA. Domicilio del Trabajador. El Trabajador señala como su domicilio el ubicado en ${textOrBlank(fields.employeeAddress)}; así mismo señala como número telefónico el ${textOrBlank(fields.employeePhone)}.`
+    },
+    {
+      match: (text: string) => text.startsWith("SEXTA. Justificación del periodo de prueba."),
+      text: `SEXTA. Justificación del periodo de prueba. Declara Rusconi Consulting, que para efectos de verificar que el Trabajador cumple con los requisitos y conocimientos necesarios para desarrollar la labor de ${position}, necesita contratar sus servicios con un período de prueba.`
+    },
+    {
+      match: (text: string) => text.startsWith("SÉPTIMA. Reconocimiento de antigüedad."),
+      text: `SÉPTIMA. Reconocimiento de antigüedad. Rusconi Consulting reconoce la antigüedad laboral del Trabajador, misma que comenzó a correr desde la celebración del contrato laboral el ${originalContractDate}.`
+    },
+    {
+      match: (text: string) => text.startsWith("PRIMERA. Naturaleza del contrato."),
+      text: `PRIMERA. Naturaleza del contrato. El Trabajador se compromete a prestar a favor de Rusconi Consulting sus servicios en calidad de ${position}, de acuerdo con su experiencia y destreza, de conformidad con todas y cada una de las instrucciones que le proporcione Rusconi Consulting de manera verbal o escrita.`
+    },
+    {
+      match: (text: string) => text.startsWith("SÉPTIMA. Jornada de trabajo."),
+      text: `SÉPTIMA. Jornada de trabajo. La jornada laboral del Trabajador correrá de las ${workday} horas, de lunes a viernes.`
+    },
+    {
+      match: (text: string) => text.startsWith("DÉCIMA. Salario."),
+      text: `DÉCIMA. Salario. Rusconi Consulting se obliga a cubrir al Trabajador como salario bruto mensual la cantidad de ${monthlySalary} M.N. (${monthlySalaryText}).`
+    },
+    {
+      match: (text: string) => text.startsWith("DÉCIMA SEGUNDA. Bono de Asistencia."),
+      text: `DÉCIMA SEGUNDA. Bono de Asistencia. Rusconi Consulting otorgará adicionalmente al Trabajador un bono de Asistencia equivalente al 10% (diez por ciento), por una cantidad de ${attendanceBonus} M.N. neto mensual (${attendanceBonusText}).`
+    },
+    {
+      match: (text: string) => text.startsWith("DÉCIMA TERCERA. Bono de puntualidad."),
+      text: `DÉCIMA TERCERA. Bono de puntualidad. Rusconi Consulting otorgará adicionalmente al Trabajador un bono de Puntualidad equivalente al 10% (diez por ciento), por una cantidad de ${punctualityBonus} M.N. neto mensual (${punctualityBonusText}).`
+    },
+    {
+      match: (text: string) => text.startsWith("Para ser acreedor a este bono, el Trabajador deberá cumplir con el horario laboral"),
+      text: `Para ser acreedor a este bono, el Trabajador deberá cumplir con el horario laboral de las ${workday} horas de lunes a viernes. El incumplimiento de este requisito será causa suficiente para no otorgar el bono de puntualidad correspondiente al periodo en cuestión.`
+    },
+    {
+      match: (text: string) => text.startsWith("Leído por ambas partes y enteradas del alcance de su contenido"),
+      text: `Leído por ambas partes y enteradas del alcance de su contenido, el presente contrato se firma por duplicado en cada una de sus hojas en ${signingCity}, ${signingDate}, quedando un ejemplar en poder de cada uno de los contratantes.`
+    },
+    {
+      match: (text: string) => /^X+(?: X+)*$/.test(text),
+      text: employeeName.toUpperCase()
+    }
+  ];
+}
+
+async function renderLaborContractTemplate(fields: LaborContractFieldValues, laborFile: LaborFile) {
+  const template = await readFile(LABOR_CONTRACT_TEMPLATE_URL);
+  const zip = await JSZip.loadAsync(template);
+  const documentFile = zip.file("word/document.xml");
+
+  if (!documentFile) {
+    throw new AppError(500, "LABOR_CONTRACT_TEMPLATE_INVALID", "La plantilla del contrato laboral no contiene word/document.xml.");
+  }
+
+  const documentXml = await documentFile.async("string");
+  zip.file("word/document.xml", replaceParagraphs(documentXml, buildContractTemplateParagraphs(fields, laborFile)));
+
+  return Buffer.from(await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE"
+  }));
+}
+
 export async function renderLaborContractDocx(laborFile: LaborFile, payload: LaborContractFieldValues) {
+  const fields = normalizeFields(mergeFieldValues(buildLaborContractDefaultFields(laborFile), payload));
+  const employeeName = textOrBlank(fields.employeeName, laborFile.employeeName);
+  const buffer = await renderLaborContractTemplate(fields, laborFile);
+
+  return {
+    buffer,
+    filename: `contrato-laboral-${sanitizeFilenamePart(employeeName)}-${currentDateKey()}.docx`,
+    contentType: DOCX_MIME_TYPE
+  };
+}
+
+async function renderLegacyLaborContractDocx(laborFile: LaborFile, payload: LaborContractFieldValues) {
   const fields = normalizeFields(mergeFieldValues(buildLaborContractDefaultFields(laborFile), payload));
   const employeeName = textOrBlank(fields.employeeName, laborFile.employeeName);
   const position = textOrBlank(fields.position);

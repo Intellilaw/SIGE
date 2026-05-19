@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
-import type { Quote, QuoteTemplateAmountColumn, QuoteTemplateTableRow } from "@sige/contracts";
+import { buildQuoteTitle, type Quote, type QuoteTemplateAmountColumn, type QuoteTemplateTableRow } from "@sige/contracts";
 import {
   AlignmentType,
   BorderStyle,
@@ -110,6 +110,7 @@ type AmountSummary = {
 };
 
 type QuoteExportPayload = {
+  quoteTitle: string;
   quoteNumber: string;
   clientName: string;
   createdAt: string;
@@ -137,18 +138,17 @@ type QuoteExportPayload = {
   totalMxn: number;
 };
 
-function sanitizeFileSegment(value: string) {
-  const normalized = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Za-z0-9._-]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  return normalized || "cotizacion";
-}
-
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function sanitizeDownloadFilenameBase(value: string) {
+  const sanitized = normalizeText(value)
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "");
+
+  return sanitized || "cotizacion";
 }
 
 function formatQuoteDate(value: string, language: Quote["language"]) {
@@ -959,7 +959,16 @@ async function renderPdfQuoteDocument(payload: QuoteExportPayload) {
 
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
-    const doc = new PDFDocument({ autoFirstPage: false, bufferPages: true, margin: 0, size: "LETTER" });
+    const doc = new PDFDocument({
+      autoFirstPage: false,
+      bufferPages: true,
+      margin: 0,
+      size: "LETTER",
+      info: {
+        Title: payload.quoteTitle,
+        Author: "Rusconi Consulting"
+      }
+    });
 
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -1495,9 +1504,9 @@ async function renderWordQuoteDocument(payload: QuoteExportPayload) {
   ];
 
   const doc = new DocxDocument({
-    title: payload.quoteNumber,
+    title: payload.quoteTitle,
     creator: "Rusconi Consulting",
-    description: `Cotizacion ${payload.quoteNumber}`,
+    description: payload.quoteTitle,
     features: {
       updateFields: true
     },
@@ -1654,6 +1663,7 @@ function buildPayload(quote: Quote): QuoteExportPayload {
   const copy = getExportCopy(language);
 
   return {
+    quoteTitle: quote.title || buildQuoteTitle(quote),
     quoteNumber: quote.quoteNumber,
     clientName: quote.clientName,
     createdAt: quote.createdAt,
@@ -1673,9 +1683,8 @@ export async function exportQuoteDocument(
   quote: Quote,
   format: QuoteExportFormat
 ): Promise<QuoteExportResult> {
-  const filename = `${sanitizeFileSegment(quote.quoteNumber)}_${sanitizeFileSegment(
-    quote.clientName.toUpperCase()
-  )}.${getExtension(format)}`;
+  const quoteTitle = quote.title || buildQuoteTitle(quote);
+  const filename = `${sanitizeDownloadFilenameBase(quoteTitle)}.${getExtension(format)}`;
   const payload = buildPayload(quote);
 
   try {

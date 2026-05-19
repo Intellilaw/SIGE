@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { EXECUTION_HOLIDAY_AUTHORITIES, deriveEffectivePermissions } from "@sige/contracts";
 
@@ -72,6 +72,8 @@ const executionPermissionByTeam = {
   TAX_COMPLIANCE: "execution:tax-compliance"
 } as const;
 
+type ExecutionTeam = keyof typeof executionPermissionByTeam;
+
 function isFinanceNextPaymentDatePatch(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -110,15 +112,66 @@ function canAccessOwnExecutionMatter(params: {
   return Boolean(permission && (params.permissions.includes("*") || params.permissions.includes(permission)));
 }
 
+function getEffectivePermissionsForRequest(request: FastifyRequest) {
+  const user = getSessionUser(request);
+  return deriveEffectivePermissions({
+    legacyRole: user.legacyRole,
+    team: user.team,
+    legacyTeam: user.legacyTeam,
+    specificRole: user.specificRole,
+    permissions: user.permissions
+  });
+}
+
+function getExecutionReadableTeam(request: FastifyRequest, permissions: string[]) {
+  const user = getSessionUser(request);
+  const team = user.team as ExecutionTeam | undefined;
+  const permission = team ? executionPermissionByTeam[team] : undefined;
+
+  return permission && permissions.includes(permission) ? team : undefined;
+}
+
+function canReadAllMatters(permissions: string[]) {
+  return permissions.includes("*") || permissions.includes("matters:read") || permissions.includes("matters:write");
+}
+
 export const mattersRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.MattersService(app.repositories.matters);
   const readGuards = [requireAuth, requireAnyPermissions(["matters:read", "matters:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["matters:write"])];
   const superadminGuards = [requireAuth, requireRoles(["SUPERADMIN"])];
 
-  app.get("/matters", { preHandler: readGuards }, async () => service.list());
+  app.get("/matters", { preHandler: [requireAuth] }, async (request) => {
+    const permissions = getEffectivePermissionsForRequest(request);
+    const records = await service.list();
 
-  app.get("/matters/recycle-bin", { preHandler: readGuards }, async () => service.listDeleted());
+    if (canReadAllMatters(permissions)) {
+      return records;
+    }
+
+    const executionTeam = getExecutionReadableTeam(request, permissions);
+    if (executionTeam) {
+      return records.filter((matter) => matter.responsibleTeam === executionTeam);
+    }
+
+    throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+  });
+
+  app.get("/matters/recycle-bin", { preHandler: [requireAuth] }, async (request) => {
+    const permissions = getEffectivePermissionsForRequest(request);
+    const records = await service.listDeleted();
+
+    if (canReadAllMatters(permissions)) {
+      return records;
+    }
+
+    const executionTeam = getExecutionReadableTeam(request, permissions);
+    if (executionTeam) {
+      return records.filter((matter) => matter.responsibleTeam === executionTeam);
+    }
+
+    throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+  });
 
   app.get("/matters/short-names", { preHandler: readGuards }, async () => service.listCommissionShortNames());
 
@@ -130,12 +183,7 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/matters/:matterId", { preHandler: [requireAuth] }, async (request) => {
     const params = matterIdParamsSchema.parse(request.params);
     const user = getSessionUser(request);
-    const permissions = deriveEffectivePermissions({
-      legacyRole: user.legacyRole,
-      team: user.team,
-      legacyTeam: user.legacyTeam,
-      specificRole: user.specificRole
-    });
+    const permissions = getEffectivePermissionsForRequest(request);
     const canWriteMatters = permissions.includes("*") || permissions.includes("matters:write");
     const canUpdateFinanceDate = permissions.includes("*") || (
       permissions.includes("finances:write") && isFinanceNextPaymentDatePatch(request.body)
@@ -176,12 +224,7 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
   app.post("/matters/:matterId/restore", { preHandler: [requireAuth] }, async (request) => {
     const params = matterIdParamsSchema.parse(request.params);
     const user = getSessionUser(request);
-    const permissions = deriveEffectivePermissions({
-      legacyRole: user.legacyRole,
-      team: user.team,
-      legacyTeam: user.legacyTeam,
-      specificRole: user.specificRole
-    });
+    const permissions = getEffectivePermissionsForRequest(request);
 
     if (!permissions.includes("*") && !permissions.includes("matters:write")) {
       const deletedMatter = (await service.listDeleted()).find((matter) => matter.id === params.matterId);

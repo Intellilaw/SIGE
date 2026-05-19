@@ -31,7 +31,7 @@ import type {
   TaskTerm,
   TaskTrackingRecord
 } from "@sige/contracts";
-import { deriveEffectivePermissions } from "@sige/contracts";
+import { buildQuoteTitle, deriveEffectivePermissions } from "@sige/contracts";
 
 import type { RefreshTokenRecord, StoredUser } from "./types";
 
@@ -214,7 +214,10 @@ export function mapUser(record: {
       legacyRole: record.legacyRole as AuthUser["legacyRole"],
       team: (record.team ?? undefined) as AuthUser["team"],
       legacyTeam: record.legacyTeam,
-      specificRole: record.specificRole
+      specificRole: record.specificRole,
+      permissions: Array.isArray(record.permissions)
+        ? record.permissions.filter((permission): permission is string => typeof permission === "string")
+        : []
     }),
     isActive: record.isActive,
     passwordResetRequired: record.passwordResetRequired
@@ -308,18 +311,66 @@ function asInternalContractPaymentMilestones(value: Prisma.JsonValue): InternalC
     .filter((milestone) => milestone.label || milestone.dueDate || milestone.notes || milestone.amountMxn);
 }
 
+function inferInternalContractFormat(originalFileName?: string | null, fileMimeType?: string | null): InternalContract["availableFormats"][number] | null {
+  const normalizedMimeType = (fileMimeType ?? "").toLowerCase();
+  const normalizedFileName = (originalFileName ?? "").toLowerCase();
+
+  if (normalizedMimeType.includes("pdf") || normalizedFileName.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (
+    normalizedMimeType.includes("wordprocessingml.document")
+    || normalizedMimeType.includes("msword")
+    || normalizedFileName.endsWith(".docx")
+    || normalizedFileName.endsWith(".doc")
+  ) {
+    return "docx";
+  }
+
+  return null;
+}
+
+function buildInternalContractAvailableFormats(record: {
+  originalFileName?: string | null;
+  fileMimeType?: string | null;
+  pdfOriginalFileName?: string | null;
+  pdfFileMimeType?: string | null;
+}): InternalContract["availableFormats"] {
+  const formats = new Set<InternalContract["availableFormats"][number]>();
+  const primaryFormat = inferInternalContractFormat(record.originalFileName, record.fileMimeType);
+  const pdfFormat = inferInternalContractFormat(record.pdfOriginalFileName, record.pdfFileMimeType);
+
+  if (primaryFormat) {
+    formats.add(primaryFormat);
+  }
+
+  if (pdfFormat) {
+    formats.add(pdfFormat);
+  }
+
+  return [...formats];
+}
+
 export function mapInternalContract(record: {
   id: string;
   contractNumber: string;
+  title: string | null;
   contractType: string;
   documentKind: string;
   clientId: string | null;
   clientNumber: string | null;
   clientName: string | null;
   collaboratorName: string | null;
+  sourceMatterId: string | null;
+  sourceQuoteId: string | null;
+  signatureStatus: string | null;
   originalFileName: string | null;
   fileMimeType: string | null;
   fileSizeBytes: number | null;
+  pdfOriginalFileName: string | null;
+  pdfFileMimeType: string | null;
+  pdfFileSizeBytes: number | null;
   paymentMilestones: Prisma.JsonValue;
   notes: string | null;
   createdAt: Date;
@@ -328,15 +379,26 @@ export function mapInternalContract(record: {
   return {
     id: record.id,
     contractNumber: record.contractNumber,
+    title: record.title ?? undefined,
     contractType: record.contractType as InternalContract["contractType"],
     documentKind: record.documentKind as InternalContract["documentKind"],
     clientId: record.clientId ?? undefined,
     clientNumber: record.clientNumber ?? undefined,
     clientName: record.clientName ?? undefined,
     collaboratorName: record.collaboratorName ?? undefined,
+    sourceMatterId: record.sourceMatterId ?? undefined,
+    sourceQuoteId: record.sourceQuoteId ?? undefined,
+    signatureStatus:
+      record.signatureStatus === "SIGNED" || record.signatureStatus === "PENDING"
+        ? record.signatureStatus
+        : undefined,
     originalFileName: record.originalFileName ?? undefined,
     fileMimeType: record.fileMimeType ?? undefined,
     fileSizeBytes: record.fileSizeBytes ?? undefined,
+    pdfOriginalFileName: record.pdfOriginalFileName ?? undefined,
+    pdfFileMimeType: record.pdfFileMimeType ?? undefined,
+    pdfFileSizeBytes: record.pdfFileSizeBytes ?? undefined,
+    availableFormats: buildInternalContractAvailableFormats(record),
     paymentMilestones: asInternalContractPaymentMilestones(record.paymentMilestones),
     notes: record.notes ?? undefined,
     createdAt: record.createdAt.toISOString(),
@@ -727,6 +789,7 @@ export function mapDailyDocumentAssignment(record: {
 
 export function mapQuote(record: {
   id: string;
+  title?: string | null;
   quoteNumber: string;
   clientId: string;
   clientName: string;
@@ -747,6 +810,7 @@ export function mapQuote(record: {
 }): Quote {
   return {
     id: record.id,
+    title: record.title || buildQuoteTitle(record),
     quoteNumber: record.quoteNumber,
     clientId: record.clientId,
     clientName: record.clientName,

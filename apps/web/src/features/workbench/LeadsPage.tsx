@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Lead, Matter, Quote } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
@@ -284,10 +284,12 @@ export function LeadsPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [commissionShortNames, setCommissionShortNames] = useState<string[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [pendingScrollLeadId, setPendingScrollLeadId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const leadRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
   const uniqueClients = useMemo(
     () =>
@@ -315,9 +317,11 @@ export function LeadsPage() {
   const filteredActiveItems = useMemo(
     () =>
       activeItems.filter(
-        (lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)
+        (lead) =>
+          lead.id === pendingScrollLeadId ||
+          (matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords))
       ),
-    [activeItems, clientSearchWords, searchWords]
+    [activeItems, clientSearchWords, pendingScrollLeadId, searchWords]
   );
 
   const filteredHistoryItems = useMemo(
@@ -409,6 +413,32 @@ export function LeadsPage() {
     void loadMonthly();
   }, [activeTab, selectedMonth, selectedYear]);
 
+  useEffect(() => {
+    if (activeTab !== "leads" || !pendingScrollLeadId) {
+      return;
+    }
+
+    if (!filteredActiveItems.some((item) => item.id === pendingScrollLeadId)) {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const row = leadRowRefs.current.get(pendingScrollLeadId);
+      if (!row) {
+        return;
+      }
+
+      row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      const firstEditableField = row.querySelector<HTMLInputElement | HTMLSelectElement>(
+        "input:not([type='checkbox']), select"
+      );
+      firstEditableField?.focus({ preventScroll: true });
+      setPendingScrollLeadId(null);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [activeTab, filteredActiveItems, pendingScrollLeadId]);
+
   function syncLeadAcrossViews(updated: Lead) {
     setActiveItems((items) => {
       const next = updated.status === "ACTIVE" ? upsertLead(items, updated) : removeLead(items, updated.id);
@@ -473,6 +503,11 @@ export function LeadsPage() {
 
     try {
       const created = await apiPost<Lead>("/leads", {});
+      if (hasActiveFilters) {
+        setSearchTerm("");
+        setClientSearch("");
+      }
+      setPendingScrollLeadId(created.id);
       setActiveItems((items) => sortActive([...items, created]));
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -871,6 +906,14 @@ export function LeadsPage() {
                         return (
                           <tr
                             key={item.id}
+                            ref={(node) => {
+                              if (node) {
+                                leadRowRefs.current.set(item.id, node);
+                                return;
+                              }
+
+                              leadRowRefs.current.delete(item.id);
+                            }}
                             className={[
                               rowState.tone === "danger" ? "lead-row-danger" : "",
                               rowState.tone === "next-business" ? "lead-row-next-business" : "",

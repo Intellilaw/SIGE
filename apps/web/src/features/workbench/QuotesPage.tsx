@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   TEAM_OPTIONS,
+  buildQuoteTitle,
   type Client,
   type Quote,
   type QuoteLanguage,
@@ -414,6 +415,7 @@ function getQuoteSearchText(quote: Quote, clientNumber?: string) {
 
   return [
     clientNumber,
+    getQuoteTitle(quote),
     quote.clientName,
     quote.quoteNumber,
     getQuoteDisplayDate(quote),
@@ -430,6 +432,14 @@ function getQuoteSearchText(quote: Quote, clientNumber?: string) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function getQuoteTitle(quote: Quote) {
+  return normalizeText(quote.title) || buildQuoteTitle(quote);
+}
+
+function getQuoteDownloadFallbackName(quote: Quote, format: QuoteDownloadFormat) {
+  return `${getQuoteTitle(quote)}.${format === "pdf" ? "pdf" : "docx"}`;
 }
 
 function filterTemplatesForSearch(templates: QuoteTemplate[], wordSearch: string, teamSearch: string) {
@@ -2126,7 +2136,7 @@ export function QuotesPage() {
     try {
       const quote = await persistQuoteIfNeeded();
       const { blob, filename } = await apiDownload(`/quotes/${quote.id}/export/${format}`);
-      downloadBlobFile(blob, filename ?? `${quote.quoteNumber}.${format === "pdf" ? "pdf" : "docx"}`);
+      downloadBlobFile(blob, filename ?? getQuoteDownloadFallbackName(quote, format));
       setFlash({
         tone: "success",
         text: `La cotizacion ${quote.quoteNumber} se descargo en ${format === "pdf" ? "PDF" : "Word"}.`
@@ -2147,7 +2157,7 @@ export function QuotesPage() {
 
     try {
       const { blob, filename } = await apiDownload(`/quotes/${quote.id}/export/${format}`);
-      downloadBlobFile(blob, filename ?? `${quote.quoteNumber}.${format === "pdf" ? "pdf" : "docx"}`);
+      downloadBlobFile(blob, filename ?? getQuoteDownloadFallbackName(quote, format));
       setFlash({
         tone: "success",
         text: `La cotizacion ${quote.quoteNumber} se descargo en ${format === "pdf" ? "PDF" : "Word"}.`
@@ -2692,7 +2702,7 @@ export function QuotesPage() {
                       <th>Cliente</th>
                       <th>Tipo de cotizacion</th>
                       <th>Equipo</th>
-                      <th>Asunto</th>
+                      <th>Titulo</th>
                       <th>Total</th>
                       <th>Hito de conclusion</th>
                       <th>Acciones</th>
@@ -2706,7 +2716,7 @@ export function QuotesPage() {
                         <td>{quote.clientName}</td>
                         <td>{getQuoteTypeLabel(quote.quoteType)}</td>
                         <td>{getTeamLabel(quote.responsibleTeam)}</td>
-                        <td>{quote.subject}</td>
+                        <td title={getQuoteTitle(quote)}>{getQuoteTitle(quote)}</td>
                         <td>{formatCurrency(quote.totalMxn)}</td>
                         <td>{quote.milestone || "-"}</td>
                         <td>{renderQuoteTableActions(quote)}</td>
@@ -2737,7 +2747,7 @@ export function QuotesPage() {
                         <th>Fecha</th>
                         <th>Tipo de cotizacion</th>
                         <th>Equipo</th>
-                        <th>Asunto</th>
+                        <th>Titulo</th>
                         <th>Total</th>
                         <th>Hito de conclusion</th>
                         <th>Acciones</th>
@@ -2750,7 +2760,7 @@ export function QuotesPage() {
                           <td>{formatDate(getQuoteDisplayDate(quote))}</td>
                           <td>{getQuoteTypeLabel(quote.quoteType)}</td>
                           <td>{getTeamLabel(quote.responsibleTeam)}</td>
-                          <td>{quote.subject}</td>
+                          <td title={getQuoteTitle(quote)}>{getQuoteTitle(quote)}</td>
                           <td>{formatCurrency(quote.totalMxn)}</td>
                           <td>{quote.milestone || "-"}</td>
                           <td>{renderQuoteTableActions(quote)}</td>
@@ -2771,7 +2781,7 @@ export function QuotesPage() {
             <div>
               <h2>
                 {editingQuote
-                  ? `Editar cotizacion ${editingQuote.quoteNumber}`
+                  ? `Editar cotizacion ${getQuoteTitle(editingQuote)}`
                   : sourceMode === "template"
                     ? "Generar nueva desde plantilla"
                     : "Generar nueva desde plantilla en blanco"}
@@ -3042,7 +3052,7 @@ export function QuotesPage() {
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Cotizacion guardada</p>
-                <h3>{viewingQuote.quoteNumber}</h3>
+                <h3>{getQuoteTitle(viewingQuote)}</h3>
               </div>
               <button type="button" className="secondary-button" onClick={() => setViewingQuote(null)}>
                 Cerrar
@@ -3095,7 +3105,7 @@ export function QuotesPage() {
           <div className="finance-modal" role="dialog" aria-modal="true" aria-label="Confirmar borrado de cotizacion guardada" onClick={(event) => event.stopPropagation()}>
             <h3>Borrar cotizacion guardada</h3>
             <p>
-              Vas a borrar <strong>{quotePendingDelete.quoteNumber}</strong>. Esta cotizacion dejara de aparecer en el historial del cliente.
+              Vas a borrar <strong>{getQuoteTitle(quotePendingDelete)}</strong>. Esta cotizacion dejara de aparecer en el historial del cliente.
             </p>
             <p className="muted">{normalizeText(quotePendingDelete.subject) || "Sin asunto capturado."}</p>
             <div className="finance-modal-actions">

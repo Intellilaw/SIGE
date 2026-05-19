@@ -318,7 +318,8 @@ export class LocalAuthRepository implements AuthRepository {
         legacyRole: user.legacyRole,
         team: user.team,
         legacyTeam: user.legacyTeam,
-        specificRole: user.specificRole
+        specificRole: user.specificRole,
+        permissions: user.permissions
       }),
       isActive: user.isActive,
       passwordResetRequired: user.passwordResetRequired

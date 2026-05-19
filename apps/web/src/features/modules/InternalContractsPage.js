@@ -11,11 +11,11 @@ const SECTION_LABELS = {
 };
 const initialFormState = {
     contractNumber: "",
+    contractTitle: "",
     templateTitle: "",
     clientId: "",
     collaboratorName: "",
     documentKind: "CONTRACT",
-    milestonesText: "",
     notes: ""
 };
 function toErrorMessage(error) {
@@ -53,48 +53,6 @@ function formatFileSize(value) {
     }
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
-function formatMilestone(milestone) {
-    const parts = [
-        milestone.dueDate ? formatDate(milestone.dueDate) : "",
-        milestone.label,
-        milestone.amountMxn ? new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(milestone.amountMxn) : "",
-        milestone.notes ?? ""
-    ].filter(Boolean);
-    return parts.join(" - ");
-}
-function dateFromSlashFormat(value) {
-    const match = value.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
-    if (!match) {
-        return "";
-    }
-    const day = match[1].padStart(2, "0");
-    const month = match[2].padStart(2, "0");
-    return `${match[3]}-${month}-${day}`;
-}
-function parseMilestoneLines(value) {
-    return value
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line, index) => {
-        const isoDate = line.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? dateFromSlashFormat(line);
-        const amountMatch = line.match(/\$\s?(\d[\d,]*(?:\.\d{1,2})?)/) ?? line.match(/\bMXN\s?(\d[\d,]*(?:\.\d{1,2})?)/i);
-        const amountMxn = amountMatch ? Number(amountMatch[1].replace(/,/g, "")) : 0;
-        const label = line
-            .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "")
-            .replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g, "")
-            .replace(/\$?\s?\d[\d,]*(?:\.\d{1,2})?/g, "")
-            .replace(/[|:;-]+/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-        return {
-            id: `milestone-${index + 1}`,
-            label: label || line,
-            dueDate: isoDate || undefined,
-            amountMxn: Number.isFinite(amountMxn) && amountMxn > 0 ? amountMxn : undefined
-        };
-    });
-}
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -117,11 +75,32 @@ function sortClients(items) {
 function sortContracts(items) {
     return [...items].sort((left, right) => left.contractNumber.localeCompare(right.contractNumber, "es-MX", { numeric: true, sensitivity: "base" }));
 }
+function groupProfessionalServicesContractsByClient(items) {
+    const groups = new Map();
+    sortContracts(items).forEach((contract) => {
+        const key = `${contract.clientNumber ?? ""}|${contract.clientName ?? ""}`.toLowerCase();
+        const label = contractOwnerLabel(contract);
+        const existing = groups.get(key);
+        if (existing) {
+            existing.contracts.push(contract);
+            return;
+        }
+        groups.set(key, {
+            key,
+            label,
+            contracts: [contract]
+        });
+    });
+    return [...groups.values()].sort((left, right) => left.label.localeCompare(right.label, "es-MX", { numeric: true, sensitivity: "base" }));
+}
 function sortContractTemplates(items) {
     return [...items].sort((left, right) => left.title.localeCompare(right.title, "es-MX", { numeric: true, sensitivity: "base" }));
 }
 function sortQuotes(items) {
     return [...items].sort((left, right) => left.quoteNumber.localeCompare(right.quoteNumber, "es-MX", { numeric: true, sensitivity: "base" }));
+}
+function quoteTitleLabel(quote) {
+    return (quote?.title ?? quote?.subject ?? "").trim();
 }
 async function fetchOptionalRows(request) {
     try {
@@ -156,6 +135,15 @@ function isLaborFileBackedContract(contract) {
 function isPdfFile(file) {
     return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
+function getContractSignatureLabel(contract) {
+    if (contract.signatureStatus === "SIGNED") {
+        return "Firmado";
+    }
+    if (contract.sourceMatterId) {
+        return "No firmado";
+    }
+    return null;
+}
 export function InternalContractsPage() {
     const { user } = useAuth();
     const [activeSection, setActiveSection] = useState("PROFESSIONAL_SERVICES");
@@ -166,6 +154,7 @@ export function InternalContractsPage() {
     const [quotes, setQuotes] = useState([]);
     const [form, setForm] = useState(initialFormState);
     const [selectedFile, setSelectedFile] = useState(null);
+    const [clientSearch, setClientSearch] = useState("");
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -244,16 +233,17 @@ export function InternalContractsPage() {
         return sortContracts(sectionContracts.filter((contract) => {
             const haystack = normalizeSearchValue([
                 contract.contractNumber,
+                contract.title,
                 contract.clientNumber,
                 contract.clientName,
                 contract.collaboratorName,
                 contract.originalFileName,
-                contract.notes,
-                ...contract.paymentMilestones.map(formatMilestone)
+                contract.notes
             ].filter(Boolean).join(" "));
             return haystack.includes(search);
         }));
     }, [activeSection, contracts, query]);
+    const groupedProfessionalContracts = useMemo(() => activeSection === "PROFESSIONAL_SERVICES" ? groupProfessionalServicesContractsByClient(filteredContracts) : [], [activeSection, filteredContracts]);
     const filteredTemplates = useMemo(() => {
         const search = normalizeSearchValue(query);
         if (!search) {
@@ -269,7 +259,20 @@ export function InternalContractsPage() {
         }));
     }, [query, templates]);
     const selectedClientQuotes = useMemo(() => sortQuotes(quotes.filter((quote) => quote.clientId === form.clientId)), [form.clientId, quotes]);
-    const parsedMilestones = useMemo(() => parseMilestoneLines(form.milestonesText), [form.milestonesText]);
+    const selectedQuote = useMemo(() => selectedClientQuotes.find((quote) => quote.quoteNumber === form.contractNumber), [form.contractNumber, selectedClientQuotes]);
+    const selectedQuoteTitle = quoteTitleLabel(selectedQuote);
+    const filteredClients = useMemo(() => {
+        const search = normalizeSearchValue(clientSearch);
+        if (!search) {
+            return clients;
+        }
+        const selectedClient = clients.find((client) => client.id === form.clientId);
+        const matches = clients.filter((client) => normalizeSearchValue(`${client.clientNumber} ${client.name}`).includes(search));
+        if (selectedClient && !matches.some((client) => client.id === selectedClient.id)) {
+            return [selectedClient, ...matches];
+        }
+        return matches;
+    }, [clientSearch, clients, form.clientId]);
     function updateForm(key, value) {
         setForm((current) => ({ ...current, [key]: value }));
         setFlash(null);
@@ -278,6 +281,7 @@ export function InternalContractsPage() {
         setActiveSection(section);
         setForm(initialFormState);
         setSelectedFile(null);
+        setClientSearch("");
         setFlash(null);
     }
     function handleFileChange(event) {
@@ -285,7 +289,16 @@ export function InternalContractsPage() {
         setFlash(null);
     }
     function handleClientChange(clientId) {
-        setForm((current) => ({ ...current, clientId, contractNumber: "" }));
+        setForm((current) => ({ ...current, clientId, contractNumber: "", contractTitle: "" }));
+        setFlash(null);
+    }
+    function handleContractNumberChange(contractNumber) {
+        const quote = selectedClientQuotes.find((entry) => entry.quoteNumber === contractNumber);
+        setForm((current) => ({
+            ...current,
+            contractNumber,
+            contractTitle: quoteTitleLabel(quote)
+        }));
         setFlash(null);
     }
     async function handleSubmit(event) {
@@ -354,11 +367,12 @@ export function InternalContractsPage() {
         try {
             const created = await apiPost("/internal-contracts", {
                 contractNumber,
+                title: activeSection === "PROFESSIONAL_SERVICES" ? form.contractTitle || selectedQuoteTitle : null,
                 contractType: activeSection,
                 documentKind: activeSection === "LABOR" ? form.documentKind : "CONTRACT",
                 clientId: activeSection === "PROFESSIONAL_SERVICES" ? form.clientId : null,
                 collaboratorName: activeSection === "LABOR" ? form.collaboratorName : null,
-                paymentMilestones: parsedMilestones,
+                paymentMilestones: [],
                 notes: form.notes,
                 originalFileName: selectedFile.name,
                 fileMimeType: selectedFile.type || "application/octet-stream",
@@ -377,11 +391,13 @@ export function InternalContractsPage() {
             setSaving(false);
         }
     }
-    async function handleDownload(contract) {
-        setDownloadingId(contract.id);
+    async function handleDownload(contract, format) {
+        const downloadKey = `${contract.id}:${format ?? "default"}`;
+        setDownloadingId(downloadKey);
         setFlash(null);
         try {
-            const { blob, filename } = await apiDownload(`/internal-contracts/${encodeURIComponent(contract.id)}/document`);
+            const query = format ? `?format=${format}` : "";
+            const { blob, filename } = await apiDownload(`/internal-contracts/${encodeURIComponent(contract.id)}/document${query}`);
             downloadBlobFile(blob, filename ?? contract.originalFileName ?? `${contract.contractNumber}.bin`);
         }
         catch (error) {
@@ -448,6 +464,16 @@ export function InternalContractsPage() {
             setDeletingId(null);
         }
     }
+    function renderContractCard(contract) {
+        const signatureLabel = getContractSignatureLabel(contract);
+        const docxDownloadKey = `${contract.id}:docx`;
+        const pdfDownloadKey = `${contract.id}:pdf`;
+        const defaultDownloadKey = `${contract.id}:default`;
+        const canDownloadDocx = contract.availableFormats.includes("docx");
+        const canDownloadPdf = contract.availableFormats.includes("pdf");
+        const canDownloadDefault = !canDownloadDocx && !canDownloadPdf && Boolean(contract.originalFileName);
+        return (_jsxs("article", { className: "internal-contract-card", children: [_jsxs("div", { className: "internal-contract-card-head", children: [_jsxs("div", { children: [_jsx("span", { className: "internal-contract-number", children: contract.contractNumber }), _jsx("h3", { children: contractOwnerLabel(contract) }), contract.title ? _jsx("p", { className: "internal-contract-title", children: contract.title }) : null] }), _jsxs("div", { className: "internal-contract-card-tags", children: [_jsx("span", { className: "status-pill status-live", children: contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato" }), signatureLabel ? (_jsx("span", { className: `status-pill ${contract.signatureStatus === "SIGNED" ? "status-live" : "status-warning"}`, children: signatureLabel })) : null, isLaborFileBackedContract(contract) ? (_jsx("span", { className: "status-pill status-migration", children: "Expediente laboral" })) : null] })] }), _jsxs("div", { className: "internal-contract-meta-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "Archivo principal" }), _jsx("strong", { children: contract.originalFileName ?? "Sin archivo" }), _jsx("small", { children: formatFileSize(contract.fileSizeBytes) })] }), _jsxs("div", { children: [_jsx("span", { children: "Alta" }), _jsx("strong", { children: formatDate(contract.createdAt) }), _jsx("small", { children: contract.fileMimeType ?? "Tipo no registrado" })] }), canDownloadPdf ? (_jsxs("div", { children: [_jsx("span", { children: "Version PDF" }), _jsx("strong", { children: contract.pdfOriginalFileName ?? "PDF generado" }), _jsx("small", { children: contract.pdfFileMimeType ?? "application/pdf" })] })) : null] }), contract.notes ? _jsx("p", { className: "internal-contract-notes", children: contract.notes }) : null, _jsxs("div", { className: "table-actions", children: [canDownloadDocx ? (_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === docxDownloadKey || downloadingId === defaultDownloadKey, onClick: () => void handleDownload(contract, contract.availableFormats.includes("docx") ? "docx" : undefined), children: downloadingId === docxDownloadKey || downloadingId === defaultDownloadKey ? "DOCX..." : "Descargar DOCX" })) : null, canDownloadPdf ? (_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === pdfDownloadKey, onClick: () => void handleDownload(contract, "pdf"), children: downloadingId === pdfDownloadKey ? "PDF..." : "Descargar PDF" })) : null, canDownloadDefault ? (_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === defaultDownloadKey, onClick: () => void handleDownload(contract), children: downloadingId === defaultDownloadKey ? "Descargando..." : "Descargar" })) : null, canWrite && !isLaborFileBackedContract(contract) ? (_jsx("button", { className: "danger-button", type: "button", disabled: deletingId === contract.id, onClick: () => void handleDelete(contract), children: deletingId === contract.id ? "Borrando..." : "Borrar" })) : null] })] }, contract.id));
+    }
     if (!canRead) {
         return (_jsx("section", { className: "page-stack", children: _jsxs("header", { className: "hero module-hero", children: [_jsx("div", { className: "module-hero-head", children: _jsx("div", { children: _jsx("h2", { children: MODULE_TITLE }) }) }), _jsx("p", { className: "muted", children: "Tu perfil actual no tiene permisos para consultar este modulo." })] }) }));
     }
@@ -455,15 +481,15 @@ export function InternalContractsPage() {
                                             ? "Machotes de empresa"
                                             : activeSection === "LABOR"
                                                 ? "Laboral / addendum"
-                                                : "Servicios profesionales" })] }), canSubmitActiveSection ? (_jsxs("form", { className: "internal-contracts-form", onSubmit: handleSubmit, children: [_jsxs("div", { className: "internal-contracts-form-grid", children: [activeSection === "TEMPLATES" ? (_jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Nombre del machote" }), _jsx("input", { value: form.templateTitle, onChange: (event) => updateForm("templateTitle", event.target.value), placeholder: "Ej. Contrato de prestacion de servicios", disabled: saving || loading })] })) : activeSection === "PROFESSIONAL_SERVICES" ? (_jsxs(_Fragment, { children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsxs("select", { value: form.clientId, onChange: (event) => handleClientChange(event.target.value), disabled: saving || loading, children: [_jsx("option", { value: "", children: "-- Seleccionar cliente --" }), clients.map((client) => (_jsxs("option", { value: client.id, children: [client.clientNumber, " - ", client.name] }, client.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de contrato" }), _jsxs("select", { value: form.contractNumber, onChange: (event) => updateForm("contractNumber", event.target.value), disabled: saving || loading || !form.clientId || selectedClientQuotes.length === 0, children: [_jsx("option", { value: "", children: !form.clientId
+                                                : "Servicios profesionales" })] }), canSubmitActiveSection ? (_jsxs("form", { className: "internal-contracts-form", onSubmit: handleSubmit, children: [_jsxs("div", { className: "internal-contracts-form-grid", children: [activeSection === "TEMPLATES" ? (_jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Nombre del machote" }), _jsx("input", { value: form.templateTitle, onChange: (event) => updateForm("templateTitle", event.target.value), placeholder: "Ej. Contrato de prestacion de servicios", disabled: saving || loading })] })) : activeSection === "PROFESSIONAL_SERVICES" ? (_jsxs(_Fragment, { children: [_jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Buscar cliente" }), _jsx("input", { value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Escribe el nombre del cliente...", disabled: saving || loading })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cliente" }), _jsxs("select", { value: form.clientId, onChange: (event) => handleClientChange(event.target.value), disabled: saving || loading, children: [_jsx("option", { value: "", children: "-- Seleccionar cliente --" }), filteredClients.map((client) => (_jsxs("option", { value: client.id, children: [client.clientNumber, " - ", client.name] }, client.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de contrato" }), _jsxs("select", { value: form.contractNumber, onChange: (event) => handleContractNumberChange(event.target.value), disabled: saving || loading || !form.clientId || selectedClientQuotes.length === 0, children: [_jsx("option", { value: "", children: !form.clientId
                                                                             ? "-- Selecciona cliente primero --"
                                                                             : selectedClientQuotes.length === 0
                                                                                 ? "-- Sin cotizaciones registradas --"
-                                                                                : "-- Seleccionar cotizacion --" }), selectedClientQuotes.map((quote) => (_jsxs("option", { value: quote.quoteNumber, children: [quote.quoteNumber, " - ", quote.subject] }, quote.id)))] })] })] })) : (_jsxs(_Fragment, { children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Colaborador interno" }), _jsxs("select", { value: form.collaboratorName, onChange: (event) => updateForm("collaboratorName", event.target.value), disabled: saving || loading, children: [_jsx("option", { value: "", children: "-- Seleccionar colaborador --" }), collaborators.map((collaborator) => (_jsxs("option", { value: collaborator.name, children: [collaborator.shortName ? `${collaborator.shortName} - ` : "", collaborator.name] }, collaborator.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de documento" }), _jsxs("select", { value: form.documentKind, onChange: (event) => updateForm("documentKind", event.target.value), disabled: saving, children: [_jsx("option", { value: "CONTRACT", children: "Contrato laboral" }), _jsx("option", { value: "ADDENDUM", children: "Addendum" })] })] })] })), _jsxs("label", { className: "form-field internal-contracts-file-field", children: [_jsx("span", { children: "Archivo" }), _jsx("input", { type: "file", accept: activeSection === "LABOR" ? ".pdf,application/pdf" : ".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt", onChange: handleFileChange, disabled: saving })] }), activeSection === "PROFESSIONAL_SERVICES" ? (_jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Fechas o hitos de pago" }), _jsx("textarea", { value: form.milestonesText, onChange: (event) => updateForm("milestonesText", event.target.value), placeholder: "Una linea por hito. Ej.\n2026-05-15 - Anticipo $50000\n2026-06-30 - Segundo pago", disabled: saving })] })) : null, _jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Notas" }), _jsx("textarea", { value: form.notes, onChange: (event) => updateForm("notes", event.target.value), placeholder: isTemplateSection ? "Notas internas sobre el uso del machote..." : "Observaciones internas del contrato...", disabled: saving })] })] }), _jsxs("div", { className: "form-actions", children: [_jsx("button", { className: "primary-button", type: "submit", disabled: saving || loading, children: saving ? "Cargando..." : isTemplateSection ? "Guardar machote" : "Guardar contrato" }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => void loadModule(), disabled: saving || loading, children: "Refrescar" })] })] })) : (_jsx("div", { className: "centered-inline-message", children: isTemplateSection
+                                                                                : "-- Seleccionar cotizacion --" }), selectedClientQuotes.map((quote) => (_jsxs("option", { value: quote.quoteNumber, children: [quote.quoteNumber, " - ", quoteTitleLabel(quote)] }, quote.id)))] })] }), _jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Titulo del contrato" }), _jsx("input", { value: form.contractTitle || selectedQuoteTitle, readOnly: true, placeholder: "Se llena al seleccionar una cotizacion" })] })] })) : (_jsxs(_Fragment, { children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Colaborador interno" }), _jsxs("select", { value: form.collaboratorName, onChange: (event) => updateForm("collaboratorName", event.target.value), disabled: saving || loading, children: [_jsx("option", { value: "", children: "-- Seleccionar colaborador --" }), collaborators.map((collaborator) => (_jsxs("option", { value: collaborator.name, children: [collaborator.shortName ? `${collaborator.shortName} - ` : "", collaborator.name] }, collaborator.id)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de documento" }), _jsxs("select", { value: form.documentKind, onChange: (event) => updateForm("documentKind", event.target.value), disabled: saving, children: [_jsx("option", { value: "CONTRACT", children: "Contrato laboral" }), _jsx("option", { value: "ADDENDUM", children: "Addendum" })] })] })] })), _jsxs("label", { className: "form-field internal-contracts-file-field", children: [_jsx("span", { children: "Archivo" }), _jsx("input", { type: "file", accept: activeSection === "LABOR" ? ".pdf,application/pdf" : ".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt", onChange: handleFileChange, disabled: saving })] }), _jsxs("label", { className: "form-field internal-contracts-wide-field", children: [_jsx("span", { children: "Notas" }), _jsx("textarea", { value: form.notes, onChange: (event) => updateForm("notes", event.target.value), placeholder: isTemplateSection ? "Notas internas sobre el uso del machote..." : "Observaciones internas del contrato...", disabled: saving })] })] }), _jsxs("div", { className: "form-actions", children: [_jsx("button", { className: "primary-button", type: "submit", disabled: saving || loading, children: saving ? "Cargando..." : isTemplateSection ? "Guardar machote" : "Guardar contrato" }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => void loadModule(), disabled: saving || loading, children: "Refrescar" })] })] })) : (_jsx("div", { className: "centered-inline-message", children: isTemplateSection
                                     ? "Tu perfil puede ver y descargar machotes, pero solo el superadmin puede cargar nuevos archivos."
                                     : "Tu perfil puede consultar contratos, pero no cargar nuevos archivos." }))] }), _jsxs("section", { className: "panel internal-contracts-list-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: SECTION_LABELS[activeSection] }), _jsxs("span", { children: [isTemplateSection ? filteredTemplates.length : filteredContracts.length, " registros"] })] }), _jsx("div", { className: "internal-contracts-toolbar", children: _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { value: query, onChange: (event) => setQuery(event.target.value), placeholder: isTemplateSection
                                                 ? "Machote, archivo o notas..."
                                                 : activeSection === "LABOR"
                                                     ? "Contrato, colaborador, expediente o archivo..."
-                                                    : "Contrato, cliente, colaborador, archivo o hito...", type: "search" })] }) }), _jsxs("div", { className: "internal-contracts-list", "aria-live": "polite", children: [loading ? (_jsx("div", { className: "centered-inline-message", children: isTemplateSection ? "Cargando machotes..." : "Cargando contratos..." })) : null, !loading && isTemplateSection && filteredTemplates.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay machotes cargados." })) : null, !loading && !isTemplateSection && filteredContracts.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay contratos en esta seccion." })) : null, !loading && isTemplateSection && filteredTemplates.map((template) => (_jsxs("article", { className: "internal-contract-card", children: [_jsxs("div", { className: "internal-contract-card-head", children: [_jsxs("div", { children: [_jsx("span", { className: "internal-contract-number", children: template.title }), _jsx("h3", { children: template.originalFileName })] }), _jsx("span", { className: "status-pill status-live", children: "Machote" })] }), _jsxs("div", { className: "internal-contract-meta-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "Archivo" }), _jsx("strong", { children: template.originalFileName }), _jsx("small", { children: formatFileSize(template.fileSizeBytes) })] }), _jsxs("div", { children: [_jsx("span", { children: "Alta" }), _jsx("strong", { children: formatDate(template.createdAt) }), _jsx("small", { children: template.fileMimeType ?? "Tipo no registrado" })] })] }), template.notes ? _jsx("p", { className: "internal-contract-notes", children: template.notes }) : null, _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === template.id, onClick: () => void handleTemplateDownload(template), children: downloadingId === template.id ? "Descargando..." : "Descargar" }), canUploadTemplate ? (_jsx("button", { className: "danger-button", type: "button", disabled: deletingId === template.id, onClick: () => void handleTemplateDelete(template), children: deletingId === template.id ? "Borrando..." : "Borrar" })) : null] })] }, template.id))), !loading && !isTemplateSection && filteredContracts.map((contract) => (_jsxs("article", { className: "internal-contract-card", children: [_jsxs("div", { className: "internal-contract-card-head", children: [_jsxs("div", { children: [_jsx("span", { className: "internal-contract-number", children: contract.contractNumber }), _jsx("h3", { children: contractOwnerLabel(contract) })] }), _jsxs("div", { className: "internal-contract-card-tags", children: [_jsx("span", { className: "status-pill status-live", children: contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato" }), isLaborFileBackedContract(contract) ? (_jsx("span", { className: "status-pill status-migration", children: "Expediente laboral" })) : null] })] }), _jsxs("div", { className: "internal-contract-meta-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "Archivo" }), _jsx("strong", { children: contract.originalFileName ?? "Sin archivo" }), _jsx("small", { children: formatFileSize(contract.fileSizeBytes) })] }), _jsxs("div", { children: [_jsx("span", { children: "Alta" }), _jsx("strong", { children: formatDate(contract.createdAt) }), _jsx("small", { children: contract.fileMimeType ?? "Tipo no registrado" })] })] }), contract.paymentMilestones.length > 0 ? (_jsx("ul", { className: "internal-contract-milestones", children: contract.paymentMilestones.map((milestone) => (_jsx("li", { children: formatMilestone(milestone) }, milestone.id))) })) : contract.contractType === "PROFESSIONAL_SERVICES" ? (_jsx("p", { className: "muted internal-contract-empty-milestones", children: "Sin hitos de pago capturados." })) : null, contract.notes ? _jsx("p", { className: "internal-contract-notes", children: contract.notes }) : null, _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: !contract.originalFileName || downloadingId === contract.id, onClick: () => void handleDownload(contract), children: downloadingId === contract.id ? "Descargando..." : "Descargar" }), canWrite && !isLaborFileBackedContract(contract) ? (_jsx("button", { className: "danger-button", type: "button", disabled: deletingId === contract.id, onClick: () => void handleDelete(contract), children: deletingId === contract.id ? "Borrando..." : "Borrar" })) : null] })] }, contract.id)))] })] })] })] }));
+                                                    : "Contrato, titulo, cliente, colaborador o archivo...", type: "search" })] }) }), _jsxs("div", { className: "internal-contracts-list", "aria-live": "polite", children: [loading ? (_jsx("div", { className: "centered-inline-message", children: isTemplateSection ? "Cargando machotes..." : "Cargando contratos..." })) : null, !loading && isTemplateSection && filteredTemplates.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay machotes cargados." })) : null, !loading && !isTemplateSection && filteredContracts.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay contratos en esta seccion." })) : null, !loading && isTemplateSection && filteredTemplates.map((template) => (_jsxs("article", { className: "internal-contract-card", children: [_jsxs("div", { className: "internal-contract-card-head", children: [_jsxs("div", { children: [_jsx("span", { className: "internal-contract-number", children: template.title }), _jsx("h3", { children: template.originalFileName })] }), _jsx("span", { className: "status-pill status-live", children: "Machote" })] }), _jsxs("div", { className: "internal-contract-meta-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "Archivo" }), _jsx("strong", { children: template.originalFileName }), _jsx("small", { children: formatFileSize(template.fileSizeBytes) })] }), _jsxs("div", { children: [_jsx("span", { children: "Alta" }), _jsx("strong", { children: formatDate(template.createdAt) }), _jsx("small", { children: template.fileMimeType ?? "Tipo no registrado" })] })] }), template.notes ? _jsx("p", { className: "internal-contract-notes", children: template.notes }) : null, _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "secondary-button", type: "button", disabled: downloadingId === template.id, onClick: () => void handleTemplateDownload(template), children: downloadingId === template.id ? "Descargando..." : "Descargar" }), canUploadTemplate ? (_jsx("button", { className: "danger-button", type: "button", disabled: deletingId === template.id, onClick: () => void handleTemplateDelete(template), children: deletingId === template.id ? "Borrando..." : "Borrar" })) : null] })] }, template.id))), !loading && !isTemplateSection && activeSection !== "PROFESSIONAL_SERVICES" && filteredContracts.map((contract) => renderContractCard(contract)), !loading && activeSection === "PROFESSIONAL_SERVICES" && groupedProfessionalContracts.map((group) => (_jsxs("section", { className: "internal-contract-group", children: [_jsxs("div", { className: "internal-contract-group-head", children: [_jsx("h3", { children: group.label }), _jsxs("span", { children: [group.contracts.length, " contrato", group.contracts.length === 1 ? "" : "s"] })] }), _jsx("div", { className: "internal-contract-group-list", children: group.contracts.map((contract) => renderContractCard(contract)) })] }, group.key)))] })] })] })] }));
 }

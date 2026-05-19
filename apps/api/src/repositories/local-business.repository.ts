@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { TASK_MODULES, type Client, type Matter, type Quote } from "@sige/contracts";
+import { TASK_MODULES, buildQuoteTitle, type Client, type Matter, type Quote } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import type {
@@ -734,13 +734,18 @@ export class LocalBusinessStore {
       })
       .filter((item) => item.concept || item.amountMxn > 0);
 
+    const quoteNumber = text(row.quote_number) || text(row.numero_cotizacion) || text(row.id);
+    const clientName = text(row.client_name) || text(row.cliente);
+    const subject = text(row.asunto) || text(row.subject) || "Cotizacion";
+
     return {
       id: text(row.id),
-      quoteNumber: text(row.quote_number) || text(row.numero_cotizacion) || text(row.id),
+      title: optionalText(row.title) ?? buildQuoteTitle({ clientName, quoteNumber, subject }),
+      quoteNumber,
       clientId: text(row.client_id) || text(row.client_name),
-      clientName: text(row.client_name) || text(row.cliente),
+      clientName,
       responsibleTeam: teamFromLegacy(row.responsible_team ?? row.equipo_responsable),
-      subject: text(row.asunto) || text(row.subject) || "Cotizacion",
+      subject,
       status: normalizedText(row.status).includes("aprob") ? "APPROVED" : normalizedText(row.status).includes("rechaz") ? "REJECTED" : normalizedText(row.status).includes("envi") ? "SENT" : "DRAFT",
       quoteType: matterType(row.quote_type),
       language: "es",

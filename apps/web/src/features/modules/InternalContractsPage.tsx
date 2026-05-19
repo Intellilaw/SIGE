@@ -3,7 +3,7 @@ import type {
   Client,
   InternalContract,
   InternalContractCollaborator,
-  InternalContractPaymentMilestone,
+  InternalContractDownloadFormat,
   InternalContractTemplate,
   InternalContractType,
   Quote
@@ -21,11 +21,11 @@ type FlashState =
 
 type ContractFormState = {
   contractNumber: string;
+  contractTitle: string;
   templateTitle: string;
   clientId: string;
   collaboratorName: string;
   documentKind: InternalContract["documentKind"];
-  milestonesText: string;
   notes: string;
 };
 
@@ -42,11 +42,11 @@ const SECTION_LABELS: Record<InternalContractSection, string> = {
 
 const initialFormState: ContractFormState = {
   contractNumber: "",
+  contractTitle: "",
   templateTitle: "",
   clientId: "",
   collaboratorName: "",
   documentKind: "CONTRACT",
-  milestonesText: "",
   notes: ""
 };
 
@@ -95,54 +95,6 @@ function formatFileSize(value?: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatMilestone(milestone: InternalContractPaymentMilestone) {
-  const parts = [
-    milestone.dueDate ? formatDate(milestone.dueDate) : "",
-    milestone.label,
-    milestone.amountMxn ? new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(milestone.amountMxn) : "",
-    milestone.notes ?? ""
-  ].filter(Boolean);
-
-  return parts.join(" - ");
-}
-
-function dateFromSlashFormat(value: string) {
-  const match = value.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
-  if (!match) {
-    return "";
-  }
-
-  const day = match[1].padStart(2, "0");
-  const month = match[2].padStart(2, "0");
-  return `${match[3]}-${month}-${day}`;
-}
-
-function parseMilestoneLines(value: string): InternalContractPaymentMilestone[] {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const isoDate = line.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? dateFromSlashFormat(line);
-      const amountMatch = line.match(/\$\s?(\d[\d,]*(?:\.\d{1,2})?)/) ?? line.match(/\bMXN\s?(\d[\d,]*(?:\.\d{1,2})?)/i);
-      const amountMxn = amountMatch ? Number(amountMatch[1].replace(/,/g, "")) : 0;
-      const label = line
-        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "")
-        .replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g, "")
-        .replace(/\$?\s?\d[\d,]*(?:\.\d{1,2})?/g, "")
-        .replace(/[|:;-]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      return {
-        id: `milestone-${index + 1}`,
-        label: label || line,
-        dueDate: isoDate || undefined,
-        amountMxn: Number.isFinite(amountMxn) && amountMxn > 0 ? amountMxn : undefined
-      };
-    });
-}
-
 function fileToBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -174,6 +126,31 @@ function sortContracts(items: InternalContract[]) {
   );
 }
 
+function groupProfessionalServicesContractsByClient(items: InternalContract[]) {
+  const groups = new Map<string, { key: string; label: string; contracts: InternalContract[] }>();
+
+  sortContracts(items).forEach((contract) => {
+    const key = `${contract.clientNumber ?? ""}|${contract.clientName ?? ""}`.toLowerCase();
+    const label = contractOwnerLabel(contract);
+    const existing = groups.get(key);
+
+    if (existing) {
+      existing.contracts.push(contract);
+      return;
+    }
+
+    groups.set(key, {
+      key,
+      label,
+      contracts: [contract]
+    });
+  });
+
+  return [...groups.values()].sort((left, right) =>
+    left.label.localeCompare(right.label, "es-MX", { numeric: true, sensitivity: "base" })
+  );
+}
+
 function sortContractTemplates(items: InternalContractTemplate[]) {
   return [...items].sort((left, right) =>
     left.title.localeCompare(right.title, "es-MX", { numeric: true, sensitivity: "base" })
@@ -184,6 +161,10 @@ function sortQuotes(items: Quote[]) {
   return [...items].sort((left, right) =>
     left.quoteNumber.localeCompare(right.quoteNumber, "es-MX", { numeric: true, sensitivity: "base" })
   );
+}
+
+function quoteTitleLabel(quote?: Quote) {
+  return (quote?.title ?? quote?.subject ?? "").trim();
 }
 
 async function fetchOptionalRows<T>(request: Promise<T[]>) {
@@ -225,6 +206,18 @@ function isPdfFile(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
+function getContractSignatureLabel(contract: InternalContract) {
+  if (contract.signatureStatus === "SIGNED") {
+    return "Firmado";
+  }
+
+  if (contract.sourceMatterId) {
+    return "No firmado";
+  }
+
+  return null;
+}
+
 export function InternalContractsPage() {
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<InternalContractSection>("PROFESSIONAL_SERVICES");
@@ -235,6 +228,7 @@ export function InternalContractsPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [form, setForm] = useState<ContractFormState>(initialFormState);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [clientSearch, setClientSearch] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -327,17 +321,21 @@ export function InternalContractsPage() {
     return sortContracts(sectionContracts.filter((contract) => {
       const haystack = normalizeSearchValue([
         contract.contractNumber,
+        contract.title,
         contract.clientNumber,
         contract.clientName,
         contract.collaboratorName,
         contract.originalFileName,
-        contract.notes,
-        ...contract.paymentMilestones.map(formatMilestone)
+        contract.notes
       ].filter(Boolean).join(" "));
 
       return haystack.includes(search);
     }));
   }, [activeSection, contracts, query]);
+  const groupedProfessionalContracts = useMemo(
+    () => activeSection === "PROFESSIONAL_SERVICES" ? groupProfessionalServicesContractsByClient(filteredContracts) : [],
+    [activeSection, filteredContracts]
+  );
 
   const filteredTemplates = useMemo(() => {
     const search = normalizeSearchValue(query);
@@ -361,7 +359,26 @@ export function InternalContractsPage() {
     () => sortQuotes(quotes.filter((quote) => quote.clientId === form.clientId)),
     [form.clientId, quotes]
   );
-  const parsedMilestones = useMemo(() => parseMilestoneLines(form.milestonesText), [form.milestonesText]);
+  const selectedQuote = useMemo(
+    () => selectedClientQuotes.find((quote) => quote.quoteNumber === form.contractNumber),
+    [form.contractNumber, selectedClientQuotes]
+  );
+  const selectedQuoteTitle = quoteTitleLabel(selectedQuote);
+  const filteredClients = useMemo(() => {
+    const search = normalizeSearchValue(clientSearch);
+    if (!search) {
+      return clients;
+    }
+
+    const selectedClient = clients.find((client) => client.id === form.clientId);
+    const matches = clients.filter((client) => normalizeSearchValue(`${client.clientNumber} ${client.name}`).includes(search));
+
+    if (selectedClient && !matches.some((client) => client.id === selectedClient.id)) {
+      return [selectedClient, ...matches];
+    }
+
+    return matches;
+  }, [clientSearch, clients, form.clientId]);
 
   function updateForm<K extends keyof ContractFormState>(key: K, value: ContractFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -372,6 +389,7 @@ export function InternalContractsPage() {
     setActiveSection(section);
     setForm(initialFormState);
     setSelectedFile(null);
+    setClientSearch("");
     setFlash(null);
   }
 
@@ -381,7 +399,17 @@ export function InternalContractsPage() {
   }
 
   function handleClientChange(clientId: string) {
-    setForm((current) => ({ ...current, clientId, contractNumber: "" }));
+    setForm((current) => ({ ...current, clientId, contractNumber: "", contractTitle: "" }));
+    setFlash(null);
+  }
+
+  function handleContractNumberChange(contractNumber: string) {
+    const quote = selectedClientQuotes.find((entry) => entry.quoteNumber === contractNumber);
+    setForm((current) => ({
+      ...current,
+      contractNumber,
+      contractTitle: quoteTitleLabel(quote)
+    }));
     setFlash(null);
   }
 
@@ -465,11 +493,12 @@ export function InternalContractsPage() {
     try {
       const created = await apiPost<InternalContract>("/internal-contracts", {
         contractNumber,
+        title: activeSection === "PROFESSIONAL_SERVICES" ? form.contractTitle || selectedQuoteTitle : null,
         contractType: activeSection,
         documentKind: activeSection === "LABOR" ? form.documentKind : "CONTRACT",
         clientId: activeSection === "PROFESSIONAL_SERVICES" ? form.clientId : null,
         collaboratorName: activeSection === "LABOR" ? form.collaboratorName : null,
-        paymentMilestones: parsedMilestones,
+        paymentMilestones: [],
         notes: form.notes,
         originalFileName: selectedFile.name,
         fileMimeType: selectedFile.type || "application/octet-stream",
@@ -488,12 +517,14 @@ export function InternalContractsPage() {
     }
   }
 
-  async function handleDownload(contract: InternalContract) {
-    setDownloadingId(contract.id);
+  async function handleDownload(contract: InternalContract, format?: InternalContractDownloadFormat) {
+    const downloadKey = `${contract.id}:${format ?? "default"}`;
+    setDownloadingId(downloadKey);
     setFlash(null);
 
     try {
-      const { blob, filename } = await apiDownload(`/internal-contracts/${encodeURIComponent(contract.id)}/document`);
+      const query = format ? `?format=${format}` : "";
+      const { blob, filename } = await apiDownload(`/internal-contracts/${encodeURIComponent(contract.id)}/document${query}`);
       downloadBlobFile(blob, filename ?? contract.originalFileName ?? `${contract.contractNumber}.bin`);
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
@@ -560,6 +591,106 @@ export function InternalContractsPage() {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  function renderContractCard(contract: InternalContract) {
+    const signatureLabel = getContractSignatureLabel(contract);
+    const docxDownloadKey = `${contract.id}:docx`;
+    const pdfDownloadKey = `${contract.id}:pdf`;
+    const defaultDownloadKey = `${contract.id}:default`;
+    const canDownloadDocx = contract.availableFormats.includes("docx");
+    const canDownloadPdf = contract.availableFormats.includes("pdf");
+    const canDownloadDefault = !canDownloadDocx && !canDownloadPdf && Boolean(contract.originalFileName);
+
+    return (
+      <article className="internal-contract-card" key={contract.id}>
+        <div className="internal-contract-card-head">
+          <div>
+            <span className="internal-contract-number">{contract.contractNumber}</span>
+            <h3>{contractOwnerLabel(contract)}</h3>
+            {contract.title ? <p className="internal-contract-title">{contract.title}</p> : null}
+          </div>
+          <div className="internal-contract-card-tags">
+            <span className="status-pill status-live">
+              {contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato"}
+            </span>
+            {signatureLabel ? (
+              <span className={`status-pill ${contract.signatureStatus === "SIGNED" ? "status-live" : "status-warning"}`}>
+                {signatureLabel}
+              </span>
+            ) : null}
+            {isLaborFileBackedContract(contract) ? (
+              <span className="status-pill status-migration">Expediente laboral</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="internal-contract-meta-grid">
+          <div>
+            <span>Archivo principal</span>
+            <strong>{contract.originalFileName ?? "Sin archivo"}</strong>
+            <small>{formatFileSize(contract.fileSizeBytes)}</small>
+          </div>
+          <div>
+            <span>Alta</span>
+            <strong>{formatDate(contract.createdAt)}</strong>
+            <small>{contract.fileMimeType ?? "Tipo no registrado"}</small>
+          </div>
+          {canDownloadPdf ? (
+            <div>
+              <span>Version PDF</span>
+              <strong>{contract.pdfOriginalFileName ?? "PDF generado"}</strong>
+              <small>{contract.pdfFileMimeType ?? "application/pdf"}</small>
+            </div>
+          ) : null}
+        </div>
+
+        {contract.notes ? <p className="internal-contract-notes">{contract.notes}</p> : null}
+
+        <div className="table-actions">
+          {canDownloadDocx ? (
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={downloadingId === docxDownloadKey || downloadingId === defaultDownloadKey}
+              onClick={() => void handleDownload(contract, contract.availableFormats.includes("docx") ? "docx" : undefined)}
+            >
+              {downloadingId === docxDownloadKey || downloadingId === defaultDownloadKey ? "DOCX..." : "Descargar DOCX"}
+            </button>
+          ) : null}
+          {canDownloadPdf ? (
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={downloadingId === pdfDownloadKey}
+              onClick={() => void handleDownload(contract, "pdf")}
+            >
+              {downloadingId === pdfDownloadKey ? "PDF..." : "Descargar PDF"}
+            </button>
+          ) : null}
+          {canDownloadDefault ? (
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={downloadingId === defaultDownloadKey}
+              onClick={() => void handleDownload(contract)}
+            >
+              {downloadingId === defaultDownloadKey ? "Descargando..." : "Descargar"}
+            </button>
+          ) : null}
+          {canWrite && !isLaborFileBackedContract(contract) ? (
+            <button
+              className="danger-button"
+              type="button"
+              disabled={deletingId === contract.id}
+              onClick={() => void handleDelete(contract)}
+            >
+              {deletingId === contract.id ? "Borrando..." : "Borrar"}
+            </button>
+          ) : null}
+        </div>
+      </article>
+    );
   }
 
   if (!canRead) {
@@ -644,6 +775,16 @@ export function InternalContractsPage() {
                   </label>
                 ) : activeSection === "PROFESSIONAL_SERVICES" ? (
                   <>
+                    <label className="form-field internal-contracts-wide-field">
+                      <span>Buscar cliente</span>
+                      <input
+                        value={clientSearch}
+                        onChange={(event) => setClientSearch(event.target.value)}
+                        placeholder="Escribe el nombre del cliente..."
+                        disabled={saving || loading}
+                      />
+                    </label>
+
                     <label className="form-field">
                       <span>Cliente</span>
                       <select
@@ -652,7 +793,7 @@ export function InternalContractsPage() {
                         disabled={saving || loading}
                       >
                         <option value="">-- Seleccionar cliente --</option>
-                        {clients.map((client) => (
+                        {filteredClients.map((client) => (
                           <option key={client.id} value={client.id}>
                             {client.clientNumber} - {client.name}
                           </option>
@@ -664,7 +805,7 @@ export function InternalContractsPage() {
                       <span>Numero de contrato</span>
                       <select
                         value={form.contractNumber}
-                        onChange={(event) => updateForm("contractNumber", event.target.value)}
+                        onChange={(event) => handleContractNumberChange(event.target.value)}
                         disabled={saving || loading || !form.clientId || selectedClientQuotes.length === 0}
                       >
                         <option value="">
@@ -676,10 +817,19 @@ export function InternalContractsPage() {
                         </option>
                         {selectedClientQuotes.map((quote) => (
                           <option key={quote.id} value={quote.quoteNumber}>
-                            {quote.quoteNumber} - {quote.subject}
+                            {quote.quoteNumber} - {quoteTitleLabel(quote)}
                           </option>
                         ))}
                       </select>
+                    </label>
+
+                    <label className="form-field internal-contracts-wide-field">
+                      <span>Titulo del contrato</span>
+                      <input
+                        value={form.contractTitle || selectedQuoteTitle}
+                        readOnly
+                        placeholder="Se llena al seleccionar una cotizacion"
+                      />
                     </label>
                   </>
                 ) : (
@@ -724,18 +874,6 @@ export function InternalContractsPage() {
                     disabled={saving}
                   />
                 </label>
-
-                {activeSection === "PROFESSIONAL_SERVICES" ? (
-                  <label className="form-field internal-contracts-wide-field">
-                    <span>Fechas o hitos de pago</span>
-                    <textarea
-                      value={form.milestonesText}
-                      onChange={(event) => updateForm("milestonesText", event.target.value)}
-                      placeholder={"Una linea por hito. Ej.\n2026-05-15 - Anticipo $50000\n2026-06-30 - Segundo pago"}
-                      disabled={saving}
-                    />
-                  </label>
-                ) : null}
 
                 <label className="form-field internal-contracts-wide-field">
                   <span>Notas</span>
@@ -783,7 +921,7 @@ export function InternalContractsPage() {
                     ? "Machote, archivo o notas..."
                     : activeSection === "LABOR"
                       ? "Contrato, colaborador, expediente o archivo..."
-                      : "Contrato, cliente, colaborador, archivo o hito..."
+                      : "Contrato, titulo, cliente, colaborador o archivo..."
                 }
                 type="search"
               />
@@ -847,69 +985,17 @@ export function InternalContractsPage() {
                 </div>
               </article>
             ))}
-            {!loading && !isTemplateSection && filteredContracts.map((contract) => (
-              <article className="internal-contract-card" key={contract.id}>
-                <div className="internal-contract-card-head">
-                  <div>
-                    <span className="internal-contract-number">{contract.contractNumber}</span>
-                    <h3>{contractOwnerLabel(contract)}</h3>
-                  </div>
-                  <div className="internal-contract-card-tags">
-                    <span className="status-pill status-live">
-                      {contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato"}
-                    </span>
-                    {isLaborFileBackedContract(contract) ? (
-                      <span className="status-pill status-migration">Expediente laboral</span>
-                    ) : null}
-                  </div>
+            {!loading && !isTemplateSection && activeSection !== "PROFESSIONAL_SERVICES" && filteredContracts.map((contract) => renderContractCard(contract))}
+            {!loading && activeSection === "PROFESSIONAL_SERVICES" && groupedProfessionalContracts.map((group) => (
+              <section className="internal-contract-group" key={group.key}>
+                <div className="internal-contract-group-head">
+                  <h3>{group.label}</h3>
+                  <span>{group.contracts.length} contrato{group.contracts.length === 1 ? "" : "s"}</span>
                 </div>
-
-                <div className="internal-contract-meta-grid">
-                  <div>
-                    <span>Archivo</span>
-                    <strong>{contract.originalFileName ?? "Sin archivo"}</strong>
-                    <small>{formatFileSize(contract.fileSizeBytes)}</small>
-                  </div>
-                  <div>
-                    <span>Alta</span>
-                    <strong>{formatDate(contract.createdAt)}</strong>
-                    <small>{contract.fileMimeType ?? "Tipo no registrado"}</small>
-                  </div>
+                <div className="internal-contract-group-list">
+                  {group.contracts.map((contract) => renderContractCard(contract))}
                 </div>
-
-                {contract.paymentMilestones.length > 0 ? (
-                  <ul className="internal-contract-milestones">
-                    {contract.paymentMilestones.map((milestone) => (
-                      <li key={milestone.id}>{formatMilestone(milestone)}</li>
-                    ))}
-                  </ul>
-                ) : contract.contractType === "PROFESSIONAL_SERVICES" ? (
-                  <p className="muted internal-contract-empty-milestones">Sin hitos de pago capturados.</p>
-                ) : null}
-
-                {contract.notes ? <p className="internal-contract-notes">{contract.notes}</p> : null}
-
-                <div className="table-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={!contract.originalFileName || downloadingId === contract.id}
-                    onClick={() => void handleDownload(contract)}
-                  >
-                    {downloadingId === contract.id ? "Descargando..." : "Descargar"}
-                  </button>
-                  {canWrite && !isLaborFileBackedContract(contract) ? (
-                    <button
-                      className="danger-button"
-                      type="button"
-                      disabled={deletingId === contract.id}
-                      onClick={() => void handleDelete(contract)}
-                    >
-                      {deletingId === contract.id ? "Borrando..." : "Borrar"}
-                    </button>
-                  ) : null}
-                </div>
-              </article>
+              </section>
             ))}
           </div>
         </section>

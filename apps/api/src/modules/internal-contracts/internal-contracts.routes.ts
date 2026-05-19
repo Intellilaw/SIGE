@@ -2,6 +2,11 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
+import {
+  buildProfessionalServicesContractPrefill,
+  professionalServicesContractFieldValuesSchema,
+  renderProfessionalServicesContractFiles
+} from "./professional-services-contract-generator";
 
 const paymentMilestoneSchema = z.object({
   id: z.string().optional(),
@@ -13,6 +18,7 @@ const paymentMilestoneSchema = z.object({
 
 const createContractSchema = z.object({
   contractNumber: z.string().min(1),
+  title: z.string().nullable().optional(),
   contractType: z.enum(["PROFESSIONAL_SERVICES", "LABOR"]),
   documentKind: z.enum(["CONTRACT", "ADDENDUM"]).default("CONTRACT"),
   clientId: z.string().nullable().optional(),
@@ -40,6 +46,19 @@ const templateParamsSchema = z.object({
   templateId: z.string().min(1)
 });
 
+const professionalServicesParamsSchema = z.object({
+  matterId: z.string().min(1)
+});
+
+const professionalServicesGenerateSchema = z.object({
+  matterId: z.string().min(1),
+  fields: professionalServicesContractFieldValuesSchema
+});
+
+const documentQuerySchema = z.object({
+  format: z.enum(["docx", "pdf"]).optional()
+});
+
 function decodeFileBase64(value?: string | null) {
   if (!value) {
     return null;
@@ -59,6 +78,30 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
   const writeGuards = [requireAuth, requireAnyPermissions(["internal-contracts:write"])];
   const templateReadGuards = [requireAuth, requireAnyPermissions(["internal-contract-templates:read"])];
   const superadminGuards = [requireAuth, requireRoles(["SUPERADMIN"])];
+  const professionalServicesGuards = [requireAuth, requireAnyPermissions(["finances:write", "matters:write", "internal-contracts:write"])];
+
+  async function loadProfessionalServicesContext(matterId: string) {
+    const matter = (await app.repositories.matters.list()).find((entry) => entry.id === matterId);
+    if (!matter) {
+      throw new app.errors.AppError(404, "MATTER_NOT_FOUND", "El asunto seleccionado no existe.");
+    }
+
+    if (!matter.clientId) {
+      throw new app.errors.AppError(400, "INTERNAL_CONTRACT_CLIENT_REQUIRED", "El asunto no tiene cliente vinculado.");
+    }
+
+    if (!matter.quoteId) {
+      throw new app.errors.AppError(400, "INTERNAL_CONTRACT_QUOTE_REQUIRED", "El asunto no tiene cotizacion vinculada.");
+    }
+
+    const quote = await app.repositories.quotes.findById(matter.quoteId);
+    if (!quote) {
+      throw new app.errors.AppError(404, "QUOTE_NOT_FOUND", "La cotizacion vinculada no existe.");
+    }
+
+    const existingState = await service.findGeneratedProfessionalServicesState(matter.id);
+    return { matter, quote, existingState };
+  }
 
   app.get("/internal-contracts", { preHandler: readGuards }, async () => service.list());
 
@@ -106,6 +149,7 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
 
     return service.create({
       contractNumber: payload.contractNumber,
+      title: payload.title,
       contractType: payload.contractType,
       documentKind: payload.documentKind,
       clientId: payload.clientId,
@@ -125,9 +169,51 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
+  app.get("/internal-contracts/professional-services/prefill/:matterId", { preHandler: professionalServicesGuards }, async (request) => {
+    const params = professionalServicesParamsSchema.parse(request.params);
+    const { matter, quote, existingState } = await loadProfessionalServicesContext(params.matterId);
+    return buildProfessionalServicesContractPrefill(matter, quote, existingState);
+  });
+
+  app.post("/internal-contracts/professional-services/generate", { preHandler: professionalServicesGuards }, async (request) => {
+    const payload = professionalServicesGenerateSchema.parse(request.body ?? {});
+    const { matter, quote } = await loadProfessionalServicesContext(payload.matterId);
+    const prefill = buildProfessionalServicesContractPrefill(matter, quote, null);
+    const files = await renderProfessionalServicesContractFiles({
+      coverContractNumber: prefill.contractNumber,
+      clientName: prefill.clientName,
+      title: prefill.title,
+      fields: payload.fields,
+      serviceLines: prefill.serviceLines,
+      paymentMilestones: prefill.paymentMilestones,
+      totalMxn: prefill.totalMxn
+    });
+
+    return service.upsertGeneratedProfessionalServices({
+      contractNumber: prefill.contractNumber,
+      title: prefill.title,
+      clientId: matter.clientId!,
+      sourceMatterId: matter.id,
+      sourceQuoteId: matter.quoteId,
+      signatureStatus: "PENDING",
+      fields: payload.fields,
+      paymentMilestones: prefill.paymentMilestones,
+      notes: `Generado desde Finanzas para ${prefill.subject}.`,
+      docxOriginalFileName: files.docx.filename,
+      docxFileMimeType: files.docx.contentType,
+      docxFileSizeBytes: files.docx.buffer.byteLength,
+      docxFileContent: files.docx.buffer,
+      pdfOriginalFileName: files.pdf.filename,
+      pdfFileMimeType: files.pdf.contentType,
+      pdfFileSizeBytes: files.pdf.buffer.byteLength,
+      pdfFileContent: files.pdf.buffer
+    });
+  });
+
   app.get("/internal-contracts/:contractId/document", { preHandler: readGuards }, async (request, reply) => {
     const params = paramsSchema.parse(request.params);
-    const document = await service.findDocument(params.contractId);
+    const query = documentQuerySchema.parse(request.query ?? {});
+    const document = await service.findDocument(params.contractId, query.format);
 
     if (!document) {
       throw new app.errors.AppError(404, "INTERNAL_CONTRACT_DOCUMENT_NOT_FOUND", "El archivo del contrato no existe.");

@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import type { QuoteLineItem, QuoteTemplate } from "@sige/contracts";
+import { buildQuoteTitle, type QuoteLineItem, type QuoteTemplate } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { mapQuote, mapQuoteTemplate } from "./mappers";
@@ -73,10 +73,15 @@ function buildQuoteTemplateData(payload: QuoteTemplateWriteRecord) {
   };
 }
 
-function buildQuoteData(payload: QuoteWriteRecord) {
+function buildQuoteData(payload: QuoteWriteRecord, quoteNumber: string) {
   const totalMxn = payload.lineItems.reduce((sum, item) => sum + item.amountMxn, 0);
 
   return {
+    title: buildQuoteTitle({
+      clientName: payload.clientName,
+      quoteNumber,
+      subject: payload.subject
+    }),
     clientId: payload.clientId,
     clientName: payload.clientName,
     responsibleTeam: payload.responsibleTeam ?? null,
@@ -154,7 +159,7 @@ export class PrismaQuotesRepository implements QuotesRepository {
     const record = await this.prisma.quote.create({
       data: {
         quoteNumber,
-        ...buildQuoteData(payload)
+        ...buildQuoteData(payload, quoteNumber)
       }
     });
 
@@ -162,11 +167,11 @@ export class PrismaQuotesRepository implements QuotesRepository {
   }
 
   public async update(quoteId: string, payload: QuoteWriteRecord) {
-    await this.findQuoteOrThrow(quoteId);
+    const current = await this.findQuoteOrThrow(quoteId);
 
     const record = await this.prisma.quote.update({
       where: { id: quoteId },
-      data: buildQuoteData(payload)
+      data: buildQuoteData(payload, current.quoteNumber)
     });
 
     return mapQuote(record);

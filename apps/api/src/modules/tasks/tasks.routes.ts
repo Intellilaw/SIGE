@@ -136,7 +136,8 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
-      specificRole: user.specificRole
+      specificRole: user.specificRole,
+      permissions: user.permissions
     });
   }
 

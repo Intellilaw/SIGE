@@ -1,18 +1,23 @@
 import { Buffer } from "node:buffer";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { InternalContract } from "@sige/contracts";
+import type { InternalContract, ProfessionalServicesContractFieldValues } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { mapInternalContract, mapInternalContractCollaborator, mapInternalContractTemplate } from "./mappers";
 import type {
+  GeneratedProfessionalServicesContractRecord,
+  InternalContractDocumentRecord,
+  InternalContractGeneratedStateRecord,
   InternalContractsRepository,
+  InternalContractDownloadFormat,
   InternalContractTemplateWriteRecord,
   InternalContractWriteRecord
 } from "./types";
 
 const LABOR_FILE_CONTRACT_DOCUMENT_ID_PREFIX = "labor-file-document:";
 const LABOR_FILE_CONTRACT_DOCUMENT_TYPES = ["EMPLOYMENT_CONTRACT", "ADDENDUM"] as const;
+const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
@@ -66,6 +71,64 @@ function toPrismaBytes(content?: Buffer | null) {
   const bytes = new Uint8Array(content.byteLength);
   bytes.set(content);
   return bytes;
+}
+
+function inferInternalContractFormat(originalFileName?: string | null, fileMimeType?: string | null): InternalContractDownloadFormat | null {
+  const normalizedMimeType = normalizeText(fileMimeType).toLowerCase();
+  const normalizedFileName = normalizeText(originalFileName).toLowerCase();
+
+  if (normalizedMimeType.includes("pdf") || normalizedFileName.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (
+    normalizedMimeType.includes("wordprocessingml.document")
+    || normalizedMimeType.includes("msword")
+    || normalizedFileName.endsWith(".docx")
+    || normalizedFileName.endsWith(".doc")
+  ) {
+    return "docx";
+  }
+
+  return null;
+}
+
+function normalizeProfessionalServicesFields(fields: ProfessionalServicesContractFieldValues): ProfessionalServicesContractFieldValues {
+  return {
+    clientKind: fields.clientKind,
+    clientRfc: normalizeText(fields.clientRfc),
+    legalRepresentative: normalizeText(fields.legalRepresentative),
+    clientAddress: normalizeText(fields.clientAddress),
+    clientPhone: normalizeText(fields.clientPhone),
+    clientEmail: normalizeText(fields.clientEmail),
+    startDate: normalizeText(fields.startDate),
+    endDate: normalizeText(fields.endDate),
+    signingDate: normalizeText(fields.signingDate)
+  };
+}
+
+function parseGeneratedProfessionalServicesFields(value: Prisma.JsonValue): ProfessionalServicesContractFieldValues | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const clientKind = candidate.clientKind === "PERSONA_FISICA" ? "PERSONA_FISICA" : candidate.clientKind === "PERSONA_MORAL" ? "PERSONA_MORAL" : null;
+  if (!clientKind) {
+    return null;
+  }
+
+  return normalizeProfessionalServicesFields({
+    clientKind,
+    clientRfc: typeof candidate.clientRfc === "string" ? candidate.clientRfc : "",
+    legalRepresentative: typeof candidate.legalRepresentative === "string" ? candidate.legalRepresentative : "",
+    clientAddress: typeof candidate.clientAddress === "string" ? candidate.clientAddress : "",
+    clientPhone: typeof candidate.clientPhone === "string" ? candidate.clientPhone : "",
+    clientEmail: typeof candidate.clientEmail === "string" ? candidate.clientEmail : "",
+    startDate: typeof candidate.startDate === "string" ? candidate.startDate : "",
+    endDate: typeof candidate.endDate === "string" ? candidate.endDate : "",
+    signingDate: typeof candidate.signingDate === "string" ? candidate.signingDate : ""
+  });
 }
 
 function normalizeIdentifierSegment(value: string) {
@@ -122,12 +185,16 @@ function mapLaborFileDocumentToInternalContract(record: {
   return {
     id: `${LABOR_FILE_CONTRACT_DOCUMENT_ID_PREFIX}${record.id}`,
     contractNumber: buildLaborFileContractNumber(record),
+    title: record.documentType === "ADDENDUM" ? `Addendum laboral - ${record.laborFile.employeeName}` : `Contrato laboral - ${record.laborFile.employeeName}`,
     contractType: "LABOR",
     documentKind: record.documentType === "ADDENDUM" ? "ADDENDUM" : "CONTRACT",
     collaboratorName: record.laborFile.employeeName,
     originalFileName: record.originalFileName,
     fileMimeType: record.fileMimeType ?? undefined,
     fileSizeBytes: record.fileSizeBytes ?? undefined,
+    availableFormats: inferInternalContractFormat(record.originalFileName, record.fileMimeType)
+      ? [inferInternalContractFormat(record.originalFileName, record.fileMimeType)!]
+      : [],
     paymentMilestones: [],
     notes: "Origen: Expedientes Laborales.",
     createdAt: record.uploadedAt.toISOString(),
@@ -184,12 +251,14 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
     validateDocumentKind(payload.documentKind);
 
     const baseData = await this.buildScopedData(payload);
+    const title = await this.resolveContractTitle(payload, contractNumber);
 
     try {
       const record = await this.prisma.internalContract.create({
         data: {
           ...baseData,
           contractNumber,
+          title,
           contractType: payload.contractType,
           documentKind: payload.documentKind,
           originalFileName: normalizeText(payload.originalFileName) || null,
@@ -211,6 +280,75 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
     }
   }
 
+  public async upsertGeneratedProfessionalServices(payload: GeneratedProfessionalServicesContractRecord) {
+    const sourceMatterId = normalizeText(payload.sourceMatterId);
+    const baseContractNumber = normalizeText(payload.contractNumber);
+
+    if (!sourceMatterId) {
+      throw new AppError(400, "INTERNAL_CONTRACT_SOURCE_MATTER_REQUIRED", "El asunto origen del contrato PSP es obligatorio.");
+    }
+
+    if (!baseContractNumber) {
+      throw new AppError(400, "INTERNAL_CONTRACT_NUMBER_REQUIRED", "El numero de contrato es obligatorio.");
+    }
+
+    const client = await this.prisma.client.findFirst({
+      where: { id: payload.clientId, deletedAt: null },
+      select: { id: true, clientNumber: true, name: true }
+    });
+
+    if (!client) {
+      throw new AppError(404, "INTERNAL_CONTRACT_CLIENT_NOT_FOUND", "El cliente seleccionado no existe.");
+    }
+
+    const existing = await this.prisma.internalContract.findUnique({
+      where: { sourceMatterId },
+      select: { id: true, contractNumber: true }
+    });
+
+    const contractNumber = existing?.contractNumber ?? await this.buildAvailableGeneratedContractNumber(baseContractNumber);
+    const normalizedFields = normalizeProfessionalServicesFields(payload.fields);
+    const title = normalizeText(payload.title) || null;
+    const notes = normalizeText(payload.notes) || null;
+    const signatureStatus = payload.signatureStatus === "SIGNED" ? "SIGNED" : "PENDING";
+    const paymentMilestones = normalizeMilestones(payload.paymentMilestones);
+    const documentData = {
+      contractNumber,
+      title,
+      contractType: "PROFESSIONAL_SERVICES",
+      documentKind: "CONTRACT",
+      client: { connect: { id: client.id } },
+      clientNumber: client.clientNumber,
+      clientName: client.name,
+      collaboratorName: null,
+      sourceMatterId,
+      sourceQuoteId: normalizeText(payload.sourceQuoteId) || null,
+      signatureStatus,
+      originalFileName: normalizeText(payload.docxOriginalFileName),
+      fileMimeType: normalizeText(payload.docxFileMimeType) || DOCX_MIME_TYPE,
+      fileSizeBytes: payload.docxFileSizeBytes ?? payload.docxFileContent.byteLength,
+      fileContent: toPrismaBytes(payload.docxFileContent) ?? new Uint8Array(),
+      pdfOriginalFileName: normalizeText(payload.pdfOriginalFileName),
+      pdfFileMimeType: normalizeText(payload.pdfFileMimeType) || "application/pdf",
+      pdfFileSizeBytes: payload.pdfFileSizeBytes ?? payload.pdfFileContent.byteLength,
+      pdfFileContent: toPrismaBytes(payload.pdfFileContent) ?? new Uint8Array(),
+      paymentMilestones,
+      generatedPayload: normalizedFields as unknown as Prisma.InputJsonValue,
+      notes
+    } satisfies Prisma.InternalContractCreateInput;
+
+    const record = existing
+      ? await this.prisma.internalContract.update({
+          where: { id: existing.id },
+          data: documentData
+        })
+      : await this.prisma.internalContract.create({
+          data: documentData
+        });
+
+    return mapInternalContract(record);
+  }
+
   public async delete(contractId: string) {
     if (parseLaborFileDocumentContractId(contractId)) {
       throw new AppError(
@@ -224,7 +362,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
     await this.prisma.internalContract.delete({ where: { id: contractId } });
   }
 
-  public async findDocument(contractId: string) {
+  public async findDocument(contractId: string, format?: InternalContractDownloadFormat): Promise<InternalContractDocumentRecord | null> {
     const laborFileDocumentId = parseLaborFileDocumentContractId(contractId);
     if (laborFileDocumentId) {
       return this.findLaborFileContractDocument(laborFileDocumentId);
@@ -236,11 +374,47 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
         contractNumber: true,
         originalFileName: true,
         fileMimeType: true,
-        fileContent: true
+        fileContent: true,
+        pdfOriginalFileName: true,
+        pdfFileMimeType: true,
+        pdfFileContent: true
       }
     });
 
-    if (!record?.fileContent || !record.originalFileName) {
+    if (!record) {
+      return null;
+    }
+
+    const requestedFormat = format ?? inferInternalContractFormat(record.originalFileName, record.fileMimeType) ?? "docx";
+    if (requestedFormat === "pdf") {
+      if (record.pdfFileContent && record.pdfOriginalFileName) {
+        return {
+          contractNumber: record.contractNumber,
+          originalFileName: record.pdfOriginalFileName,
+          fileMimeType: record.pdfFileMimeType ?? "application/pdf",
+          format: "pdf",
+          fileContent: Buffer.from(record.pdfFileContent)
+        };
+      }
+
+      if (
+        record.fileContent
+        && record.originalFileName
+        && inferInternalContractFormat(record.originalFileName, record.fileMimeType) === "pdf"
+      ) {
+        return {
+          contractNumber: record.contractNumber,
+          originalFileName: record.originalFileName,
+          fileMimeType: record.fileMimeType,
+          format: "pdf",
+          fileContent: Buffer.from(record.fileContent)
+        };
+      }
+
+      return null;
+    }
+
+    if (!record.fileContent || !record.originalFileName) {
       return null;
     }
 
@@ -248,11 +422,58 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       contractNumber: record.contractNumber,
       originalFileName: record.originalFileName,
       fileMimeType: record.fileMimeType,
+      format: inferInternalContractFormat(record.originalFileName, record.fileMimeType) ?? "docx",
       fileContent: Buffer.from(record.fileContent)
     };
   }
 
-  private async findLaborFileContractDocument(documentId: string) {
+  public async findGeneratedProfessionalServicesState(matterId: string): Promise<InternalContractGeneratedStateRecord | null> {
+    const sourceMatterId = normalizeText(matterId);
+    if (!sourceMatterId) {
+      return null;
+    }
+
+    const record = await this.prisma.internalContract.findUnique({
+      where: { sourceMatterId },
+      select: {
+        id: true,
+        signatureStatus: true,
+        generatedPayload: true,
+        originalFileName: true,
+        fileMimeType: true,
+        pdfOriginalFileName: true,
+        pdfFileMimeType: true
+      }
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    const fields = parseGeneratedProfessionalServicesFields(record.generatedPayload);
+    if (!fields) {
+      return null;
+    }
+
+    const signatureStatus: InternalContractGeneratedStateRecord["signatureStatus"] =
+      record.signatureStatus === "SIGNED" ? "SIGNED" : "PENDING";
+
+    return {
+      contractId: record.id,
+      signatureStatus,
+      availableFormats: [
+        ...new Set(
+          [
+            inferInternalContractFormat(record.originalFileName, record.fileMimeType),
+            inferInternalContractFormat(record.pdfOriginalFileName, record.pdfFileMimeType)
+          ].filter((entry): entry is InternalContractDownloadFormat => Boolean(entry))
+        )
+      ],
+      fields
+    };
+  }
+
+  private async findLaborFileContractDocument(documentId: string): Promise<InternalContractDocumentRecord | null> {
     const record = await this.prisma.laborFileDocument.findFirst({
       where: {
         id: documentId,
@@ -283,6 +504,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       contractNumber: buildLaborFileContractNumber(record),
       originalFileName: record.originalFileName,
       fileMimeType: record.fileMimeType,
+      format: inferInternalContractFormat(record.originalFileName, record.fileMimeType) ?? "pdf",
       fileContent: Buffer.from(record.fileContent)
     };
   }
@@ -400,6 +622,54 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       clientName: null,
       collaboratorName
     };
+  }
+
+  private async resolveContractTitle(payload: InternalContractWriteRecord, contractNumber: string) {
+    const explicitTitle = normalizeText(payload.title);
+    if (explicitTitle) {
+      return explicitTitle;
+    }
+
+    if (payload.contractType !== "PROFESSIONAL_SERVICES") {
+      return null;
+    }
+
+    const clientId = normalizeText(payload.clientId);
+    if (!clientId || !contractNumber) {
+      return null;
+    }
+
+    const quote = await this.prisma.quote.findFirst({
+      where: { clientId, quoteNumber: contractNumber },
+      select: { title: true }
+    });
+
+    return normalizeText(quote?.title) || null;
+  }
+
+  private async buildAvailableGeneratedContractNumber(baseContractNumber: string) {
+    const normalizedBase = normalizeText(baseContractNumber);
+    let attempt = 0;
+
+    while (attempt < 100) {
+      const candidate = attempt === 0
+        ? normalizedBase
+        : attempt === 1
+          ? `${normalizedBase}-PSP`
+          : `${normalizedBase}-PSP-${attempt}`;
+      const existing = await this.prisma.internalContract.findUnique({
+        where: { contractNumber: candidate },
+        select: { id: true }
+      });
+
+      if (!existing) {
+        return candidate;
+      }
+
+      attempt += 1;
+    }
+
+    throw new AppError(409, "INTERNAL_CONTRACT_NUMBER_EXISTS", "No fue posible reservar un numero unico para el contrato PSP.");
   }
 
   private async findOrThrow(contractId: string) {

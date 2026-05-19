@@ -1,4 +1,7 @@
 import type {
+  GeneratedProfessionalServicesContractRecord,
+  InternalContractDownloadFormat,
+  InternalContractGeneratedStateRecord,
   InternalContractTemplateWriteRecord,
   InternalContractWriteRecord,
   InternalContractsRepository
@@ -15,12 +18,20 @@ export class InternalContractsService {
     return this.repository.create(payload);
   }
 
+  public upsertGeneratedProfessionalServices(payload: GeneratedProfessionalServicesContractRecord) {
+    return this.repository.upsertGeneratedProfessionalServices(payload);
+  }
+
   public delete(contractId: string) {
     return this.repository.delete(contractId);
   }
 
-  public findDocument(contractId: string) {
-    return this.repository.findDocument(contractId);
+  public findDocument(contractId: string, format?: InternalContractDownloadFormat) {
+    return this.repository.findDocument(contractId, format);
+  }
+
+  public findGeneratedProfessionalServicesState(matterId: string): Promise<InternalContractGeneratedStateRecord | null> {
+    return this.repository.findGeneratedProfessionalServicesState(matterId);
   }
 
   public listCollaborators() {

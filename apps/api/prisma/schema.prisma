@@ -150,25 +150,36 @@ model Client {
 model InternalContract {
   id                String   @id @default(uuid())
   contractNumber    String   @unique
+  title             String?
   contractType      String
   documentKind      String   @default("CONTRACT")
   clientId          String?
   clientNumber      String?
   clientName        String?
   collaboratorName  String?
+  sourceMatterId    String?  @unique
+  sourceQuoteId     String?
+  signatureStatus   String   @default("PENDING")
   originalFileName  String?
   fileMimeType      String?
   fileSizeBytes     Int?
   fileContent       Bytes?
+  pdfOriginalFileName String?
+  pdfFileMimeType   String?
+  pdfFileSizeBytes  Int?
+  pdfFileContent    Bytes?
   paymentMilestones Json     @default("[]")
+  generatedPayload  Json?
   notes             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   client            Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
   @@index([contractType, contractNumber])
+  @@index([title])
   @@index([clientId])
   @@index([collaboratorName])
+  @@index([sourceQuoteId])
 }
 
 model InternalContractTemplate {
@@ -206,6 +217,7 @@ model DailyDocumentAssignment {
 
 model Quote {
   id          String   @id @default(uuid())
+  title       String   @default("")
   quoteNumber String   @unique
   clientId    String
   clientName  String
@@ -226,6 +238,8 @@ model Quote {
   client      Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
   leads       Lead[]
   matters     Matter[]
+
+  @@index([title])
 }
 
 model QuoteTemplate {

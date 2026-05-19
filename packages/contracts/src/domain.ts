@@ -45,6 +45,9 @@ export interface Client {
 
 export type InternalContractType = "PROFESSIONAL_SERVICES" | "LABOR";
 export type InternalContractDocumentKind = "CONTRACT" | "ADDENDUM";
+export type InternalContractDownloadFormat = "docx" | "pdf";
+export type InternalContractSignatureStatus = "PENDING" | "SIGNED";
+export type ProfessionalServicesContractClientKind = "PERSONA_FISICA" | "PERSONA_MORAL";
 
 export interface InternalContractPaymentMilestone {
   id: string;
@@ -54,9 +57,30 @@ export interface InternalContractPaymentMilestone {
   notes?: string;
 }
 
+export interface ProfessionalServicesContractFieldValues {
+  clientKind: ProfessionalServicesContractClientKind;
+  clientRfc: string;
+  legalRepresentative: string;
+  clientAddress: string;
+  clientPhone: string;
+  clientEmail: string;
+  startDate: string;
+  endDate: string;
+  signingDate: string;
+}
+
+export interface ProfessionalServicesContractServiceLine {
+  id: string;
+  service: string;
+  fees: string;
+  observations: string;
+  paymentMoment: string;
+}
+
 export interface InternalContract {
   id: string;
   contractNumber: string;
+  title?: string;
   contractType: InternalContractType;
   documentKind: InternalContractDocumentKind;
   clientId?: string;
@@ -66,10 +90,35 @@ export interface InternalContract {
   originalFileName?: string;
   fileMimeType?: string;
   fileSizeBytes?: number;
+  pdfOriginalFileName?: string;
+  pdfFileMimeType?: string;
+  pdfFileSizeBytes?: number;
+  sourceMatterId?: string;
+  sourceQuoteId?: string;
+  signatureStatus?: InternalContractSignatureStatus;
+  availableFormats: InternalContractDownloadFormat[];
   paymentMilestones: InternalContractPaymentMilestone[];
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProfessionalServicesContractPrefillResult {
+  contractId?: string;
+  matterId: string;
+  contractNumber: string;
+  clientNumber?: string;
+  clientName: string;
+  quoteId?: string;
+  quoteNumber?: string;
+  subject: string;
+  title: string;
+  signatureStatus: InternalContractSignatureStatus;
+  availableFormats: InternalContractDownloadFormat[];
+  fields: ProfessionalServicesContractFieldValues;
+  serviceLines: ProfessionalServicesContractServiceLine[];
+  paymentMilestones: InternalContractPaymentMilestone[];
+  totalMxn: number;
 }
 
 export interface InternalContractTemplate {
@@ -176,6 +225,10 @@ export interface LaborContractFieldValues {
   workdayEnd: string;
   monthlyGrossSalary: string;
   monthlyGrossSalaryText: string;
+  attendanceBonus: string;
+  attendanceBonusText: string;
+  punctualityBonus: string;
+  punctualityBonusText: string;
   biweeklyGrossSalary: string;
   biweeklyGrossSalaryText: string;
   signingDate: string;
@@ -381,6 +434,7 @@ export type QuoteLanguage = "es" | "en";
 
 export interface Quote {
   id: string;
+  title: string;
   quoteNumber: string;
   clientId: string;
   clientName: string;
@@ -398,6 +452,22 @@ export interface Quote {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+function normalizeQuoteTitleText(value?: string | null, fallback = "") {
+  return (value ?? "").trim().replace(/\s+/g, " ") || fallback;
+}
+
+export function buildQuoteTitle(input: {
+  clientName?: string | null;
+  quoteNumber?: string | null;
+  subject?: string | null;
+}) {
+  const clientName = normalizeQuoteTitleText(input.clientName, "Cliente sin nombre");
+  const quoteNumber = normalizeQuoteTitleText(input.quoteNumber, "Sin numero");
+  const subject = normalizeQuoteTitleText(input.subject, "Sin asunto");
+
+  return `${clientName} (${quoteNumber}) (${subject})`;
 }
 
 export interface QuoteTemplate {

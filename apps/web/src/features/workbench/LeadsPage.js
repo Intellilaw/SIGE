@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteModule } from "../auth/permissions";
@@ -224,10 +224,12 @@ export function LeadsPage() {
     const [quotes, setQuotes] = useState([]);
     const [commissionShortNames, setCommissionShortNames] = useState([]);
     const [selectedLeads, setSelectedLeads] = useState(new Set());
+    const [pendingScrollLeadId, setPendingScrollLeadId] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [clientSearch, setClientSearch] = useState("");
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState(null);
+    const leadRowRefs = useRef(new Map());
     const uniqueClients = useMemo(() => [...new Set(quotes.map((quote) => normalizeText(quote.clientName)).filter(Boolean))].sort((left, right) => left.localeCompare(right, "es-MX")), [quotes]);
     const commissionOptions = useMemo(() => [...new Set([
             ...commissionShortNames,
@@ -236,7 +238,8 @@ export function LeadsPage() {
     const searchWords = useMemo(() => getSearchWords(searchTerm), [searchTerm]);
     const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
     const hasActiveFilters = searchWords.length > 0 || clientSearchWords.length > 0;
-    const filteredActiveItems = useMemo(() => activeItems.filter((lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)), [activeItems, clientSearchWords, searchWords]);
+    const filteredActiveItems = useMemo(() => activeItems.filter((lead) => lead.id === pendingScrollLeadId ||
+        (matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords))), [activeItems, clientSearchWords, pendingScrollLeadId, searchWords]);
     const filteredHistoryItems = useMemo(() => historyItems.filter((lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)), [historyItems, clientSearchWords, searchWords]);
     const filteredMonthlyItems = useMemo(() => monthlyItems.filter((lead) => matchesLeadKeywordSearch(lead, searchWords) && matchesLeadClientSearch(lead, clientSearchWords)), [monthlyItems, clientSearchWords, searchWords]);
     const sentMonthlyTotal = useMemo(() => filteredMonthlyItems.reduce((sum, item) => sum + Number(item.amountMxn || 0), 0), [filteredMonthlyItems]);
@@ -292,6 +295,25 @@ export function LeadsPage() {
         }
         void loadMonthly();
     }, [activeTab, selectedMonth, selectedYear]);
+    useEffect(() => {
+        if (activeTab !== "leads" || !pendingScrollLeadId) {
+            return;
+        }
+        if (!filteredActiveItems.some((item) => item.id === pendingScrollLeadId)) {
+            return;
+        }
+        const animationFrameId = window.requestAnimationFrame(() => {
+            const row = leadRowRefs.current.get(pendingScrollLeadId);
+            if (!row) {
+                return;
+            }
+            row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+            const firstEditableField = row.querySelector("input:not([type='checkbox']), select");
+            firstEditableField?.focus({ preventScroll: true });
+            setPendingScrollLeadId(null);
+        });
+        return () => window.cancelAnimationFrame(animationFrameId);
+    }, [activeTab, filteredActiveItems, pendingScrollLeadId]);
     function syncLeadAcrossViews(updated) {
         setActiveItems((items) => {
             const next = updated.status === "ACTIVE" ? upsertLead(items, updated) : removeLead(items, updated.id);
@@ -350,6 +372,11 @@ export function LeadsPage() {
         }
         try {
             const created = await apiPost("/leads", {});
+            if (hasActiveFilters) {
+                setSearchTerm("");
+                setClientSearch("");
+            }
+            setPendingScrollLeadId(created.id);
             setActiveItems((items) => sortActive([...items, created]));
         }
         catch (error) {
@@ -576,7 +603,13 @@ export function LeadsPage() {
                                                                 } }) }), _jsx("th", { children: "Comision cierre" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Prospecto" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Total" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Ultima" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Siguiente" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" }), _jsx("th", { children: "Borrar" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "Cargando leads..." }) })) : filteredActiveItems.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: hasActiveFilters ? "No hay leads que coincidan con la busqueda." : "No hay leads activos." }) })) : (filteredActiveItems.map((item) => {
                                                     const rowState = evaluateLeadRow(item);
                                                     const linkedQuote = findQuoteByNumber(item.quoteNumber);
-                                                    return (_jsxs("tr", { className: [
+                                                    return (_jsxs("tr", { ref: (node) => {
+                                                            if (node) {
+                                                                leadRowRefs.current.set(item.id, node);
+                                                                return;
+                                                            }
+                                                            leadRowRefs.current.delete(item.id);
+                                                        }, className: [
                                                             rowState.tone === "danger" ? "lead-row-danger" : "",
                                                             rowState.tone === "next-business" ? "lead-row-next-business" : "",
                                                             selectedLeads.has(item.id) ? "lead-row-selected" : ""

@@ -80,6 +80,10 @@ const EMPTY_CONTRACT_FORM: LaborContractFieldValues = {
   workdayEnd: "18:00",
   monthlyGrossSalary: "",
   monthlyGrossSalaryText: "",
+  attendanceBonus: "",
+  attendanceBonusText: "",
+  punctualityBonus: "",
+  punctualityBonusText: "",
   biweeklyGrossSalary: "",
   biweeklyGrossSalaryText: "",
   signingDate: "",
@@ -98,6 +102,10 @@ const CONTRACT_FIELD_LABELS: Record<keyof LaborContractFieldValues, string> = {
   workdayEnd: "Hora de salida",
   monthlyGrossSalary: "Salario mensual",
   monthlyGrossSalaryText: "Salario mensual en letra",
+  attendanceBonus: "Bono de asistencia",
+  attendanceBonusText: "Bono de asistencia en letra",
+  punctualityBonus: "Bono de puntualidad",
+  punctualityBonusText: "Bono de puntualidad en letra",
   biweeklyGrossSalary: "Pago quincenal",
   biweeklyGrossSalaryText: "Pago quincenal en letra",
   signingDate: "Fecha de firma",
@@ -1268,7 +1276,7 @@ export function LaborFilesPage() {
                 <div className="panel-header">
                   <div>
                     <h2>Generación de contrato laboral</h2>
-                    <span>Word editable con datos del trabajador y resguardo automático en expediente.</span>
+                    <span>Word editable basado en el contrato de trabajo vigente y resguardo automático en expediente.</span>
                   </div>
                   <span className={`status-pill ${contractDocument ? "status-live" : "status-warning"}`}>
                     {contractDocument ? "Contrato guardado" : "Pendiente"}
@@ -1394,18 +1402,33 @@ export function LaborFilesPage() {
                             />
                           </label>
                           <label className="form-field">
-                            <span>Pago quincenal bruto</span>
+                            <span>Bono de asistencia</span>
                             <input
-                              placeholder="$0.00"
-                              value={contractForm.biweeklyGrossSalary}
-                              onChange={(event) => updateContractFormField("biweeklyGrossSalary", event.target.value)}
+                              placeholder="10% del salario si se deja vacío"
+                              value={contractForm.attendanceBonus}
+                              onChange={(event) => updateContractFormField("attendanceBonus", event.target.value)}
                             />
                           </label>
                           <label className="form-field">
-                            <span>Pago quincenal en letra</span>
+                            <span>Bono de asistencia en letra</span>
                             <input
-                              value={contractForm.biweeklyGrossSalaryText}
-                              onChange={(event) => updateContractFormField("biweeklyGrossSalaryText", event.target.value)}
+                              value={contractForm.attendanceBonusText}
+                              onChange={(event) => updateContractFormField("attendanceBonusText", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Bono de puntualidad</span>
+                            <input
+                              placeholder="10% del salario si se deja vacío"
+                              value={contractForm.punctualityBonus}
+                              onChange={(event) => updateContractFormField("punctualityBonus", event.target.value)}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Bono de puntualidad en letra</span>
+                            <input
+                              value={contractForm.punctualityBonusText}
+                              onChange={(event) => updateContractFormField("punctualityBonusText", event.target.value)}
                             />
                           </label>
                           <label className="form-field">

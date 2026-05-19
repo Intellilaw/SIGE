@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { UIEvent } from "react";
-import type { Client, CommissionReceiver, FinanceRecord, FinanceRecordStats, FinanceSnapshot, Matter } from "@sige/contracts";
+import type { FormEvent, UIEvent } from "react";
+import type {
+  Client,
+  CommissionReceiver,
+  FinanceRecord,
+  FinanceRecordStats,
+  FinanceSnapshot,
+  InternalContract,
+  InternalContractDownloadFormat,
+  Matter,
+  ProfessionalServicesContractFieldValues,
+  ProfessionalServicesContractPrefillResult
+} from "@sige/contracts";
 import { TEAM_OPTIONS } from "@sige/contracts";
 
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
 
@@ -119,12 +130,28 @@ const ACTIVE_COLUMN_WIDTHS = [
   "140px"
 ] as const;
 
+const EMPTY_PROFESSIONAL_SERVICES_FIELDS: ProfessionalServicesContractFieldValues = {
+  clientKind: "PERSONA_MORAL",
+  clientRfc: "",
+  legalRepresentative: "",
+  clientAddress: "",
+  clientPhone: "",
+  clientEmail: "",
+  startDate: "",
+  endDate: "",
+  signingDate: ""
+};
+
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message;
   }
 
   return "Ocurrio un error inesperado.";
+}
+
+function hasPermission(permissions: string[] | undefined, permission: string) {
+  return Boolean(permissions?.includes("*") || permissions?.includes(permission));
 }
 
 function normalizeText(value?: string | null) {
@@ -166,6 +193,24 @@ function toDateInput(value?: string | null) {
 function formatDateList(values: Array<string | null | undefined>) {
   const dates = values.map(toDateInput).filter(Boolean);
   return dates.length > 0 ? dates.join(" / ") : "-";
+}
+
+function downloadBlobFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function fetchOptionalRows<T>(request: Promise<T[]>) {
+  try {
+    return await request;
+  } catch {
+    return [];
+  }
 }
 
 function getMonthName(month: number) {
@@ -377,6 +422,7 @@ export function FinancesPage() {
   const { user } = useAuth();
   const canReadFinances = canReadModule(user, "finances");
   const canWriteFinances = canWriteModule(user, "finances");
+  const canReadInternalContracts = hasPermission(user?.permissions, "internal-contracts:read") || hasPermission(user?.permissions, "internal-contracts:write");
   const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
   const canDeleteFinanceRecords = isSuperadmin || canWriteFinances;
   const pageRef = useRef<HTMLElement | null>(null);
@@ -392,6 +438,7 @@ export function FinancesPage() {
   const [snapshots, setSnapshots] = useState<FinanceSnapshot[]>([]);
   const [viewingSnapshot, setViewingSnapshot] = useState<FinanceSnapshot | null>(null);
   const [activeMatters, setActiveMatters] = useState<FinanceMatterRow[]>([]);
+  const [professionalContracts, setProfessionalContracts] = useState<InternalContract[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [receivers, setReceivers] = useState<CommissionReceiver[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -399,6 +446,13 @@ export function FinancesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
+  const [contractFormOpen, setContractFormOpen] = useState(false);
+  const [contractPrefillLoading, setContractPrefillLoading] = useState(false);
+  const [contractGenerating, setContractGenerating] = useState(false);
+  const [contractActionKey, setContractActionKey] = useState<string | null>(null);
+  const [contractFlash, setContractFlash] = useState<string | null>(null);
+  const [contractPrefill, setContractPrefill] = useState<ProfessionalServicesContractPrefillResult | null>(null);
+  const [contractForm, setContractForm] = useState<ProfessionalServicesContractFieldValues>(EMPTY_PROFESSIONAL_SERVICES_FIELDS);
   const [wordSearch, setWordSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
 
@@ -557,6 +611,138 @@ export function FinancesPage() {
     () => filteredActiveMatters.filter((matter) => matter.matterType === "RETAINER"),
     [filteredActiveMatters]
   );
+  const professionalContractsByMatterId = useMemo(() => {
+    const next = new Map<string, InternalContract>();
+
+    professionalContracts
+      .filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES" && contract.sourceMatterId)
+      .forEach((contract) => {
+        next.set(contract.sourceMatterId!, contract);
+      });
+
+    return next;
+  }, [professionalContracts]);
+
+  function upsertProfessionalContract(contract: InternalContract) {
+    setProfessionalContracts((current) => {
+      const others = current.filter((entry) => entry.id !== contract.id);
+      return [contract, ...others];
+    });
+  }
+
+  function closeContractForm() {
+    setContractFormOpen(false);
+    setContractPrefillLoading(false);
+    setContractGenerating(false);
+    setContractActionKey(null);
+    setContractPrefill(null);
+    setContractForm(EMPTY_PROFESSIONAL_SERVICES_FIELDS);
+    setContractFlash(null);
+  }
+
+  function getContractStatus(contract?: InternalContract) {
+    if (!contract) {
+      return {
+        label: "Pendiente",
+        className: "finance-contract-status finance-contract-status-missing"
+      };
+    }
+
+    if (contract.signatureStatus === "SIGNED") {
+      return {
+        label: "Firmado",
+        className: "finance-contract-status finance-contract-status-signed"
+      };
+    }
+
+    return {
+      label: "No firmado",
+      className: "finance-contract-status finance-contract-status-pending"
+    };
+  }
+
+  async function handleContractDownload(contractId: string, format: InternalContractDownloadFormat) {
+    const actionKey = `${contractId}:${format}`;
+    setContractActionKey(actionKey);
+    setError(null);
+
+    try {
+      const suffix = format === "pdf" ? "?format=pdf" : "?format=docx";
+      const { blob, filename } = await apiDownload(`/internal-contracts/${encodeURIComponent(contractId)}/document${suffix}`);
+      downloadBlobFile(blob, filename ?? `contrato.${format === "pdf" ? "pdf" : "docx"}`);
+    } catch (caughtError) {
+      setError(toErrorMessage(caughtError));
+    } finally {
+      setContractActionKey(null);
+    }
+  }
+
+  function updateContractFormField<K extends keyof ProfessionalServicesContractFieldValues>(
+    field: K,
+    value: ProfessionalServicesContractFieldValues[K]
+  ) {
+    setContractForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "clientKind" && value === "PERSONA_FISICA" ? { legalRepresentative: "" } : {})
+    }));
+    setContractFlash(null);
+  }
+
+  async function handleOpenContractForm(matter: FinanceMatterRow) {
+    setContractFormOpen(true);
+    setContractPrefillLoading(true);
+    setContractGenerating(false);
+    setContractActionKey(null);
+    setContractFlash(null);
+    setContractPrefill(null);
+    setError(null);
+
+    try {
+      const result = await apiGet<ProfessionalServicesContractPrefillResult>(
+        `/internal-contracts/professional-services/prefill/${encodeURIComponent(matter.id)}`
+      );
+      setContractPrefill(result);
+      setContractForm(result.fields);
+    } catch (caughtError) {
+      setError(toErrorMessage(caughtError));
+      setContractFormOpen(false);
+    } finally {
+      setContractPrefillLoading(false);
+    }
+  }
+
+  async function handleGenerateContract(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!contractPrefill) {
+      return;
+    }
+
+    setContractGenerating(true);
+    setContractFlash(null);
+    setError(null);
+
+    try {
+      const created = await apiPost<InternalContract>("/internal-contracts/professional-services/generate", {
+        matterId: contractPrefill.matterId,
+        fields: contractForm
+      });
+      upsertProfessionalContract(created);
+      setContractPrefill((current) => current
+        ? {
+            ...current,
+            contractId: created.id,
+            signatureStatus: created.signatureStatus ?? "PENDING",
+            availableFormats: created.availableFormats
+          }
+        : current);
+      setContractFlash("Contrato generado y guardado en Administracion de contratos internos.");
+    } catch (caughtError) {
+      setError(toErrorMessage(caughtError));
+    } finally {
+      setContractGenerating(false);
+    }
+  }
 
   async function loadCurrentMonthPresence() {
     if (!canReadFinances) {
@@ -626,6 +812,7 @@ export function FinancesPage() {
     if (!canReadFinances) {
       setClients([]);
       setActiveMatters([]);
+      setProfessionalContracts([]);
       setLoading(false);
       setError("No tienes permisos para consultar Finanzas.");
       return;
@@ -634,11 +821,13 @@ export function FinancesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [matters, nextClients] = await Promise.all([
+      const [matters, nextClients, nextContracts] = await Promise.all([
         apiGet<Matter[]>("/matters"),
-        canWriteFinances ? apiGet<Client[]>("/clients") : Promise.resolve([])
+        canWriteFinances ? apiGet<Client[]>("/clients") : Promise.resolve([]),
+        canReadInternalContracts ? fetchOptionalRows(apiGet<InternalContract[]>("/internal-contracts")) : Promise.resolve([])
       ]);
       setClients(nextClients);
+      setProfessionalContracts(nextContracts.filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES"));
       setActiveMatters(
         matters.map((matter) => ({
           ...matter,
@@ -666,7 +855,13 @@ export function FinancesPage() {
     }
 
     void loadActiveMattersView();
-  }, [activeTab, canReadFinances, selectedMonth, selectedYear]);
+  }, [activeTab, canReadFinances, canReadInternalContracts, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    if (activeTab !== "active-matters" && contractFormOpen) {
+      closeContractForm();
+    }
+  }, [activeTab, contractFormOpen]);
 
   function resolveClientNumber(clientName?: string | null, fallback?: string | null) {
     return clientNumberByName.get(normalizeComparableText(clientName)) ?? normalizeText(fallback);
@@ -1248,25 +1443,18 @@ export function FinancesPage() {
 
     return (
       <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances}>
-        <div className="finance-active-table-shell finance-table-shell-sticky">
-          <div className="finance-table-x-nav" onScroll={handleFinanceTableScroll} aria-label="Desplazamiento horizontal de asuntos activos">
-            <div className="finance-table-x-nav-spacer finance-active-table-x-nav-spacer" />
-          </div>
-          <div className="finance-table-sticky-head">
-            <table className="finance-active-table">
-              {renderActiveColGroup()}
-              {renderActiveHeader()}
-            </table>
-          </div>
-          <div className="finance-table-scroll" onScroll={handleFinanceTableScroll}>
-            <table className="finance-active-table">
-              {renderActiveColGroup()}
-              <tbody>
+        <div className="finance-active-table-shell">
+          <table className="finance-active-table">
+            {renderActiveColGroup()}
+            {renderActiveHeader()}
+            <tbody>
             {items.map((matter) => {
               const highlight = shouldHighlightMatter(matter);
               const targetDate = new Date(matter.transferYear, matter.transferMonth - 1, 1);
               const currentDate = new Date(currentYear, currentMonth - 1, 1);
               const disabled = targetDate > currentDate;
+              const relatedContract = professionalContractsByMatterId.get(matter.id);
+              const contractStatus = getContractStatus(relatedContract);
 
               return (
                 <tr className={highlight ? "finance-row-danger" : variant === "retainer" ? "finance-row-retainer" : ""} key={matter.id} title={highlight ? getMatterHighlightMessage() : ""}>
@@ -1279,12 +1467,12 @@ export function FinancesPage() {
                   <td>{matter.commissionAssignee ?? "-"}</td>
                   <td>{TEAM_OPTIONS.find((option) => option.key === matter.responsibleTeam)?.label ?? "-"}</td>
                   <td>
-                    <button className="secondary-button finance-contract-button" type="button">
+                    <button className="secondary-button finance-contract-button" type="button" onClick={() => void handleOpenContractForm(matter)}>
                       Generar contrato
                     </button>
                   </td>
                   <td>
-                    <span className="finance-contract-status finance-contract-status-pending">No firmado</span>
+                    <span className={contractStatus.className}>{contractStatus.label}</span>
                   </td>
                   <td><input className="finance-input" type="date" value={toDateInput(matter.nextPaymentDate)} onChange={(event) => void handleMatterNextPaymentDateChange(matter.id, event.target.value)} /></td>
                   <td>
@@ -1304,9 +1492,8 @@ export function FinancesPage() {
             {!loading && items.length === 0 ? (
               <tr><td className="centered-inline-message" colSpan={13}>{variant === "retainer" ? "No hay igualas activas." : "No hay asuntos unicos activos."}</td></tr>
             ) : null}
-              </tbody>
-            </table>
-          </div>
+            </tbody>
+          </table>
         </div>
       </fieldset>
     );
@@ -1460,6 +1647,186 @@ export function FinancesPage() {
       ) : null}
 
       {activeTab === "snapshots" ? renderSnapshots() : null}
+
+      {contractFormOpen ? (
+        <div className="finance-modal-backdrop" role="presentation" onClick={() => (contractGenerating ? undefined : closeContractForm())}>
+          <div className="finance-modal finance-modal-wide finance-contract-modal" role="dialog" aria-modal="true" aria-label="Generar contrato de prestacion de servicios" onClick={(event) => event.stopPropagation()}>
+            <div className="finance-modal-head">
+              <div>
+                <h3>Contrato de prestacion de servicios profesionales</h3>
+                <p className="muted">La portada se llena aqui y los servicios, honorarios y momentos de pago se toman de la cotizacion vinculada.</p>
+              </div>
+              <button className="secondary-button" type="button" disabled={contractGenerating} onClick={closeContractForm}>Cerrar</button>
+            </div>
+
+            {contractPrefillLoading ? (
+              <div className="centered-inline-message">Preparando formulario del contrato...</div>
+            ) : contractPrefill ? (
+              <form className="finance-contract-form" onSubmit={handleGenerateContract}>
+                <div className="quotes-detail-grid finance-contract-summary-grid">
+                  <div className="quotes-detail-block">
+                    <strong>No. de contrato</strong>
+                    <p>{contractPrefill.contractNumber}</p>
+                  </div>
+                  <div className="quotes-detail-block">
+                    <strong>Cliente</strong>
+                    <p>{[contractPrefill.clientNumber, contractPrefill.clientName].filter(Boolean).join(" - ")}</p>
+                  </div>
+                  <div className="quotes-detail-block">
+                    <strong>No. de cotizacion</strong>
+                    <p>{contractPrefill.quoteNumber ?? "-"}</p>
+                  </div>
+                  <div className="quotes-detail-block">
+                    <strong>Asunto</strong>
+                    <p>{contractPrefill.subject}</p>
+                  </div>
+                  <div className="quotes-detail-block">
+                    <strong>Total cotizacion</strong>
+                    <p>{formatCurrency(contractPrefill.totalMxn)}</p>
+                  </div>
+                  <div className="quotes-detail-block">
+                    <strong>Estatus</strong>
+                    <p>{getContractStatus(professionalContractsByMatterId.get(contractPrefill.matterId)).label}</p>
+                  </div>
+                </div>
+
+                {contractFlash ? <div className="message-banner message-success">{contractFlash}</div> : null}
+
+                <div className="finance-contract-form-section">
+                  <div className="panel-header finance-contract-section-head">
+                    <h4>Datos editables de la portada</h4>
+                    <span>Estos datos se guardan para futuras regeneraciones.</span>
+                  </div>
+
+                  <div className="finance-contract-field-grid">
+                    <label className="form-field">
+                      <span>Tipo de cliente</span>
+                      <select value={contractForm.clientKind} onChange={(event) => updateContractFormField("clientKind", event.target.value as ProfessionalServicesContractFieldValues["clientKind"])}>
+                        <option value="PERSONA_MORAL">Persona moral</option>
+                        <option value="PERSONA_FISICA">Persona fisica</option>
+                      </select>
+                    </label>
+
+                    <label className="form-field">
+                      <span>RFC del cliente</span>
+                      <input required value={contractForm.clientRfc} onChange={(event) => updateContractFormField("clientRfc", event.target.value)} />
+                    </label>
+
+                    {contractForm.clientKind === "PERSONA_MORAL" ? (
+                      <label className="form-field">
+                        <span>Representante legal</span>
+                        <input required value={contractForm.legalRepresentative} onChange={(event) => updateContractFormField("legalRepresentative", event.target.value)} />
+                      </label>
+                    ) : null}
+
+                    <label className="form-field finance-contract-wide-field">
+                      <span>Domicilio</span>
+                      <textarea required value={contractForm.clientAddress} onChange={(event) => updateContractFormField("clientAddress", event.target.value)} />
+                    </label>
+
+                    <label className="form-field">
+                      <span>Telefono</span>
+                      <input required value={contractForm.clientPhone} onChange={(event) => updateContractFormField("clientPhone", event.target.value)} />
+                    </label>
+
+                    <label className="form-field">
+                      <span>Correo electronico</span>
+                      <input required type="email" value={contractForm.clientEmail} onChange={(event) => updateContractFormField("clientEmail", event.target.value)} />
+                    </label>
+
+                    <label className="form-field">
+                      <span>Fecha de inicio</span>
+                      <input required type="date" value={contractForm.startDate} onChange={(event) => updateContractFormField("startDate", event.target.value)} />
+                    </label>
+
+                    <label className="form-field">
+                      <span>Fecha de terminacion</span>
+                      <input type="date" value={contractForm.endDate} onChange={(event) => updateContractFormField("endDate", event.target.value)} />
+                    </label>
+
+                    <label className="form-field">
+                      <span>Fecha de firma</span>
+                      <input required type="date" value={contractForm.signingDate} onChange={(event) => updateContractFormField("signingDate", event.target.value)} />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="finance-contract-form-section">
+                  <div className="panel-header finance-contract-section-head">
+                    <h4>Informacion tomada automaticamente de la cotizacion</h4>
+                    <span>Solo lectura para evitar doble captura.</span>
+                  </div>
+
+                  <div className="finance-table-shell finance-contract-table-shell">
+                    <table className="finance-table finance-contract-detail-table">
+                      <thead>
+                        <tr>
+                          <th>Servicio</th>
+                          <th>Honorarios</th>
+                          <th>Observaciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {contractPrefill.serviceLines.map((line) => (
+                          <tr key={line.id}>
+                            <td>{line.service}</td>
+                            <td>{line.fees}</td>
+                            <td>{line.observations}</td>
+                          </tr>
+                        ))}
+                        {contractPrefill.serviceLines.length === 0 ? (
+                          <tr>
+                            <td className="centered-inline-message" colSpan={3}>La cotizacion no trae conceptos visibles.</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="finance-contract-milestones">
+                    <strong>Momentos de pago</strong>
+                    <div>
+                      {contractPrefill.paymentMilestones.length > 0
+                        ? contractPrefill.paymentMilestones.map((milestone) => (
+                            <span className="finance-contract-milestone-chip" key={milestone.id}>{milestone.label}</span>
+                          ))
+                        : <span className="muted">Sin momentos de pago especificados.</span>}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-modal-actions">
+                  <button className="primary-button" type="submit" disabled={contractGenerating || contractPrefillLoading}>
+                    {contractGenerating ? "Generando..." : "Generar y guardar"}
+                  </button>
+                  {contractPrefill.contractId && contractPrefill.availableFormats.includes("docx") ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={contractActionKey === `${contractPrefill.contractId}:docx`}
+                      onClick={() => void handleContractDownload(contractPrefill.contractId!, "docx")}
+                    >
+                      {contractActionKey === `${contractPrefill.contractId}:docx` ? "DOCX..." : "Descargar DOCX"}
+                    </button>
+                  ) : null}
+                  {contractPrefill.contractId && contractPrefill.availableFormats.includes("pdf") ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={contractActionKey === `${contractPrefill.contractId}:pdf`}
+                      onClick={() => void handleContractDownload(contractPrefill.contractId!, "pdf")}
+                    >
+                      {contractActionKey === `${contractPrefill.contractId}:pdf` ? "PDF..." : "Descargar PDF"}
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            ) : (
+              <div className="centered-inline-message">No fue posible preparar el contrato para este asunto.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {copyModalOpen ? (
         <div className="finance-modal-backdrop">

@@ -16,6 +16,8 @@ import type {
   HolidayAuthorityShortName,
   InternalContract,
   InternalContractCollaborator,
+  InternalContractDownloadFormat,
+  InternalContractSignatureStatus,
   InternalContractTemplate,
   LaborFile,
   LaborFileDocument,
@@ -29,6 +31,7 @@ import type {
   Lead,
   ManagedUser,
   Matter,
+  ProfessionalServicesContractFieldValues,
   Quote,
   QuoteTemplate,
   TaskAdditionalTask,
@@ -40,6 +43,8 @@ import type {
   TaskModuleDefinition,
   UpdateManagedUserInput
 } from "@sige/contracts";
+
+export type { InternalContractDownloadFormat };
 
 export interface RefreshTokenRecord {
   id: string;
@@ -120,6 +125,7 @@ export interface ClientsRepository {
 
 export interface InternalContractWriteRecord {
   contractNumber: string;
+  title?: string | null;
   contractType: InternalContract["contractType"];
   documentKind: InternalContract["documentKind"];
   clientId?: string | null;
@@ -130,6 +136,26 @@ export interface InternalContractWriteRecord {
   fileMimeType?: string | null;
   fileSizeBytes?: number | null;
   fileContent?: Buffer | null;
+}
+
+export interface GeneratedProfessionalServicesContractRecord {
+  contractNumber: string;
+  title?: string | null;
+  clientId: string;
+  sourceMatterId: string;
+  sourceQuoteId?: string | null;
+  signatureStatus: InternalContractSignatureStatus;
+  fields: ProfessionalServicesContractFieldValues;
+  paymentMilestones: InternalContract["paymentMilestones"];
+  notes?: string | null;
+  docxOriginalFileName: string;
+  docxFileMimeType?: string | null;
+  docxFileSizeBytes?: number | null;
+  docxFileContent: Buffer;
+  pdfOriginalFileName: string;
+  pdfFileMimeType?: string | null;
+  pdfFileSizeBytes?: number | null;
+  pdfFileContent: Buffer;
 }
 
 export interface InternalContractTemplateWriteRecord {
@@ -145,7 +171,15 @@ export interface InternalContractDocumentRecord {
   contractNumber: string;
   originalFileName: string;
   fileMimeType?: string | null;
+  format: InternalContractDownloadFormat;
   fileContent: Buffer;
+}
+
+export interface InternalContractGeneratedStateRecord {
+  contractId: string;
+  signatureStatus: InternalContractSignatureStatus;
+  availableFormats: InternalContractDownloadFormat[];
+  fields: ProfessionalServicesContractFieldValues;
 }
 
 export interface InternalContractTemplateDocumentRecord {
@@ -158,8 +192,10 @@ export interface InternalContractTemplateDocumentRecord {
 export interface InternalContractsRepository {
   list(): Promise<InternalContract[]>;
   create(payload: InternalContractWriteRecord): Promise<InternalContract>;
+  upsertGeneratedProfessionalServices(payload: GeneratedProfessionalServicesContractRecord): Promise<InternalContract>;
   delete(contractId: string): Promise<void>;
-  findDocument(contractId: string): Promise<InternalContractDocumentRecord | null>;
+  findDocument(contractId: string, format?: InternalContractDownloadFormat): Promise<InternalContractDocumentRecord | null>;
+  findGeneratedProfessionalServicesState(matterId: string): Promise<InternalContractGeneratedStateRecord | null>;
   listCollaborators(): Promise<InternalContractCollaborator[]>;
   listTemplates(): Promise<InternalContractTemplate[]>;
   createTemplate(payload: InternalContractTemplateWriteRecord): Promise<InternalContractTemplate>;
