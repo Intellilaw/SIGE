@@ -15,6 +15,9 @@ interface SsoJwtPayload {
   name: string;
   username: string;
   short_name?: string;
+  role: string;
+  legacy_role: string;
+  is_superadmin: boolean;
   iat: number;
   nbf: number;
   exp: number;
@@ -53,6 +56,9 @@ export function createManagerDeEscritosSsoUrl(user: AuthUser, config: AppConfig)
     name: user.displayName,
     username: user.username,
     short_name: user.shortName,
+    role: user.role,
+    legacy_role: user.legacyRole,
+    is_superadmin: user.role === "SUPERADMIN" || user.legacyRole === "SUPERADMIN",
     iat: issuedAt,
     nbf: issuedAt - 5,
     exp: expiresAt,

@@ -13,7 +13,6 @@ export class PrismaAuthRepository implements AuthRepository {
     const usernameCandidates = buildLegacyUsernameLookupCandidates(normalizedIdentifier);
     const record = await this.prisma.user.findFirst({
       where: {
-        isActive: true,
         OR: [
           { email: normalizedEmail },
           ...usernameCandidates.map((username) => ({

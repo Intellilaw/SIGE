@@ -54,7 +54,6 @@ interface ExecutionTaskPanelProps {
   clientNumber?: string;
   mode: "create" | "history" | null;
   tasks: MatterTaskView[];
-  userShortName?: string;
   onClose: () => void;
   onModeChange: (mode: "create" | "history") => void;
   onCreateTask: (payload: CreateTaskInput) => Promise<void>;
@@ -116,7 +115,6 @@ export function ExecutionTaskPanel({
   clientNumber,
   mode,
   tasks,
-  userShortName,
   onClose,
   onModeChange,
   onCreateTask,
@@ -126,7 +124,7 @@ export function ExecutionTaskPanel({
   const [taskSearch, setTaskSearch] = useState("");
   const [taskSearchOpen, setTaskSearchOpen] = useState(false);
   const [selectorTargets, setSelectorTargets] = useState<SelectorTargetEntry[]>([]);
-  const [responsible, setResponsible] = useState(userShortName || module.defaultResponsible);
+  const [responsible, setResponsible] = useState(module.defaultResponsible);
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -165,10 +163,10 @@ export function ExecutionTaskPanel({
     setTaskSearch("");
     setTaskSearchOpen(false);
     setSelectorTargets([]);
-    setResponsible(userShortName || module.defaultResponsible);
+    setResponsible(module.defaultResponsible);
     setDueDate(addBusinessDays(new Date(), 3));
     setSuccessMessage(null);
-  }, [matter?.id, mode, module.defaultResponsible, userShortName]);
+  }, [matter?.id, mode, module.defaultResponsible]);
 
   useEffect(() => {
     if (!taskSearchOpen) {

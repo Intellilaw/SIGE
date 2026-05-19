@@ -48,6 +48,28 @@ const INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
       "Referencia del ID RI que genero el comentario."
     ],
     cadence: "Revision periodica por direccion antes de activar cada nueva seccion conectada."
+  },
+  {
+    id: "RI-001",
+    section: "Ejecucion",
+    surface: "Columna Input de RI",
+    status: "active",
+    promptName: "Comentarios operativos de ejecucion",
+    promptVersion: "v0.1",
+    prompt:
+      "Analiza el asunto en ejecucion y genera comentarios breves para detectar riesgos, omisiones, vencimientos, falta de contexto o pasos siguientes que deban revisarse por el equipo responsable.",
+    context: [
+      "Datos del asunto, cliente, cotizacion, proceso especifico e ID del asunto.",
+      "Siguiente tarea, fecha de siguiente tarea, origen y canal operativo.",
+      "Autoridad de dias inhabiles y datos de grupo interno cuando existan.",
+      "Estado de conclusion, hito de conclusion y notas visibles del asunto."
+    ],
+    output: [
+      "Input de RI visible en la columna de Ejecucion.",
+      "Observacion accionable y breve para el equipo.",
+      "Referencia visual RI-001 en el encabezado de la columna."
+    ],
+    cadence: "Ajuste de prompt cuando direccion refine la supervision de asuntos en ejecucion."
   }
 ];
 
@@ -59,19 +81,12 @@ const STATUS_LABELS: Record<IntelligenceConnectionStatus, string> = {
 
 const summaryCards = [
   { label: "Modelo frontier", value: OPENAI_FRONTIER_MODEL.modelId, tone: "model" },
-  { label: "Secciones SIGE activas", value: "0", tone: "active" },
+  { label: "Secciones SIGE activas", value: String(INTELLIGENCE_CONNECTIONS.filter((connection) => connection.status === "active").length), tone: "active" },
   { label: "Registro base", value: "RI-000", tone: "base" },
   { label: "Prompts gobernados", value: String(INTELLIGENCE_CONNECTIONS.length), tone: "prompt" }
 ];
 
-export function RusconiIntelligencePage() {
-  const { user } = useAuth();
-  const canAccess = canAccessGeneralSupervision(user);
-
-  if (!canAccess) {
-    return <Navigate to="/app" replace />;
-  }
-
+export function RusconiIntelligenceContent() {
   return (
     <section className="page-stack rusconi-intelligence-page">
       <header className="hero module-hero ri-hero">
@@ -119,7 +134,7 @@ export function RusconiIntelligencePage() {
           <span>RI + ID</span>
         </div>
         <div className="ri-identity-strip">
-          <RusconiIntelligenceBadge connectionId="RI-001" label="Vista conectada de ejemplo visual" />
+          <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
           <RusconiIntelligenceBadge connectionId="RI-014" label="Flujo conectado de ejemplo visual" />
           <RusconiIntelligenceBadge connectionId="RI-027" label="Columna conectada de ejemplo visual" />
         </div>
@@ -194,4 +209,15 @@ export function RusconiIntelligencePage() {
       </section>
     </section>
   );
+}
+
+export function RusconiIntelligencePage() {
+  const { user } = useAuth();
+  const canAccess = canAccessGeneralSupervision(user);
+
+  if (!canAccess) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return <RusconiIntelligenceContent />;
 }

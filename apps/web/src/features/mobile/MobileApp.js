@@ -50,8 +50,8 @@ function mobileResponsibleMatches(value, member, sharedAliases) {
 function dedupeResponsibleOptions(values) {
     return Array.from(new Set(values.map(normalizeResponsibleOption).filter(Boolean))).sort((left, right) => left.localeCompare(right));
 }
-function getDefaultResponsibleOption(userShortName, moduleDefaultResponsible) {
-    return normalizeResponsibleOption(userShortName) || splitResponsibleOptions(moduleDefaultResponsible)[0] || "";
+function getDefaultResponsibleOption(moduleDefaultResponsible) {
+    return normalizeResponsibleOption(moduleDefaultResponsible) || splitResponsibleOptions(moduleDefaultResponsible)[0] || "";
 }
 function normalizeComparableText(value) {
     return normalizeText(value)
@@ -894,7 +894,7 @@ export function MobileExecutionTeamPage() {
     const [eventSearch, setEventSearch] = useState("");
     const [eventSearchOpen, setEventSearchOpen] = useState(false);
     const [targets, setTargets] = useState([]);
-    const [responsible, setResponsible] = useState(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
+    const [responsible, setResponsible] = useState(getDefaultResponsibleOption(module?.defaultResponsible));
     const [responsibleOptions, setResponsibleOptions] = useState([]);
     const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
     const [submitting, setSubmitting] = useState(false);
@@ -912,9 +912,8 @@ export function MobileExecutionTeamPage() {
     const moduleResponsibleOptions = useMemo(() => dedupeResponsibleOptions([
         ...responsibleOptions,
         ...fallbackResponsibleOptions,
-        user?.shortName,
         responsible
-    ]), [fallbackResponsibleOptions, responsible, responsibleOptions, user?.shortName]);
+    ]), [fallbackResponsibleOptions, responsible, responsibleOptions]);
     async function loadModuleData() {
         if (!module) {
             return;
@@ -950,8 +949,17 @@ export function MobileExecutionTeamPage() {
         }
     }, [module?.moduleId, canAccess]);
     useEffect(() => {
-        setResponsible(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
-    }, [module?.moduleId, user?.shortName]);
+        setResponsible(getDefaultResponsibleOption(module?.defaultResponsible));
+    }, [module?.moduleId, module?.defaultResponsible]);
+    useEffect(() => {
+        setSelectedEventId("");
+        setEventSearch("");
+        setEventSearchOpen(false);
+        setTargets([]);
+        setResponsible(getDefaultResponsibleOption(module?.defaultResponsible));
+        setDueDate(addBusinessDays(new Date(), 3));
+        setSuccessMessage(null);
+    }, [selectedMatterId, module?.moduleId, module?.defaultResponsible]);
     useEffect(() => {
         if (!module || !canAccess) {
             setResponsibleOptions([]);
@@ -963,14 +971,14 @@ export function MobileExecutionTeamPage() {
         async function loadResponsibleOptions() {
             try {
                 const loaded = await apiGet(`/users/team-short-names?team=${encodeURIComponent(team)}`);
-                const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions, user?.shortName]);
+                const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions]);
                 if (!cancelled) {
                     setResponsibleOptions(nextOptions.length > 0 ? nextOptions : fallbackOptions);
                 }
             }
             catch {
                 if (!cancelled) {
-                    setResponsibleOptions(dedupeResponsibleOptions([...fallbackOptions, user?.shortName]));
+                    setResponsibleOptions(fallbackOptions);
                 }
             }
         }
@@ -978,7 +986,7 @@ export function MobileExecutionTeamPage() {
         return () => {
             cancelled = true;
         };
-    }, [canAccess, module?.moduleId, module?.team, module?.defaultResponsible, user?.shortName]);
+    }, [canAccess, module?.moduleId, module?.team, module?.defaultResponsible]);
     useEffect(() => {
         if (!eventSearchOpen) {
             return;

@@ -84,7 +84,7 @@ function run(command: string, args: string[]) {
 
 async function ensureLocalPrismaEngineIsEnabled() {
   const generatedClient = await fs.readFile(generatedPrismaClientPath, "utf8");
-  const patchedClient = generatedClient.replace('"copyEngine": false', '"copyEngine": true');
+  const patchedClient = generatedClient.replaceAll('"copyEngine": false', '"copyEngine": true');
 
   if (patchedClient !== generatedClient) {
     await fs.writeFile(generatedPrismaClientPath, patchedClient);

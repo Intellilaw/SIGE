@@ -6,7 +6,6 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
 import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
-import { BriefManagerRedirectPage } from "./features/modules/BriefManagerRedirectPage";
 import { HolidaysPage } from "./features/modules/HolidaysPage";
 import { InternalContractsPage } from "./features/modules/InternalContractsPage";
 import { LaborFilesPage } from "./features/modules/LaborFilesPage";
@@ -115,7 +114,7 @@ export default function App() {
             <Route path="general-supervision" element={<GeneralSupervisionPage />} />
             <Route path="rusconi-intelligence" element={<RusconiIntelligencePage />} />
             <Route path="matter-catalog" element={<MatterCatalogPage />} />
-            <Route path="brief-manager" element={<BriefManagerRedirectPage />} />
+            <Route path="brief-manager" element={<Navigate to="/app" replace />} />
             <Route path="internal-contracts" element={<InternalContractsPage />} />
             <Route path="labor-file" element={<LaborFilesPage />} />
             <Route path="daily-documents" element={<DailyDocumentsPage />} />

@@ -147,8 +147,8 @@ function dedupeResponsibleOptions(values: Array<string | undefined | null>) {
   );
 }
 
-function getDefaultResponsibleOption(userShortName?: string | null, moduleDefaultResponsible?: string | null) {
-  return normalizeResponsibleOption(userShortName) || splitResponsibleOptions(moduleDefaultResponsible)[0] || "";
+function getDefaultResponsibleOption(moduleDefaultResponsible?: string | null) {
+  return normalizeResponsibleOption(moduleDefaultResponsible) || splitResponsibleOptions(moduleDefaultResponsible)[0] || "";
 }
 
 function normalizeComparableText(value?: string | null) {
@@ -1992,7 +1992,7 @@ export function MobileExecutionTeamPage() {
   const [eventSearch, setEventSearch] = useState("");
   const [eventSearchOpen, setEventSearchOpen] = useState(false);
   const [targets, setTargets] = useState<MobileTaskTarget[]>([]);
-  const [responsible, setResponsible] = useState(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
+  const [responsible, setResponsible] = useState(getDefaultResponsibleOption(module?.defaultResponsible));
   const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
@@ -2022,10 +2022,9 @@ export function MobileExecutionTeamPage() {
     () => dedupeResponsibleOptions([
       ...responsibleOptions,
       ...fallbackResponsibleOptions,
-      user?.shortName,
       responsible
     ]),
-    [fallbackResponsibleOptions, responsible, responsibleOptions, user?.shortName]
+    [fallbackResponsibleOptions, responsible, responsibleOptions]
   );
 
   async function loadModuleData() {
@@ -2072,8 +2071,18 @@ export function MobileExecutionTeamPage() {
   }, [module?.moduleId, canAccess]);
 
   useEffect(() => {
-    setResponsible(getDefaultResponsibleOption(user?.shortName, module?.defaultResponsible));
-  }, [module?.moduleId, user?.shortName]);
+    setResponsible(getDefaultResponsibleOption(module?.defaultResponsible));
+  }, [module?.moduleId, module?.defaultResponsible]);
+
+  useEffect(() => {
+    setSelectedEventId("");
+    setEventSearch("");
+    setEventSearchOpen(false);
+    setTargets([]);
+    setResponsible(getDefaultResponsibleOption(module?.defaultResponsible));
+    setDueDate(addBusinessDays(new Date(), 3));
+    setSuccessMessage(null);
+  }, [selectedMatterId, module?.moduleId, module?.defaultResponsible]);
 
   useEffect(() => {
     if (!module || !canAccess) {
@@ -2088,13 +2097,13 @@ export function MobileExecutionTeamPage() {
     async function loadResponsibleOptions() {
       try {
         const loaded = await apiGet<string[]>(`/users/team-short-names?team=${encodeURIComponent(team)}`);
-        const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions, user?.shortName]);
+        const nextOptions = dedupeResponsibleOptions([...loaded, ...fallbackOptions]);
         if (!cancelled) {
           setResponsibleOptions(nextOptions.length > 0 ? nextOptions : fallbackOptions);
         }
       } catch {
         if (!cancelled) {
-          setResponsibleOptions(dedupeResponsibleOptions([...fallbackOptions, user?.shortName]));
+          setResponsibleOptions(fallbackOptions);
         }
       }
     }
@@ -2104,7 +2113,7 @@ export function MobileExecutionTeamPage() {
     return () => {
       cancelled = true;
     };
-  }, [canAccess, module?.moduleId, module?.team, module?.defaultResponsible, user?.shortName]);
+  }, [canAccess, module?.moduleId, module?.team, module?.defaultResponsible]);
 
   useEffect(() => {
     if (!eventSearchOpen) {

@@ -105,10 +105,6 @@ export class LocalAuthRepository implements AuthRepository {
     const normalizedLookup = normalizeLookupValue(normalizedIdentifier);
 
     const user = this.getState().users.find((candidate) => {
-      if (!candidate.isActive) {
-        return false;
-      }
-
       if (candidate.email === normalizedEmail) {
         return true;
       }

@@ -14,6 +14,7 @@ import {
 } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import { useAuth } from "../auth/AuthContext";
 import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
@@ -1091,8 +1092,8 @@ export function ExecutionTeamWorkspace({
                   <th>No. Cliente</th>
                   <th>Cliente</th>
                   <th>No. Cotizacion</th>
-                  <th>Asunto</th>
-                  <th>Proceso especifico</th>
+                  <th className="execution-wide-text-column">Asunto</th>
+                  <th className="execution-wide-text-column">Proceso especifico</th>
                   <th>ID Asunto</th>
                   <th>Enviar</th>
                   <th>Canal</th>
@@ -1103,7 +1104,12 @@ export function ExecutionTeamWorkspace({
                   <th>Órgano para efectos de días inhábiles</th>
                   <th>ID del grupo interno de Telegram</th>
                   <th>Nombre del grupo interno de Telegram</th>
-                  <th>Comentarios LLM</th>
+                  <th>
+                    <span className="ri-table-column-label">
+                      Input de RI
+                      <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
+                    </span>
+                  </th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
                   <th>Comentarios</th>
@@ -1151,11 +1157,18 @@ export function ExecutionTeamWorkspace({
                           <td>
                             <input className="lead-cell-input matter-cell-readonly" value={matter.quoteNumber || ""} readOnly />
                           </td>
-                          <td>
-                            <input className="lead-cell-input matter-cell-readonly" value={matter.subject || ""} readOnly />
+                          <td className="execution-wide-text-column">
+                            <div className="lead-cell-input matter-cell-readonly execution-readable-cell" title={matter.subject || ""}>
+                              {matter.subject || "-"}
+                            </div>
                           </td>
-                          <td>
-                            <input className="lead-cell-input matter-cell-readonly" value={matter.specificProcess || ""} readOnly />
+                          <td className="execution-wide-text-column">
+                            <div
+                              className="lead-cell-input matter-cell-readonly execution-readable-cell"
+                              title={matter.specificProcess || ""}
+                            >
+                              {matter.specificProcess || "-"}
+                            </div>
                           </td>
                           <td>
                             <input className="lead-cell-input matter-cell-readonly" value={matter.matterIdentifier || ""} readOnly />
@@ -1327,12 +1340,17 @@ export function ExecutionTeamWorkspace({
                   <th>No. Cliente</th>
                   <th>Cliente</th>
                   <th>No. Cotizacion</th>
-                  <th>Asunto</th>
+                  <th className="execution-wide-text-column">Asunto</th>
                   <th>ID Asunto</th>
                   <th>Canal</th>
                   <th>Siguiente tarea</th>
                   <th>Fecha sig. tarea</th>
-                  <th>Comentarios LLM</th>
+                  <th>
+                    <span className="ri-table-column-label">
+                      Input de RI
+                      <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
+                    </span>
+                  </th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
                   <th>Notas</th>
@@ -1361,7 +1379,11 @@ export function ExecutionTeamWorkspace({
                         <td>{getEffectiveClientNumber(matter, clients) || "-"}</td>
                         <td>{matter.clientName || "-"}</td>
                         <td>{matter.quoteNumber || "-"}</td>
-                        <td>{matter.subject || "-"}</td>
+                        <td className="execution-wide-text-column">
+                          <div className="lead-cell-input matter-cell-readonly execution-readable-cell" title={matter.subject || ""}>
+                            {matter.subject || "-"}
+                          </div>
+                        </td>
                         <td>{matter.matterIdentifier || "-"}</td>
                         <td>{getChannelLabel(matter.communicationChannel)}</td>
                         <td>
@@ -1413,7 +1435,6 @@ export function ExecutionTeamWorkspace({
         clientNumber={panelMatter ? getEffectiveClientNumber(panelMatter, clients) : ""}
         mode={panelMode}
         tasks={panelTasks}
-        userShortName={user?.shortName}
         onClose={() => {
           setPanelMatter(null);
           setPanelMode(null);

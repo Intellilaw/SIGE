@@ -41,12 +41,12 @@ function normalizeEventSearch(value) {
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase();
 }
-export function ExecutionTaskPanel({ module, legacyConfig, distributionEvents, matter, clientNumber, mode, tasks, userShortName, onClose, onModeChange, onCreateTask, onUpdateState }) {
+export function ExecutionTaskPanel({ module, legacyConfig, distributionEvents, matter, clientNumber, mode, tasks, onClose, onModeChange, onCreateTask, onUpdateState }) {
     const [selectedEventId, setSelectedEventId] = useState("");
     const [taskSearch, setTaskSearch] = useState("");
     const [taskSearchOpen, setTaskSearchOpen] = useState(false);
     const [selectorTargets, setSelectorTargets] = useState([]);
-    const [responsible, setResponsible] = useState(userShortName || module.defaultResponsible);
+    const [responsible, setResponsible] = useState(module.defaultResponsible);
     const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
     const [submitting, setSubmitting] = useState(false);
     const [successMessage, setSuccessMessage] = useState(null);
@@ -75,10 +75,10 @@ export function ExecutionTaskPanel({ module, legacyConfig, distributionEvents, m
         setTaskSearch("");
         setTaskSearchOpen(false);
         setSelectorTargets([]);
-        setResponsible(userShortName || module.defaultResponsible);
+        setResponsible(module.defaultResponsible);
         setDueDate(addBusinessDays(new Date(), 3));
         setSuccessMessage(null);
-    }, [matter?.id, mode, module.defaultResponsible, userShortName]);
+    }, [matter?.id, mode, module.defaultResponsible]);
     useEffect(() => {
         if (!taskSearchOpen) {
             return;

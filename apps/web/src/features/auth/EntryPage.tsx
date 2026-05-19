@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 import { APP_VERSION_TEXT } from "@sige/contracts";
 
 import { useAuth } from "./AuthContext";
+import intellilawLogo from "../../assets/intellilaw-logo.svg";
+import legalFlowLogo from "../../assets/legalflow-logo.svg";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 
 export function EntryPage() {
@@ -25,7 +27,9 @@ export function EntryPage() {
 
           <div className="entry-actions">
             <div className="entry-option">
-              <div className="entry-option-mark entry-option-mark-muted">IL</div>
+              <div className="entry-option-logo-shell">
+                <img className="entry-option-logo" src={intellilawLogo} alt="Intellilaw" />
+              </div>
               <button
                 type="button"
                 className="entry-button entry-button-disabled"
@@ -34,6 +38,21 @@ export function EntryPage() {
                 title="El acceso de Intellilaw estara disponible proximamente."
               >
                 Acceso Intellilaw
+              </button>
+            </div>
+
+            <div className="entry-option">
+              <div className="entry-option-logo-shell">
+                <img className="entry-option-logo" src={legalFlowLogo} alt="LegalFlow" />
+              </div>
+              <button
+                type="button"
+                className="entry-button entry-button-disabled"
+                disabled
+                aria-disabled="true"
+                title="El acceso de LegalFlow estara disponible proximamente."
+              >
+                Acceso LegalFlow
               </button>
             </div>
 

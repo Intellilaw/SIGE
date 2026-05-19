@@ -104,7 +104,9 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-MX", {
     style: "currency",
     currency: "MXN",
-    minimumFractionDigits: 2
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
   }).format(value || 0);
 }
 
@@ -970,16 +972,19 @@ export function LeadsPage() {
                               />
                             </td>
                             <td>
-                              <input
-                                className={`lead-cell-input lead-cell-input-number ${item.quoteNumber ? "is-readonly" : ""}`}
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={Number(item.amountMxn || 0)}
-                                readOnly={!canWriteLeads || Boolean(item.quoteNumber)}
-                                onChange={(event) => handleLeadFieldChange(item.id, "amountMxn", event.target.value)}
-                                onBlur={() => handleLeadBlur(item.id)}
-                              />
+                              <div className="lead-currency-input">
+                                <span aria-hidden="true">$</span>
+                                <input
+                                  className={`lead-cell-input lead-cell-input-number ${item.quoteNumber ? "is-readonly" : ""}`}
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={Number(item.amountMxn || 0)}
+                                  readOnly={!canWriteLeads || Boolean(item.quoteNumber)}
+                                  onChange={(event) => handleLeadFieldChange(item.id, "amountMxn", event.target.value)}
+                                  onBlur={() => handleLeadBlur(item.id)}
+                                />
+                              </div>
                             </td>
                             <td>
                               <select

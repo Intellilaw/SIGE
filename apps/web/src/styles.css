@@ -147,20 +147,21 @@ textarea {
 }
 
 .entry-actions {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 28px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 24px;
   width: 100%;
+  max-width: 980px;
   margin: 72px auto 0;
-  flex-wrap: wrap;
 }
 
 .entry-option {
   display: grid;
   justify-items: center;
   gap: 16px;
-  width: min(340px, 100%);
+  min-width: 0;
+  width: 100%;
 }
 
 .entry-option-mark {
@@ -199,12 +200,17 @@ textarea {
 }
 
 .entry-button {
+  align-items: center;
   width: 100%;
   border: none;
   border-radius: 18px;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 88px;
   padding: 22px 24px;
   font-size: 1.12rem;
   font-weight: 700;
+  line-height: 1.2;
   text-align: center;
   transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
@@ -384,6 +390,15 @@ textarea {
   align-items: center;
   gap: 10px;
   font-size: 0.95rem;
+}
+
+.nav-link-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .nav-link-content {
@@ -591,6 +606,15 @@ textarea {
   background: rgba(255, 255, 255, 0.75);
   box-shadow: 0 10px 24px rgba(31, 41, 51, 0.06);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.dashboard-module-card-button {
+  width: 100%;
+  appearance: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .dashboard-module-card:hover {
@@ -2630,6 +2654,25 @@ textarea {
   min-width: 130px;
 }
 
+.lead-currency-input {
+  position: relative;
+  min-width: 130px;
+}
+
+.lead-currency-input > span {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.lead-currency-input .lead-cell-input-number {
+  padding-left: 30px;
+}
+
 .lead-cell-input.is-readonly {
   background: #f5f7fa;
   color: #52606d;
@@ -3269,11 +3312,26 @@ textarea {
 }
 
 .execution-table {
-  min-width: 3070px;
+  min-width: 3400px;
 }
 
 .execution-table thead th {
   background: #eef4fb;
+}
+
+.execution-table .execution-wide-text-column {
+  min-width: 330px;
+  width: 330px;
+}
+
+.execution-readable-cell {
+  min-width: 300px;
+  min-height: 54px;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.35;
 }
 
 .execution-table-recycle thead th {
@@ -6381,6 +6439,34 @@ textarea {
   font-size: 0.76rem;
 }
 
+.ri-table-column-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ri-table-column-label .ri-badge {
+  gap: 4px;
+  padding: 2px 6px 2px 2px;
+  vertical-align: middle;
+}
+
+.ri-table-column-label .ri-mark {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+}
+
+.ri-table-column-label .ri-mark::before {
+  inset: 4px;
+}
+
+.ri-table-column-label .ri-mark-core,
+.ri-table-column-label .ri-badge-id {
+  font-size: 0.55rem;
+}
+
 .ri-summary-grid,
 .ri-prompt-grid {
   display: grid;
@@ -6597,10 +6683,11 @@ textarea {
 }
 
 .mobile-app-shell {
+  --mobile-bottom-clearance: 220px;
   min-height: 100vh;
   background: #f7fafc;
   color: #172033;
-  padding: 64px 14px 132px;
+  padding: 64px 14px calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
 }
 
 .mobile-centered {
@@ -6713,6 +6800,7 @@ textarea {
 .mobile-content {
   max-width: 720px;
   margin: 0 auto;
+  padding-bottom: 24px;
 }
 
 .mobile-embedded-module {
@@ -7285,7 +7373,9 @@ textarea {
 
   .entry-actions {
     gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
     margin-top: 44px;
+    max-width: 720px;
   }
 
   .entry-title {
