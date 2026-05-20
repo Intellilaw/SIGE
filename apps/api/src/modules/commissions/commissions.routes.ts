@@ -27,11 +27,27 @@ const snapshotBodySchema = z.object({
   snapshotData: z.unknown().optional()
 });
 
+const exclusionBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  section: z.string().min(1).max(120),
+  group: z.enum(["EXECUTION", "CLIENT", "CLOSING"]),
+  financeRecordId: z.string().min(1),
+  excluded: z.boolean()
+});
+
 function normalizeComparableText(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .trim();
+}
+
+function normalizeIdentityText(value?: string | null) {
+  return normalizeComparableText(value)
+    .replace(/[@._-]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -81,12 +97,52 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
     return permissions.includes("*") || permissions.includes("commissions:write");
   }
 
+  function canManageCommissionExclusions(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    const permissions = getEffectivePermissions(request);
+    const hasSuperadminAccess = permissions.includes("*")
+      || user.role === "SUPERADMIN"
+      || user.legacyRole === "SUPERADMIN";
+    const emailLocalPart = user.email?.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user.email;
+    const isEduardoRusconi = [user.shortName, user.username, user.displayName, user.email, emailLocalPart].some((value) => {
+      const normalized = normalizeIdentityText(value);
+      return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
+    });
+
+    return hasSuperadminAccess && isEduardoRusconi;
+  }
+
   app.get("/commissions/overview", { preHandler: readGuards }, async (request) => {
     const query = periodQuerySchema.parse(request.query);
     return service.getOverview(query.year, query.month);
   });
 
   app.get("/commissions/receivers", { preHandler: readGuards }, async () => service.listReceivers());
+
+  app.patch("/commissions/exclusions", { preHandler: [requireAuth] }, async (request) => {
+    if (!canManageCommissionExclusions(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Only Eduardo Rusconi can manage commission exclusions.");
+    }
+
+    const payload = exclusionBodySchema.parse(request.body ?? {});
+    if (!payload.excluded) {
+      await service.clearExclusion(payload);
+      return {
+        ...payload,
+        excluded: false
+      };
+    }
+
+    return service.setExclusion({
+      year: payload.year,
+      month: payload.month,
+      section: payload.section,
+      group: payload.group,
+      financeRecordId: payload.financeRecordId,
+      createdByUserId: getSessionUser(request).id,
+      createdByName: getSessionUser(request).displayName
+    });
+  });
 
   app.post("/commissions/receivers", { preHandler: writeGuards }, async (request) => {
     const payload = receiverBodySchema.parse(request.body ?? {});

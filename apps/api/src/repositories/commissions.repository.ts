@@ -2,8 +2,14 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { COMMISSION_SECTIONS } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
-import { mapCommissionReceiver, mapCommissionSnapshot, mapFinanceRecord, mapGeneralExpense } from "./mappers";
-import type { CommissionsRepository, CreateCommissionSnapshotRecord } from "./types";
+import {
+  mapCommissionExclusion,
+  mapCommissionReceiver,
+  mapCommissionSnapshot,
+  mapFinanceRecord,
+  mapGeneralExpense
+} from "./mappers";
+import type { CommissionExclusionWriteRecord, CommissionsRepository, CreateCommissionSnapshotRecord } from "./types";
 
 function normalizeRequiredText(value: string) {
   return value.trim();
@@ -19,7 +25,7 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
   public async getOverview(year: number, month: number) {
     await this.ensureDefaultReceivers();
 
-    const [financeRecords, generalExpenses, receivers] = await Promise.all([
+    const [financeRecords, generalExpenses, receivers, exclusions] = await Promise.all([
       this.prisma.financeRecord.findMany({
         where: { year, month },
         orderBy: [{ clientNumber: "asc" }, { clientName: "asc" }, { subject: "asc" }, { createdAt: "asc" }]
@@ -34,13 +40,18 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       }),
       this.prisma.commissionReceiver.findMany({
         orderBy: [{ name: "asc" }]
+      }),
+      this.prisma.commissionExclusion.findMany({
+        where: { year, month },
+        orderBy: [{ section: "asc" }, { group: "asc" }, { createdAt: "asc" }]
       })
     ]);
 
     return {
       financeRecords: financeRecords.map(mapFinanceRecord),
       generalExpenses: generalExpenses.map(mapGeneralExpense),
-      receivers: receivers.map(mapCommissionReceiver)
+      receivers: receivers.map(mapCommissionReceiver),
+      exclusions: exclusions.map(mapCommissionExclusion)
     };
   }
 
@@ -145,6 +156,47 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
     });
 
     return mapCommissionSnapshot(record);
+  }
+
+  public async setExclusion(payload: CommissionExclusionWriteRecord) {
+    const record = await this.prisma.commissionExclusion.upsert({
+      where: {
+        year_month_section_group_financeRecordId: {
+          year: payload.year,
+          month: payload.month,
+          section: payload.section,
+          group: payload.group,
+          financeRecordId: payload.financeRecordId
+        }
+      },
+      create: {
+        year: payload.year,
+        month: payload.month,
+        section: payload.section,
+        group: payload.group,
+        financeRecordId: payload.financeRecordId,
+        createdByUserId: payload.createdByUserId,
+        createdByName: payload.createdByName
+      },
+      update: {
+        createdByUserId: payload.createdByUserId,
+        createdByName: payload.createdByName
+      }
+    });
+
+    return mapCommissionExclusion(record);
+  }
+
+  public async clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">) {
+    await this.prisma.commissionExclusion.deleteMany({
+      where: {
+        year: payload.year,
+        month: payload.month,
+        section: payload.section,
+        group: payload.group,
+        financeRecordId: payload.financeRecordId
+      }
+    });
   }
 
   private async ensureDefaultReceivers() {

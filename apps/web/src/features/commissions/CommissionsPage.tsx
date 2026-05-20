@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   Client,
   CommissionBreakdownEntry,
+  CommissionExclusion,
   CommissionReceiver,
   CommissionSection,
   CommissionSnapshot,
@@ -29,6 +30,7 @@ interface CommissionsOverviewResponse {
   financeRecords: FinanceRecord[];
   generalExpenses: GeneralExpense[];
   receivers: CommissionReceiver[];
+  exclusions: CommissionExclusion[];
 }
 
 interface ComputedFinanceRecord extends FinanceRecord, FinanceRecordStats {
@@ -85,6 +87,44 @@ function normalizeText(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function normalizeIdentityText(value?: string | null) {
+  return normalizeText(value)
+    .replace(/[@._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"]) {
+  const hasSuperadminAccess = Boolean(
+    user?.permissions?.includes("*") ||
+    user?.role === "SUPERADMIN" ||
+    user?.legacyRole === "SUPERADMIN"
+  );
+  const emailLocalPart = user?.email?.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user?.email;
+  const isEduardoRusconi = [user?.shortName, user?.username, user?.displayName, user?.email, emailLocalPart].some((value) => {
+    const normalized = normalizeIdentityText(value);
+    return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
+  });
+
+  return hasSuperadminAccess && isEduardoRusconi;
+}
+
+function buildCommissionExclusionKey(input: {
+  year: number;
+  month: number;
+  section: string;
+  group: CommissionBreakdownEntry["group"];
+  financeRecordId: string;
+}) {
+  return [
+    input.year,
+    input.month,
+    normalizeText(input.section),
+    input.group,
+    input.financeRecordId
+  ].join("::");
 }
 
 function formatCurrency(value: number) {
@@ -249,31 +289,74 @@ function getDeductionConfiguration(section: string) {
 
   switch (normalizedSection) {
     case normalizeText("Litigio (lider)"):
-      return { rate: 0.08, teamLabel: "Litigio", useAllExpenses: false };
+      return { rate: 0.08, teamLabel: "Litigio", distributionKey: "pctLitigation" as const, useAllExpenses: false };
     case normalizeText("Litigio (colaborador)"):
-      return { rate: 0.01, teamLabel: "Litigio", useAllExpenses: false };
+      return { rate: 0.01, teamLabel: "Litigio", distributionKey: "pctLitigation" as const, useAllExpenses: false };
     case normalizeText("Corporativo-laboral (lider)"):
-      return { rate: 0.08, teamLabel: "Corporativo y laboral", useAllExpenses: false };
+      return { rate: 0.08, teamLabel: "Corporativo y laboral", distributionKey: "pctCorporateLabor" as const, useAllExpenses: false };
     case normalizeText("Corporativo-laboral (colaborador)"):
-      return { rate: 0.01, teamLabel: "Corporativo y laboral", useAllExpenses: false };
+      return { rate: 0.01, teamLabel: "Corporativo y laboral", distributionKey: "pctCorporateLabor" as const, useAllExpenses: false };
     case normalizeText("Convenios (lider)"):
-      return { rate: 0.08, teamLabel: "Convenios", useAllExpenses: false };
+      return { rate: 0.08, teamLabel: "Convenios", distributionKey: "pctSettlements" as const, useAllExpenses: false };
     case normalizeText("Convenios (colaborador)"):
-      return { rate: 0.01, teamLabel: "Convenios", useAllExpenses: false };
+      return { rate: 0.01, teamLabel: "Convenios", distributionKey: "pctSettlements" as const, useAllExpenses: false };
     case normalizeText("Der Financiero (lider)"):
-      return { rate: 0, teamLabel: "Der Financiero", useAllExpenses: false };
+      return { rate: 0, teamLabel: "Der Financiero", distributionKey: "pctFinancialLaw" as const, useAllExpenses: false };
     case normalizeText("Der Financiero (colaborador)"):
-      return { rate: 0.01, teamLabel: "Der Financiero", useAllExpenses: false };
+      return { rate: 0.01, teamLabel: "Der Financiero", distributionKey: "pctFinancialLaw" as const, useAllExpenses: false };
     case normalizeText("Compliance Fiscal (lider)"):
-      return { rate: 0.08, teamLabel: "Compliance Fiscal", useAllExpenses: false };
+      return { rate: 0.08, teamLabel: "Compliance Fiscal", distributionKey: "pctTaxCompliance" as const, useAllExpenses: false };
     case normalizeText("Compliance Fiscal (colaborador)"):
-      return { rate: 0.01, teamLabel: "Compliance Fiscal", useAllExpenses: false };
+      return { rate: 0.01, teamLabel: "Compliance Fiscal", distributionKey: "pctTaxCompliance" as const, useAllExpenses: false };
     case normalizeText("Comunicacion con cliente"):
     case normalizeText("Finanzas"):
-      return { rate: 0.01, teamLabel: "", useAllExpenses: true };
+      return { rate: 0.01, teamLabel: "", distributionKey: undefined, useAllExpenses: true };
     default:
-      return { rate: 0, teamLabel: "", useAllExpenses: false };
+      return { rate: 0, teamLabel: "", distributionKey: undefined, useAllExpenses: false };
   }
+}
+
+function getExpenseDistributionSum(expense: GeneralExpense) {
+  return (
+    Number(expense.pctLitigation || 0) +
+    Number(expense.pctCorporateLabor || 0) +
+    Number(expense.pctSettlements || 0) +
+    Number(expense.pctFinancialLaw || 0) +
+    Number(expense.pctTaxCompliance || 0)
+  );
+}
+
+function getExpenseDeductionBaseAmount(
+  expense: GeneralExpense,
+  deductionConfiguration: ReturnType<typeof getDeductionConfiguration>
+) {
+  const amount = Number(expense.amountMxn || 0);
+  if (deductionConfiguration.useAllExpenses) {
+    return amount;
+  }
+
+  if (expense.expenseWithoutTeam) {
+    return 0;
+  }
+
+  if (expense.generalExpense) {
+    return amount / 5;
+  }
+
+  if (deductionConfiguration.distributionKey && getExpenseDistributionSum(expense) > 0) {
+    return amount * (Number(expense[deductionConfiguration.distributionKey] || 0) / 100);
+  }
+
+  const isGeneralExpense = normalizeText(expense.team) === normalizeText("General");
+  if (isGeneralExpense) {
+    return amount / 5;
+  }
+
+  if (normalizeText(expense.team) === normalizeText(deductionConfiguration.teamLabel)) {
+    return amount;
+  }
+
+  return 0;
 }
 
 function buildHighlightReason(record: FinanceRecord, stats: FinanceRecordStats, clients: Client[]) {
@@ -322,11 +405,35 @@ function calculateSection(
   financeRecords: FinanceRecord[],
   generalExpenses: GeneralExpense[],
   clients: Client[],
-  section: string
+  section: string,
+  year: number,
+  month: number,
+  exclusions: CommissionExclusion[]
 ): SectionCalculation {
   if (!section) {
     return EMPTY_CALCULATION;
   }
+
+  const exclusionKeys = new Set(
+    exclusions
+      .filter((exclusion) =>
+        exclusion.year === year &&
+        exclusion.month === month &&
+        normalizeText(exclusion.section) === normalizeText(section)
+      )
+      .map((exclusion) => buildCommissionExclusionKey(exclusion))
+  );
+  const applyExclusions = (records: CommissionBreakdownEntry[]) =>
+    records.map((record) => ({
+      ...record,
+      excluded: exclusionKeys.has(buildCommissionExclusionKey({
+        year,
+        month,
+        section,
+        group: record.group,
+        financeRecordId: record.financeRecordId
+      }))
+    }));
 
   const computedRecords: ComputedFinanceRecord[] = financeRecords.map((record) => {
     const stats = calculateFinanceStats(record);
@@ -341,83 +448,79 @@ function calculateSection(
     };
   });
 
-  const executionRecords = computedRecords
-    .map<CommissionBreakdownEntry | null>((record) => {
-      const amountMxn = getExecutionAmount(record, record, section);
-      if (amountMxn <= 0) {
-        return null;
-      }
+  const executionRecords = applyExclusions(
+    computedRecords
+      .map<CommissionBreakdownEntry | null>((record) => {
+        const amountMxn = getExecutionAmount(record, record, section);
+        if (amountMxn <= 0) {
+          return null;
+        }
 
-      const showOnePercentBase = ["Comunicacion con cliente", "Finanzas"].some(
-        (targetSection) => normalizeText(targetSection) === normalizeText(section)
-      );
+        const showOnePercentBase = ["Comunicacion con cliente", "Finanzas"].some(
+          (targetSection) => normalizeText(targetSection) === normalizeText(section)
+        );
 
-      return {
+        return {
+          financeRecordId: record.id,
+          clientName: record.clientName,
+          clientNumber: record.effectiveClientNumber,
+          quoteNumber: record.quoteNumber,
+          subject: `${record.subject}${showOnePercentBase ? " (1% Base)" : ""}`,
+          group: "EXECUTION",
+          baseNetMxn: record.netFeesMxn,
+          amountMxn,
+          highlighted: record.highlighted,
+          highlightReason: record.highlightReason
+        };
+      })
+      .filter((record): record is CommissionBreakdownEntry => record !== null)
+  );
+
+  const clientRecords = applyExclusions(
+    computedRecords
+      .filter((record) => normalizeText(record.clientCommissionRecipient) === normalizeText(section) && record.clientCommissionMxn > 0)
+      .map<CommissionBreakdownEntry>((record) => ({
         financeRecordId: record.id,
         clientName: record.clientName,
         clientNumber: record.effectiveClientNumber,
         quoteNumber: record.quoteNumber,
-        subject: `${record.subject}${showOnePercentBase ? " (1% Base)" : ""}`,
-        group: "EXECUTION",
+        subject: record.subject,
+        group: "CLIENT",
         baseNetMxn: record.netFeesMxn,
-        amountMxn,
+        amountMxn: record.clientCommissionMxn,
         highlighted: record.highlighted,
         highlightReason: record.highlightReason
-      };
-    })
-    .filter((record): record is CommissionBreakdownEntry => record !== null);
+      }))
+  );
 
-  const clientRecords = computedRecords
-    .filter((record) => normalizeText(record.clientCommissionRecipient) === normalizeText(section) && record.clientCommissionMxn > 0)
-    .map<CommissionBreakdownEntry>((record) => ({
-      financeRecordId: record.id,
-      clientName: record.clientName,
-      clientNumber: record.effectiveClientNumber,
-      quoteNumber: record.quoteNumber,
-      subject: record.subject,
-      group: "CLIENT",
-      baseNetMxn: record.netFeesMxn,
-      amountMxn: record.clientCommissionMxn,
-      highlighted: record.highlighted,
-      highlightReason: record.highlightReason
-    }));
+  const closingRecords = applyExclusions(
+    computedRecords
+      .filter((record) => normalizeText(record.closingCommissionRecipient) === normalizeText(section) && record.closingCommissionMxn > 0)
+      .map<CommissionBreakdownEntry>((record) => ({
+        financeRecordId: record.id,
+        clientName: record.clientName,
+        clientNumber: record.effectiveClientNumber,
+        quoteNumber: record.quoteNumber,
+        subject: record.subject,
+        group: "CLOSING",
+        baseNetMxn: record.netFeesMxn,
+        amountMxn: record.closingCommissionMxn,
+        highlighted: record.highlighted,
+        highlightReason: record.highlightReason
+      }))
+  );
 
-  const closingRecords = computedRecords
-    .filter((record) => normalizeText(record.closingCommissionRecipient) === normalizeText(section) && record.closingCommissionMxn > 0)
-    .map<CommissionBreakdownEntry>((record) => ({
-      financeRecordId: record.id,
-      clientName: record.clientName,
-      clientNumber: record.effectiveClientNumber,
-      quoteNumber: record.quoteNumber,
-      subject: record.subject,
-      group: "CLOSING",
-      baseNetMxn: record.netFeesMxn,
-      amountMxn: record.closingCommissionMxn,
-      highlighted: record.highlighted,
-      highlightReason: record.highlightReason
-    }));
+  const sumIncludedRows = (records: CommissionBreakdownEntry[]) =>
+    records.reduce((sum, record) => sum + (record.excluded ? 0 : record.amountMxn), 0);
 
   const grossTotalMxn =
-    executionRecords.reduce((sum, record) => sum + record.amountMxn, 0) +
-    clientRecords.reduce((sum, record) => sum + record.amountMxn, 0) +
-    closingRecords.reduce((sum, record) => sum + record.amountMxn, 0);
+    sumIncludedRows(executionRecords) +
+    sumIncludedRows(clientRecords) +
+    sumIncludedRows(closingRecords);
 
   const deductionConfiguration = getDeductionConfiguration(section);
   const deductionBaseMxn = generalExpenses.reduce((sum, expense) => {
-    if (deductionConfiguration.useAllExpenses) {
-      return sum + expense.amountMxn;
-    }
-
-    const isGeneralExpense = normalizeText(expense.team) === normalizeText("General");
-    if (isGeneralExpense) {
-      return sum + (expense.amountMxn / 5);
-    }
-
-    if (normalizeText(expense.team) === normalizeText(deductionConfiguration.teamLabel)) {
-      return sum + expense.amountMxn;
-    }
-
-    return sum;
+    return sum + getExpenseDeductionBaseAmount(expense, deductionConfiguration);
   }, 0);
 
   const deductionMxn = deductionBaseMxn * deductionConfiguration.rate;
@@ -471,9 +574,16 @@ function CommissionGroupTable(props: {
   toneClass: string;
   rows: CommissionBreakdownEntry[];
   showBaseNet?: boolean;
+  showExclusionControls?: boolean;
+  canManageExclusions?: boolean;
+  savingExclusionKeys?: Set<string>;
+  year?: number;
+  month?: number;
+  section?: string;
+  onToggleExclusion?: (row: CommissionBreakdownEntry, excluded: boolean) => void;
 }) {
-  const total = props.rows.reduce((sum, row) => sum + row.amountMxn, 0);
-  const totalColumns = props.showBaseNet ? 4 : 3;
+  const total = props.rows.reduce((sum, row) => sum + (row.excluded ? 0 : row.amountMxn), 0);
+  const totalColumns = (props.showBaseNet ? 4 : 3) + (props.showExclusionControls ? 1 : 0);
   const totalLabelColumns = props.showBaseNet ? 3 : 2;
 
   return (
@@ -490,6 +600,7 @@ function CommissionGroupTable(props: {
               <th>Asunto</th>
               {props.showBaseNet ? <th>Base Neta</th> : null}
               <th>{props.showBaseNet ? "Comision" : "Monto"}</th>
+              {props.showExclusionControls ? <th className="commissions-exclusion-heading">Excluir gasto</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -498,25 +609,72 @@ function CommissionGroupTable(props: {
                 <td colSpan={totalColumns}>Sin comisiones en este rubro.</td>
               </tr>
             ) : (
-              props.rows.map((row) => (
-                <tr
-                  key={`${row.group}-${row.financeRecordId}`}
-                  className={row.highlighted ? "commissions-row-alert" : undefined}
-                  style={row.highlighted ? { backgroundColor: "#fee2e2" } : undefined}
-                  title={row.highlightReason}
-                >
-                  <td>{row.clientName || "-"}</td>
-                  <td>{row.subject || "-"}</td>
-                  {props.showBaseNet ? <td>{formatCurrency(row.baseNetMxn)}</td> : null}
-                  <td>{formatCurrency(row.amountMxn)}</td>
-                </tr>
-              ))
+              props.rows.map((row) => {
+                const exclusionKey =
+                  props.year && props.month && props.section
+                    ? buildCommissionExclusionKey({
+                        year: props.year,
+                        month: props.month,
+                        section: props.section,
+                        group: row.group,
+                        financeRecordId: row.financeRecordId
+                      })
+                    : `${row.group}-${row.financeRecordId}`;
+                const savingExclusion = props.savingExclusionKeys?.has(exclusionKey) ?? false;
+                const rowClassName = [
+                  row.highlighted ? "commissions-row-alert" : "",
+                  row.excluded ? "commissions-row-excluded" : ""
+                ].filter(Boolean).join(" ") || undefined;
+                const rowTitle = [
+                  row.highlightReason,
+                  row.excluded ? "Excluido del calculo de esta seccion." : ""
+                ].filter(Boolean).join(" ");
+
+                return (
+                  <tr
+                    key={`${row.group}-${row.financeRecordId}`}
+                    className={rowClassName}
+                    style={row.highlighted ? { backgroundColor: "#fee2e2" } : undefined}
+                    title={rowTitle || undefined}
+                  >
+                    <td>{row.clientName || "-"}</td>
+                    <td>{row.subject || "-"}</td>
+                    {props.showBaseNet ? <td>{formatCurrency(row.baseNetMxn)}</td> : null}
+                    <td className="commissions-amount-cell">
+                      <span className={row.excluded ? "commissions-amount-excluded" : undefined}>
+                        {formatCurrency(row.amountMxn)}
+                      </span>
+                    </td>
+                    {props.showExclusionControls ? (
+                      <td className="commissions-exclusion-cell">
+                        <label
+                          className="commissions-exclusion-toggle"
+                          title={
+                            props.canManageExclusions
+                              ? "Excluir del calculo de esta seccion"
+                              : "Solo Eduardo Rusconi puede cambiar esta exclusion"
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(row.excluded)}
+                            disabled={!props.canManageExclusions || savingExclusion}
+                            aria-label={`Excluir ${row.clientName || "registro"} del calculo de esta seccion`}
+                            onChange={(event) => props.onToggleExclusion?.(row, event.target.checked)}
+                          />
+                        </label>
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })
             )}
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={totalLabelColumns}>Total rubro</td>
               <td>{formatCurrency(total)}</td>
+              {props.showExclusionControls ? <td className="commissions-exclusion-cell" aria-label="Excluir gasto" /> : null}
             </tr>
           </tfoot>
         </table>
@@ -584,6 +742,8 @@ export function CommissionsPage() {
   const [receivers, setReceivers] = useState<CommissionReceiver[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [snapshots, setSnapshots] = useState<CommissionSnapshot[]>([]);
+  const [exclusions, setExclusions] = useState<CommissionExclusion[]>([]);
+  const [savingExclusionKeys, setSavingExclusionKeys] = useState<Set<string>>(new Set());
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(true);
   const [savingSnapshot, setSavingSnapshot] = useState(false);
@@ -599,6 +759,7 @@ export function CommissionsPage() {
   const canWriteClientRelationsCommissions = hasPermission(user, "commissions:client-relations:write");
   const canWriteOwnCommissionSection = hasPermission(user, "commissions:own-section:write");
   const canReadClients = hasPermission(user, "clients:read");
+  const canManageExclusions = canManageCommissionExclusions(user);
 
   const visibleSections = useMemo(() => {
     const userRole = normalizeText(user?.specificRole);
@@ -663,6 +824,7 @@ export function CommissionsPage() {
       setFinanceRecords(overview.financeRecords);
       setGeneralExpenses(overview.generalExpenses);
       setReceivers(overview.receivers);
+      setExclusions(overview.exclusions ?? []);
       setClients(clientsResponse);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -693,9 +855,51 @@ export function CommissionsPage() {
   }, []);
 
   const sectionCalculation = useMemo(
-    () => calculateSection(financeRecords, generalExpenses, clients, activeSection),
-    [activeSection, clients, financeRecords, generalExpenses]
+    () => calculateSection(financeRecords, generalExpenses, clients, activeSection, selectedYear, selectedMonth, exclusions),
+    [activeSection, clients, exclusions, financeRecords, generalExpenses, selectedMonth, selectedYear]
   );
+
+  async function handleToggleCommissionExclusion(row: CommissionBreakdownEntry, excluded: boolean) {
+    if (!canManageExclusions || !activeSection) {
+      return;
+    }
+
+    const payload = {
+      year: selectedYear,
+      month: selectedMonth,
+      section: activeSection,
+      group: row.group,
+      financeRecordId: row.financeRecordId,
+      excluded
+    };
+    const exclusionKey = buildCommissionExclusionKey(payload);
+
+    setSavingExclusionKeys((current) => new Set(current).add(exclusionKey));
+    setFlash(null);
+
+    try {
+      const response = await apiPatch<CommissionExclusion | (typeof payload)>("/commissions/exclusions", payload);
+      setExclusions((current) => {
+        const withoutCurrent = current.filter((entry) =>
+          buildCommissionExclusionKey(entry) !== exclusionKey
+        );
+
+        if (!excluded) {
+          return withoutCurrent;
+        }
+
+        return [...withoutCurrent, response as CommissionExclusion];
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setSavingExclusionKeys((current) => {
+        const next = new Set(current);
+        next.delete(exclusionKey);
+        return next;
+      });
+    }
+  }
 
   async function handleCreateReceiver() {
     if (!canWriteCommissions) {
@@ -968,16 +1172,37 @@ export function CommissionsPage() {
                       title="PRIMER GRUPO: Comisiones de Ejecucion"
                       toneClass="tone-primary"
                       rows={sectionCalculation.executionRecords}
+                      showExclusionControls
+                      canManageExclusions={canManageExclusions}
+                      savingExclusionKeys={savingExclusionKeys}
+                      year={selectedYear}
+                      month={selectedMonth}
+                      section={activeSection}
+                      onToggleExclusion={handleToggleCommissionExclusion}
                     />
                     <CommissionGroupTable
                       title="SEGUNDO GRUPO: Comisiones de Cliente (20%)"
                       toneClass="tone-secondary"
                       rows={sectionCalculation.clientRecords}
+                      showExclusionControls
+                      canManageExclusions={canManageExclusions}
+                      savingExclusionKeys={savingExclusionKeys}
+                      year={selectedYear}
+                      month={selectedMonth}
+                      section={activeSection}
+                      onToggleExclusion={handleToggleCommissionExclusion}
                     />
                     <CommissionGroupTable
                       title="TERCER GRUPO: Comisiones de Cierre (10%)"
                       toneClass="tone-tertiary"
                       rows={sectionCalculation.closingRecords}
+                      showExclusionControls
+                      canManageExclusions={canManageExclusions}
+                      savingExclusionKeys={savingExclusionKeys}
+                      year={selectedYear}
+                      month={selectedMonth}
+                      section={activeSection}
+                      onToggleExclusion={handleToggleCommissionExclusion}
                     />
                   </div>
 

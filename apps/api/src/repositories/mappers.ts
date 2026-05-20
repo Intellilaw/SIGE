@@ -4,6 +4,7 @@ import type {
   BudgetPlan,
   BudgetPlanSnapshot,
   Client,
+  CommissionExclusion,
   CommissionReceiver,
   CommissionSnapshot,
   DailyDocumentAssignment,
@@ -1136,6 +1137,32 @@ export function mapCommissionReceiver(record: {
     name: record.name,
     active: record.active,
     createdAt: record.createdAt.toISOString()
+  };
+}
+
+export function mapCommissionExclusion(record: {
+  id: string;
+  year: number;
+  month: number;
+  section: string;
+  group: string;
+  financeRecordId: string;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): CommissionExclusion {
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    section: record.section,
+    group: record.group as CommissionExclusion["group"],
+    financeRecordId: record.financeRecordId,
+    createdByUserId: record.createdByUserId ?? undefined,
+    createdByName: record.createdByName ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 

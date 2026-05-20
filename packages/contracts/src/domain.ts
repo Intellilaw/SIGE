@@ -731,8 +731,22 @@ export interface CommissionBreakdownEntry {
   group: "EXECUTION" | "CLIENT" | "CLOSING";
   baseNetMxn: number;
   amountMxn: number;
+  excluded?: boolean;
   highlighted?: boolean;
   highlightReason?: string;
+}
+
+export interface CommissionExclusion {
+  id: string;
+  year: number;
+  month: number;
+  section: string;
+  group: CommissionBreakdownEntry["group"];
+  financeRecordId: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CommissionSnapshotFinanceRecord extends FinanceRecord, FinanceRecordStats {

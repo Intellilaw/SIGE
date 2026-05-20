@@ -5594,6 +5594,45 @@ textarea {
   background: rgba(12, 74, 110, 0.1);
 }
 
+.commissions-amount-cell {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 140px;
+}
+
+.commissions-group-table .commissions-exclusion-heading,
+.commissions-group-table .commissions-exclusion-cell {
+  text-align: center;
+  white-space: nowrap;
+  width: 112px;
+}
+
+.commissions-amount-excluded {
+  color: #64748b;
+  text-decoration: line-through;
+}
+
+.commissions-exclusion-toggle {
+  align-items: center;
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  margin-inline: auto;
+  width: 24px;
+}
+
+.commissions-exclusion-toggle input {
+  accent-color: #1d4ed8;
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.commissions-row-excluded td {
+  background: rgba(148, 163, 184, 0.16);
+}
+
 .commissions-caption {
   margin-top: 0;
 }

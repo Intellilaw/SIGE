@@ -4,6 +4,7 @@ import type {
   BudgetPlanSnapshot,
   Client,
   CommissionReceiver,
+  CommissionExclusion,
   CommissionSnapshot,
   CreateManagedUserInput,
   DailyDocumentAssignment,
@@ -533,6 +534,7 @@ export interface CommissionsOverviewRecord {
   financeRecords: FinanceRecord[];
   generalExpenses: GeneralExpense[];
   receivers: CommissionReceiver[];
+  exclusions: CommissionExclusion[];
 }
 
 export interface CreateCommissionSnapshotRecord {
@@ -544,6 +546,16 @@ export interface CreateCommissionSnapshotRecord {
   snapshotData?: CommissionSnapshot["snapshotData"];
 }
 
+export interface CommissionExclusionWriteRecord {
+  year: number;
+  month: number;
+  section: string;
+  group: CommissionExclusion["group"];
+  financeRecordId: string;
+  createdByUserId?: string;
+  createdByName?: string;
+}
+
 export interface CommissionsRepository {
   getOverview(year: number, month: number): Promise<CommissionsOverviewRecord>;
   listReceivers(): Promise<CommissionReceiver[]>;
@@ -552,6 +564,8 @@ export interface CommissionsRepository {
   deleteReceiver(receiverId: string): Promise<void>;
   listSnapshots(): Promise<CommissionSnapshot[]>;
   createSnapshot(payload: CreateCommissionSnapshotRecord): Promise<CommissionSnapshot>;
+  setExclusion(payload: CommissionExclusionWriteRecord): Promise<CommissionExclusion>;
+  clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">): Promise<void>;
 }
 
 export interface KpiAccessScope extends Pick<

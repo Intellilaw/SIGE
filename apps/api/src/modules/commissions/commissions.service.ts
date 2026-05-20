@@ -1,4 +1,8 @@
-import type { CommissionsRepository, CreateCommissionSnapshotRecord } from "../../repositories/types";
+import type {
+  CommissionExclusionWriteRecord,
+  CommissionsRepository,
+  CreateCommissionSnapshotRecord
+} from "../../repositories/types";
 
 export class CommissionsService {
   public constructor(private readonly repository: CommissionsRepository) {}
@@ -29,5 +33,13 @@ export class CommissionsService {
 
   public createSnapshot(payload: CreateCommissionSnapshotRecord) {
     return this.repository.createSnapshot(payload);
+  }
+
+  public setExclusion(payload: CommissionExclusionWriteRecord) {
+    return this.repository.setExclusion(payload);
+  }
+
+  public clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">) {
+    return this.repository.clearExclusion(payload);
   }
 }

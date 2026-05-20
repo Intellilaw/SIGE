@@ -418,6 +418,22 @@ model CommissionReceiver {
   createdAt DateTime @default(now())
 }
 
+model CommissionExclusion {
+  id              String   @id @default(uuid())
+  year            Int
+  month           Int
+  section         String
+  group           String
+  financeRecordId String
+  createdByUserId String?
+  createdByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([year, month, section, group, financeRecordId])
+  @@index([year, month, section])
+}
+
 model FinanceRecord {
   id                         String   @id @default(uuid())
   year                       Int
