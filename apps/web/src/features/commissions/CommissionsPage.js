@@ -45,6 +45,7 @@ function normalizeIdentityText(value) {
         .trim();
 }
 function canManageCommissionExclusions(user) {
+    const canWriteCommissionExclusions = Boolean(user?.permissions?.includes("commissions:exclusions:write"));
     const hasSuperadminAccess = Boolean(user?.permissions?.includes("*") ||
         user?.role === "SUPERADMIN" ||
         user?.legacyRole === "SUPERADMIN");
@@ -53,7 +54,7 @@ function canManageCommissionExclusions(user) {
         const normalized = normalizeIdentityText(value);
         return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
     });
-    return hasSuperadminAccess && isEduardoRusconi;
+    return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
 }
 function buildCommissionExclusionKey(input) {
     return [
@@ -429,7 +430,7 @@ function CommissionGroupTable(props) {
                                 ].filter(Boolean).join(" ");
                                 return (_jsxs("tr", { className: rowClassName, style: row.highlighted ? { backgroundColor: "#fee2e2" } : undefined, title: rowTitle || undefined, children: [_jsx("td", { children: row.clientName || "-" }), _jsx("td", { children: row.subject || "-" }), props.showBaseNet ? _jsx("td", { children: formatCurrency(row.baseNetMxn) }) : null, _jsx("td", { className: "commissions-amount-cell", children: _jsx("span", { className: row.excluded ? "commissions-amount-excluded" : undefined, children: formatCurrency(row.amountMxn) }) }), props.showExclusionControls ? (_jsx("td", { className: "commissions-exclusion-cell", children: _jsx("label", { className: "commissions-exclusion-toggle", title: props.canManageExclusions
                                                     ? "Excluir del calculo de esta seccion"
-                                                    : "Solo Eduardo Rusconi puede cambiar esta exclusion", children: _jsx("input", { type: "checkbox", checked: Boolean(row.excluded), disabled: !props.canManageExclusions || savingExclusion, "aria-label": `Excluir ${row.clientName || "registro"} del calculo de esta seccion`, onChange: (event) => props.onToggleExclusion?.(row, event.target.checked) }) }) })) : null] }, `${row.group}-${row.financeRecordId}`));
+                                                    : "Solo Eduardo Rusconi o Finanzas puede cambiar esta exclusion", children: _jsx("input", { type: "checkbox", checked: Boolean(row.excluded), disabled: !props.canManageExclusions || savingExclusion, "aria-label": `Excluir ${row.clientName || "registro"} del calculo de esta seccion`, onChange: (event) => props.onToggleExclusion?.(row, event.target.checked) }) }) })) : null] }, `${row.group}-${row.financeRecordId}`));
                             })) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { colSpan: totalLabelColumns, children: "Total rubro" }), _jsx("td", { children: formatCurrency(total) }), props.showExclusionControls ? _jsx("td", { className: "commissions-exclusion-cell", "aria-label": "Excluir gasto" }) : null] }) })] }) })] }));
 }
 function SnapshotDetailModal(props) {

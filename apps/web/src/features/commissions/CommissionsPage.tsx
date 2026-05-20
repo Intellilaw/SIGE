@@ -97,6 +97,7 @@ function normalizeIdentityText(value?: string | null) {
 }
 
 function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"]) {
+  const canWriteCommissionExclusions = Boolean(user?.permissions?.includes("commissions:exclusions:write"));
   const hasSuperadminAccess = Boolean(
     user?.permissions?.includes("*") ||
     user?.role === "SUPERADMIN" ||
@@ -108,7 +109,7 @@ function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"])
     return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
   });
 
-  return hasSuperadminAccess && isEduardoRusconi;
+  return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
 }
 
 function buildCommissionExclusionKey(input: {
@@ -652,7 +653,7 @@ function CommissionGroupTable(props: {
                           title={
                             props.canManageExclusions
                               ? "Excluir del calculo de esta seccion"
-                              : "Solo Eduardo Rusconi puede cambiar esta exclusion"
+                              : "Solo Eduardo Rusconi o Finanzas puede cambiar esta exclusion"
                           }
                         >
                           <input

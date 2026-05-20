@@ -321,11 +321,15 @@ export function derivePermissions(input: {
     permissions.add("clients:read");
     permissions.add("quotes:read");
     permissions.add("quotes:write");
+    permissions.add("matters:read");
     permissions.add("finances:read");
     permissions.add("finances:write");
+    permissions.add("budget-planning:read");
+    permissions.add("budget-planning:write");
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
     permissions.add("commissions:all:read");
+    permissions.add("commissions:exclusions:write");
     permissions.add("internal-contracts:read");
     permissions.add("internal-contract-templates:read");
   }

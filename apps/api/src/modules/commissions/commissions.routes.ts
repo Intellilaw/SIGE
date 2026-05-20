@@ -100,6 +100,7 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
   function canManageCommissionExclusions(request: FastifyRequest) {
     const user = getSessionUser(request);
     const permissions = getEffectivePermissions(request);
+    const canWriteCommissionExclusions = permissions.includes("commissions:exclusions:write");
     const hasSuperadminAccess = permissions.includes("*")
       || user.role === "SUPERADMIN"
       || user.legacyRole === "SUPERADMIN";
@@ -109,7 +110,7 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
       return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
     });
 
-    return hasSuperadminAccess && isEduardoRusconi;
+    return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
   }
 
   app.get("/commissions/overview", { preHandler: readGuards }, async (request) => {
@@ -121,7 +122,7 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch("/commissions/exclusions", { preHandler: [requireAuth] }, async (request) => {
     if (!canManageCommissionExclusions(request)) {
-      throw new app.errors.AppError(403, "FORBIDDEN", "Only Eduardo Rusconi can manage commission exclusions.");
+      throw new app.errors.AppError(403, "FORBIDDEN", "Only Eduardo Rusconi or Finance team members can manage commission exclusions.");
     }
 
     const payload = exclusionBodySchema.parse(request.body ?? {});
