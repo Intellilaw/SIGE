@@ -2338,6 +2338,7 @@ textarea {
   justify-content: flex-start;
   color: #475569;
   font-size: 0.9rem;
+  min-width: 0;
 }
 
 .quote-template-mode-toggle {
@@ -2391,7 +2392,7 @@ textarea {
 
 .quote-template-row-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(220px, 1fr)) minmax(220px, 1fr) minmax(220px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -2399,16 +2400,24 @@ textarea {
 .quote-template-field {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .quote-template-field-wide {
+  grid-column: span 2;
   min-width: 0;
 }
 
 .quote-template-field-head {
   align-items: center;
   color: #334e68;
+  flex-wrap: wrap;
   font-weight: 700;
+}
+
+.quote-template-field-head span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .quote-template-field-head small {
@@ -7623,6 +7632,10 @@ textarea {
   .quotes-template-list-row,
   .quotes-line-item-row {
     grid-template-columns: 1fr;
+  }
+
+  .quote-template-field-wide {
+    grid-column: auto;
   }
 
   .quotes-template-list-actions {

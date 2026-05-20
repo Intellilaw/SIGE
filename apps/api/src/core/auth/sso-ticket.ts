@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 
-import type { AuthUser } from "@sige/contracts";
+import { buildDisplayName, type AuthUser } from "@sige/contracts";
 
 import type { env } from "../../config/env";
 
@@ -41,6 +41,18 @@ function signHs256(payload: SsoJwtPayload, secret: string) {
   return `${unsignedToken}.${signature}`;
 }
 
+function getSsoDisplayName(user: AuthUser) {
+  const displayName = user.displayName.trim();
+  const username = user.username.trim();
+  const technicalDisplayName =
+    !displayName ||
+    displayName.toLowerCase() === username.toLowerCase() ||
+    displayName.includes("@") ||
+    /^[a-z0-9._-]+$/i.test(displayName);
+
+  return technicalDisplayName ? buildDisplayName(username || user.email) : displayName;
+}
+
 export function createManagerDeEscritosSsoUrl(user: AuthUser, config: AppConfig) {
   if (!config.SSO_SECRET_KEY) {
     throw new Error("SSO_SECRET_KEY is not configured.");
@@ -54,7 +66,7 @@ export function createManagerDeEscritosSsoUrl(user: AuthUser, config: AppConfig)
     sub: user.id,
     user_id: user.id,
     email: user.email,
-    name: user.displayName,
+    name: getSsoDisplayName(user),
     username: user.username,
     short_name: user.shortName,
     role: user.role,

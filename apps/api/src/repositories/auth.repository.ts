@@ -20,6 +20,12 @@ export class PrismaAuthRepository implements AuthRepository {
               equals: username,
               mode: "insensitive" as const
             }
+          })),
+          ...usernameCandidates.map((displayName) => ({
+            displayName: {
+              equals: displayName,
+              mode: "insensitive" as const
+            }
           }))
         ]
       }
