@@ -1,20 +1,13 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const PRODUCTION_API_BASE_URL = "https://api.pruebasb.online/api/v1";
 function isLoopbackHost(hostname) {
     return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
 }
 function resolveApiBaseUrl(configuredBaseUrl) {
     const browserHostname = window.location.hostname;
     if (configuredBaseUrl?.startsWith("/")) {
-        if (browserHostname === "pruebasb.online" || browserHostname === "www.pruebasb.online") {
-            return PRODUCTION_API_BASE_URL;
-        }
         return configuredBaseUrl;
     }
     if (!configuredBaseUrl) {
-        if (browserHostname === "pruebasb.online" || browserHostname === "www.pruebasb.online") {
-            return PRODUCTION_API_BASE_URL;
-        }
         return "/api/v1";
     }
     const apiUrl = new URL(configuredBaseUrl);

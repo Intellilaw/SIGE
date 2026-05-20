@@ -12,7 +12,7 @@ import type {
   ProfessionalServicesContractFieldValues,
   ProfessionalServicesContractPrefillResult
 } from "@sige/contracts";
-import { TEAM_OPTIONS } from "@sige/contracts";
+import { COMMISSION_SECTIONS, TEAM_OPTIONS } from "@sige/contracts";
 
 import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -163,6 +163,77 @@ function normalizeComparableText(value?: string | null) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+const COMMISSION_RECEIVER_ALIAS_PAIRS = [
+  ["Derecho financiero (lider)", "Der Financiero (lider)"],
+  ["Derecho financiero (colaborador)", "Der Financiero (colaborador)"],
+  ["Cumplimiento fiscal (lider)", "Compliance Fiscal (lider)"],
+  ["Cumplimiento fiscal (colaborador)", "Compliance Fiscal (colaborador)"],
+  ["Fiscal de Cumplimiento (lider)", "Compliance Fiscal (lider)"],
+  ["Fiscal de Cumplimiento (colaborador)", "Compliance Fiscal (colaborador)"]
+] as const;
+
+const COMMISSION_RECEIVER_NAME_BY_KEY = new Map<string, string>();
+
+for (const name of COMMISSION_SECTIONS) {
+  COMMISSION_RECEIVER_NAME_BY_KEY.set(normalizeComparableText(name), name);
+}
+
+for (const [alias, canonicalName] of COMMISSION_RECEIVER_ALIAS_PAIRS) {
+  COMMISSION_RECEIVER_NAME_BY_KEY.set(normalizeComparableText(alias), canonicalName);
+}
+
+function getCanonicalCommissionReceiverName(value?: string | null) {
+  const name = normalizeText(value);
+  if (!name) {
+    return "";
+  }
+
+  return COMMISSION_RECEIVER_NAME_BY_KEY.get(normalizeComparableText(name)) ?? name;
+}
+
+function getRequiredCommissionReceiverId(name: string) {
+  const slug = normalizeComparableText(name)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `required-${slug}`;
+}
+
+function buildRequiredCommissionReceiver(name: string): CommissionReceiver {
+  return {
+    id: getRequiredCommissionReceiverId(name),
+    name,
+    active: true,
+    createdAt: "1970-01-01T00:00:00.000Z"
+  };
+}
+
+function getCommissionReceiverOptions(receivers: CommissionReceiver[]) {
+  const byKey = new Map<string, CommissionReceiver>();
+
+  const addReceiver = (receiver: CommissionReceiver) => {
+    if (!receiver.active) {
+      return;
+    }
+
+    const name = getCanonicalCommissionReceiverName(receiver.name);
+    if (!name) {
+      return;
+    }
+
+    const key = normalizeComparableText(name);
+    if (!byKey.has(key)) {
+      byKey.set(key, { ...receiver, name });
+    }
+  };
+
+  receivers.forEach(addReceiver);
+  COMMISSION_SECTIONS.forEach((name) => addReceiver(buildRequiredCommissionReceiver(name)));
+
+  return [...byKey.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, "es", { sensitivity: "base" })
+  );
 }
 
 function getSearchWords(value: string) {
@@ -536,6 +607,7 @@ export function FinancesPage() {
 
   const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
   const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
+  const commissionReceiverOptions = useMemo(() => getCommissionReceiverOptions(receivers), [receivers]);
 
   const filteredActiveMatters = useMemo(
     () =>
@@ -1323,16 +1395,16 @@ export function FinancesPage() {
                   <td><input className="finance-input finance-input-readonly finance-input-number finance-cell-positive" value={stats.netFeesMxn} readOnly /></td>
                   <td>{formatCurrency(stats.clientCommissionMxn)}</td>
                   <td>
-                    <select className="finance-input" value={record.clientCommissionRecipient ?? ""} onChange={(event) => { const clientCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { clientCommissionRecipient }); void persistRecordPatch(record.id, { clientCommissionRecipient }); }}>
+                    <select className="finance-input" value={getCanonicalCommissionReceiverName(record.clientCommissionRecipient)} onChange={(event) => { const clientCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { clientCommissionRecipient }); void persistRecordPatch(record.id, { clientCommissionRecipient }); }}>
                       <option value="">Seleccionar...</option>
-                      {receivers.map((receiver) => <option key={receiver.id} value={receiver.name}>{receiver.name}</option>)}
+                      {commissionReceiverOptions.map((receiver) => <option key={receiver.id} value={receiver.name}>{receiver.name}</option>)}
                     </select>
                   </td>
                   <td>{formatCurrency(stats.closingCommissionMxn)}</td>
                   <td>
-                    <select className="finance-input" value={record.closingCommissionRecipient ?? ""} onChange={(event) => { const closingCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { closingCommissionRecipient }); void persistRecordPatch(record.id, { closingCommissionRecipient }); }}>
+                    <select className="finance-input" value={getCanonicalCommissionReceiverName(record.closingCommissionRecipient)} onChange={(event) => { const closingCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { closingCommissionRecipient }); void persistRecordPatch(record.id, { closingCommissionRecipient }); }}>
                       <option value="">Seleccionar...</option>
-                      {receivers.map((receiver) => <option key={receiver.id} value={receiver.name}>{receiver.name}</option>)}
+                      {commissionReceiverOptions.map((receiver) => <option key={receiver.id} value={receiver.name}>{receiver.name}</option>)}
                     </select>
                   </td>
                   <td className="finance-total-cell">{formatCurrency(stats.netFeesMxn - stats.clientCommissionMxn - stats.closingCommissionMxn)}</td>

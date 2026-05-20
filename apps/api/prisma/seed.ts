@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { PrismaClient } from "@prisma/client";
-import { TASK_MODULES } from "@sige/contracts";
+import { COMMISSION_SECTIONS, TASK_MODULES } from "@sige/contracts";
 
 import { hashPassword } from "../src/core/auth/passwords";
 
@@ -135,23 +135,7 @@ async function seedUsers() {
 }
 
 async function seedCommissionReceivers() {
-  const receivers = [
-    "Dirección general",
-    "Litigio (líder)",
-    "Litigio (colaborador)",
-    "Corporativo-laboral (líder)",
-    "Corporativo-laboral (colaborador)",
-    "Convenios (líder)",
-    "Convenios (colaborador)",
-    "Derecho financiero (líder)",
-    "Derecho financiero (colaborador)",
-    "Compliance fiscal (líder)",
-    "Compliance fiscal (colaborador)",
-    "Comunicación con cliente",
-    "Finanzas"
-  ];
-
-  for (const name of receivers) {
+  for (const name of COMMISSION_SECTIONS) {
     await prisma.commissionReceiver.upsert({
       where: { name },
       update: { active: true },

@@ -633,7 +633,10 @@ export const COMMISSION_SECTIONS = [
   "Compliance Fiscal (lider)",
   "Compliance Fiscal (colaborador)",
   "Comunicacion con cliente",
-  "Finanzas"
+  "Finanzas",
+  "Emilio Petith",
+  "Joaquín Pani",
+  "Edgar Ortuño"
 ] as const;
 
 export type CommissionSection = typeof COMMISSION_SECTIONS[number];
