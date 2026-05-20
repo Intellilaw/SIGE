@@ -1,14 +1,30 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { APP_VERSION_LABEL } from "@sige/contracts";
+import { APP_VERSION_LABEL, buildDisplayName } from "@sige/contracts";
 
 import { getNavigationForUser } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { openBriefManagerWindow, reportBriefManagerOpenError } from "../modules/openBriefManagerWindow";
 
+function looksLikeHandle(value: string) {
+  return /[@._-]/.test(value);
+}
+
+function getSidebarUserName(user: ReturnType<typeof useAuth>["user"]) {
+  const displayName = user?.displayName?.trim();
+  const username = user?.username?.trim();
+  const email = user?.email?.trim();
+
+  if (displayName && !looksLikeHandle(displayName)) {
+    return displayName;
+  }
+
+  return buildDisplayName(username || displayName || email || "Usuario");
+}
+
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const userContext = user?.legacyTeam ?? user?.specificRole ?? user?.team ?? user?.email;
+  const sidebarUserName = getSidebarUserName(user);
   const navigation = getNavigationForUser(user);
 
   const handleOpenBriefManager = () => {
@@ -53,9 +69,7 @@ export function AppShell() {
           </nav>
         </div>
         <div className="user-card">
-          <strong>{user?.displayName}</strong>
-          <span>{userContext}</span>
-          <small>@{user?.username}</small>
+          <strong>{sidebarUserName}</strong>
           <button type="button" onClick={logout}>
             Cerrar sesion
           </button>

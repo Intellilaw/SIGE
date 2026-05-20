@@ -21,7 +21,7 @@ const litigationTables = [
     table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones", title: "3. Desahogo de Prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
     table({ slug: "jueces-magistrados", sourceTable: "hablar_jueces_magistrados", title: "4. Hablar con jueces y magistrados", tabs: statusTabs("1. Pendientes", "2. Hecho"), dateLabel: "Fecha en que la tarea debe ser realizada" }),
     table({ slug: "sentencias", sourceTable: "sentencias_pendientes", title: "5. Sentencias pendientes", dateLabel: "Fecha Esperada" }),
-    table({ slug: "audiencias", sourceTable: "audiencias_citas_oficiales", title: "6. Audiencias y citas oficiales", dateLabel: "Fecha de la audiencia/cita" }),
+    table({ slug: "audiencias", sourceTable: "audiencias_citas_oficiales", title: "6. Audiencias y citas oficiales", dateLabel: "Fecha de la audiencia/cita", responsibleOptions: ["EMRT", "ARR"] }),
     table({ slug: "citas-actuarios", sourceTable: "citas_actuarios", title: "7. Citas con actuarios", dateLabel: "Fecha de la cita" }),
     table({ slug: "notificaciones", sourceTable: "notificaciones_emplazamientos_pendientes", title: "8. Notificaciones y emplazamientos", dateLabel: "Fecha en la que la tarea debe ser realizada" }),
     table({ slug: "apelaciones-preventiva", sourceTable: "apelaciones_tramitacion_preventiva", title: "9. Apelaciones de tramitacion preventiva", dateLabel: "Fecha en la que se espera la sentencia" }),

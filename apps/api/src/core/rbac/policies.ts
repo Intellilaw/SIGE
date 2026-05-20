@@ -18,6 +18,7 @@ export const BASE_PERMISSIONS = {
   generalExpensesWrite: "general-expenses:write",
   generalExpensesJnlsApprovalWrite: "general-expenses:jnls-approval:write",
   commissionsRead: "commissions:read",
+  commissionsAllRead: "commissions:all:read",
   commissionsWrite: "commissions:write",
   commissionsClientRelationsWrite: "commissions:client-relations:write",
   commissionsOwnSectionWrite: "commissions:own-section:write",

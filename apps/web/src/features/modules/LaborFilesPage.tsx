@@ -6,10 +6,11 @@ import {
   type LaborFile,
   type LaborFileDocument,
   type LaborFileDocumentType,
+  type LaborGlobalVacationBatchResult,
   type LaborGlobalVacationDay,
   type LaborGlobalVacationDayInput,
+  type LaborPreviousYearPendingVacationInput,
   type LaborVacationEvent,
-  type LaborVacationEventInput,
   type LaborVacationFormatFieldValues
 } from "@sige/contracts";
 
@@ -26,20 +27,27 @@ type FlashState =
 
 type LaborFileProfileForm = {
   hireDate: string;
+  personalPhone: string;
+  personalEmail: string;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  emergencyContactAddress: string;
   notes: string;
+};
+
+type PreviousYearPendingVacationForm = LaborPreviousYearPendingVacationInput & {
+  description: string;
+  manualOverrideConfirmed: boolean;
 };
 
 const EMPTY_PROFILE_FORM: LaborFileProfileForm = {
   hireDate: "",
+  personalPhone: "",
+  personalEmail: "",
+  emergencyContactName: "",
+  emergencyContactPhone: "",
+  emergencyContactAddress: "",
   notes: ""
-};
-
-const EMPTY_VACATION_FORM: LaborVacationEventInput = {
-  eventType: "VACATION",
-  startDate: "",
-  endDate: "",
-  days: 1,
-  description: ""
 };
 
 const EMPTY_GLOBAL_VACATION_FORM: LaborGlobalVacationDayInput = {
@@ -48,8 +56,13 @@ const EMPTY_GLOBAL_VACATION_FORM: LaborGlobalVacationDayInput = {
   description: ""
 };
 
+const EMPTY_PREVIOUS_YEAR_PENDING_FORM: PreviousYearPendingVacationForm = {
+  days: 0,
+  description: "",
+  manualOverrideConfirmed: false
+};
+
 const VACATION_FORMAT_AUTHORIZER = "Mayra Rubí Ordóñez Mendoza";
-const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const EMPTY_VACATION_FORMAT_FORM: LaborVacationFormatFieldValues = {
   employeeName: "",
@@ -65,7 +78,8 @@ const EMPTY_VACATION_FORMAT_FORM: LaborVacationFormatFieldValues = {
   entitlementDays: 0,
   pendingDays: 0,
   enjoyedDays: 0,
-  description: ""
+  description: "",
+  overrideTeamVacationConflict: false
 };
 
 const EMPTY_CONTRACT_FORM: LaborContractFieldValues = {
@@ -212,6 +226,12 @@ function getLatestDocument(documents: LaborFileDocument[], documentType: LaborFi
     .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt))[0];
 }
 
+function getDocumentsByType(documents: LaborFileDocument[], documentType: LaborFileDocumentType) {
+  return [...documents]
+    .filter((document) => document.documentType === documentType)
+    .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt));
+}
+
 function getDocumentLabel(documentType: LaborFileDocumentType) {
   return LABOR_FILE_DOCUMENT_DEFINITIONS.find((definition) => definition.type === documentType)?.label ?? documentType;
 }
@@ -262,10 +282,55 @@ function sortLaborFiles(items: LaborFile[]) {
 
 function normalizeComparableText(value?: string) {
   return (value ?? "")
+    .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
+    .replace(/[._]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function isEduardoRusconi(input: {
+  username?: string;
+  displayName?: string;
+  email?: string;
+}) {
+  return (
+    normalizeComparableText(input.username) === "eduardo rusconi" ||
+    normalizeComparableText(input.displayName) === "eduardo rusconi" ||
+    (input.email ?? "").toLowerCase().startsWith("eduardo.rusconi")
+  );
+}
+
+function isMayraOrdonez(input: {
+  username?: string;
+  displayName?: string;
+  email?: string;
+}) {
+  const username = normalizeComparableText(input.username);
+  const displayName = normalizeComparableText(input.displayName);
+  const email = normalizeComparableText(input.email);
+
+  return (
+    (username.includes("mayra") && username.includes("ordonez")) ||
+    (displayName.includes("mayra") && displayName.includes("ordonez")) ||
+    (email.includes("mayra") && email.includes("ordonez"))
+  );
+}
+
+function isSuperadminEduardoRusconi(input: {
+  username?: string;
+  displayName?: string;
+  email?: string;
+  role?: string;
+  legacyRole?: string;
+  permissions?: string[];
+}) {
+  return isEduardoRusconi(input) && (
+    normalizeComparableText(input.role) === "superadmin" ||
+    normalizeComparableText(input.legacyRole) === "superadmin" ||
+    Boolean(input.permissions?.includes("*"))
+  );
 }
 
 function addDaysKey(value: string, offset: number) {
@@ -326,6 +391,10 @@ function formatVacationFormatDatesText(dates: string[]) {
 }
 
 function buildVacationFormatFormDefaults(laborFile?: LaborFile): LaborVacationFormatFieldValues {
+  const availableDays = laborFile
+    ? laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays
+    : 0;
+
   return {
     ...EMPTY_VACATION_FORMAT_FORM,
     employeeName: laborFile?.employeeName ?? "",
@@ -334,9 +403,52 @@ function buildVacationFormatFormDefaults(laborFile?: LaborFile): LaborVacationFo
     hireDate: laborFile?.hireDate.slice(0, 10) ?? "",
     vacationYearStartDate: laborFile?.vacationSummary.currentYearStartDate ?? "",
     completedYearsLabel: laborFile?.vacationSummary.completedYearsLabel ?? "",
-    entitlementDays: laborFile?.vacationSummary.entitlementDays ?? 0,
+    entitlementDays: availableDays,
     pendingDays: laborFile?.vacationSummary.remainingDays ?? 0,
     enjoyedDays: laborFile?.vacationSummary.usedDays ?? 0
+  };
+}
+
+function getVacationFormatAccounting(laborFile: LaborFile | undefined, selectedDays: number) {
+  if (!laborFile) {
+    return {
+      hireDate: "",
+      vacationYearStartDate: "",
+      completedYearsLabel: "",
+      entitlementDays: 0,
+      pendingDays: 0,
+      enjoyedDays: 0
+    };
+  }
+
+  return {
+    hireDate: laborFile.hireDate.slice(0, 10),
+    vacationYearStartDate: laborFile.vacationSummary.currentYearStartDate,
+    completedYearsLabel: laborFile.vacationSummary.completedYearsLabel,
+    entitlementDays: laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays,
+    pendingDays: Math.max(0, laborFile.vacationSummary.remainingDays - selectedDays),
+    enjoyedDays: laborFile.vacationSummary.usedDays + selectedDays
+  };
+}
+
+function getCountedPreviousYearPendingEvent(laborFile?: LaborFile) {
+  if (!laborFile) {
+    return undefined;
+  }
+
+  return laborFile.vacationEvents.find((event) =>
+    event.eventType === "PREVIOUS_YEAR_PENDING" &&
+    event.startDate === laborFile.vacationSummary.previousYearStartDate &&
+    event.endDate === laborFile.vacationSummary.previousYearEndDate
+  );
+}
+
+function buildPreviousYearPendingFormDefaults(laborFile?: LaborFile): PreviousYearPendingVacationForm {
+  const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile);
+  return {
+    ...EMPTY_PREVIOUS_YEAR_PENDING_FORM,
+    days: laborFile?.vacationSummary.previousYearPendingDays ?? 0,
+    description: currentPendingEvent?.description ?? ""
   };
 }
 
@@ -361,16 +473,31 @@ function isPdfFile(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
-function isDocxFile(file: File) {
-  return file.type === DOCX_MIME_TYPE || file.name.toLowerCase().endsWith(".docx");
+function isVacationEventAuthorized(event: LaborVacationEvent) {
+  const mimeType = (event.acceptanceFileMimeType ?? "").toLowerCase();
+  const filename = (event.acceptanceOriginalFileName ?? "").toLowerCase();
+  return (event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION") &&
+    (mimeType === "application/pdf" || filename.endsWith(".pdf"));
 }
 
-function getVacationAcceptanceMimeType(file: File) {
-  if (isDocxFile(file)) {
-    return DOCX_MIME_TYPE;
+function isVacationFormatEvent(event: LaborVacationEvent) {
+  return event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION";
+}
+
+function getVacationEventTitle(event: LaborVacationEvent) {
+  if (event.eventType === "GLOBAL_VACATION") {
+    return "Vacaciones generales";
   }
 
-  return file.type || "application/pdf";
+  if (event.eventType === "VACATION") {
+    return "Vacaciones";
+  }
+
+  if (event.eventType === "PREVIOUS_YEAR_PENDING") {
+    return "Saldo pendiente del año anterior";
+  }
+
+  return "Descuento del año pasado";
 }
 
 function getEmployeeSecondaryLabel(laborFile: LaborFile) {
@@ -401,11 +528,8 @@ export function LaborFilesPage() {
   const [vacationFormatRange, setVacationFormatRange] = useState({ startDate: "", endDate: "" });
   const [vacationFormatSingleDate, setVacationFormatSingleDate] = useState("");
   const [generatingVacationFormat, setGeneratingVacationFormat] = useState(false);
-  const [vacationForm, setVacationForm] = useState<LaborVacationEventInput>(EMPTY_VACATION_FORM);
-  const [vacationRange, setVacationRange] = useState({ startDate: "", endDate: "" });
-  const [vacationSingleDate, setVacationSingleDate] = useState("");
-  const [selectedVacationDates, setSelectedVacationDates] = useState<string[]>([]);
-  const [vacationAcceptanceFile, setVacationAcceptanceFile] = useState<File | null>(null);
+  const [previousYearPendingForm, setPreviousYearPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
+  const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
   const [globalVacationDays, setGlobalVacationDays] = useState<LaborGlobalVacationDay[]>([]);
   const [globalVacationForm, setGlobalVacationForm] = useState<LaborGlobalVacationDayInput>(EMPTY_GLOBAL_VACATION_FORM);
   const [query, setQuery] = useState("");
@@ -414,12 +538,44 @@ export function LaborFilesPage() {
   const [documentActionId, setDocumentActionId] = useState<string | null>(null);
   const [deletingVacationId, setDeletingVacationId] = useState<string | null>(null);
   const [vacationFileActionId, setVacationFileActionId] = useState<string | null>(null);
+  const [signingVacationEventId, setSigningVacationEventId] = useState<string | null>(null);
   const [deletingGlobalVacationId, setDeletingGlobalVacationId] = useState<string | null>(null);
+  const [downloadingGlobalVacationId, setDownloadingGlobalVacationId] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const canRead = hasPermission(user?.permissions, "labor-file:read") || hasPermission(user?.permissions, "labor-file:write");
   const canWrite = hasPermission(user?.permissions, "labor-file:write");
+  const canOverrideVacationConflicts = Boolean(user && isEduardoRusconi({
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email
+  }));
+  const canDeleteApprovedVacationFormats = Boolean(user && isEduardoRusconi({
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email
+  }));
+  const canDeleteDraftVacationFormats = Boolean(user && (
+    isEduardoRusconi({
+      username: user.username,
+      displayName: user.displayName,
+      email: user.email
+    }) ||
+    isMayraOrdonez({
+      username: user.username,
+      displayName: user.displayName,
+      email: user.email
+    })
+  ));
+  const canManagePreviousYearPending = Boolean(user && isSuperadminEduardoRusconi({
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email,
+    role: user.role,
+    legacyRole: user.legacyRole,
+    permissions: user.permissions
+  }));
   const selectedLaborFile = laborFiles.find((laborFile) => laborFile.id === selectedId) ?? laborFiles[0];
 
   async function loadLaborFiles(preferredId?: string) {
@@ -461,11 +617,17 @@ export function LaborFilesPage() {
       setVacationFormatFormOpen(false);
       setVacationFormatRange({ startDate: "", endDate: "" });
       setVacationFormatSingleDate("");
+      setPreviousYearPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
       return;
     }
 
     setProfileForm({
       hireDate: selectedLaborFile.hireDate.slice(0, 10),
+      personalPhone: selectedLaborFile.personalPhone ?? "",
+      personalEmail: selectedLaborFile.personalEmail ?? "",
+      emergencyContactName: selectedLaborFile.emergencyContactName ?? "",
+      emergencyContactPhone: selectedLaborFile.emergencyContactPhone ?? "",
+      emergencyContactAddress: selectedLaborFile.emergencyContactAddress ?? "",
       notes: selectedLaborFile.notes ?? ""
     });
     setContractForm(buildContractFormDefaults(selectedLaborFile));
@@ -476,6 +638,7 @@ export function LaborFilesPage() {
     setVacationFormatFormOpen(false);
     setVacationFormatRange({ startDate: "", endDate: "" });
     setVacationFormatSingleDate("");
+    setPreviousYearPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile));
     setFlash(null);
   }, [selectedLaborFile?.id]);
 
@@ -506,6 +669,44 @@ export function LaborFilesPage() {
     ].filter(Boolean).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalized));
   }, [laborFiles, query]);
 
+  function canDeleteVacationEventForCurrentUser(event: LaborVacationEvent) {
+    if (!canWrite) {
+      return false;
+    }
+
+    if (event.eventType === "PREVIOUS_YEAR_PENDING") {
+      return canManagePreviousYearPending;
+    }
+
+    if (!isVacationFormatEvent(event)) {
+      return true;
+    }
+
+    return isVacationEventAuthorized(event)
+      ? canDeleteApprovedVacationFormats
+      : canDeleteDraftVacationFormats;
+  }
+
+  function isGlobalVacationDayAuthorized(dayId: string) {
+    return laborFiles.some((laborFile) =>
+      laborFile.vacationEvents.some((event) =>
+        event.eventType === "GLOBAL_VACATION" &&
+        event.globalVacationDayId === dayId &&
+        isVacationEventAuthorized(event)
+      )
+    );
+  }
+
+  function canDeleteGlobalVacationDay(dayId: string) {
+    if (!canWrite) {
+      return false;
+    }
+
+    return isGlobalVacationDayAuthorized(dayId)
+      ? canDeleteApprovedVacationFormats
+      : canDeleteDraftVacationFormats;
+  }
+
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setSelectedFile(event.target.files?.[0] ?? null);
     setFlash(null);
@@ -523,6 +724,11 @@ export function LaborFilesPage() {
     try {
       await apiPatch<LaborFile>(`/labor-files/${selectedLaborFile.id}`, {
         hireDate: profileForm.hireDate,
+        personalPhone: profileForm.personalPhone || null,
+        personalEmail: profileForm.personalEmail || null,
+        emergencyContactName: profileForm.emergencyContactName || null,
+        emergencyContactPhone: profileForm.emergencyContactPhone || null,
+        emergencyContactAddress: profileForm.emergencyContactAddress || null,
         notes: profileForm.notes || null
       });
       setFlash({ tone: "success", text: "Expediente actualizado." });
@@ -543,6 +749,15 @@ export function LaborFilesPage() {
     if (!selectedFile) {
       setFlash({ tone: "error", text: "Selecciona un archivo para cargar." });
       return;
+    }
+
+    const uploadDefinition = LABOR_FILE_DOCUMENT_DEFINITIONS.find((definition) => definition.type === uploadType);
+    if (uploadDefinition?.maxFiles) {
+      const currentCount = selectedLaborFile.documents.filter((document) => document.documentType === uploadType).length;
+      if (currentCount >= uploadDefinition.maxFiles) {
+        setFlash({ tone: "error", text: `Solo se pueden cargar hasta ${uploadDefinition.maxFiles} archivos para ${uploadDefinition.label}.` });
+        return;
+      }
     }
 
     setSaving(true);
@@ -720,7 +935,13 @@ export function LaborFilesPage() {
     setFlash(null);
 
     try {
-      await apiPost<LaborVacationEvent>(`/labor-files/${selectedLaborFile.id}/vacation-format/generate`, vacationFormatForm);
+      const accounting = getVacationFormatAccounting(selectedLaborFile, vacationFormatForm.vacationDates.length);
+      await apiPost<LaborVacationEvent>(`/labor-files/${selectedLaborFile.id}/vacation-format/generate`, {
+        ...vacationFormatForm,
+        vacationDays: vacationFormatForm.vacationDates.length,
+        ...accounting,
+        overrideTeamVacationConflict: canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict)
+      });
       setFlash({ tone: "success", text: "Formato de vacaciones generado, guardado y contabilizado." });
       setVacationFormatForm(buildVacationFormatFormDefaults(selectedLaborFile));
       setVacationFormatRange({ startDate: "", endDate: "" });
@@ -770,103 +991,6 @@ export function LaborFilesPage() {
     }
   }
 
-  function handleVacationAcceptanceFileChange(event: ChangeEvent<HTMLInputElement>) {
-    setVacationAcceptanceFile(event.target.files?.[0] ?? null);
-    setFlash(null);
-  }
-
-  function addVacationDates(dates: string[]) {
-    if (dates.length === 0) {
-      setFlash({ tone: "error", text: "Selecciona al menos un día de vacaciones." });
-      return;
-    }
-
-    setSelectedVacationDates((current) => sortDateKeys([...current, ...dates]));
-    setFlash(null);
-  }
-
-  function handleVacationRangeAdd() {
-    if (!vacationRange.startDate || !vacationRange.endDate) {
-      setFlash({ tone: "error", text: "Captura el inicio y fin del rango de vacaciones." });
-      return;
-    }
-
-    const dates = enumerateDateKeys(vacationRange.startDate, vacationRange.endDate);
-    if (dates.length === 0) {
-      setFlash({ tone: "error", text: "La fecha final no puede ser anterior a la inicial." });
-      return;
-    }
-
-    addVacationDates(dates);
-    setVacationRange({ startDate: "", endDate: "" });
-  }
-
-  function handleVacationSingleDateAdd() {
-    if (!vacationSingleDate) {
-      setFlash({ tone: "error", text: "Selecciona un día de vacaciones." });
-      return;
-    }
-
-    addVacationDates([vacationSingleDate]);
-    setVacationSingleDate("");
-  }
-
-  function handleVacationDateRemove(date: string) {
-    setSelectedVacationDates((current) => current.filter((entry) => entry !== date));
-  }
-
-  async function handleVacationSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedLaborFile || !canWrite) {
-      return;
-    }
-
-    setSaving(true);
-    setFlash(null);
-
-    try {
-      if (selectedVacationDates.length === 0) {
-        setFlash({ tone: "error", text: "Agrega al menos un día de vacaciones." });
-        return;
-      }
-
-      if (!vacationAcceptanceFile) {
-        setFlash({ tone: "error", text: "Carga el formato de aceptación de vacaciones en PDF o Word." });
-        return;
-      }
-
-      if (!isPdfFile(vacationAcceptanceFile) && !isDocxFile(vacationAcceptanceFile)) {
-        setFlash({ tone: "error", text: "El formato de aceptación debe ser PDF o Word." });
-        return;
-      }
-
-      await apiPost(`/labor-files/${selectedLaborFile.id}/vacation-events`, {
-        ...vacationForm,
-        eventType: "VACATION",
-        vacationDates: selectedVacationDates,
-        days: selectedVacationDates.length,
-        startDate: selectedVacationDates[0] ?? null,
-        endDate: selectedVacationDates[selectedVacationDates.length - 1] ?? null,
-        acceptanceOriginalFileName: vacationAcceptanceFile.name,
-        acceptanceFileMimeType: getVacationAcceptanceMimeType(vacationAcceptanceFile),
-        acceptanceFileBase64: await fileToBase64(vacationAcceptanceFile),
-        description: vacationForm.description || null
-      });
-      setVacationForm(EMPTY_VACATION_FORM);
-      setVacationRange({ startDate: "", endDate: "" });
-      setVacationSingleDate("");
-      setSelectedVacationDates([]);
-      setVacationAcceptanceFile(null);
-      event.currentTarget.reset();
-      setFlash({ tone: "success", text: "Vacaciones registradas." });
-      await loadLaborFiles(selectedLaborFile.id);
-    } catch (error) {
-      setFlash({ tone: "error", text: toErrorMessage(error) });
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function handleVacationDelete(eventId: string) {
     setDeletingVacationId(eventId);
     setFlash(null);
@@ -900,6 +1024,70 @@ export function LaborFilesPage() {
     }
   }
 
+  async function handleVacationSignedPdfUpload(event: LaborVacationEvent, file: File) {
+    if (!selectedLaborFile || !canWrite) {
+      return;
+    }
+
+    if (!isPdfFile(file)) {
+      setFlash({ tone: "error", text: "El formato firmado debe cargarse en PDF." });
+      return;
+    }
+
+    setSigningVacationEventId(event.id);
+    setFlash(null);
+
+    try {
+      await apiPost<LaborVacationEvent>(`/labor-files/vacation-events/${event.id}/signed-format`, {
+        originalFileName: file.name,
+        fileMimeType: file.type || "application/pdf",
+        fileBase64: await fileToBase64(file),
+        overrideTeamVacationConflict: canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict)
+      });
+      setFlash({ tone: "success", text: "PDF firmado cargado. Vacaciones autorizadas." });
+      await loadLaborFiles(selectedLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSigningVacationEventId(null);
+    }
+  }
+
+  async function handlePreviousYearPendingSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedLaborFile || !canWrite) {
+      return;
+    }
+
+    if (!canManagePreviousYearPending) {
+      setFlash({ tone: "error", text: "Solo el superadmin Eduardo Rusconi puede agregar manualmente pendientes del año anterior." });
+      return;
+    }
+
+    if (!previousYearPendingForm.manualOverrideConfirmed) {
+      setFlash({ tone: "error", text: "Marca el checkbox para confirmar el ajuste manual del año anterior." });
+      return;
+    }
+
+    setSavingPreviousYearPending(true);
+    setFlash(null);
+
+    try {
+      await apiPost<LaborFile>(`/labor-files/${selectedLaborFile.id}/previous-year-pending-vacations`, {
+        days: Number(previousYearPendingForm.days) || 0,
+        description: previousYearPendingForm.description || null,
+        manualOverrideConfirmed: true
+      });
+      setPreviousYearPendingForm((current) => ({ ...current, manualOverrideConfirmed: false }));
+      setFlash({ tone: "success", text: "Saldo pendiente del año anterior actualizado." });
+      await loadLaborFiles(selectedLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSavingPreviousYearPending(false);
+    }
+  }
+
   async function handleGlobalVacationSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canWrite) {
@@ -910,18 +1098,32 @@ export function LaborFilesPage() {
     setFlash(null);
 
     try {
-      await apiPost<LaborGlobalVacationDay>("/labor-files/global-vacation-days", {
+      const result = await apiPost<LaborGlobalVacationBatchResult>("/labor-files/global-vacation-days", {
         date: globalVacationForm.date,
         days: globalVacationForm.days ?? 1,
         description: globalVacationForm.description || null
       });
       setGlobalVacationForm(EMPTY_GLOBAL_VACATION_FORM);
-      setFlash({ tone: "success", text: "Día general de vacaciones registrado." });
+      setFlash({ tone: "success", text: `Vacación general registrada. Se generaron ${result.generatedFormats} formatos individuales.` });
       await loadLaborFiles(selectedLaborFile?.id);
+      await downloadGlobalVacationFormats(result.day);
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function downloadGlobalVacationFormats(day: Pick<LaborGlobalVacationDay, "id" | "date">) {
+    setDownloadingGlobalVacationId(day.id);
+
+    try {
+      const { blob, filename } = await apiDownload(`/labor-files/global-vacation-days/${day.id}/acceptance-formats`);
+      downloadBlobFile(blob, filename ?? `formatos-vacaciones-generales-${day.date}.zip`);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setDownloadingGlobalVacationId(null);
     }
   }
 
@@ -959,20 +1161,28 @@ export function LaborFilesPage() {
     ? getLatestDocument(selectedLaborFile.documents, "EMPLOYMENT_CONTRACT")
     : undefined;
   const latestVacationFormatEvent = selectedLaborFile?.vacationEvents
-    .filter((event) => event.acceptanceOriginalFileName)
+    .filter((event) => event.eventType === "VACATION" && event.acceptanceOriginalFileName)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const vacationFormatSelectedDays = vacationFormatForm.vacationDates.length;
   const vacationFormatProjectedPending = selectedLaborFile
     ? Math.max(0, selectedLaborFile.vacationSummary.remainingDays - vacationFormatSelectedDays)
     : vacationFormatForm.pendingDays;
-  const vacationFormatProjectedEnjoyed = selectedLaborFile
+  const vacationFormatProjectedCommitted = selectedLaborFile
     ? selectedLaborFile.vacationSummary.usedDays + vacationFormatSelectedDays
     : vacationFormatForm.enjoyedDays;
+  const vacationFormatAccounting = getVacationFormatAccounting(selectedLaborFile, vacationFormatSelectedDays);
   const addenda = selectedLaborFile?.documents
     .filter((document) => document.documentType === "ADDENDUM")
     .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt)) ?? [];
   const documentDefinitions = LABOR_FILE_DOCUMENT_DEFINITIONS.filter((definition) =>
     !definition.contractSection
+  );
+  const selectedUploadDefinition = LABOR_FILE_DOCUMENT_DEFINITIONS.find((definition) => definition.type === uploadType);
+  const selectedUploadCount = selectedLaborFile
+    ? selectedLaborFile.documents.filter((document) => document.documentType === uploadType).length
+    : 0;
+  const selectedUploadLimitReached = Boolean(
+    selectedUploadDefinition?.maxFiles && selectedUploadCount >= selectedUploadDefinition.maxFiles
   );
 
   return (
@@ -1012,7 +1222,7 @@ export function LaborFilesPage() {
           <div className="panel-header">
             <div>
               <h2>Vacaciones generales</h2>
-              <span>Estos días se descuentan del conteo de todos los expedientes aplicables.</span>
+              <span>Genera los formatos individuales y registra el movimiento en todos los expedientes aplicables.</span>
             </div>
             <span>{globalVacationDays.length} registrados</span>
           </div>
@@ -1045,30 +1255,45 @@ export function LaborFilesPage() {
               />
             </label>
             <button className="primary-button" disabled={saving} type="submit">
-              Marcar para todos
+              {saving ? "Generando..." : "Generar para todos"}
             </button>
           </form>
 
           <div className="labor-file-global-vacation-list">
             {globalVacationDays.length === 0 ? (
               <div className="centered-inline-message">Sin vacaciones generales registradas.</div>
-            ) : globalVacationDays.map((day) => (
-              <div className="labor-file-vacation-event" key={day.id}>
-                <div>
-                  <strong>{formatDate(day.date)}</strong>
-                  <span>{day.days} {day.days === 1 ? "día" : "días"} para todos</span>
+            ) : globalVacationDays.map((day) => {
+              const canDeleteDay = canDeleteGlobalVacationDay(day.id);
+              return (
+                <div className="labor-file-vacation-event" key={day.id}>
+                  <div>
+                    <strong>{formatDate(day.date)}</strong>
+                    <span>{day.days} {day.days === 1 ? "día" : "días"} para todos</span>
+                  </div>
+                  {day.description ? <small>{day.description}</small> : <small>Vacación general</small>}
+                  <div className="table-actions">
+                    <button
+                      className="ghost-button"
+                      disabled={downloadingGlobalVacationId === day.id}
+                      onClick={() => void downloadGlobalVacationFormats(day)}
+                      type="button"
+                    >
+                      {downloadingGlobalVacationId === day.id ? "Preparando..." : "Descargar formatos"}
+                    </button>
+                    {canDeleteDay ? (
+                      <button
+                        className="danger-button"
+                        disabled={deletingGlobalVacationId === day.id}
+                        onClick={() => void handleGlobalVacationDelete(day.id)}
+                        type="button"
+                      >
+                        Quitar
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                {day.description ? <small>{day.description}</small> : <small>Vacación general</small>}
-                <button
-                  className="danger-button"
-                  disabled={deletingGlobalVacationId === day.id}
-                  onClick={() => void handleGlobalVacationDelete(day.id)}
-                  type="button"
-                >
-                  Quitar
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       ) : null}
@@ -1127,8 +1352,8 @@ export function LaborFilesPage() {
               <section className="panel labor-file-profile-panel">
                 <div className="panel-header">
                   <div>
-                    <h2>{selectedLaborFile.employeeName}</h2>
-                    <span>{selectedLaborFile.legacyTeam ?? "Sin equipo"} / {selectedLaborFile.specificRole ?? "Sin rol"}</span>
+                    <h2>Información general</h2>
+                    <span>{selectedLaborFile.employeeName} / {selectedLaborFile.legacyTeam ?? "Sin equipo"} / {selectedLaborFile.specificRole ?? "Sin rol"}</span>
                   </div>
                   <div className="labor-file-status-group">
                     <span className={`status-pill ${selectedLaborFile.status === "COMPLETE" ? "status-live" : "status-warning"}`}>
@@ -1141,6 +1366,10 @@ export function LaborFilesPage() {
                 </div>
 
                 <div className="labor-file-profile-grid">
+                  <div>
+                    <span>Nombre</span>
+                    <strong>{selectedLaborFile.employeeName}</strong>
+                  </div>
                   <div>
                     <span>Usuario</span>
                     <strong>{selectedLaborFile.employeeUsername}</strong>
@@ -1157,6 +1386,26 @@ export function LaborFilesPage() {
                     <span>Última actualización</span>
                     <strong>{formatDateTime(selectedLaborFile.updatedAt)}</strong>
                   </div>
+                  <div>
+                    <span>Teléfono personal</span>
+                    <strong>{selectedLaborFile.personalPhone ?? "-"}</strong>
+                  </div>
+                  <div>
+                    <span>Correo personal</span>
+                    <strong>{selectedLaborFile.personalEmail ?? "-"}</strong>
+                  </div>
+                  <div>
+                    <span>Contacto de emergencia</span>
+                    <strong>{selectedLaborFile.emergencyContactName ?? "-"}</strong>
+                  </div>
+                  <div>
+                    <span>Teléfono de emergencia</span>
+                    <strong>{selectedLaborFile.emergencyContactPhone ?? "-"}</strong>
+                  </div>
+                  <div className="labor-file-profile-wide-card">
+                    <span>Dirección del contacto de emergencia</span>
+                    <strong>{selectedLaborFile.emergencyContactAddress ?? "-"}</strong>
+                  </div>
                 </div>
 
                 {canWrite ? (
@@ -1167,6 +1416,45 @@ export function LaborFilesPage() {
                         type="date"
                         value={profileForm.hireDate}
                         onChange={(event) => setProfileForm((current) => ({ ...current, hireDate: event.target.value }))}
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Teléfono personal</span>
+                      <input
+                        autoComplete="tel"
+                        value={profileForm.personalPhone}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, personalPhone: event.target.value }))}
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Correo electrónico personal</span>
+                      <input
+                        autoComplete="email"
+                        type="email"
+                        value={profileForm.personalEmail}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, personalEmail: event.target.value }))}
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Persona de contacto para emergencias</span>
+                      <input
+                        value={profileForm.emergencyContactName}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, emergencyContactName: event.target.value }))}
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Número de contacto de emergencia</span>
+                      <input
+                        autoComplete="tel"
+                        value={profileForm.emergencyContactPhone}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, emergencyContactPhone: event.target.value }))}
+                      />
+                    </label>
+                    <label className="form-field labor-file-profile-wide-field">
+                      <span>Dirección del contacto de emergencia</span>
+                      <textarea
+                        value={profileForm.emergencyContactAddress}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, emergencyContactAddress: event.target.value }))}
                       />
                     </label>
                     <label className="form-field labor-file-notes-field">
@@ -1208,11 +1496,22 @@ export function LaborFilesPage() {
                     </label>
                     <label className="form-field">
                       <span>Archivo</span>
-                      <input accept={getUploadAccept(uploadType)} onChange={handleFileChange} type="file" />
+                      <input
+                        accept={getUploadAccept(uploadType)}
+                        disabled={selectedUploadLimitReached}
+                        onChange={handleFileChange}
+                        type="file"
+                      />
                     </label>
-                    <button className="primary-button" disabled={saving} type="submit">
+                    <button className="primary-button" disabled={saving || selectedUploadLimitReached} type="submit">
                       Cargar
                     </button>
+                    {selectedUploadDefinition?.maxFiles ? (
+                      <small className="labor-file-upload-limit">
+                        {selectedUploadCount} de {selectedUploadDefinition.maxFiles} cargados
+                        {selectedUploadLimitReached ? " / límite alcanzado" : ""}
+                      </small>
+                    ) : null}
                   </form>
                 ) : null}
 
@@ -1258,16 +1557,30 @@ export function LaborFilesPage() {
                     <span>Obligatorios y opcionales</span>
                   </div>
                   {documentDefinitions.map((definition) => (
-                    <DocumentRow
-                      canWrite={canWrite}
-                      document={getLatestDocument(selectedLaborFile.documents, definition.type)}
-                      documentActionId={documentActionId}
-                      key={definition.type}
-                      label={definition.label}
-                      required={isDocumentRequired(definition.type, selectedLaborFile)}
-                      onDelete={handleDocumentDelete}
-                      onDownload={handleDocumentDownload}
-                    />
+                    definition.multiple ? (
+                      <MultipleDocumentRow
+                        canWrite={canWrite}
+                        documentActionId={documentActionId}
+                        documents={getDocumentsByType(selectedLaborFile.documents, definition.type)}
+                        key={definition.type}
+                        label={definition.label}
+                        maxFiles={definition.maxFiles}
+                        required={isDocumentRequired(definition.type, selectedLaborFile)}
+                        onDelete={handleDocumentDelete}
+                        onDownload={handleDocumentDownload}
+                      />
+                    ) : (
+                      <DocumentRow
+                        canWrite={canWrite}
+                        document={getLatestDocument(selectedLaborFile.documents, definition.type)}
+                        documentActionId={documentActionId}
+                        key={definition.type}
+                        label={definition.label}
+                        required={isDocumentRequired(definition.type, selectedLaborFile)}
+                        onDelete={handleDocumentDelete}
+                        onDownload={handleDocumentDownload}
+                      />
+                    )
                   ))}
                 </div>
               </section>
@@ -1534,6 +1847,31 @@ export function LaborFilesPage() {
                       </div>
                     </div>
 
+                    <div className="labor-file-vacation-conflict-rule">
+                      <div>
+                        <strong>Regla de equipo</strong>
+                        <span>
+                          No se puede generar ni autorizar un formato si otra persona del mismo equipo pidió vacaciones en las mismas fechas.
+                        </span>
+                      </div>
+                      <label className="checkbox-row">
+                        <input
+                          checked={canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict)}
+                          disabled={!canOverrideVacationConflicts || generatingVacationFormat}
+                          type="checkbox"
+                          onChange={(event) =>
+                            updateVacationFormatFormField("overrideTeamVacationConflict", event.target.checked)
+                          }
+                        />
+                        <span>Override Eduardo Rusconi</span>
+                      </label>
+                      <small>
+                        {canOverrideVacationConflicts
+                          ? "Este override permite continuar aun cuando existan cruces de fechas en el equipo."
+                          : "Solo Eduardo Rusconi puede marcar este override."}
+                      </small>
+                    </div>
+
                     {vacationFormatFormOpen ? (
                       <form className="labor-file-vacation-format-form" onSubmit={handleVacationFormatGenerate}>
                         <div className="labor-file-vacation-format-form-head">
@@ -1554,15 +1892,15 @@ export function LaborFilesPage() {
                         <div className="labor-file-vacation-format-stats">
                           <div>
                             <span>Días solicitados</span>
-                            <strong>{vacationFormatSelectedDays || vacationFormatForm.vacationDays}</strong>
+                            <strong>{vacationFormatSelectedDays}</strong>
                           </div>
                           <div>
                             <span>Quedarían pendientes</span>
                             <strong>{vacationFormatProjectedPending}</strong>
                           </div>
                           <div>
-                            <span>Disfrutados acumulados</span>
-                            <strong>{vacationFormatProjectedEnjoyed}</strong>
+                            <span>Programados y autorizados</span>
+                            <strong>{vacationFormatProjectedCommitted}</strong>
                           </div>
                         </div>
 
@@ -1654,22 +1992,6 @@ export function LaborFilesPage() {
                             />
                           </label>
                           <label className="form-field">
-                            <span>Días de vacaciones</span>
-                            <input
-                              min="1"
-                              type="number"
-                              value={vacationFormatForm.vacationDays}
-                              onChange={(event) => updateVacationFormatFormField("vacationDays", Number(event.target.value))}
-                            />
-                          </label>
-                          <label className="form-field labor-file-vacation-format-wide-field">
-                            <span>Texto "A disfrutar"</span>
-                            <input
-                              value={vacationFormatForm.enjoymentText}
-                              onChange={(event) => updateVacationFormatFormField("enjoymentText", event.target.value)}
-                            />
-                          </label>
-                          <label className="form-field">
                             <span>El interesado</span>
                             <input
                               value={vacationFormatForm.interestedName}
@@ -1683,56 +2005,32 @@ export function LaborFilesPage() {
                               onChange={(event) => updateVacationFormatFormField("authorizerName", event.target.value)}
                             />
                           </label>
-                          <label className="form-field">
-                            <span>Fecha de ingreso</span>
-                            <input
-                              type="date"
-                              value={vacationFormatForm.hireDate}
-                              onChange={(event) => updateVacationFormatFormField("hireDate", event.target.value)}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Fecha de inicio</span>
-                            <input
-                              type="date"
-                              value={vacationFormatForm.vacationYearStartDate}
-                              onChange={(event) => updateVacationFormatFormField("vacationYearStartDate", event.target.value)}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Años cumplidos</span>
-                            <input
-                              value={vacationFormatForm.completedYearsLabel}
-                              onChange={(event) => updateVacationFormatFormField("completedYearsLabel", event.target.value)}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Días que corresponden</span>
-                            <input
-                              min="0"
-                              type="number"
-                              value={vacationFormatForm.entitlementDays}
-                              onChange={(event) => updateVacationFormatFormField("entitlementDays", Number(event.target.value))}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Días pendientes</span>
-                            <input
-                              min="0"
-                              type="number"
-                              value={vacationFormatForm.pendingDays}
-                              onChange={(event) => updateVacationFormatFormField("pendingDays", Number(event.target.value))}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Días disfrutados</span>
-                            <input
-                              min="0"
-                              type="number"
-                              value={vacationFormatForm.enjoyedDays}
-                              onChange={(event) => updateVacationFormatFormField("enjoyedDays", Number(event.target.value))}
-                            />
-                          </label>
+                          <div className="labor-file-vacation-format-accounting">
+                            <div>
+                              <span>Fecha de ingreso</span>
+                              <strong>{formatDate(vacationFormatAccounting.hireDate)}</strong>
+                            </div>
+                            <div>
+                              <span>Fecha de inicio</span>
+                              <strong>{formatDate(vacationFormatAccounting.vacationYearStartDate)}</strong>
+                            </div>
+                            <div>
+                              <span>Años cumplidos</span>
+                              <strong>{vacationFormatAccounting.completedYearsLabel || "-"}</strong>
+                            </div>
+                            <div>
+                              <span>Días que corresponden</span>
+                              <strong>{vacationFormatAccounting.entitlementDays}</strong>
+                            </div>
+                            <div>
+                              <span>Días pendientes</span>
+                              <strong>{vacationFormatAccounting.pendingDays}</strong>
+                            </div>
+                            <div>
+                              <span>Días disfrutados</span>
+                              <strong>{vacationFormatAccounting.enjoyedDays}</strong>
+                            </div>
+                          </div>
                           <label className="form-field labor-file-vacation-format-wide-field">
                             <span>Descripción</span>
                             <input
@@ -1751,11 +2049,11 @@ export function LaborFilesPage() {
                             <button
                               className="secondary-button"
                               disabled={vacationFileActionId === latestVacationFormatEvent.id}
-                              onClick={() => void handleVacationAcceptanceDownload(latestVacationFormatEvent, "download")}
-                              type="button"
-                            >
-                              Descargar formato
-                            </button>
+                            onClick={() => void handleVacationAcceptanceDownload(latestVacationFormatEvent, "download")}
+                            type="button"
+                          >
+                            {isVacationEventAuthorized(latestVacationFormatEvent) ? "Descargar PDF firmado" : "Descargar formato"}
+                          </button>
                           ) : null}
                           <button
                             className="secondary-button"
@@ -1788,137 +2086,180 @@ export function LaborFilesPage() {
                   ))}
                 </div>
 
-                {canWrite ? (
-                  <form className="labor-file-vacation-form" onSubmit={handleVacationSubmit}>
-                    <div className="labor-file-vacation-date-tools">
-                      <div className="labor-file-vacation-date-group is-range">
-                        <h3>Días continuos</h3>
-                        <div className="labor-file-vacation-date-row">
-                          <label className="form-field">
-                            <span>Inicio</span>
-                            <input
-                              type="date"
-                              value={vacationRange.startDate}
-                              onChange={(event) => setVacationRange((current) => ({ ...current, startDate: event.target.value }))}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Fin</span>
-                            <input
-                              type="date"
-                              value={vacationRange.endDate}
-                              onChange={(event) => setVacationRange((current) => ({ ...current, endDate: event.target.value }))}
-                            />
-                          </label>
-                          <button className="secondary-button" onClick={handleVacationRangeAdd} type="button">
-                            Agregar rango
-                          </button>
-                        </div>
-                      </div>
-                      <div className="labor-file-vacation-date-group is-single">
-                        <h3>Día suelto</h3>
-                        <div className="labor-file-vacation-date-row">
-                          <label className="form-field">
-                            <span>Fecha</span>
-                            <input
-                              type="date"
-                              value={vacationSingleDate}
-                              onChange={(event) => setVacationSingleDate(event.target.value)}
-                            />
-                          </label>
-                          <button className="secondary-button" onClick={handleVacationSingleDateAdd} type="button">
-                            Agregar día
-                          </button>
-                        </div>
-                      </div>
+                <div className="labor-file-vacation-accounting-grid">
+                  <div>
+                    <span>Días ya devengados</span>
+                    <strong>{selectedLaborFile.vacationSummary.earnedDays}</strong>
+                  </div>
+                  <div>
+                    <span>Días no devengados</span>
+                    <strong>{selectedLaborFile.vacationSummary.unearnedDays}</strong>
+                  </div>
+                  <div>
+                    <span>Programados sin PDF firmado</span>
+                    <strong>{selectedLaborFile.vacationSummary.scheduledDays}</strong>
+                  </div>
+                  <div>
+                    <span>Autorizados con PDF firmado</span>
+                    <strong>{selectedLaborFile.vacationSummary.authorizedDays}</strong>
+                  </div>
+                </div>
+
+                <form className="labor-file-previous-year-pending" onSubmit={handlePreviousYearPendingSubmit}>
+                  <div className="labor-file-previous-year-pending-head">
+                    <div>
+                      <h3>Pendientes del año anterior</h3>
+                      <span>
+                        Solo se suma el saldo del periodo inmediato anterior: {formatDate(selectedLaborFile.vacationSummary.previousYearStartDate)} al {formatDate(selectedLaborFile.vacationSummary.previousYearEndDate)}.
+                        Los saldos de años anteriores quedan fuera de la contabilidad.
+                      </span>
                     </div>
-                    <div className="labor-file-vacation-selected-days">
-                      <div className="labor-file-section-title">
-                        <h3>Días seleccionados</h3>
-                        <span>{selectedVacationDates.length} días</span>
-                      </div>
-                      {selectedVacationDates.length === 0 ? (
-                        <div className="centered-inline-message">Agrega días continuos o salteados.</div>
-                      ) : (
-                        <div className="labor-file-vacation-day-chips">
-                          {selectedVacationDates.map((date) => (
-                            <button key={date} onClick={() => handleVacationDateRemove(date)} type="button">
-                              {formatDate(date)} <span>Quitar</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <label className="form-field labor-file-vacation-file">
-                      <span>Formato de aceptación (PDF o Word)</span>
+                    <strong>{selectedLaborFile.vacationSummary.previousYearPendingDays} días</strong>
+                  </div>
+
+                  <label className={`labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`}>
+                    <input
+                      checked={previousYearPendingForm.manualOverrideConfirmed}
+                      disabled={!canManagePreviousYearPending || savingPreviousYearPending}
+                      type="checkbox"
+                      onChange={(event) =>
+                        setPreviousYearPendingForm((current) => ({
+                          ...current,
+                          manualOverrideConfirmed: event.target.checked
+                        }))
+                      }
+                    />
+                    <span>Agregar o actualizar manualmente días pendientes del año anterior</span>
+                  </label>
+
+                  <div className="labor-file-previous-year-pending-fields">
+                    <label className="form-field">
+                      <span>Días pendientes</span>
                       <input
-                        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        required
-                        type="file"
-                        onChange={handleVacationAcceptanceFileChange}
+                        disabled={!canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
+                        min="0"
+                        step="0.5"
+                        type="number"
+                        value={previousYearPendingForm.days}
+                        onChange={(event) =>
+                          setPreviousYearPendingForm((current) => ({
+                            ...current,
+                            days: Number(event.target.value)
+                          }))
+                        }
                       />
                     </label>
-                    <label className="form-field labor-file-vacation-description">
-                      <span>Descripción</span>
+                    <label className="form-field">
+                      <span>Nota</span>
                       <input
-                        value={vacationForm.description ?? ""}
-                        onChange={(event) => setVacationForm((current) => ({ ...current, description: event.target.value }))}
+                        disabled={!canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
+                        placeholder="Motivo o referencia del ajuste"
+                        value={previousYearPendingForm.description}
+                        onChange={(event) =>
+                          setPreviousYearPendingForm((current) => ({
+                            ...current,
+                            description: event.target.value
+                          }))
+                        }
                       />
                     </label>
-                    <button className="primary-button" disabled={saving} type="submit">
-                      Agregar vacaciones
+                    <button
+                      className="secondary-button"
+                      disabled={!canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
+                      type="submit"
+                    >
+                      {savingPreviousYearPending ? "Guardando..." : "Guardar saldo"}
                     </button>
-                  </form>
-                ) : null}
+                  </div>
+
+                  <small>
+                    {canManagePreviousYearPending
+                      ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente anterior de este expediente."
+                      : "Solo el superadmin Eduardo Rusconi puede marcar este checkbox y guardar el ajuste."}
+                    {selectedLaborFile.vacationSummary.ignoredPreviousYearPendingDays > 0
+                      ? ` No se contabilizan ${selectedLaborFile.vacationSummary.ignoredPreviousYearPendingDays} días de años más antiguos.`
+                      : ""}
+                  </small>
+                </form>
 
                 <div className="labor-file-vacation-events">
                   {selectedLaborFile.vacationEvents.length === 0 ? (
                     <div className="centered-inline-message">Sin vacaciones registradas.</div>
-                  ) : selectedLaborFile.vacationEvents.map((event) => (
-                    <div className="labor-file-vacation-event" key={event.id}>
-                      <div>
-                        <strong>{event.eventType === "VACATION" ? "Vacaciones" : "Descuento del año pasado"}</strong>
-                        <span>
-                          {event.days} días
-                          {formatVacationEventDates(event) ? ` / ${formatVacationEventDates(event)}` : ""}
-                        </span>
-                        {event.acceptanceOriginalFileName ? <small>Formato: {event.acceptanceOriginalFileName}</small> : null}
-                      </div>
-                      {event.description ? <small>{event.description}</small> : null}
-                      <div className="table-actions">
-                        {event.acceptanceOriginalFileName ? (
-                          <>
+                  ) : selectedLaborFile.vacationEvents.map((event) => {
+                    const isAuthorized = isVacationEventAuthorized(event);
+                    const isVacationRequest = event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION";
+                    const canDeleteVacationEvent = canDeleteVacationEventForCurrentUser(event);
+                    return (
+                      <div className={`labor-file-vacation-event ${isAuthorized ? "is-authorized" : "is-scheduled"}`} key={event.id}>
+                        <div>
+                          <div className="labor-file-vacation-event-title">
+                            <strong>{getVacationEventTitle(event)}</strong>
+                            {isVacationRequest ? (
+                              <span className={`status-pill ${isAuthorized ? "status-live" : "status-warning"}`}>
+                                {isAuthorized ? "Autorizado" : "Programado"}
+                              </span>
+                            ) : null}
+                          </div>
+                          <span>
+                            {event.days} días
+                            {formatVacationEventDates(event) ? ` / ${formatVacationEventDates(event)}` : ""}
+                          </span>
+                          {event.acceptanceOriginalFileName ? <small>Formato: {event.acceptanceOriginalFileName}</small> : null}
+                          {isVacationRequest && !isAuthorized ? <small>Pendiente de PDF firmado para autorizar.</small> : null}
+                        </div>
+                        {event.description ? <small>{event.description}</small> : null}
+                        <div className="table-actions">
+                          {event.acceptanceOriginalFileName ? (
+                            <>
+                              <button
+                                className="ghost-button"
+                                disabled={vacationFileActionId === event.id}
+                                onClick={() => void handleVacationAcceptanceDownload(event, "open")}
+                                type="button"
+                              >
+                                Abrir formato
+                              </button>
+                              <button
+                                className="ghost-button"
+                                disabled={vacationFileActionId === event.id}
+                                onClick={() => void handleVacationAcceptanceDownload(event, "download")}
+                                type="button"
+                              >
+                                Descargar
+                              </button>
+                            </>
+                          ) : null}
+                          {canWrite && isVacationRequest && !isAuthorized ? (
+                            <label className={`ghost-button labor-file-signed-upload ${signingVacationEventId === event.id ? "is-disabled" : ""}`}>
+                              <span>{signingVacationEventId === event.id ? "Cargando..." : "Cargar PDF firmado"}</span>
+                              <input
+                                accept=".pdf,application/pdf"
+                                disabled={signingVacationEventId === event.id}
+                                type="file"
+                                onChange={(inputEvent) => {
+                                  const file = inputEvent.currentTarget.files?.[0];
+                                  if (file) {
+                                    void handleVacationSignedPdfUpload(event, file);
+                                  }
+                                  inputEvent.currentTarget.value = "";
+                                }}
+                              />
+                            </label>
+                          ) : null}
+                          {canDeleteVacationEvent ? (
                             <button
-                              className="ghost-button"
-                              disabled={vacationFileActionId === event.id}
-                              onClick={() => void handleVacationAcceptanceDownload(event, "open")}
+                              className="danger-button"
+                              disabled={deletingVacationId === event.id}
+                              onClick={() => void handleVacationDelete(event.id)}
                               type="button"
                             >
-                              Abrir formato
+                              Quitar
                             </button>
-                            <button
-                              className="ghost-button"
-                              disabled={vacationFileActionId === event.id}
-                              onClick={() => void handleVacationAcceptanceDownload(event, "download")}
-                              type="button"
-                            >
-                              Descargar
-                            </button>
-                          </>
-                        ) : null}
-                        {canWrite ? (
-                          <button
-                            className="danger-button"
-                            disabled={deletingVacationId === event.id}
-                            onClick={() => void handleVacationDelete(event.id)}
-                            type="button"
-                          >
-                            Quitar
-                          </button>
-                        ) : null}
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             </>
@@ -1991,6 +2332,95 @@ function DocumentRow({
         ) : (
           <span className="status-pill status-warning">Falta</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface MultipleDocumentRowProps {
+  label: string;
+  required?: boolean;
+  documents: LaborFileDocument[];
+  maxFiles?: number;
+  canWrite: boolean;
+  documentActionId: string | null;
+  onDownload: (document: LaborFileDocument, mode: "open" | "download") => Promise<void>;
+  onDelete: (document: LaborFileDocument) => Promise<void>;
+}
+
+function MultipleDocumentRow({
+  label,
+  required,
+  documents,
+  maxFiles,
+  canWrite,
+  documentActionId,
+  onDownload,
+  onDelete
+}: MultipleDocumentRowProps) {
+  const limitText = maxFiles ? `${documents.length}/${maxFiles}` : `${documents.length}`;
+  const remainingText = maxFiles
+    ? documents.length >= maxFiles
+      ? "Límite alcanzado"
+      : `${maxFiles - documents.length} espacios disponibles`
+    : "Múltiples archivos permitidos";
+
+  return (
+    <div className={`labor-file-document-row labor-file-document-row-multiple ${documents.length > 0 ? "is-loaded" : "is-missing"}`}>
+      <div>
+        <strong>{label}</strong>
+        <span>{required ? "Obligatorio" : "Opcional"}</span>
+      </div>
+      <div className="labor-file-multiple-document-summary">
+        <strong>{documents.length > 0 ? `${documents.length} archivos cargados` : "Pendiente"}</strong>
+        <span>{remainingText}</span>
+        {documents.length === 0 ? (
+          <small>Sin formatos cargados.</small>
+        ) : (
+          <div className="labor-file-multiple-document-list">
+            {documents.map((document, index) => (
+              <div className="labor-file-multiple-document-item" key={document.id}>
+                <div>
+                  <strong>{index + 1}. {document.originalFileName}</strong>
+                  <span>{formatFileSize(document.fileSizeBytes)} / {formatDateTime(document.uploadedAt)}</span>
+                </div>
+                <div className="table-actions">
+                  <button
+                    className="ghost-button"
+                    disabled={documentActionId === document.id}
+                    onClick={() => void onDownload(document, "open")}
+                    type="button"
+                  >
+                    Abrir
+                  </button>
+                  <button
+                    className="ghost-button"
+                    disabled={documentActionId === document.id}
+                    onClick={() => void onDownload(document, "download")}
+                    type="button"
+                  >
+                    Descargar
+                  </button>
+                  {canWrite ? (
+                    <button
+                      className="danger-button"
+                      disabled={documentActionId === document.id}
+                      onClick={() => void onDelete(document)}
+                      type="button"
+                    >
+                      Borrar
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="table-actions">
+        <span className={`status-pill ${documents.length > 0 ? "status-live" : "status-warning"}`}>
+          {limitText}
+        </span>
       </div>
     </div>
   );

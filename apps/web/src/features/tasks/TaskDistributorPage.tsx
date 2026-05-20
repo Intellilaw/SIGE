@@ -888,8 +888,11 @@ export function TaskDistributorPage() {
   }
 
   function getResponsibleSelectOptions(record: TaskTrackingRecord) {
+    const table = resolveRecordTable(record);
+
     return dedupeResponsibleOptions([
       ...moduleResponsibleOptions,
+      ...(table?.responsibleOptions ?? []),
       record.responsible
     ]);
   }

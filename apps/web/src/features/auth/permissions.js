@@ -24,7 +24,13 @@ const MODULE_ACCESS = {
         write: ["general-expenses:write"]
     },
     commissions: {
-        read: ["commissions:read", "commissions:write", "commissions:client-relations:write", "commissions:own-section:write"],
+        read: [
+            "commissions:read",
+            "commissions:all:read",
+            "commissions:write",
+            "commissions:client-relations:write",
+            "commissions:own-section:write"
+        ],
         write: ["commissions:write"]
     },
     kpis: { read: ["kpis:read"], write: ["kpis:team-manage"] },

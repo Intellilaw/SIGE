@@ -250,18 +250,18 @@ function getDefaultAmountColumnTitle(index: number, language: Quote["language"])
   return index === 0 ? "Monto" : `Monto ${index + 1}`;
 }
 
-function localizeAmountColumnTitle(title: string, index: number, language: Quote["language"]) {
+function getExportAmountColumnTitle(language: Quote["language"]) {
+  return language === "en" ? "Amount" : "Monto";
+}
+
+function localizeAmountColumnTitle(title: string, language: Quote["language"]) {
   const normalized = normalizeText(title);
   if (!normalized) {
-    return getDefaultAmountColumnTitle(index, language);
+    return getExportAmountColumnTitle(language);
   }
 
-  if (language === "en") {
-    const match = normalized.match(/^monto(?:\s+(\d+))?$/i);
-    if (match) {
-      const number = match[1] ?? (index === 0 ? "" : String(index + 1));
-      return number ? `Amount ${number}` : "Amount";
-    }
+  if (/^(?:monto|amount)(?:\s+\d+)?$/i.test(normalized)) {
+    return getExportAmountColumnTitle(language);
   }
 
   return normalized;
@@ -391,11 +391,28 @@ function addPdfLetterheadPage(doc: PDFKit.PDFDocument, letterheadImage: Buffer |
 }
 
 function formatExportCurrency(value: number) {
-  return new Intl.NumberFormat("es-MX", {
+  const formattedValue = new Intl.NumberFormat("es-MX", {
     style: "currency",
     currency: "MXN",
     minimumFractionDigits: 2
   }).format(Number(value || 0));
+
+  return `${formattedValue} M.N.`;
+}
+
+function parseCurrencyLikeAmount(value: string) {
+  const cleanedValue = normalizeText(value)
+    .replace(/\s*M\.?\s*N\.?$/i, "")
+    .replace(/^\$/, "")
+    .replace(/,/g, "")
+    .trim();
+
+  if (!/^\d+(?:\.\d+)?$/.test(cleanedValue)) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(cleanedValue);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function getPdfPlainCellText(value: string, fallback: string) {
@@ -409,8 +426,13 @@ function getPdfAmountCellText(value: string, mode: ExportAmountColumn["mode"], f
   }
 
   if (mode === "FIXED") {
-    const parsed = Number.parseFloat(text.replace(/,/g, ""));
-    return Number.isFinite(parsed) ? formatExportCurrency(parsed) : fallback;
+    const parsed = parseCurrencyLikeAmount(text);
+    return parsed == null ? fallback : formatExportCurrency(parsed);
+  }
+
+  const parsed = parseCurrencyLikeAmount(text);
+  if (parsed != null) {
+    return formatExportCurrency(parsed);
   }
 
   return text;
@@ -1589,9 +1611,9 @@ function buildExportTable(quote: Quote, language: Quote["language"]) {
     .map((column, index) => ({ column, index }))
     .filter(({ column }) => column.enabled);
 
-  const amountColumns = enabledAmountColumns.map(({ column, index }) => ({
+  const amountColumns = enabledAmountColumns.map(({ column }) => ({
     id: column.id,
-    title: localizeAmountColumnTitle(column.title, index, language),
+    title: localizeAmountColumnTitle(column.title, language),
     mode: column.mode
   }));
 

@@ -464,6 +464,12 @@ function makeDateKey(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
 }
 
+function addDateKey(value: string, offset: number) {
+  const date = dateFromKey(value);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
 function getCurrentVacationYearStartKey(hireDateKey: string, todayKey = toDateOnlyKey(new Date())) {
   const hireDate = dateFromKey(hireDateKey);
   const today = dateFromKey(todayKey);
@@ -478,6 +484,18 @@ function getCurrentVacationYearStartKey(hireDateKey: string, todayKey = toDateOn
   }
 
   return anniversary;
+}
+
+function getPreviousVacationYearRange(currentYearStartDate: string) {
+  const currentYearStart = dateFromKey(currentYearStartDate);
+  const month = currentYearStart.getUTCMonth() + 1;
+  const day = currentYearStart.getUTCDate();
+  const previousYearStartDate = makeDateKey(currentYearStart.getUTCFullYear() - 1, month, day);
+
+  return {
+    previousYearStartDate,
+    previousYearEndDate: addDateKey(currentYearStartDate, -1)
+  };
 }
 
 function getCompletedYears(hireDateKey: string, currentYearStartKey: string) {
@@ -580,6 +598,39 @@ function formatVacationDateSelection(event: LaborVacationEvent) {
   return dates.map(formatLongDateKey).join(", ");
 }
 
+function getMexicoCityDateKey(value = new Date()) {
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Mexico_City",
+    year: "numeric"
+  }).formatToParts(value);
+  const parts = Object.fromEntries(dateParts.map((part) => [part.type, part.value]));
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function getVacationEventLastDateKey(event: LaborVacationEvent) {
+  const dates = [...(event.vacationDates ?? [])].sort();
+  if (dates.length > 0) {
+    return dates[dates.length - 1];
+  }
+
+  return event.endDate ?? event.startDate ?? "";
+}
+
+function isPastVacationEvent(event: LaborVacationEvent, todayKey = getMexicoCityDateKey()) {
+  const lastDateKey = getVacationEventLastDateKey(event);
+  return Boolean(lastDateKey && lastDateKey < todayKey);
+}
+
+function isAuthorizedVacationEvent(event: LaborVacationEvent) {
+  const mimeType = (event.acceptanceFileMimeType ?? "").toLowerCase();
+  const filename = (event.acceptanceOriginalFileName ?? "").toLowerCase();
+  return (event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION") &&
+    (mimeType === "application/pdf" || filename.endsWith(".pdf"));
+}
+
 function buildVacationSummary(
   hireDateKey: string,
   employmentEndedAtKey: string | undefined,
@@ -587,14 +638,42 @@ function buildVacationSummary(
   globalVacationDays: LaborGlobalVacationDay[]
 ): LaborFile["vacationSummary"] {
   const currentYearStartDate = getCurrentVacationYearStartKey(hireDateKey);
+  const { previousYearStartDate, previousYearEndDate } = getPreviousVacationYearRange(currentYearStartDate);
   const completedYears = getCompletedYears(hireDateKey, currentYearStartDate);
   const entitlementDays = getVacationEntitlementDays(completedYears);
   const applicableGlobalVacationDays = globalVacationDays.filter((day) =>
     day.date >= hireDateKey && (!employmentEndedAtKey || day.date <= employmentEndedAtKey)
   );
-  const usedDays = vacationEvents.reduce((total, event) => total + event.days, 0) +
-    applicableGlobalVacationDays.reduce((total, day) => total + day.days, 0);
-  const remainingDays = entitlementDays - usedDays;
+  const vacationRequests = vacationEvents.filter((event) =>
+    event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION"
+  );
+  const globalVacationRequests = vacationEvents.filter((event) => event.eventType === "GLOBAL_VACATION");
+  const previousYearPendingEvents = vacationEvents.filter((event) => event.eventType === "PREVIOUS_YEAR_PENDING");
+  const previousYearPendingCountedEvents = previousYearPendingEvents.filter((event) =>
+    event.startDate === previousYearStartDate && event.endDate === previousYearEndDate
+  );
+  const previousYearPendingDays = previousYearPendingCountedEvents.reduce((total, event) => total + event.days, 0);
+  const ignoredPreviousYearPendingDays = previousYearPendingEvents
+    .filter((event) => !previousYearPendingCountedEvents.includes(event))
+    .reduce((total, event) => total + event.days, 0);
+  const previousYearDeductionDays = vacationEvents
+    .filter((event) => event.eventType === "PREVIOUS_YEAR_DEDUCTION")
+    .reduce((total, event) => total + event.days, 0);
+  const globalVacationUsedDays = applicableGlobalVacationDays
+    .filter((day) => !globalVacationRequests.some((event) =>
+      event.globalVacationDayId === day.id || event.startDate === day.date
+    ))
+    .reduce((total, day) => total + day.days, 0);
+  const authorizedDays = vacationRequests
+    .filter(isAuthorizedVacationEvent)
+    .reduce((total, event) => total + event.days, 0);
+  const scheduledDays = vacationRequests
+    .filter((event) => !isAuthorizedVacationEvent(event))
+    .reduce((total, event) => total + event.days, 0);
+  const availableDays = entitlementDays + previousYearPendingDays;
+  const usedDays = authorizedDays + scheduledDays + previousYearDeductionDays + globalVacationUsedDays;
+  const remainingDays = availableDays - usedDays;
+  const unearnedDays = Math.max(0, usedDays - availableDays);
   const eventLines = vacationEvents.map((event) => {
     if (event.eventType === "PREVIOUS_YEAR_DEDUCTION") {
       return {
@@ -603,16 +682,36 @@ function buildVacationSummary(
       };
     }
 
+    if (event.eventType === "PREVIOUS_YEAR_PENDING") {
+      const dateRange = formatVacationRange(event.startDate, event.endDate);
+      const isCounted = previousYearPendingCountedEvents.includes(event);
+      return {
+        dateKey: event.startDate ?? "0000-00-00",
+        line: isCounted
+          ? `Saldo pendiente del año inmediato anterior: agrega ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+          : `Saldo pendiente de un año anterior no contabilizado: ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+      };
+    }
+
     const dateRange = formatVacationDateSelection(event);
+    const actionText = isPastVacationEvent(event) ? "Tomó" : "Tomará";
+    const statusText = isAuthorizedVacationEvent(event)
+      ? "Autorizado con PDF firmado"
+      : "Programado pendiente de PDF firmado";
+    const prefix = event.eventType === "GLOBAL_VACATION" ? "Vacación general: " : "";
     return {
       dateKey: event.startDate ?? "9999-99-99",
-      line: `Tomará ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` en ${dateRange}` : ""}.`
+      line: `${prefix}${actionText} ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` en ${dateRange}` : ""}. ${statusText}.`
     };
   });
-  const globalVacationLines = applicableGlobalVacationDays.map((day) => ({
-    dateKey: day.date,
-    line: `Vacación general: descuenta ${day.days} ${day.days === 1 ? "día" : "días"} el ${formatLongDateKey(day.date)}${day.description ? ` (${day.description})` : ""}.`
-  }));
+  const globalVacationLines = applicableGlobalVacationDays
+    .filter((day) => !globalVacationRequests.some((event) =>
+      event.globalVacationDayId === day.id || event.startDate === day.date
+    ))
+    .map((day) => ({
+      dateKey: day.date,
+      line: `Vacación general: descuenta ${day.days} ${day.days === 1 ? "día" : "días"} el ${formatLongDateKey(day.date)}${day.description ? ` (${day.description})` : ""}.`
+    }));
   const sortedEventLines = [...eventLines, ...globalVacationLines]
     .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
     .map((event) => event.line);
@@ -620,9 +719,17 @@ function buildVacationSummary(
   return {
     hireDate: hireDateKey,
     currentYearStartDate,
+    previousYearStartDate,
+    previousYearEndDate,
     completedYears,
     completedYearsLabel: formatCompletedYearsLabel(completedYears).toUpperCase(),
     entitlementDays,
+    previousYearPendingDays,
+    ignoredPreviousYearPendingDays,
+    earnedDays: entitlementDays,
+    unearnedDays,
+    scheduledDays,
+    authorizedDays,
     usedDays,
     remainingDays,
     lines: [
@@ -630,9 +737,15 @@ function buildVacationSummary(
       `Fecha de ingreso: ${formatLongDateKey(hireDateKey)}`,
       `Fecha de inicio del año corriente: ${formatLongDateKey(currentYearStartDate)}`,
       `${formatCompletedYearsLabel(completedYears).toUpperCase()} AÑOS CUMPLIDOS`,
-      `Le corresponden ${entitlementDays} días de vacaciones de los cuales:`,
+      `Días ya devengados: ${entitlementDays}.`,
+      `Pendientes del año inmediato anterior (${formatLongDateKey(previousYearStartDate)} al ${formatLongDateKey(previousYearEndDate)}): ${previousYearPendingDays}.`,
+      `Pendientes de años anteriores al inmediato anterior no contabilizados: ${ignoredPreviousYearPendingDays}.`,
+      `Días no devengados: ${unearnedDays}.`,
+      `Días ya programados pendientes de PDF firmado: ${scheduledDays}.`,
+      `Días ya autorizados con PDF firmado: ${authorizedDays}.`,
+      "Periodos disfrutados, programados y descuentos:",
       ...sortedEventLines,
-      `Después de disfrutar los días anteriormente señalados, le quedan ${remainingDays} por disfrutar.`
+      `Después de considerar los días anteriormente señalados, le quedan ${remainingDays} por disfrutar.`
     ]
   };
 }
@@ -664,6 +777,7 @@ export function mapLaborFileDocument(record: {
 export function mapLaborVacationEvent(record: {
   id: string;
   laborFileId: string;
+  globalVacationDayId?: string | null;
   eventType: string;
   startDate: Date | null;
   endDate: Date | null;
@@ -679,6 +793,7 @@ export function mapLaborVacationEvent(record: {
   return {
     id: record.id,
     laborFileId: record.laborFileId,
+    globalVacationDayId: record.globalVacationDayId ?? undefined,
     eventType: record.eventType as LaborVacationEvent["eventType"],
     startDate: toDateOnlyKey(record.startDate) || undefined,
     endDate: toDateOnlyKey(record.endDate) || undefined,
@@ -718,6 +833,11 @@ export function mapLaborFile(record: {
   employeeEmail: string | null;
   employeeUsername: string;
   employeeShortName: string | null;
+  personalPhone: string | null;
+  personalEmail: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  emergencyContactAddress: string | null;
   team: string | null;
   legacyTeam: string | null;
   specificRole: string | null;
@@ -744,6 +864,11 @@ export function mapLaborFile(record: {
     employeeEmail: record.employeeEmail ?? undefined,
     employeeUsername: record.employeeUsername,
     employeeShortName: record.employeeShortName ?? undefined,
+    personalPhone: record.personalPhone ?? undefined,
+    personalEmail: record.personalEmail ?? undefined,
+    emergencyContactName: record.emergencyContactName ?? undefined,
+    emergencyContactPhone: record.emergencyContactPhone ?? undefined,
+    emergencyContactAddress: record.emergencyContactAddress ?? undefined,
     team: (record.team ?? undefined) as LaborFile["team"],
     legacyTeam: record.legacyTeam ?? undefined,
     specificRole: record.specificRole ?? undefined,

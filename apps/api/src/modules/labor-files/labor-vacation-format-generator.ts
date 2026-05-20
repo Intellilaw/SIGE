@@ -39,10 +39,11 @@ export const laborVacationFormatFieldValuesSchema = z.object({
   hireDate: z.string().max(30).default(""),
   vacationYearStartDate: z.string().max(30).default(""),
   completedYearsLabel: z.string().max(120).default(""),
-  entitlementDays: z.coerce.number().min(0).default(0),
-  pendingDays: z.coerce.number().min(0).default(0),
-  enjoyedDays: z.coerce.number().min(0).default(0),
-  description: z.string().max(500).default("")
+  entitlementDays: z.coerce.number().default(0),
+  pendingDays: z.coerce.number().default(0),
+  enjoyedDays: z.coerce.number().default(0),
+  description: z.string().max(500).default(""),
+  overrideTeamVacationConflict: z.boolean().optional().default(false)
 });
 
 const noBorder = {
@@ -137,8 +138,9 @@ function sanitizeFilenamePart(value: string) {
 
 function normalizeFields(laborFile: LaborFile, payload: LaborVacationFormatFieldValues): LaborVacationFormatFieldValues {
   const vacationDates = Array.from(new Set(payload.vacationDates.filter((date) => parseDateKey(date)))).sort();
-  const vacationDays = vacationDates.length || Number(payload.vacationDays) || 1;
+  const vacationDays = vacationDates.length || 1;
   const enjoymentText = normalizeText(payload.enjoymentText) || formatVacationDatesText(vacationDates);
+  const availableDays = laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays;
 
   return {
     employeeName: normalizeText(payload.employeeName) || laborFile.employeeName,
@@ -148,19 +150,14 @@ function normalizeFields(laborFile: LaborFile, payload: LaborVacationFormatField
     enjoymentText,
     interestedName: normalizeText(payload.interestedName) || normalizeText(payload.employeeName) || laborFile.employeeName,
     authorizerName: normalizeText(payload.authorizerName) || "Mayra Rubí Ordóñez Mendoza",
-    hireDate: normalizeText(payload.hireDate) || laborFile.hireDate.slice(0, 10),
-    vacationYearStartDate: normalizeText(payload.vacationYearStartDate) || laborFile.vacationSummary.currentYearStartDate,
-    completedYearsLabel: normalizeText(payload.completedYearsLabel) || laborFile.vacationSummary.completedYearsLabel,
-    entitlementDays: Number.isFinite(Number(payload.entitlementDays))
-      ? Number(payload.entitlementDays)
-      : laborFile.vacationSummary.entitlementDays,
-    pendingDays: Number.isFinite(Number(payload.pendingDays))
-      ? Number(payload.pendingDays)
-      : Math.max(0, laborFile.vacationSummary.remainingDays - vacationDays),
-    enjoyedDays: Number.isFinite(Number(payload.enjoyedDays))
-      ? Number(payload.enjoyedDays)
-      : laborFile.vacationSummary.usedDays + vacationDays,
-    description: normalizeText(payload.description)
+    hireDate: laborFile.hireDate.slice(0, 10),
+    vacationYearStartDate: laborFile.vacationSummary.currentYearStartDate,
+    completedYearsLabel: laborFile.vacationSummary.completedYearsLabel,
+    entitlementDays: availableDays,
+    pendingDays: Math.max(0, laborFile.vacationSummary.remainingDays - vacationDays),
+    enjoyedDays: laborFile.vacationSummary.usedDays + vacationDays,
+    description: normalizeText(payload.description),
+    overrideTeamVacationConflict: Boolean(payload.overrideTeamVacationConflict)
   };
 }
 
@@ -388,7 +385,8 @@ export function buildLaborVacationFormatDefaultFields(laborFile: LaborFile): Lab
     entitlementDays: laborFile.vacationSummary.entitlementDays,
     pendingDays: laborFile.vacationSummary.remainingDays,
     enjoyedDays: laborFile.vacationSummary.usedDays,
-    description: ""
+    description: "",
+    overrideTeamVacationConflict: false
   };
 }
 

@@ -39,6 +39,11 @@ model LaborFile {
   employeeEmail      String?
   employeeUsername   String
   employeeShortName  String?
+  personalPhone      String?
+  personalEmail      String?
+  emergencyContactName    String?
+  emergencyContactPhone   String?
+  emergencyContactAddress String?
   team               String?
   legacyTeam         String?
   specificRole       String?
@@ -77,6 +82,7 @@ model LaborFileDocument {
 model LaborVacationEvent {
   id                         String    @id @default(uuid())
   laborFileId                String
+  globalVacationDayId        String?
   eventType                  String
   startDate                  DateTime? @db.Date
   endDate                    DateTime? @db.Date
@@ -92,6 +98,7 @@ model LaborVacationEvent {
   laborFile                  LaborFile @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
 
   @@index([laborFileId, eventType])
+  @@index([globalVacationDayId])
   @@index([startDate, endDate])
 }
 

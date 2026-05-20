@@ -83,8 +83,6 @@ export class PrismaMattersRepository implements MattersRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async list() {
-    await this.cleanupDeleted();
-
     const records = await this.prisma.matter.findMany({
       where: { deletedAt: null },
       orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
@@ -94,8 +92,6 @@ export class PrismaMattersRepository implements MattersRepository {
   }
 
   public async listDeleted() {
-    await this.cleanupDeleted();
-
     const records = await this.prisma.matter.findMany({
       where: { deletedAt: { not: null } },
       orderBy: [{ deletedAt: "desc" }, { updatedAt: "desc" }]
@@ -385,19 +381,6 @@ export class PrismaMattersRepository implements MattersRepository {
         dueDate,
         state: "PENDING",
         recurring: false
-      }
-    });
-  }
-
-  private async cleanupDeleted() {
-    const threshold = new Date();
-    threshold.setDate(threshold.getDate() - 30);
-
-    await this.prisma.matter.deleteMany({
-      where: {
-        deletedAt: {
-          lt: threshold
-        }
       }
     });
   }

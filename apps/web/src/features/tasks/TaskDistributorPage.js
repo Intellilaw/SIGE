@@ -660,8 +660,10 @@ export function TaskDistributorPage() {
         setTerms((current) => current.map((term) => term.id === updated.id ? updated : term));
     }
     function getResponsibleSelectOptions(record) {
+        const table = resolveRecordTable(record);
         return dedupeResponsibleOptions([
             ...moduleResponsibleOptions,
+            ...(table?.responsibleOptions ?? []),
             record.responsible
         ]);
     }

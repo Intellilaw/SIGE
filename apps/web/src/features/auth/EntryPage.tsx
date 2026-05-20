@@ -17,7 +17,9 @@ export function EntryPage() {
           <div className="entry-accent" aria-hidden="true" />
 
           <div className="entry-brand">
-            <div className="entry-brand-mark">IL</div>
+            <div className="entry-brand-logo-shell">
+              <img className="entry-brand-logo" src={intellilawLogo} alt="Logo Intellilaw" />
+            </div>
             <p className="entry-brand-name">INTELLILAW</p>
           </div>
 

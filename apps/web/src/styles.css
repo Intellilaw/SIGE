@@ -95,11 +95,10 @@ textarea {
 .entry-brand {
   display: grid;
   justify-items: center;
-  gap: 16px;
-  margin-bottom: 26px;
+  gap: 14px;
+  margin-bottom: 28px;
 }
 
-.entry-brand-mark,
 .entry-option-mark {
   display: grid;
   place-items: center;
@@ -109,11 +108,23 @@ textarea {
   box-shadow: 0 12px 24px rgba(31, 41, 51, 0.1);
 }
 
-.entry-brand-mark {
-  width: 96px;
-  height: 96px;
+.entry-brand-logo-shell {
+  width: min(300px, 82vw);
+  height: 112px;
+  padding: 26px 32px;
+  border: 1px solid rgba(146, 39, 143, 0.1);
   border-radius: 28px;
-  font-size: 1.9rem;
+  background: linear-gradient(145deg, #ffffff, #f6f9ff);
+  box-shadow: 0 20px 44px rgba(31, 41, 51, 0.12);
+  display: grid;
+  place-items: center;
+}
+
+.entry-brand-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .entry-brand-name {
@@ -438,10 +449,6 @@ textarea {
   padding: 16px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.7);
-}
-
-.user-card small {
-  color: #7b8794;
 }
 
 .content {
@@ -969,11 +976,13 @@ textarea {
   grid-column: 1 / -1;
 }
 
-.daily-doc-client-search {
+.daily-doc-client-search,
+.quote-client-search {
   position: relative;
 }
 
-.daily-doc-client-search-results {
+.daily-doc-client-search-results,
+.quote-client-search-results {
   position: absolute;
   z-index: 8;
   inset: calc(100% + 6px) 0 auto;
@@ -989,7 +998,9 @@ textarea {
 }
 
 .daily-doc-client-search-results button,
-.daily-doc-client-search-empty {
+.daily-doc-client-search-empty,
+.quote-client-search-results button,
+.quote-client-search-empty {
   width: 100%;
   border: none;
   border-radius: 10px;
@@ -999,28 +1010,34 @@ textarea {
   text-align: left;
 }
 
-.daily-doc-client-search-results button {
+.daily-doc-client-search-results button,
+.quote-client-search-results button {
   display: grid;
   gap: 3px;
   cursor: pointer;
 }
 
-.daily-doc-client-search-results button strong {
+.daily-doc-client-search-results button strong,
+.quote-client-search-results button strong {
   color: #102a43;
   font-size: 0.95rem;
 }
 
-.daily-doc-client-search-results button span {
+.daily-doc-client-search-results button span,
+.quote-client-search-results button span {
   color: #52606d;
   font-size: 0.86rem;
 }
 
 .daily-doc-client-search-results button:hover,
-.daily-doc-client-search-results button[aria-selected="true"] {
+.daily-doc-client-search-results button[aria-selected="true"],
+.quote-client-search-results button:hover,
+.quote-client-search-results button[aria-selected="true"] {
   background: rgba(29, 78, 216, 0.08);
 }
 
-.daily-doc-client-search-empty {
+.daily-doc-client-search-empty,
+.quote-client-search-empty {
   color: #64748b;
   font-weight: 700;
 }
@@ -8424,12 +8441,22 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.labor-file-profile-wide-card {
+  grid-column: span 2;
+}
+
 .labor-file-profile-form {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.labor-file-profile-wide-field,
+.labor-file-notes-field {
+  grid-column: 1 / -1;
+}
+
+.labor-file-profile-wide-field textarea,
 .labor-file-notes-field textarea {
   min-height: 84px;
   resize: vertical;
@@ -8452,6 +8479,14 @@ textarea {
 
 .labor-file-upload-form input[type="file"] {
   padding: 10px 12px;
+}
+
+.labor-file-upload-limit {
+  align-self: center;
+  color: #52657a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  grid-column: 1 / -1;
 }
 
 .labor-file-contract-generator-panel,
@@ -8570,6 +8605,39 @@ textarea {
   line-height: 1.05;
 }
 
+.labor-file-vacation-conflict-rule {
+  align-items: center;
+  background: #fffaf0;
+  border: 1px solid rgba(160, 109, 0, 0.2);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 14px;
+}
+
+.labor-file-vacation-conflict-rule > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.labor-file-vacation-conflict-rule strong {
+  color: #102a43;
+}
+
+.labor-file-vacation-conflict-rule span,
+.labor-file-vacation-conflict-rule small {
+  color: #52657a;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.labor-file-vacation-conflict-rule small {
+  grid-column: 1 / -1;
+}
+
 .labor-file-vacation-format-section {
   background: #ffffff;
   border: 1px solid rgba(31, 41, 51, 0.08);
@@ -8616,6 +8684,37 @@ textarea {
 .labor-file-contract-wide-field,
 .labor-file-vacation-format-wide-field {
   grid-column: 1 / -1;
+}
+
+.labor-file-vacation-format-accounting {
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.labor-file-vacation-format-accounting > div {
+  background: #f8fafb;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.labor-file-vacation-format-accounting span {
+  color: #52657a;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.labor-file-vacation-format-accounting strong {
+  color: #102a43;
+  font-size: 1rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .labor-file-contract-wide-field textarea {
@@ -8717,6 +8816,15 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.labor-file-document-row-multiple {
+  align-items: start;
+}
+
+.labor-file-document-row-multiple .table-actions > .status-pill {
+  justify-content: center;
+  min-width: 58px;
+}
+
 .labor-file-document-row > div {
   display: grid;
   gap: 3px;
@@ -8732,6 +8840,55 @@ textarea {
   color: #52657a;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.labor-file-document-row .status-pill.status-live {
+  color: #0f766e;
+}
+
+.labor-file-document-row .status-pill.status-warning {
+  color: #b42318;
+}
+
+.labor-file-multiple-document-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.labor-file-multiple-document-summary small {
+  color: #52657a;
+  font-weight: 700;
+}
+
+.labor-file-multiple-document-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  min-width: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.labor-file-multiple-document-item {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid rgba(31, 41, 51, 0.07);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 10px;
+}
+
+.labor-file-multiple-document-item .table-actions {
+  gap: 6px;
+}
+
+.labor-file-multiple-document-item .table-actions button {
+  min-height: 34px;
+  padding: 8px 11px;
 }
 
 .labor-file-vacation-summary {
@@ -8751,6 +8908,138 @@ textarea {
   font-weight: 700;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.labor-file-vacation-accounting-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.labor-file-vacation-accounting-grid > div {
+  background: #ffffff;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-left: 4px solid #1d4ed8;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.labor-file-vacation-accounting-grid > div:nth-child(2) {
+  border-left-color: #b42318;
+}
+
+.labor-file-vacation-accounting-grid > div:nth-child(3) {
+  border-left-color: #a06d00;
+}
+
+.labor-file-vacation-accounting-grid > div:nth-child(4) {
+  border-left-color: #0f766e;
+}
+
+.labor-file-vacation-accounting-grid span {
+  color: #52657a;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.labor-file-vacation-accounting-grid strong {
+  color: #102a43;
+  font-size: 1.35rem;
+  line-height: 1.05;
+}
+
+.labor-file-previous-year-pending {
+  background: #ffffff;
+  border: 1px solid rgba(31, 41, 51, 0.09);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.labor-file-previous-year-pending-head {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.labor-file-previous-year-pending-head > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.labor-file-previous-year-pending h3 {
+  color: #102a43;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.labor-file-previous-year-pending-head span,
+.labor-file-previous-year-pending small {
+  color: #52657a;
+  font-size: 0.84rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.labor-file-previous-year-pending-head strong {
+  background: #eef7f4;
+  border-radius: 999px;
+  color: #0f766e;
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  padding: 9px 13px;
+  white-space: nowrap;
+}
+
+.labor-file-manual-checkbox {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  color: #243447;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.labor-file-manual-checkbox input {
+  height: 18px;
+  width: 18px;
+}
+
+.labor-file-manual-checkbox span {
+  font-weight: 850;
+}
+
+.labor-file-manual-checkbox.is-disabled {
+  color: #7b8794;
+}
+
+.labor-file-previous-year-pending-fields {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(130px, 0.45fr) minmax(220px, 1fr) auto;
+  min-width: 0;
+}
+
+.labor-file-previous-year-pending-fields .form-field {
+  margin: 0;
+}
+
+.labor-file-previous-year-pending-fields button {
+  min-height: 52px;
 }
 
 .labor-file-vacation-form {
@@ -8797,18 +9086,28 @@ textarea {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(150px, 0.65fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(172px, 100%), 1fr));
   min-width: 0;
 }
 
 .labor-file-vacation-date-group.is-single .labor-file-vacation-date-row {
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.8fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(172px, 100%), 1fr));
+}
+
+.labor-file-vacation-date-row .form-field,
+.labor-file-vacation-date-row input[type="date"] {
+  min-width: min(172px, 100%);
+}
+
+.labor-file-vacation-date-row input[type="date"] {
+  font-variant-numeric: tabular-nums;
 }
 
 .labor-file-vacation-date-row .secondary-button {
   border-color: rgba(29, 78, 216, 0.08);
   box-shadow: none;
   min-height: 52px;
+  min-width: min(172px, 100%);
   width: 100%;
 }
 
@@ -8907,6 +9206,13 @@ textarea {
   min-width: 0;
 }
 
+.labor-file-vacation-event-title {
+  align-items: center;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .labor-file-vacation-event .table-actions {
   align-items: stretch;
   display: flex;
@@ -8923,6 +9229,34 @@ textarea {
   width: 100%;
 }
 
+.labor-file-signed-upload {
+  min-height: 40px;
+  overflow: hidden;
+  padding: 10px 16px;
+  position: relative;
+  width: 100%;
+}
+
+.labor-file-signed-upload input {
+  bottom: 0;
+  cursor: pointer;
+  font-size: 999px;
+  left: 0;
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.labor-file-signed-upload.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.labor-file-signed-upload.is-disabled input {
+  cursor: not-allowed;
+}
+
 .labor-file-vacation-event strong {
   color: #102a43;
 }
@@ -8931,6 +9265,14 @@ textarea {
 .labor-file-vacation-event small {
   color: #52657a;
   font-weight: 700;
+}
+
+.labor-file-vacation-event .status-pill.status-live {
+  color: #0f766e;
+}
+
+.labor-file-vacation-event .status-pill.status-warning {
+  color: #b42318;
 }
 
 @media (max-width: 980px) {
@@ -8944,11 +9286,16 @@ textarea {
   .labor-file-upload-form,
   .labor-file-contract-generator-summary,
   .labor-file-contract-field-grid,
+  .labor-file-vacation-conflict-rule,
   .labor-file-vacation-format-summary,
   .labor-file-vacation-format-stats,
   .labor-file-vacation-format-field-grid,
+  .labor-file-vacation-format-accounting,
+  .labor-file-vacation-accounting-grid,
+  .labor-file-previous-year-pending-fields,
   .labor-file-global-vacation-form,
   .labor-file-document-row,
+  .labor-file-multiple-document-item,
   .labor-file-vacation-form,
   .labor-file-vacation-date-tools,
   .labor-file-vacation-date-row,
@@ -8961,6 +9308,11 @@ textarea {
     flex-direction: column;
   }
 
+  .labor-file-previous-year-pending-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .internal-contract-group-head {
     align-items: flex-start;
     flex-direction: column;
@@ -8968,6 +9320,10 @@ textarea {
 
   .labor-files-sidebar {
     order: 2;
+  }
+
+  .labor-file-vacation-event .table-actions {
+    width: 100%;
   }
 }
 

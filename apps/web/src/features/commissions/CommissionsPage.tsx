@@ -595,6 +595,7 @@ export function CommissionsPage() {
   const [editingReceiverName, setEditingReceiverName] = useState("");
   const [viewingSnapshot, setViewingSnapshot] = useState<CommissionSnapshot | null>(null);
   const canWriteCommissions = canWriteModule(user, "commissions");
+  const canReadAllCommissions = canWriteCommissions || hasPermission(user, "commissions:all:read");
   const canWriteClientRelationsCommissions = hasPermission(user, "commissions:client-relations:write");
   const canWriteOwnCommissionSection = hasPermission(user, "commissions:own-section:write");
   const canReadClients = hasPermission(user, "clients:read");
@@ -602,7 +603,7 @@ export function CommissionsPage() {
   const visibleSections = useMemo(() => {
     const userRole = normalizeText(user?.specificRole);
 
-    if (canWriteCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
+    if (canReadAllCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
       return [...COMMISSION_SECTIONS];
     }
 
@@ -613,7 +614,7 @@ export function CommissionsPage() {
     }
 
     return COMMISSION_SECTIONS.filter((section) => normalizeText(section) === userRole);
-  }, [canWriteClientRelationsCommissions, canWriteCommissions, user?.legacyRole, user?.role, user?.specificRole]);
+  }, [canReadAllCommissions, canWriteClientRelationsCommissions, user?.legacyRole, user?.role, user?.specificRole]);
 
   const canAccessCalculation = visibleSections.length > 0;
   const visibleSectionKeys = useMemo(
@@ -644,10 +645,10 @@ export function CommissionsPage() {
   }, [activeSection, visibleSections]);
 
   useEffect(() => {
-    if (activeTab === "receivers" && !canWriteCommissions) {
+    if (activeTab === "receivers" && !canReadAllCommissions) {
       setActiveTab("calculation");
     }
-  }, [activeTab, canWriteCommissions]);
+  }, [activeTab, canReadAllCommissions]);
 
   async function loadBoard() {
     setLoadingBoard(true);
@@ -823,7 +824,7 @@ export function CommissionsPage() {
 
   const snapshotCards = loadingSnapshots
     ? []
-    : canWriteCommissions
+    : canReadAllCommissions
       ? snapshots
       : snapshots.filter((snapshot) => visibleSectionKeys.has(normalizeText(snapshot.section)));
   const activeSectionLabel = activeSection || "Sin seccion";
@@ -859,7 +860,7 @@ export function CommissionsPage() {
           >
             Calculo de comisiones
           </button>
-          {canWriteCommissions ? (
+          {canReadAllCommissions ? (
             <button
               type="button"
               className={`commissions-tab ${activeTab === "receivers" ? "is-active" : ""}`}

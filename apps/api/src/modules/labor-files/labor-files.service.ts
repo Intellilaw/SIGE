@@ -1,8 +1,14 @@
 import type {
   LaborFileDocumentUploadRecord,
-  LaborFilesRepository
+  LaborFilesRepository,
+  LaborVacationAcceptanceUploadRecord
 } from "../../repositories/types";
-import type { LaborFileUpdateInput, LaborGlobalVacationDayInput, LaborVacationEventInput } from "@sige/contracts";
+import type {
+  LaborFileUpdateInput,
+  LaborGlobalVacationDayInput,
+  LaborPreviousYearPendingVacationInput,
+  LaborVacationEventInput
+} from "@sige/contracts";
 
 export class LaborFilesService {
   public constructor(private readonly repository: LaborFilesRepository) {}
@@ -47,6 +53,17 @@ export class LaborFilesService {
     return this.repository.createVacationEvent(laborFileId, payload);
   }
 
+  public setPreviousYearPendingVacationDays(laborFileId: string, payload: LaborPreviousYearPendingVacationInput & {
+    previousYearStartDate: string;
+    previousYearEndDate: string;
+  }) {
+    return this.repository.setPreviousYearPendingVacationDays(laborFileId, payload);
+  }
+
+  public updateVacationAcceptance(eventId: string, payload: LaborVacationAcceptanceUploadRecord) {
+    return this.repository.updateVacationAcceptance(eventId, payload);
+  }
+
   public deleteVacationEvent(eventId: string) {
     return this.repository.deleteVacationEvent(eventId);
   }
@@ -57,6 +74,14 @@ export class LaborFilesService {
 
   public createGlobalVacationDay(payload: LaborGlobalVacationDayInput) {
     return this.repository.createGlobalVacationDay(payload);
+  }
+
+  public findGlobalVacationAcceptanceDocuments(globalVacationDayId: string) {
+    return this.repository.findGlobalVacationAcceptanceDocuments(globalVacationDayId);
+  }
+
+  public deleteGlobalVacationEvents(globalVacationDayId: string) {
+    return this.repository.deleteGlobalVacationEvents(globalVacationDayId);
   }
 
   public deleteGlobalVacationDay(dayId: string) {

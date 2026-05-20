@@ -147,10 +147,14 @@ export type LaborFileDocumentType =
   | "ADDENDUM"
   | "PROOF_OF_ADDRESS"
   | "TAX_STATUS_CERTIFICATE"
+  | "CURP"
+  | "IMSS_WEEKS_CERTIFICATE"
+  | "BANK_ACCOUNT_STATEMENT"
   | "OFFICIAL_ID"
   | "CV"
   | "PROFESSIONAL_TITLE"
-  | "PROFESSIONAL_LICENSE";
+  | "PROFESSIONAL_LICENSE"
+  | "EQUIPMENT_DELIVERY_FORMAT";
 
 export type LaborFileDocumentRequirement = "ALWAYS" | "PROFESSIONAL_CREDENTIAL" | "OPTIONAL";
 
@@ -161,6 +165,8 @@ export interface LaborFileDocumentDefinition {
   contractSection?: boolean;
   pdfOnly?: boolean;
   wordAllowed?: boolean;
+  multiple?: boolean;
+  maxFiles?: number;
 }
 
 export const LABOR_FILE_DOCUMENT_DEFINITIONS: LaborFileDocumentDefinition[] = [
@@ -168,13 +174,28 @@ export const LABOR_FILE_DOCUMENT_DEFINITIONS: LaborFileDocumentDefinition[] = [
   { type: "ADDENDUM", label: "Addendum", requirement: "OPTIONAL", contractSection: true, pdfOnly: true },
   { type: "PROOF_OF_ADDRESS", label: "Comprobante de domicilio", requirement: "ALWAYS" },
   { type: "TAX_STATUS_CERTIFICATE", label: "Constancia de situación fiscal", requirement: "ALWAYS" },
+  { type: "CURP", label: "CURP", requirement: "ALWAYS" },
+  { type: "IMSS_WEEKS_CERTIFICATE", label: "Constancia de semanas cotizadas IMSS", requirement: "ALWAYS", pdfOnly: true },
+  { type: "BANK_ACCOUNT_STATEMENT", label: "Estado de cuenta con CLABE y número de cuenta", requirement: "ALWAYS" },
   { type: "OFFICIAL_ID", label: "Identificación oficial", requirement: "ALWAYS" },
   { type: "CV", label: "CV", requirement: "ALWAYS" },
-  { type: "PROFESSIONAL_TITLE", label: "Título profesional", requirement: "PROFESSIONAL_CREDENTIAL" },
-  { type: "PROFESSIONAL_LICENSE", label: "Cédula profesional", requirement: "PROFESSIONAL_CREDENTIAL" }
+  { type: "PROFESSIONAL_TITLE", label: "Título profesional", requirement: "OPTIONAL" },
+  { type: "PROFESSIONAL_LICENSE", label: "Cédula profesional", requirement: "OPTIONAL" },
+  {
+    type: "EQUIPMENT_DELIVERY_FORMAT",
+    label: "Formato de entrega de equipo",
+    requirement: "OPTIONAL",
+    wordAllowed: true,
+    multiple: true,
+    maxFiles: 10
+  }
 ];
 
-export type LaborVacationEventType = "PREVIOUS_YEAR_DEDUCTION" | "VACATION";
+export type LaborVacationEventType =
+  | "PREVIOUS_YEAR_DEDUCTION"
+  | "PREVIOUS_YEAR_PENDING"
+  | "VACATION"
+  | "GLOBAL_VACATION";
 
 export interface LaborFileDocument {
   id: string;
@@ -191,6 +212,7 @@ export interface LaborFileDocument {
 export interface LaborVacationEvent {
   id: string;
   laborFileId: string;
+  globalVacationDayId?: string;
   eventType: LaborVacationEventType;
   startDate?: string;
   endDate?: string;
@@ -211,6 +233,11 @@ export interface LaborGlobalVacationDay {
   description?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LaborGlobalVacationBatchResult {
+  day: LaborGlobalVacationDay;
+  generatedFormats: number;
 }
 
 export interface LaborContractFieldValues {
@@ -263,14 +290,23 @@ export interface LaborVacationFormatFieldValues {
   pendingDays: number;
   enjoyedDays: number;
   description: string;
+  overrideTeamVacationConflict?: boolean;
 }
 
 export interface LaborVacationSummary {
   hireDate: string;
   currentYearStartDate: string;
+  previousYearStartDate: string;
+  previousYearEndDate: string;
   completedYears: number;
   completedYearsLabel: string;
   entitlementDays: number;
+  previousYearPendingDays: number;
+  ignoredPreviousYearPendingDays: number;
+  earnedDays: number;
+  unearnedDays: number;
+  scheduledDays: number;
+  authorizedDays: number;
   usedDays: number;
   remainingDays: number;
   lines: string[];
@@ -283,6 +319,11 @@ export interface LaborFile {
   employeeEmail?: string;
   employeeUsername: string;
   employeeShortName?: string;
+  personalPhone?: string;
+  personalEmail?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactAddress?: string;
   team?: Team;
   legacyTeam?: string;
   specificRole?: string;
@@ -301,6 +342,11 @@ export interface LaborFile {
 
 export interface LaborFileUpdateInput {
   hireDate?: string;
+  personalPhone?: string | null;
+  personalEmail?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  emergencyContactAddress?: string | null;
   notes?: string | null;
 }
 
@@ -313,6 +359,7 @@ export interface LaborFileDocumentUploadInput {
 
 export interface LaborVacationEventInput {
   eventType: LaborVacationEventType;
+  globalVacationDayId?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   vacationDates?: string[];
@@ -321,6 +368,12 @@ export interface LaborVacationEventInput {
   acceptanceOriginalFileName?: string | null;
   acceptanceFileMimeType?: string | null;
   acceptanceFileBase64?: string | null;
+}
+
+export interface LaborPreviousYearPendingVacationInput {
+  days: number;
+  description?: string | null;
+  manualOverrideConfirmed?: boolean;
 }
 
 export interface LaborGlobalVacationDayInput {

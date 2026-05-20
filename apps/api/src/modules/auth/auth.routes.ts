@@ -29,6 +29,12 @@ const passwordResetCompleteSchema = z.object({
   password: z.string().min(10).max(128)
 });
 
+function canOpenBriefManager(user: { permissions: string[] }) {
+  return user.permissions.includes("*")
+    || user.permissions.includes("brief-manager:read")
+    || user.permissions.includes("brief-manager:write");
+}
+
 function getAppOrigin(request: { headers: Record<string, unknown> }, fallbackOrigin: string) {
   const origin = request.headers.origin;
   return typeof origin === "string" && origin.length > 0 ? origin : fallbackOrigin;
@@ -126,6 +132,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const user = await service.getProfile(getSessionUser(request).id);
     if (!user.isActive || user.passwordResetRequired) {
       throw new app.errors.AppError(403, "SSO_USER_NOT_ALLOWED", "This account cannot open Manager de escritos.");
+    }
+
+    if (!canOpenBriefManager(user)) {
+      throw new app.errors.AppError(403, "SSO_FORBIDDEN", "This account is not authorized for Manager de escritos.");
     }
 
     try {

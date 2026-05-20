@@ -285,6 +285,7 @@ export function derivePermissions(input: {
   const isClientRelationsTeam =
     normalizedTeam === "comunicacion con cliente" || normalizedTeam === "comunicacion con clientes";
   const isSalesTeam = normalizedTeam === "ventas";
+  const isFinanceTeam = normalizedTeam === "finanzas" || specificRole === "finanzas";
 
   if (input.legacyRole === "SUPERADMIN" || specificRole === "direccion general") {
     return ["*"];
@@ -316,7 +317,7 @@ export function derivePermissions(input: {
     permissions.add("sales:write");
   }
 
-  if (normalizedTeam === "finanzas") {
+  if (isFinanceTeam) {
     permissions.add("clients:read");
     permissions.add("quotes:read");
     permissions.add("quotes:write");
@@ -324,6 +325,7 @@ export function derivePermissions(input: {
     permissions.add("finances:write");
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
+    permissions.add("commissions:all:read");
     permissions.add("internal-contracts:read");
     permissions.add("internal-contract-templates:read");
   }

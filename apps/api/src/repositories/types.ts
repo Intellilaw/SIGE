@@ -25,6 +25,7 @@ import type {
   LaborFileUpdateInput,
   LaborGlobalVacationDay,
   LaborGlobalVacationDayInput,
+  LaborPreviousYearPendingVacationInput,
   LaborVacationEvent,
   LaborVacationEventInput,
   KpiOverview,
@@ -230,6 +231,12 @@ export interface LaborVacationAcceptanceDocumentRecord {
   fileContent: Buffer;
 }
 
+export interface LaborVacationAcceptanceUploadRecord {
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileContent: Buffer;
+}
+
 export interface LaborFilesRepository {
   list(): Promise<LaborFile[]>;
   listForUser(userId: string): Promise<LaborFile[]>;
@@ -241,9 +248,16 @@ export interface LaborFilesRepository {
   uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord): Promise<LaborFileDocument>;
   deleteDocument(documentId: string): Promise<void>;
   createVacationEvent(laborFileId: string, payload: LaborVacationEventInput): Promise<LaborVacationEvent>;
+  setPreviousYearPendingVacationDays(laborFileId: string, payload: LaborPreviousYearPendingVacationInput & {
+    previousYearStartDate: string;
+    previousYearEndDate: string;
+  }): Promise<LaborFile>;
+  updateVacationAcceptance(eventId: string, payload: LaborVacationAcceptanceUploadRecord): Promise<LaborVacationEvent>;
   deleteVacationEvent(eventId: string): Promise<void>;
   listGlobalVacationDays(): Promise<LaborGlobalVacationDay[]>;
   createGlobalVacationDay(payload: LaborGlobalVacationDayInput): Promise<LaborGlobalVacationDay>;
+  findGlobalVacationAcceptanceDocuments(globalVacationDayId: string): Promise<LaborVacationAcceptanceDocumentRecord[]>;
+  deleteGlobalVacationEvents(globalVacationDayId: string): Promise<void>;
   deleteGlobalVacationDay(dayId: string): Promise<void>;
   syncMissingForUsers(): Promise<void>;
 }

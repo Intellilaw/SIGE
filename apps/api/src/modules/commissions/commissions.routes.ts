@@ -48,6 +48,7 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.CommissionsService(app.repositories.commissions);
   const readGuards = [requireAuth, requireAnyPermissions([
     "commissions:read",
+    "commissions:all:read",
     "commissions:write",
     "commissions:client-relations:write",
     "commissions:own-section:write"
@@ -65,8 +66,15 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
-      specificRole: user.specificRole
+      specificRole: user.specificRole,
+      permissions: user.permissions
     });
+  }
+
+  function canReadAllCommissions(permissions: string[]) {
+    return permissions.includes("*")
+      || permissions.includes("commissions:write")
+      || permissions.includes("commissions:all:read");
   }
 
   function canManageAllCommissions(permissions: string[]) {
@@ -105,7 +113,7 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
   app.get("/commissions/snapshots", { preHandler: readGuards }, async (request) => {
     const snapshots = await service.listSnapshots();
     const permissions = getEffectivePermissions(request);
-    if (canManageAllCommissions(permissions)) {
+    if (canReadAllCommissions(permissions)) {
       return snapshots;
     }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { Client, Matter, Quote, TaskItem, TaskModuleDefinition, Team } from "@sige/contracts";
 import { TEAM_OPTIONS } from "@sige/contracts";
 
@@ -166,13 +166,45 @@ function findQuoteByNumber(quotes: Quote[], quoteNumber?: string | null) {
   return quotes.find((quote) => normalizeText(quote.quoteNumber) === cleanQuoteNumber);
 }
 
-function findClientMatch(clients: Client[], clientName?: string | null) {
-  const normalizedClientName = normalizeComparableText(clientName);
-  if (!normalizedClientName) {
+function getClientSearchLabel(client: Client) {
+  return `${client.clientNumber} - ${client.name}`;
+}
+
+function findClientBySearchValue(clients: Client[], value?: string | null) {
+  const normalizedValue = normalizeComparableText(value);
+  if (!normalizedValue) {
     return undefined;
   }
 
-  return clients.find((client) => normalizeComparableText(client.name) === normalizedClientName);
+  return clients.find((client) => {
+    const normalizedName = normalizeComparableText(client.name);
+    const normalizedNumber = normalizeComparableText(client.clientNumber);
+    const normalizedLabel = normalizeComparableText(getClientSearchLabel(client));
+    return normalizedValue === normalizedName || normalizedValue === normalizedNumber || normalizedValue === normalizedLabel;
+  });
+}
+
+function findMatterClientMatch(clients: Client[], matter: Matter) {
+  if (matter.clientId) {
+    const matchById = clients.find((client) => client.id === matter.clientId);
+    if (matchById) {
+      return matchById;
+    }
+  }
+
+  return findClientBySearchValue(clients, matter.clientName) ?? findClientBySearchValue(clients, matter.clientNumber);
+}
+
+function quoteBelongsToClient(quote: Quote, client: Client) {
+  return quote.clientId === client.id || normalizeComparableText(quote.clientName) === normalizeComparableText(client.name);
+}
+
+function getClientQuoteOptions(quotes: Quote[], client?: Client) {
+  if (!client) {
+    return [];
+  }
+
+  return quotes.filter((quote) => quoteBelongsToClient(quote, client));
 }
 
 function getEffectiveMatterType(matter: Matter, quotes: Quote[]) {
@@ -185,7 +217,7 @@ function getEffectiveMatterType(matter: Matter, quotes: Quote[]) {
 }
 
 function getEffectiveClientNumber(matter: Matter, clients: Client[]) {
-  return findClientMatch(clients, matter.clientName)?.clientNumber ?? normalizeText(matter.clientNumber);
+  return findMatterClientMatch(clients, matter)?.clientNumber ?? normalizeText(matter.clientNumber);
 }
 
 interface MatterReflection {
@@ -481,11 +513,13 @@ interface MatterTableProps {
   reflections: Map<string, MatterReflection>;
   commissionOptions: string[];
   selectedIds: Set<string>;
+  rowRefs: MutableRefObject<Map<string, HTMLTableRowElement>>;
   readOnly: boolean;
   variant: MatterTableVariant;
   canDeleteReadOnlyRows: boolean;
   onToggleSelection: (matterId: string) => void;
   onToggleAll: (items: Matter[]) => void;
+  onClientChange: (matterId: string, value: string) => void;
   onLocalChange: (matterId: string, field: keyof MatterPatchPayload, value: string | number) => void;
   onImmediateChange: (matterId: string, field: keyof MatterPatchPayload, value: string | boolean) => Promise<void>;
   onQuoteChange: (matterId: string, quoteNumber: string) => Promise<void>;
@@ -503,11 +537,13 @@ function MatterTable({
   reflections,
   commissionOptions,
   selectedIds,
+  rowRefs,
   readOnly,
   variant,
   canDeleteReadOnlyRows,
   onToggleSelection,
   onToggleAll,
+  onClientChange,
   onLocalChange,
   onImmediateChange,
   onQuoteChange,
@@ -518,10 +554,16 @@ function MatterTable({
 }: MatterTableProps) {
   const isRetainerTable = variant === "retainer";
   const allSelected = !readOnly && items.length > 0 && items.every((item) => selectedIds.has(item.id));
+  const clientSearchListId = `matter-client-options-${variant}`;
 
   return (
     <div className="lead-table-shell">
       <div className="lead-table-wrapper">
+        <datalist id={clientSearchListId}>
+          {clients.map((client) => (
+            <option key={client.id} value={getClientSearchLabel(client)} />
+          ))}
+        </datalist>
         <table className={`lead-table matters-table ${isRetainerTable ? "matters-table-retainer" : "matters-table-unique"}`}>
           <thead>
             <tr>
@@ -577,10 +619,17 @@ function MatterTable({
                 const reflection = getMatterReflection(item, reflections);
                 const rowReason = evaluateMatterRow(item, quotes, clients, reflection);
                 const isSelected = selectedIds.has(item.id);
-                const clientMatch = findClientMatch(clients, item.clientName);
+                const clientMatch = findMatterClientMatch(clients, item);
                 const effectiveClientNumber = clientMatch?.clientNumber ?? normalizeText(item.clientNumber);
                 const isClientLocked = Boolean(clientMatch);
                 const isQuoteLocked = Boolean(normalizeText(item.quoteNumber));
+                const clientQuoteOptions = getClientQuoteOptions(quotes, clientMatch);
+                const quoteOptions = linkedQuote && !clientQuoteOptions.some((quote) => quote.id === linkedQuote.id)
+                  ? [...clientQuoteOptions, linkedQuote]
+                  : clientQuoteOptions;
+                const hasSelectedQuoteOption =
+                  !normalizeText(item.quoteNumber) ||
+                  quoteOptions.some((quote) => normalizeText(quote.quoteNumber) === normalizeText(item.quoteNumber));
                 const isSpecificProcessEditable = !readOnly && matterType === "RETAINER";
                 const isLinked = isMatterLinked(item);
                 const sendLabel = matterType === "RETAINER" ? "-> Ejecucion" : "-> Ejec + Fin";
@@ -591,7 +640,19 @@ function MatterTable({
                 ].join(" ").trim();
 
                 return (
-                  <tr key={item.id} className={rowClassName} title={rowReason ?? ""}>
+                  <tr
+                    key={item.id}
+                    ref={(node) => {
+                      if (node) {
+                        rowRefs.current.set(item.id, node);
+                        return;
+                      }
+
+                      rowRefs.current.delete(item.id);
+                    }}
+                    className={rowClassName}
+                    title={rowReason ?? ""}
+                  >
                     <td className="lead-table-checkbox">
                       <input
                         type="checkbox"
@@ -614,11 +675,13 @@ function MatterTable({
                     <td>
                       <input
                         className={`lead-cell-input ${isQuoteLocked ? "matter-cell-readonly" : ""}`}
+                        list={clientSearchListId}
                         value={item.clientName || ""}
                         disabled={readOnly}
                         readOnly={readOnly || isQuoteLocked}
-                        onChange={(event) => onLocalChange(item.id, "clientName", event.target.value)}
+                        onChange={(event) => onClientChange(item.id, event.target.value)}
                         onBlur={() => onBlur(item.id)}
+                        placeholder="Buscar cliente..."
                       />
                     </td>
                     <td>
@@ -628,20 +691,15 @@ function MatterTable({
                         disabled={readOnly}
                         onChange={(event) => void onQuoteChange(item.id, event.target.value)}
                       >
-                        <option value="">Manual (Sin cot.)</option>
-                        {quotes
-                          .filter((quote) => {
-                            if (!normalizeText(item.clientName)) {
-                              return true;
-                            }
-
-                            return normalizeComparableText(quote.clientName) === normalizeComparableText(item.clientName);
-                          })
-                          .map((quote) => (
-                            <option key={quote.id} value={quote.quoteNumber}>
-                              {quote.quoteNumber} - {quote.clientName}
-                            </option>
-                          ))}
+                        <option value="">{clientMatch ? "Manual (Sin cot.)" : "Selecciona cliente primero"}</option>
+                        {!hasSelectedQuoteOption && normalizeText(item.quoteNumber) ? (
+                          <option value={item.quoteNumber}>{item.quoteNumber}</option>
+                        ) : null}
+                        {quoteOptions.map((quote) => (
+                          <option key={quote.id} value={quote.quoteNumber}>
+                            {quote.quoteNumber} - {quote.subject}
+                          </option>
+                        ))}
                       </select>
                     </td>
                     <td>
@@ -926,6 +984,8 @@ export function MattersPage() {
   const [teamFilter, setTeamFilter] = useState<string>("Todos");
   const [clientSearch, setClientSearch] = useState("");
   const [wordSearch, setWordSearch] = useState("");
+  const [pendingScrollMatterId, setPendingScrollMatterId] = useState<string | null>(null);
+  const matterRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
   const canReadMatters = canReadModule(user, "active-matters");
   const canWriteMatters = canWriteModule(user, "active-matters");
@@ -984,7 +1044,7 @@ export function MattersPage() {
   function syncMatterAcrossViews(updated: Matter) {
     setActiveItems((items) => {
       const next = updated.deletedAt ? removeMatter(items, updated.id) : upsertMatter(items, updated);
-      return sortActiveMatters(next, clients);
+      return next;
     });
     setDeletedItems((items) => {
       const next = updated.deletedAt ? upsertMatter(items, updated) : removeMatter(items, updated.id);
@@ -1006,7 +1066,7 @@ export function MattersPage() {
     }
 
     const updated = updater({ ...current });
-    setActiveItems((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+    setActiveItems((items) => replaceMatter(items, updated));
     return updated;
   }
 
@@ -1032,6 +1092,34 @@ export function MattersPage() {
     updateMatterLocal(matterId, (matter) => {
       const draft = matter as Matter & Record<string, unknown>;
       draft[field as string] = value;
+      return matter;
+    });
+  }
+
+  function handleClientChange(matterId: string, value: string) {
+    if (!canWriteMatters) {
+      return;
+    }
+
+    updateMatterLocal(matterId, (matter) => {
+      const selectedClient = findClientBySearchValue(clients, value);
+
+      if (selectedClient) {
+        const currentQuote = findQuoteByNumber(quotes, matter.quoteNumber);
+        matter.clientId = selectedClient.id;
+        matter.clientNumber = selectedClient.clientNumber;
+        matter.clientName = selectedClient.name;
+
+        if (currentQuote && !quoteBelongsToClient(currentQuote, selectedClient)) {
+          matter.quoteId = undefined;
+          matter.quoteNumber = undefined;
+        }
+      } else {
+        matter.clientId = undefined;
+        matter.clientNumber = undefined;
+        matter.clientName = value;
+      }
+
       return matter;
     });
   }
@@ -1109,7 +1197,13 @@ export function MattersPage() {
 
     try {
       const created = await apiPost<Matter>("/matters", {});
-      setActiveItems((items) => sortActiveMatters([...items, created], clients));
+      if (hasActiveFilters) {
+        setTeamFilter("Todos");
+        setClientSearch("");
+        setWordSearch("");
+      }
+      setPendingScrollMatterId(created.id);
+      setActiveItems((items) => [...items, created]);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     }
@@ -1147,7 +1241,7 @@ export function MattersPage() {
 
     try {
       await apiPost<void>("/matters/bulk-trash", { ids: Array.from(selectedIds) });
-      setActiveItems((items) => sortActiveMatters(items.filter((item) => !selectedIds.has(item.id)), clients));
+      setActiveItems((items) => items.filter((item) => !selectedIds.has(item.id)));
       setSelectedIds(new Set());
       await loadBoard();
     } catch (error) {
@@ -1262,6 +1356,7 @@ export function MattersPage() {
 
   const clientSearchWords = useMemo(() => getSearchWords(clientSearch), [clientSearch]);
   const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
+  const hasActiveFilters = teamFilter !== "Todos" || clientSearchWords.length > 0 || wordSearchWords.length > 0;
   const reflections = useMemo(
     () => buildMatterReflectionMap(taskItems, taskModules),
     [taskItems, taskModules]
@@ -1269,13 +1364,17 @@ export function MattersPage() {
   const filteredItems = useMemo(
     () =>
       activeItems.filter((item) => {
+        if (item.id === pendingScrollMatterId) {
+          return true;
+        }
+
         const teamMatches = teamFilter === "Todos" || item.responsibleTeam === teamFilter;
         const reflection = getMatterReflection(item, reflections);
         const clientMatches = matchesClientSearch(item.clientName, clientSearchWords);
         const wordMatches = matchesWordSearch(item, quotes, clients, reflection, wordSearchWords);
         return teamMatches && clientMatches && wordMatches;
       }),
-    [activeItems, clientSearchWords, wordSearchWords, teamFilter, reflections, quotes, clients]
+    [activeItems, pendingScrollMatterId, clientSearchWords, wordSearchWords, teamFilter, reflections, quotes, clients]
   );
   const filteredDeletedItems = useMemo(
     () =>
@@ -1296,6 +1395,28 @@ export function MattersPage() {
     () => filteredItems.filter((item) => item.matterType === "RETAINER"),
     [filteredItems]
   );
+
+  useEffect(() => {
+    if (!pendingScrollMatterId || !filteredItems.some((item) => item.id === pendingScrollMatterId)) {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const row = matterRowRefs.current.get(pendingScrollMatterId);
+      if (!row) {
+        return;
+      }
+
+      row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      const firstEditableField = row.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        "input:not([type='checkbox']):not([readonly]):not(:disabled), select:not(:disabled), textarea:not(:disabled)"
+      );
+      firstEditableField?.focus({ preventScroll: true });
+      setPendingScrollMatterId(null);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [filteredItems, pendingScrollMatterId]);
 
   return (
     <section className="page-stack matters-page">
@@ -1389,11 +1510,13 @@ export function MattersPage() {
           reflections={reflections}
           commissionOptions={commissionOptions}
           selectedIds={selectedIds}
+          rowRefs={matterRowRefs}
           readOnly={!canWriteMatters}
           variant="unique"
           canDeleteReadOnlyRows={canDeleteReadOnlyRows}
           onToggleSelection={toggleSelection}
           onToggleAll={toggleAll}
+          onClientChange={handleClientChange}
           onLocalChange={handleLocalChange}
           onImmediateChange={handleImmediateChange}
           onQuoteChange={handleQuoteChange}
@@ -1422,11 +1545,13 @@ export function MattersPage() {
           reflections={reflections}
           commissionOptions={commissionOptions}
           selectedIds={new Set()}
+          rowRefs={matterRowRefs}
           readOnly={true}
           variant="retainer"
           canDeleteReadOnlyRows={canDeleteReadOnlyRows}
           onToggleSelection={() => undefined}
           onToggleAll={() => undefined}
+          onClientChange={handleClientChange}
           onLocalChange={handleLocalChange}
           onImmediateChange={handleImmediateChange}
           onQuoteChange={handleQuoteChange}

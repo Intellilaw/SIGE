@@ -13,13 +13,14 @@ import {
   type LaborFileUpdateInput,
   type LaborGlobalVacationDay,
   type LaborGlobalVacationDayInput,
+  type LaborPreviousYearPendingVacationInput,
   type LaborVacationEvent,
   type LaborVacationEventInput
 } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { mapLaborFile, mapLaborFileDocument, mapLaborGlobalVacationDay, mapLaborVacationEvent } from "./mappers";
-import type { LaborFileDocumentUploadRecord, LaborFilesRepository } from "./types";
+import type { LaborFileDocumentUploadRecord, LaborFilesRepository, LaborVacationAcceptanceUploadRecord } from "./types";
 
 type LaborFileUserSnapshot = {
   id: string;
@@ -59,9 +60,14 @@ interface LocalLaborVacationEventState extends Omit<LaborVacationEvent, "descrip
   acceptanceFileBase64?: string | null;
 }
 
-interface LocalLaborFileState extends Omit<LaborFile, "documents" | "vacationEvents" | "globalVacationDays" | "vacationSummary" | "employeeEmail" | "employeeShortName" | "team" | "legacyTeam" | "specificRole" | "employmentEndedAt" | "notes"> {
+interface LocalLaborFileState extends Omit<LaborFile, "documents" | "vacationEvents" | "globalVacationDays" | "vacationSummary" | "employeeEmail" | "employeeShortName" | "personalPhone" | "personalEmail" | "emergencyContactName" | "emergencyContactPhone" | "emergencyContactAddress" | "team" | "legacyTeam" | "specificRole" | "employmentEndedAt" | "notes"> {
   employeeEmail?: string | null;
   employeeShortName?: string | null;
+  personalPhone?: string | null;
+  personalEmail?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  emergencyContactAddress?: string | null;
   team?: string | null;
   legacyTeam?: string | null;
   specificRole?: string | null;
@@ -75,6 +81,11 @@ interface LocalLaborState {
   files: LocalLaborFileState[];
   globalVacationDays: LaborGlobalVacationDay[];
 }
+
+type PreviousYearPendingVacationWrite = LaborPreviousYearPendingVacationInput & {
+  previousYearStartDate: string;
+  previousYearEndDate: string;
+};
 
 const LABOR_FILE_RELATIONS = {
   documents: {
@@ -125,6 +136,7 @@ const VACATION_ACCEPTANCE_MIME_TYPES = new Set([
 const CONTRACT_PREFILL_DOCUMENT_TYPES = new Set<LaborFileDocumentType>([
   "PROOF_OF_ADDRESS",
   "TAX_STATUS_CERTIFICATE",
+  "CURP",
   "OFFICIAL_ID",
   "CV",
   "PROFESSIONAL_TITLE",
@@ -220,6 +232,10 @@ function decodeBase64File(value?: string | null) {
   return Buffer.from(base64Payload.includes(",") ? base64Payload.slice(base64Payload.indexOf(",") + 1) : base64Payload, "base64");
 }
 
+function isVacationRequestEventType(eventType: LaborVacationEvent["eventType"]) {
+  return eventType === "VACATION" || eventType === "GLOBAL_VACATION";
+}
+
 function getVacationDateKeys(payload: LaborVacationEventInput) {
   const explicitDateKeys = (payload.vacationDates ?? [])
     .map((date) => toDate(date))
@@ -256,10 +272,49 @@ function isVacationAcceptanceFile(payload: Pick<LaborFileDocumentUploadRecord, "
   return isPdfFile(payload) || isDocxFile(payload);
 }
 
+function getDocumentDefinition(documentType: LaborFileDocumentType) {
+  return LABOR_FILE_DOCUMENT_DEFINITIONS.find((definition) => definition.type === documentType);
+}
+
 function validateDocumentType(documentType: LaborFileDocumentType) {
   if (!KNOWN_DOCUMENT_TYPES.has(documentType)) {
     throw new AppError(400, "INVALID_LABOR_FILE_DOCUMENT_TYPE", "Tipo de documento laboral inválido.");
   }
+}
+
+function validateLaborDocumentFile(documentType: LaborFileDocumentType, payload: Pick<LaborFileDocumentUploadRecord, "fileMimeType" | "originalFileName">) {
+  const definition = getDocumentDefinition(documentType);
+  const label = definition?.label ?? "El documento";
+  const mimeType = normalizeText(payload.fileMimeType).toLowerCase();
+
+  if (definition?.wordAllowed && !isPdfFile(payload) && !isDocxFile(payload)) {
+    throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", `${label} debe ser PDF o DOCX.`);
+  }
+
+  if (PDF_ONLY_TYPES.has(documentType) && !isPdfFile(payload)) {
+    throw new AppError(400, "LABOR_FILE_DOCUMENT_PDF_REQUIRED", `${label} debe ser PDF.`);
+  }
+
+  if (definition?.wordAllowed && mimeType && !LABOR_CONTRACT_MIME_TYPES.has(mimeType)) {
+    throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", `${label} debe ser PDF o DOCX.`);
+  }
+
+  if (!definition?.wordAllowed && !PDF_ONLY_TYPES.has(documentType) && mimeType && !ALLOWED_DOCUMENT_MIME_TYPES.has(mimeType)) {
+    throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "Solo se permiten archivos PDF, JPG o PNG.");
+  }
+}
+
+function assertDocumentLimit(documentType: LaborFileDocumentType, currentCount: number) {
+  const definition = getDocumentDefinition(documentType);
+  if (!definition?.maxFiles || currentCount < definition.maxFiles) {
+    return;
+  }
+
+  throw new AppError(
+    400,
+    "LABOR_FILE_DOCUMENT_LIMIT_REACHED",
+    `Solo se pueden cargar hasta ${definition.maxFiles} archivos para ${definition.label}.`
+  );
 }
 
 function requiresProfessionalCredentials(specificRole?: string | null) {
@@ -480,6 +535,11 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       where: { id: laborFileId },
       data: {
         hireDate: payload.hireDate ? toDate(payload.hireDate) ?? undefined : undefined,
+        personalPhone: payload.personalPhone === undefined ? undefined : normalizeText(payload.personalPhone) || null,
+        personalEmail: payload.personalEmail === undefined ? undefined : normalizeText(payload.personalEmail) || null,
+        emergencyContactName: payload.emergencyContactName === undefined ? undefined : normalizeText(payload.emergencyContactName) || null,
+        emergencyContactPhone: payload.emergencyContactPhone === undefined ? undefined : normalizeText(payload.emergencyContactPhone) || null,
+        emergencyContactAddress: payload.emergencyContactAddress === undefined ? undefined : normalizeText(payload.emergencyContactAddress) || null,
         notes: payload.notes === undefined ? undefined : normalizeText(payload.notes) || null
       },
       include: LABOR_FILE_RELATIONS
@@ -502,30 +562,11 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     }
 
     const mimeType = normalizeText(payload.fileMimeType).toLowerCase();
-    if (payload.documentType === "EMPLOYMENT_CONTRACT" && !isPdfFile(payload) && !isDocxFile(payload)) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "El contrato laboral debe ser PDF o DOCX.");
-    }
-
-    if (PDF_ONLY_TYPES.has(payload.documentType) && !isPdfFile(payload)) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_PDF_REQUIRED", "El contrato laboral y sus addenda deben ser PDF.");
-    }
-
-    if (
-      payload.documentType === "EMPLOYMENT_CONTRACT" &&
-      mimeType &&
-      !LABOR_CONTRACT_MIME_TYPES.has(mimeType)
-    ) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "El contrato laboral debe ser PDF o DOCX.");
-    }
-
-    if (
-      payload.documentType !== "EMPLOYMENT_CONTRACT" &&
-      !PDF_ONLY_TYPES.has(payload.documentType) &&
-      mimeType &&
-      !ALLOWED_DOCUMENT_MIME_TYPES.has(mimeType)
-    ) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "Solo se permiten archivos PDF, JPG o PNG.");
-    }
+    validateLaborDocumentFile(payload.documentType, payload);
+    const currentCount = await this.prisma.laborFileDocument.count({
+      where: { laborFileId, documentType: payload.documentType }
+    });
+    assertDocumentLimit(payload.documentType, currentCount);
 
     const record = await this.prisma.laborFileDocument.create({
       data: {
@@ -560,24 +601,30 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
   public async createVacationEvent(laborFileId: string, payload: LaborVacationEventInput) {
     await this.findOrThrow(laborFileId);
 
-    if (payload.eventType !== "PREVIOUS_YEAR_DEDUCTION" && payload.eventType !== "VACATION") {
+    if (
+      payload.eventType !== "PREVIOUS_YEAR_DEDUCTION" &&
+      payload.eventType !== "PREVIOUS_YEAR_PENDING" &&
+      payload.eventType !== "VACATION" &&
+      payload.eventType !== "GLOBAL_VACATION"
+    ) {
       throw new AppError(400, "INVALID_LABOR_VACATION_EVENT_TYPE", "Tipo de movimiento de vacaciones inválido.");
     }
 
-    const vacationDateKeys = payload.eventType === "VACATION" ? getVacationDateKeys(payload) : [];
+    const isVacationRequest = isVacationRequestEventType(payload.eventType);
+    const vacationDateKeys = isVacationRequest ? getVacationDateKeys(payload) : [];
     const days = payload.eventType === "VACATION" ? vacationDateKeys.length : Number(payload.days);
     if (!Number.isFinite(days) || days <= 0) {
       throw new AppError(400, "INVALID_LABOR_VACATION_DAYS", "Los días de vacaciones deben ser mayores a cero.");
     }
 
-    if (payload.eventType === "VACATION" && vacationDateKeys.length === 0) {
+    if (isVacationRequest && vacationDateKeys.length === 0) {
       throw new AppError(400, "LABOR_VACATION_DATE_REQUIRED", "Captura al menos un día de vacaciones.");
     }
 
-    const startDate = payload.eventType === "VACATION"
+    const startDate = isVacationRequest
       ? toDate(vacationDateKeys[0])
       : toDate(payload.startDate);
-    const endDate = payload.eventType === "VACATION"
+    const endDate = isVacationRequest
       ? toDate(vacationDateKeys[vacationDateKeys.length - 1])
       : toDate(payload.endDate) ?? startDate;
 
@@ -585,7 +632,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     const acceptanceFileMimeType = normalizeText(payload.acceptanceFileMimeType).toLowerCase();
     const acceptanceFileContent = decodeBase64File(payload.acceptanceFileBase64);
 
-    if (payload.eventType === "VACATION") {
+    if (isVacationRequest) {
       if (!acceptanceOriginalFileName || !acceptanceFileContent?.byteLength) {
         throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "Carga el formato de aceptacion de vacaciones en PDF o DOCX.");
       }
@@ -602,16 +649,99 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     const record = await this.prisma.laborVacationEvent.create({
       data: {
         laborFileId,
+        globalVacationDayId: payload.eventType === "GLOBAL_VACATION" ? normalizeText(payload.globalVacationDayId) || null : null,
         eventType: payload.eventType,
         startDate,
         endDate,
-        vacationDates: payload.eventType === "VACATION" ? vacationDateKeys : undefined,
+        vacationDates: isVacationRequest ? vacationDateKeys : undefined,
         days: new Prisma.Decimal(days),
         description: normalizeText(payload.description) || null,
-        acceptanceOriginalFileName: payload.eventType === "VACATION" ? acceptanceOriginalFileName : null,
-        acceptanceFileMimeType: payload.eventType === "VACATION" ? acceptanceFileMimeType || "application/pdf" : null,
-        acceptanceFileSizeBytes: payload.eventType === "VACATION" ? acceptanceFileContent?.byteLength ?? null : null,
-        acceptanceFileContent: payload.eventType === "VACATION" && acceptanceFileContent ? toPrismaBytes(acceptanceFileContent) : null
+        acceptanceOriginalFileName: isVacationRequest ? acceptanceOriginalFileName : null,
+        acceptanceFileMimeType: isVacationRequest ? acceptanceFileMimeType || "application/pdf" : null,
+        acceptanceFileSizeBytes: isVacationRequest ? acceptanceFileContent?.byteLength ?? null : null,
+        acceptanceFileContent: isVacationRequest && acceptanceFileContent ? toPrismaBytes(acceptanceFileContent) : null
+      }
+    });
+
+    return mapLaborVacationEvent(record);
+  }
+
+  public async setPreviousYearPendingVacationDays(laborFileId: string, payload: PreviousYearPendingVacationWrite) {
+    await this.findOrThrow(laborFileId);
+
+    const days = Number(payload.days ?? 0);
+    if (!Number.isFinite(days) || days < 0) {
+      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_DAYS", "Los días pendientes del año anterior no pueden ser negativos.");
+    }
+
+    const startDate = toDate(payload.previousYearStartDate);
+    const endDate = toDate(payload.previousYearEndDate);
+    if (!startDate || !endDate || toDateKey(endDate) < toDateKey(startDate)) {
+      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_PERIOD", "El periodo del año anterior no es válido.");
+    }
+
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.laborVacationEvent.deleteMany({
+        where: {
+          laborFileId,
+          eventType: "PREVIOUS_YEAR_PENDING"
+        }
+      });
+
+      if (days > 0) {
+        await transaction.laborVacationEvent.create({
+          data: {
+            laborFileId,
+            eventType: "PREVIOUS_YEAR_PENDING",
+            startDate,
+            endDate,
+            days: new Prisma.Decimal(days),
+            description: normalizeText(payload.description) || null
+          }
+        });
+      }
+    });
+
+    const updated = await this.findById(laborFileId);
+    if (!updated) {
+      throw new AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    return updated;
+  }
+
+  public async updateVacationAcceptance(eventId: string, payload: LaborVacationAcceptanceUploadRecord) {
+    const acceptanceOriginalFileName = normalizeText(payload.originalFileName);
+    const acceptanceFileMimeType = normalizeText(payload.fileMimeType).toLowerCase();
+
+    if (!acceptanceOriginalFileName || !payload.fileContent.byteLength) {
+      throw new AppError(400, "LABOR_VACATION_SIGNED_FORMAT_REQUIRED", "Carga el formato firmado de vacaciones en PDF.");
+    }
+
+    if (!isPdfFile({ originalFileName: acceptanceOriginalFileName, fileMimeType: acceptanceFileMimeType })) {
+      throw new AppError(400, "LABOR_VACATION_SIGNED_FORMAT_PDF_REQUIRED", "El formato firmado de vacaciones debe ser PDF.");
+    }
+
+    const existing = await this.prisma.laborVacationEvent.findUnique({
+      where: { id: eventId },
+      select: { id: true, eventType: true }
+    });
+
+    if (!existing) {
+      throw new AppError(404, "LABOR_VACATION_EVENT_NOT_FOUND", "El movimiento de vacaciones no existe.");
+    }
+
+    if (existing.eventType !== "VACATION" && existing.eventType !== "GLOBAL_VACATION") {
+      throw new AppError(400, "LABOR_VACATION_SIGNED_FORMAT_INVALID_EVENT", "Solo las vacaciones pueden autorizarse con PDF firmado.");
+    }
+
+    const record = await this.prisma.laborVacationEvent.update({
+      where: { id: eventId },
+      data: {
+        acceptanceOriginalFileName,
+        acceptanceFileMimeType: "application/pdf",
+        acceptanceFileSizeBytes: payload.fileContent.byteLength,
+        acceptanceFileContent: toPrismaBytes(payload.fileContent)
       }
     });
 
@@ -664,6 +794,47 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     return mapLaborGlobalVacationDay(record);
   }
 
+  public async findGlobalVacationAcceptanceDocuments(globalVacationDayId: string) {
+    const records = await this.prisma.laborVacationEvent.findMany({
+      where: {
+        globalVacationDayId,
+        eventType: "GLOBAL_VACATION",
+        acceptanceFileContent: { not: null }
+      },
+      orderBy: [{ laborFile: { employeeName: "asc" } }, { createdAt: "asc" }],
+      select: {
+        laborFileId: true,
+        acceptanceOriginalFileName: true,
+        acceptanceFileMimeType: true,
+        acceptanceFileContent: true,
+        laborFile: {
+          select: {
+            userId: true,
+            employeeName: true
+          }
+        }
+      }
+    });
+
+    return records.map((record) => ({
+      laborFileId: record.laborFileId,
+      userId: record.laborFile.userId,
+      employeeName: record.laborFile.employeeName,
+      originalFileName: record.acceptanceOriginalFileName ?? "formato-vacaciones.docx",
+      fileMimeType: record.acceptanceFileMimeType,
+      fileContent: Buffer.from(record.acceptanceFileContent ?? [])
+    }));
+  }
+
+  public async deleteGlobalVacationEvents(globalVacationDayId: string) {
+    await this.prisma.laborVacationEvent.deleteMany({
+      where: {
+        globalVacationDayId,
+        eventType: "GLOBAL_VACATION"
+      }
+    });
+  }
+
   public async deleteGlobalVacationDay(dayId: string) {
     const record = await this.prisma.laborGlobalVacationDay.findUnique({
       where: { id: dayId },
@@ -674,7 +845,15 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       throw new AppError(404, "LABOR_GLOBAL_VACATION_DAY_NOT_FOUND", "El día general de vacaciones no existe.");
     }
 
-    await this.prisma.laborGlobalVacationDay.delete({ where: { id: dayId } });
+    await this.prisma.$transaction([
+      this.prisma.laborVacationEvent.deleteMany({
+        where: {
+          globalVacationDayId: dayId,
+          eventType: "GLOBAL_VACATION"
+        }
+      }),
+      this.prisma.laborGlobalVacationDay.delete({ where: { id: dayId } })
+    ]);
   }
 
   public async syncMissingForUsers() {
@@ -925,6 +1104,21 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       if (payload.hireDate !== undefined) {
         laborFile.hireDate = normalizeDateKey(payload.hireDate) ?? laborFile.hireDate;
       }
+      if (payload.personalPhone !== undefined) {
+        laborFile.personalPhone = normalizeText(payload.personalPhone) || null;
+      }
+      if (payload.personalEmail !== undefined) {
+        laborFile.personalEmail = normalizeText(payload.personalEmail) || null;
+      }
+      if (payload.emergencyContactName !== undefined) {
+        laborFile.emergencyContactName = normalizeText(payload.emergencyContactName) || null;
+      }
+      if (payload.emergencyContactPhone !== undefined) {
+        laborFile.emergencyContactPhone = normalizeText(payload.emergencyContactPhone) || null;
+      }
+      if (payload.emergencyContactAddress !== undefined) {
+        laborFile.emergencyContactAddress = normalizeText(payload.emergencyContactAddress) || null;
+      }
       if (payload.notes !== undefined) {
         laborFile.notes = normalizeText(payload.notes) || null;
       }
@@ -948,34 +1142,13 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     }
 
     const mimeType = normalizeText(payload.fileMimeType).toLowerCase();
-    if (payload.documentType === "EMPLOYMENT_CONTRACT" && !isPdfFile(payload) && !isDocxFile(payload)) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "El contrato laboral debe ser PDF o DOCX.");
-    }
-
-    if (PDF_ONLY_TYPES.has(payload.documentType) && !isPdfFile(payload)) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_PDF_REQUIRED", "El contrato laboral y sus addenda deben ser PDF.");
-    }
-
-    if (
-      payload.documentType === "EMPLOYMENT_CONTRACT" &&
-      mimeType &&
-      !LABOR_CONTRACT_MIME_TYPES.has(mimeType)
-    ) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "El contrato laboral debe ser PDF o DOCX.");
-    }
-
-    if (
-      payload.documentType !== "EMPLOYMENT_CONTRACT" &&
-      !PDF_ONLY_TYPES.has(payload.documentType) &&
-      mimeType &&
-      !ALLOWED_DOCUMENT_MIME_TYPES.has(mimeType)
-    ) {
-      throw new AppError(400, "LABOR_FILE_DOCUMENT_TYPE_NOT_ALLOWED", "Solo se permiten archivos PDF, JPG o PNG.");
-    }
+    validateLaborDocumentFile(payload.documentType, payload);
 
     let created: LocalLaborFileDocumentState | null = null;
     this.updateState((state) => {
       const laborFile = this.findOrThrowInState(state, laborFileId);
+      const currentCount = laborFile.documents.filter((document) => document.documentType === payload.documentType).length;
+      assertDocumentLimit(payload.documentType, currentCount);
       const now = new Date().toISOString();
       created = {
         id: randomUUID(),
@@ -1016,24 +1189,30 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
   }
 
   public async createVacationEvent(laborFileId: string, payload: LaborVacationEventInput) {
-    if (payload.eventType !== "PREVIOUS_YEAR_DEDUCTION" && payload.eventType !== "VACATION") {
+    if (
+      payload.eventType !== "PREVIOUS_YEAR_DEDUCTION" &&
+      payload.eventType !== "PREVIOUS_YEAR_PENDING" &&
+      payload.eventType !== "VACATION" &&
+      payload.eventType !== "GLOBAL_VACATION"
+    ) {
       throw new AppError(400, "INVALID_LABOR_VACATION_EVENT_TYPE", "Tipo de movimiento de vacaciones invalido.");
     }
 
-    const vacationDateKeys = payload.eventType === "VACATION" ? getVacationDateKeys(payload) : [];
+    const isVacationRequest = isVacationRequestEventType(payload.eventType);
+    const vacationDateKeys = isVacationRequest ? getVacationDateKeys(payload) : [];
     const days = payload.eventType === "VACATION" ? vacationDateKeys.length : Number(payload.days);
     if (!Number.isFinite(days) || days <= 0) {
       throw new AppError(400, "INVALID_LABOR_VACATION_DAYS", "Los dias de vacaciones deben ser mayores a cero.");
     }
 
-    if (payload.eventType === "VACATION" && vacationDateKeys.length === 0) {
+    if (isVacationRequest && vacationDateKeys.length === 0) {
       throw new AppError(400, "LABOR_VACATION_DATE_REQUIRED", "Captura al menos un dia de vacaciones.");
     }
 
-    const startDate = payload.eventType === "VACATION"
+    const startDate = isVacationRequest
       ? vacationDateKeys[0]
       : normalizeDateKey(payload.startDate);
-    const endDate = payload.eventType === "VACATION"
+    const endDate = isVacationRequest
       ? vacationDateKeys[vacationDateKeys.length - 1]
       : normalizeDateKey(payload.endDate) ?? startDate;
 
@@ -1041,7 +1220,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     const acceptanceFileMimeType = normalizeText(payload.acceptanceFileMimeType).toLowerCase();
     const acceptanceFileContent = decodeBase64File(payload.acceptanceFileBase64);
 
-    if (payload.eventType === "VACATION") {
+    if (isVacationRequest) {
       if (!acceptanceOriginalFileName || !acceptanceFileContent?.byteLength) {
         throw new AppError(400, "LABOR_VACATION_ACCEPTANCE_FILE_REQUIRED", "Carga el formato de aceptacion de vacaciones en PDF o DOCX.");
       }
@@ -1062,16 +1241,17 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       created = {
         id: randomUUID(),
         laborFileId,
+        globalVacationDayId: payload.eventType === "GLOBAL_VACATION" ? normalizeText(payload.globalVacationDayId) || undefined : undefined,
         eventType: payload.eventType,
         startDate,
         endDate,
-        vacationDates: payload.eventType === "VACATION" ? vacationDateKeys : [],
+        vacationDates: isVacationRequest ? vacationDateKeys : [],
         days,
         description: normalizeText(payload.description) || null,
-        acceptanceOriginalFileName: payload.eventType === "VACATION" ? acceptanceOriginalFileName : undefined,
-        acceptanceFileMimeType: payload.eventType === "VACATION" ? acceptanceFileMimeType || "application/pdf" : null,
-        acceptanceFileSizeBytes: payload.eventType === "VACATION" ? acceptanceFileContent?.byteLength : undefined,
-        acceptanceFileBase64: payload.eventType === "VACATION" && acceptanceFileContent
+        acceptanceOriginalFileName: isVacationRequest ? acceptanceOriginalFileName : undefined,
+        acceptanceFileMimeType: isVacationRequest ? acceptanceFileMimeType || "application/pdf" : null,
+        acceptanceFileSizeBytes: isVacationRequest ? acceptanceFileContent?.byteLength : undefined,
+        acceptanceFileBase64: isVacationRequest && acceptanceFileContent
           ? acceptanceFileContent.toString("base64")
           : null,
         createdAt: now,
@@ -1082,6 +1262,86 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     });
 
     return this.mapVacationEvent(created!);
+  }
+
+  public async setPreviousYearPendingVacationDays(laborFileId: string, payload: PreviousYearPendingVacationWrite) {
+    const days = Number(payload.days ?? 0);
+    if (!Number.isFinite(days) || days < 0) {
+      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_DAYS", "Los dias pendientes del año anterior no pueden ser negativos.");
+    }
+
+    const startDate = normalizeDateKey(payload.previousYearStartDate);
+    const endDate = normalizeDateKey(payload.previousYearEndDate);
+    if (!startDate || !endDate || endDate < startDate) {
+      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_PERIOD", "El periodo del año anterior no es valido.");
+    }
+
+    this.updateState((state) => {
+      const laborFile = this.findOrThrowInState(state, laborFileId);
+      const now = new Date().toISOString();
+      laborFile.vacationEvents = laborFile.vacationEvents.filter((event) => event.eventType !== "PREVIOUS_YEAR_PENDING");
+
+      if (days > 0) {
+        laborFile.vacationEvents.push({
+          id: randomUUID(),
+          laborFileId,
+          eventType: "PREVIOUS_YEAR_PENDING",
+          startDate,
+          endDate,
+          vacationDates: [],
+          days,
+          description: normalizeText(payload.description) || null,
+          createdAt: now,
+          updatedAt: now
+        });
+      }
+
+      laborFile.updatedAt = now;
+    });
+
+    return this.mapLaborFile(this.findOrThrow(laborFileId));
+  }
+
+  public async updateVacationAcceptance(eventId: string, payload: LaborVacationAcceptanceUploadRecord) {
+    const acceptanceOriginalFileName = normalizeText(payload.originalFileName);
+    const acceptanceFileMimeType = normalizeText(payload.fileMimeType).toLowerCase();
+
+    if (!acceptanceOriginalFileName || !payload.fileContent.byteLength) {
+      throw new AppError(400, "LABOR_VACATION_SIGNED_FORMAT_REQUIRED", "Carga el formato firmado de vacaciones en PDF.");
+    }
+
+    if (!isPdfFile({ originalFileName: acceptanceOriginalFileName, fileMimeType: acceptanceFileMimeType })) {
+      throw new AppError(400, "LABOR_VACATION_SIGNED_FORMAT_PDF_REQUIRED", "El formato firmado de vacaciones debe ser PDF.");
+    }
+
+    let updated: LocalLaborVacationEventState | null = null;
+    this.updateState((state) => {
+      for (const laborFile of state.files) {
+        const event = laborFile.vacationEvents.find((candidate) => candidate.id === eventId);
+        if (!event) {
+          continue;
+        }
+
+        if (event.eventType !== "VACATION" && event.eventType !== "GLOBAL_VACATION") {
+          throw new AppError(400, "LABOR_VACATION_SIGNED_FORMAT_INVALID_EVENT", "Solo las vacaciones pueden autorizarse con PDF firmado.");
+        }
+
+        event.acceptanceOriginalFileName = acceptanceOriginalFileName;
+        event.acceptanceFileMimeType = "application/pdf";
+        event.acceptanceFileSizeBytes = payload.fileContent.byteLength;
+        event.acceptanceFileBase64 = payload.fileContent.toString("base64");
+        event.updatedAt = new Date().toISOString();
+        laborFile.updatedAt = event.updatedAt;
+        updated = event;
+        break;
+      }
+    });
+
+    if (!updated) {
+      throw new AppError(404, "LABOR_VACATION_EVENT_NOT_FOUND", "El movimiento de vacaciones no existe.");
+    }
+
+    return this.mapVacationEvent(updated);
   }
 
   public async deleteVacationEvent(eventId: string) {
@@ -1146,12 +1406,53 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     return saved!;
   }
 
+  public async findGlobalVacationAcceptanceDocuments(globalVacationDayId: string) {
+    return this.getState().files
+      .flatMap((laborFile) =>
+        laborFile.vacationEvents
+          .filter((event) =>
+            event.eventType === "GLOBAL_VACATION" &&
+            event.globalVacationDayId === globalVacationDayId &&
+            Boolean(event.acceptanceFileBase64)
+          )
+          .map((event) => ({
+            laborFileId: laborFile.id,
+            userId: laborFile.userId,
+            employeeName: laborFile.employeeName,
+            originalFileName: event.acceptanceOriginalFileName ?? "formato-vacaciones.docx",
+            fileMimeType: event.acceptanceFileMimeType,
+            fileContent: Buffer.from(event.acceptanceFileBase64 ?? "", "base64")
+          }))
+      )
+      .sort((left, right) => left.employeeName.localeCompare(right.employeeName));
+  }
+
+  public async deleteGlobalVacationEvents(globalVacationDayId: string) {
+    this.updateState((state) => {
+      const now = new Date().toISOString();
+      for (const laborFile of state.files) {
+        const nextEvents = laborFile.vacationEvents.filter((event) =>
+          event.eventType !== "GLOBAL_VACATION" || event.globalVacationDayId !== globalVacationDayId
+        );
+        if (nextEvents.length !== laborFile.vacationEvents.length) {
+          laborFile.vacationEvents = nextEvents;
+          laborFile.updatedAt = now;
+        }
+      }
+    });
+  }
+
   public async deleteGlobalVacationDay(dayId: string) {
     let deleted = false;
     this.updateState((state) => {
       const nextDays = state.globalVacationDays.filter((day) => day.id !== dayId);
       deleted = nextDays.length !== state.globalVacationDays.length;
       state.globalVacationDays = nextDays;
+      for (const laborFile of state.files) {
+        laborFile.vacationEvents = laborFile.vacationEvents.filter((event) =>
+          event.eventType !== "GLOBAL_VACATION" || event.globalVacationDayId !== dayId
+        );
+      }
     });
 
     if (!deleted) {
@@ -1278,6 +1579,11 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       employeeEmail: snapshot.employeeEmail,
       employeeUsername: user.username,
       employeeShortName: snapshot.employeeShortName,
+      personalPhone: null,
+      personalEmail: null,
+      emergencyContactName: null,
+      emergencyContactPhone: null,
+      emergencyContactAddress: null,
       team: snapshot.team,
       legacyTeam: snapshot.legacyTeam,
       specificRole: snapshot.specificRole,
@@ -1331,6 +1637,11 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       employeeEmail: record.employeeEmail ?? null,
       employeeUsername: record.employeeUsername,
       employeeShortName: record.employeeShortName ?? null,
+      personalPhone: record.personalPhone ?? null,
+      personalEmail: record.personalEmail ?? null,
+      emergencyContactName: record.emergencyContactName ?? null,
+      emergencyContactPhone: record.emergencyContactPhone ?? null,
+      emergencyContactAddress: record.emergencyContactAddress ?? null,
       team: record.team ?? null,
       legacyTeam: record.legacyTeam ?? null,
       specificRole: record.specificRole ?? null,
@@ -1379,6 +1690,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     return {
       id: event.id,
       laborFileId: event.laborFileId,
+      globalVacationDayId: event.globalVacationDayId ?? null,
       eventType: event.eventType,
       startDate: event.startDate ? localDate(event.startDate) : null,
       endDate: event.endDate ? localDate(event.endDate) : null,
@@ -1464,6 +1776,20 @@ export class ResilientLaborFilesRepository implements LaborFilesRepository {
     );
   }
 
+  public setPreviousYearPendingVacationDays(laborFileId: string, payload: PreviousYearPendingVacationWrite) {
+    return this.withFallback(
+      () => this.primary.setPreviousYearPendingVacationDays(laborFileId, payload),
+      () => this.fallback!.setPreviousYearPendingVacationDays(laborFileId, payload)
+    );
+  }
+
+  public updateVacationAcceptance(eventId: string, payload: LaborVacationAcceptanceUploadRecord) {
+    return this.withFallback(
+      () => this.primary.updateVacationAcceptance(eventId, payload),
+      () => this.fallback!.updateVacationAcceptance(eventId, payload)
+    );
+  }
+
   public deleteVacationEvent(eventId: string) {
     return this.withFallback(() => this.primary.deleteVacationEvent(eventId), () => this.fallback!.deleteVacationEvent(eventId));
   }
@@ -1477,6 +1803,20 @@ export class ResilientLaborFilesRepository implements LaborFilesRepository {
 
   public createGlobalVacationDay(payload: LaborGlobalVacationDayInput) {
     return this.withFallback(() => this.primary.createGlobalVacationDay(payload), () => this.fallback!.createGlobalVacationDay(payload));
+  }
+
+  public findGlobalVacationAcceptanceDocuments(globalVacationDayId: string) {
+    return this.withFallback(
+      () => this.primary.findGlobalVacationAcceptanceDocuments(globalVacationDayId),
+      () => this.fallback?.findGlobalVacationAcceptanceDocuments(globalVacationDayId) ?? Promise.resolve([])
+    );
+  }
+
+  public deleteGlobalVacationEvents(globalVacationDayId: string) {
+    return this.withFallback(
+      () => this.primary.deleteGlobalVacationEvents(globalVacationDayId),
+      () => this.fallback?.deleteGlobalVacationEvents(globalVacationDayId) ?? Promise.resolve()
+    );
   }
 
   public deleteGlobalVacationDay(dayId: string) {

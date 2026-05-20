@@ -149,10 +149,14 @@ const DOCUMENT_LABELS: Record<LaborFileDocumentType, string> = {
   ADDENDUM: "Addendum",
   PROOF_OF_ADDRESS: "Comprobante de domicilio",
   TAX_STATUS_CERTIFICATE: "Constancia de situacion fiscal",
+  CURP: "CURP",
+  IMSS_WEEKS_CERTIFICATE: "Constancia de semanas cotizadas IMSS",
+  BANK_ACCOUNT_STATEMENT: "Estado de cuenta con CLABE y numero de cuenta",
   OFFICIAL_ID: "Identificacion oficial",
   CV: "CV",
   PROFESSIONAL_TITLE: "Titulo profesional",
-  PROFESSIONAL_LICENSE: "Cedula profesional"
+  PROFESSIONAL_LICENSE: "Cedula profesional",
+  EQUIPMENT_DELIVERY_FORMAT: "Formato de entrega de equipo"
 };
 
 const fieldLabels: Record<keyof LaborContractFieldValues, string> = {
@@ -971,13 +975,18 @@ async function renderLaborContractTemplate(fields: LaborContractFieldValues, lab
 export async function renderLaborContractDocx(laborFile: LaborFile, payload: LaborContractFieldValues) {
   const fields = normalizeFields(mergeFieldValues(buildLaborContractDefaultFields(laborFile), payload));
   const employeeName = textOrBlank(fields.employeeName, laborFile.employeeName);
-  const buffer = await renderLaborContractTemplate(fields, laborFile);
 
-  return {
-    buffer,
-    filename: `contrato-laboral-${sanitizeFilenamePart(employeeName)}-${currentDateKey()}.docx`,
-    contentType: DOCX_MIME_TYPE
-  };
+  try {
+    const buffer = await renderLaborContractTemplate(fields, laborFile);
+
+    return {
+      buffer,
+      filename: `contrato-laboral-${sanitizeFilenamePart(employeeName)}-${currentDateKey()}.docx`,
+      contentType: DOCX_MIME_TYPE
+    };
+  } catch {
+    return renderLegacyLaborContractDocx(laborFile, fields);
+  }
 }
 
 async function renderLegacyLaborContractDocx(laborFile: LaborFile, payload: LaborContractFieldValues) {

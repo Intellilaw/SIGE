@@ -119,6 +119,31 @@ function matchesAllSearchWords(haystack: string, searchWords: string[]) {
   return searchWords.every((word) => normalizedHaystack.includes(word));
 }
 
+function getClientPickerLabel(client: Client) {
+  return normalizeText(client.clientNumber) ? `${client.clientNumber} - ${client.name}` : client.name;
+}
+
+function getClientPickerSearchText(client: Client) {
+  return `${client.clientNumber} ${client.name}`;
+}
+
+function findClientByPickerText(clients: Client[], value: string) {
+  const normalizedValue = normalizeComparableText(value);
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return (
+    clients.find((client) =>
+      [
+        getClientPickerLabel(client),
+        client.name,
+        client.clientNumber
+      ].some((candidate) => normalizeComparableText(candidate) === normalizedValue)
+    ) ?? null
+  );
+}
+
 const SPANISH_TO_ENGLISH_TERMS: Array<[string, string]> = [
   ["prestacion de servicios", "provision of services"],
   ["prestación de servicios", "provision of services"],
@@ -294,12 +319,29 @@ function parseAmountInput(value: string) {
   return parsed;
 }
 
+function parseCurrencyLikeAmount(value: string) {
+  const cleanedValue = normalizeText(value)
+    .replace(/\s*M\.?\s*N\.?$/i, "")
+    .replace(/^\$/, "")
+    .replace(/,/g, "")
+    .trim();
+
+  if (!/^\d+(?:\.\d+)?$/.test(cleanedValue)) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(cleanedValue);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat("es-MX", {
+  const formattedValue = new Intl.NumberFormat("es-MX", {
     style: "currency",
     currency: "MXN",
     minimumFractionDigits: 2
   }).format(Number(value || 0));
+
+  return `${formattedValue} M.N.`;
 }
 
 function formatDate(value?: string) {
@@ -1075,6 +1117,11 @@ function getPreviewCellValue(cell: QuoteTemplateCell, amountMode?: QuoteTemplate
     return formatCurrency(parseAmountInput(cleanValue));
   }
 
+  const parsedAmount = parseCurrencyLikeAmount(cleanValue);
+  if (parsedAmount != null) {
+    return formatCurrency(parsedAmount);
+  }
+
   return cleanValue;
 }
 
@@ -1668,10 +1715,25 @@ export function QuotesPage() {
   const [templateTeamSearch, setTemplateTeamSearch] = useState("");
   const [quoteWordSearch, setQuoteWordSearch] = useState("");
   const [quoteClientSearch, setQuoteClientSearch] = useState("");
+  const [quoteComposerClientSearch, setQuoteComposerClientSearch] = useState("");
+  const [isQuoteComposerClientSearchOpen, setIsQuoteComposerClientSearchOpen] = useState(false);
 
   useEffect(() => {
     void loadBoard();
   }, []);
+
+  useEffect(() => {
+    const selectedClient = clients.find((client) => client.id === quoteForm.clientId);
+
+    if (selectedClient) {
+      setQuoteComposerClientSearch(getClientPickerLabel(selectedClient));
+      return;
+    }
+
+    if (!isQuoteComposerClientSearchOpen) {
+      setQuoteComposerClientSearch("");
+    }
+  }, [clients, isQuoteComposerClientSearchOpen, quoteForm.clientId]);
 
   async function loadBoard() {
     setLoading(true);
@@ -1937,6 +1999,23 @@ export function QuotesPage() {
     }));
   }
 
+  function selectQuoteComposerClient(client: Client) {
+    setQuoteComposerClientSearch(getClientPickerLabel(client));
+    setIsQuoteComposerClientSearchOpen(false);
+    handleClientSelection(client.id);
+  }
+
+  function resolveQuoteComposerClient() {
+    const selectedClient = clients.find((entry) => entry.id === quoteForm.clientId);
+    const selectedLabel = selectedClient ? getClientPickerLabel(selectedClient) : "";
+
+    if (selectedClient && normalizeComparableText(selectedLabel) === normalizeComparableText(quoteComposerClientSearch)) {
+      return selectedClient;
+    }
+
+    return findClientByPickerText(clients, quoteComposerClientSearch);
+  }
+
   function updateQuoteTemplateRow(rowIndex: number, updater: (row: QuoteTemplateTableRow) => QuoteTemplateTableRow) {
     updateQuoteTemplateDraft((current) => ({
       ...current,
@@ -1979,13 +2058,9 @@ export function QuotesPage() {
   }
 
   async function persistQuoteIfNeeded() {
-    if (!quoteForm.clientId) {
-      throw new Error("Selecciona el cliente para guardar la cotizacion.");
-    }
-
-    const client = clients.find((entry) => entry.id === quoteForm.clientId);
+    const client = resolveQuoteComposerClient();
     if (!client) {
-      throw new Error("No se encontro el cliente seleccionado.");
+      throw new Error("Selecciona un cliente de la lista para guardar la cotizacion.");
     }
 
     if (sourceMode === "template" && !quoteTemplateDraft) {
@@ -2294,6 +2369,12 @@ export function QuotesPage() {
   const suggestedQuoteNumber = editingQuote?.quoteNumber ?? preparedQuote?.quoteNumber ?? buildNextQuoteNumber(quotes);
   const suggestedTemplateNumber = buildNextTemplateNumber(templates);
   const templateFormNumber = editingTemplate?.templateNumber ?? suggestedTemplateNumber;
+  const quoteComposerClientSearchWords = getSearchWords(quoteComposerClientSearch);
+  const filteredQuoteComposerClientOptions = (
+    quoteComposerClientSearchWords.length
+      ? clients.filter((client) => matchesAllSearchWords(getClientPickerSearchText(client), quoteComposerClientSearchWords))
+      : clients
+  ).slice(0, quoteComposerClientSearchWords.length ? 12 : 10);
 
   return (
     <section className="page-stack quotes-page">
@@ -2864,17 +2945,56 @@ export function QuotesPage() {
 
           <form className="quotes-form" onSubmit={handleQuoteSubmit}>
             <div className="quotes-form-grid">
-              <label className="form-field">
+              <div className="form-field quote-client-search">
                 <span>Cliente</span>
-                <select value={quoteForm.clientId} onChange={(event) => handleClientSelection(event.target.value)}>
-                  <option value="">Seleccionar cliente...</option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.clientNumber} - {client.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <input
+                  aria-autocomplete="list"
+                  aria-expanded={isQuoteComposerClientSearchOpen}
+                  aria-label="Buscar cliente para la cotizacion"
+                  onBlur={() => setIsQuoteComposerClientSearchOpen(false)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setQuoteComposerClientSearch(nextValue);
+                    setIsQuoteComposerClientSearchOpen(true);
+
+                    if (!normalizeText(nextValue)) {
+                      handleClientSelection("");
+                    }
+                  }}
+                  onFocus={() => setIsQuoteComposerClientSearchOpen(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && filteredQuoteComposerClientOptions[0]) {
+                      event.preventDefault();
+                      selectQuoteComposerClient(filteredQuoteComposerClientOptions[0]);
+                    }
+                  }}
+                  placeholder="Buscar por nombre o numero de cliente..."
+                  role="combobox"
+                  type="text"
+                  value={quoteComposerClientSearch}
+                />
+                {isQuoteComposerClientSearchOpen ? (
+                  <div className="quote-client-search-results" role="listbox" aria-label="Resultados de clientes">
+                    {filteredQuoteComposerClientOptions.length ? (
+                      filteredQuoteComposerClientOptions.map((client) => (
+                        <button
+                          aria-selected={quoteForm.clientId === client.id}
+                          key={client.id}
+                          onClick={() => selectQuoteComposerClient(client)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          type="button"
+                        >
+                          <strong>{client.clientNumber || "S/N"}</strong>
+                          <span>{client.name}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="quote-client-search-empty">Sin clientes que coincidan con la busqueda.</div>
+                    )}
+                  </div>
+                ) : null}
+                <input aria-hidden="true" readOnly tabIndex={-1} type="hidden" value={quoteForm.clientId} />
+              </div>
 
               <label className="form-field">
                 <span>Equipo responsable</span>
