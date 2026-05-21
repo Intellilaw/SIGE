@@ -13,7 +13,9 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
 import {
   buildDistributionHistoryTaskNameMap,
+  getEffectiveTrackingResponsible,
   getTermEnabledRecordData,
+  hasValidTrackingResponsible,
   isTrackingTermEnabled,
   resolveTrackingTaskName,
   usesOptionalTermToggle,
@@ -216,8 +218,8 @@ function summarizeHolidayAuthorities(authorities: string[]) {
   return `${authorities.slice(0, 3).join(", ")} +${authorities.length - 3}`;
 }
 
-function getRowDate(record: TaskTrackingRecord) {
-  return [toDateInput(record.dueDate), toDateInput(record.termDate)]
+function getRowDate(record: TaskTrackingRecord, table?: LegacyTaskTableConfig) {
+  return [toDateInput(record.dueDate), isTrackingTermEnabled(record, table) ? toDateInput(record.termDate) : ""]
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right))[0] ?? "";
 }
@@ -281,7 +283,7 @@ function isTrackingRecordRed(
   }
 
   const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId);
-  const dueDate = getRowDate(record);
+  const dueDate = getRowDate(record, table);
   const requiresDate = table?.showDateColumn !== false;
 
   if (usesPresentationAndTermDates(table)) {
@@ -290,13 +292,16 @@ function isTrackingRecordRed(
     const termEnabled = isTrackingTermEnabled(record, table);
 
     return !taskName
-      || !record.responsible
+      || !hasValidTrackingResponsible(record, table)
       || !presentationDate
       || presentationDate <= todayInput()
       || (termEnabled && (!termDate || termDate <= todayInput()));
   }
 
-  return !taskName || !record.responsible || (requiresDate && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
+  return !taskName
+    || !hasValidTrackingResponsible(record, table)
+    || (requiresDate && !dueDate)
+    || (Boolean(dueDate) && dueDate <= todayInput());
 }
 
 function getStageLabel(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
@@ -635,7 +640,7 @@ export function TaskDistributorPage() {
 
   function getEarliestOpenDate(item: TaskDistributionHistory) {
     return getOpenHistoryRecords(item)
-      .map(getRowDate)
+      .map((record) => getRowDate(record, resolveRecordTable(record)))
       .filter(Boolean)
       .sort((left, right) => left.localeCompare(right))[0] ?? "";
   }
@@ -656,6 +661,7 @@ export function TaskDistributorPage() {
     const recordText = openRecords.flatMap((record) => {
       const table = resolveRecordTable(record);
       const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId);
+      const termDate = isTrackingTermEnabled(record, table) ? record.termDate : "";
 
       return [
         taskName,
@@ -669,8 +675,8 @@ export function TaskDistributorPage() {
         getStageLabel(table, record),
         table?.title,
         record.dueDate,
-        record.termDate,
-        getRowDate(record)
+        termDate,
+        getRowDate(record, table)
       ];
     });
 
@@ -890,6 +896,10 @@ export function TaskDistributorPage() {
   function getResponsibleSelectOptions(record: TaskTrackingRecord) {
     const table = resolveRecordTable(record);
 
+    if (table?.restrictResponsibleOptions) {
+      return dedupeResponsibleOptions(table.responsibleOptions ?? []);
+    }
+
     return dedupeResponsibleOptions([
       ...moduleResponsibleOptions,
       ...(table?.responsibleOptions ?? []),
@@ -933,7 +943,7 @@ export function TaskDistributorPage() {
       matterIdentifier: record.matterIdentifier ?? null,
       eventName: taskName || record.eventName || table?.title || "Termino",
       pendingTaskLabel: taskName || null,
-      responsible: record.responsible || moduleConfig.defaultResponsible,
+      responsible: getEffectiveTrackingResponsible(record, table) || (table?.restrictResponsibleOptions ? "" : moduleConfig.defaultResponsible),
       dueDate: record.dueDate ?? null,
       termDate: record.termDate ?? record.dueDate ?? null,
       status: record.status,
@@ -1244,19 +1254,25 @@ export function TaskDistributorPage() {
                                           </label>
                                           <label className="tasks-active-target-field">
                                             <span>Responsable</span>
-                                            <select
-                                              className="tasks-legacy-input"
-                                              value={record.responsible}
-                                              onChange={(event) => void patchRecord(record, { responsible: event.target.value })}
-                                              aria-label="Responsable"
-                                            >
-                                              <option value="">Seleccionar responsable</option>
-                                              {getResponsibleSelectOptions(record).map((responsible) => (
-                                                <option key={responsible} value={responsible}>
-                                                  {responsible}
-                                                </option>
-                                              ))}
-                                            </select>
+                                            {table?.fixedResponsible ? (
+                                              <div className="tasks-legacy-readonly-value">
+                                                {getEffectiveTrackingResponsible(record, table)}
+                                              </div>
+                                            ) : (
+                                              <select
+                                                className="tasks-legacy-input"
+                                                value={record.responsible}
+                                                onChange={(event) => void patchRecord(record, { responsible: event.target.value })}
+                                                aria-label="Responsable"
+                                              >
+                                                <option value="">Seleccionar responsable</option>
+                                                {getResponsibleSelectOptions(record).map((responsible) => (
+                                                  <option key={responsible} value={responsible}>
+                                                    {responsible}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            )}
                                           </label>
                                           {table?.showReportedPeriod ? (
                                             <label className="tasks-active-target-field">
@@ -1317,7 +1333,7 @@ export function TaskDistributorPage() {
                                                 <input
                                                   className="tasks-legacy-input"
                                                   type="date"
-                                                  value={toDateInput(record.dueDate) || getRowDate(record)}
+                                                  value={toDateInput(record.dueDate) || getRowDate(record, table)}
                                                   onChange={(event) => void patchRecord(record, {
                                                     dueDate: event.target.value || null,
                                                     termDate: null

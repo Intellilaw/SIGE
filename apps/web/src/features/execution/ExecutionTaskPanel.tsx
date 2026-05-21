@@ -7,6 +7,7 @@ import {
   type CatalogTargetEntry
 } from "../tasks/task-distribution-utils";
 import type { LegacyTaskModuleConfig } from "../tasks/task-legacy-config";
+import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import type { ExecutionModuleDescriptor } from "./execution-config";
 
 type SelectorTargetEntry = CatalogTargetEntry & {
@@ -107,6 +108,221 @@ function normalizeEventSearch(value?: string | null) {
     .toLowerCase();
 }
 
+const CREATE_TASKS_RI_CONNECTION_ID = "RI-002";
+const DUPLICATE_TASK_THRESHOLD = 0.62;
+
+const duplicateTaskStopWords = new Set([
+  "a",
+  "al",
+  "ante",
+  "con",
+  "contra",
+  "de",
+  "del",
+  "el",
+  "en",
+  "la",
+  "las",
+  "lo",
+  "los",
+  "para",
+  "por",
+  "que",
+  "se",
+  "sin",
+  "sobre",
+  "su",
+  "sus",
+  "un",
+  "una",
+  "unos",
+  "unas",
+  "vs",
+  "versus",
+  "tarea",
+  "realizar",
+  "hacer",
+  "preparar",
+  "presentar",
+  "promover",
+  "interponer",
+  "solicitar",
+  "generar",
+  "registrar"
+]);
+
+const duplicateTaskPhraseExpansions: Array<[string, string]> = [
+  ["orden de aprehension", "detencion captura arresto"],
+  ["orden aprehension", "detencion captura arresto"],
+  ["orden de captura", "aprehension detencion arresto"],
+  ["privacion de libertad", "detencion arresto aprehension"],
+  ["amparo indirecto", "amparo constitucional"],
+  ["medio de defensa", "recurso impugnacion"],
+  ["contestacion de demanda", "respuesta demanda"],
+  ["termino judicial", "plazo vencimiento"]
+];
+
+const duplicateTaskSynonymGroups = [
+  ["amparo", "constitucional"],
+  ["aprehension", "detencion", "captura", "arresto"],
+  ["demanda", "accion", "juicio", "reclamacion"],
+  ["contestacion", "respuesta"],
+  ["escrito", "promocion", "peticion"],
+  ["recurso", "apelacion", "impugnacion", "revision"],
+  ["audiencia", "comparecencia", "diligencia"],
+  ["notificacion", "emplazamiento", "citacion", "aviso"],
+  ["vencimiento", "termino", "plazo"],
+  ["pago", "cobro", "liquidacion"],
+  ["convenio", "acuerdo", "transaccion"],
+  ["prueba", "evidencia", "documental"],
+  ["sentencia", "resolucion", "fallo"],
+  ["medida", "cautelar", "suspension"]
+];
+
+type DuplicateTaskMatch = {
+  candidateName: string;
+  existingTaskName: string;
+  existingTaskTrack: string;
+  score: number;
+};
+
+function normalizeSemanticTaskText(value?: string | null) {
+  return normalizeEventSearch(value)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCanonicalTaskToken(token: string) {
+  if (token.startsWith("apreh")) return "aprehension";
+  if (token.startsWith("deten")) return "detencion";
+  if (token.startsWith("captur")) return "captura";
+  if (token.startsWith("arrest")) return "arresto";
+  if (token.startsWith("ampar")) return "amparo";
+  if (token.startsWith("constit")) return "constitucional";
+  if (token.startsWith("demand")) return "demanda";
+  if (token.startsWith("contest")) return "contestacion";
+  if (token.startsWith("respond")) return "respuesta";
+  if (token.startsWith("promoc")) return "promocion";
+  if (token.startsWith("apel")) return "apelacion";
+  if (token.startsWith("impugn")) return "impugnacion";
+  if (token.startsWith("notific")) return "notificacion";
+  if (token.startsWith("emplaz")) return "emplazamiento";
+  if (token.startsWith("venc")) return "vencimiento";
+  if (token.startsWith("termin")) return "termino";
+  if (token.startsWith("cautel")) return "cautelar";
+  if (token.startsWith("suspend")) return "suspension";
+  return token;
+}
+
+function getSemanticTaskTokens(value: string) {
+  let text = normalizeSemanticTaskText(value);
+
+  for (const [phrase, expansion] of duplicateTaskPhraseExpansions) {
+    if (text.includes(phrase)) {
+      text = `${text} ${expansion}`;
+    }
+  }
+
+  const tokens = text
+    .split(" ")
+    .map(getCanonicalTaskToken)
+    .filter((token) => token.length > 2 && !duplicateTaskStopWords.has(token));
+
+  const expanded = new Set(tokens);
+  for (const token of tokens) {
+    const group = duplicateTaskSynonymGroups.find((synonyms) => synonyms.includes(token));
+    group?.forEach((synonym) => expanded.add(synonym));
+  }
+
+  return expanded;
+}
+
+function calculateSemanticTaskSimilarity(left: string, right: string) {
+  const leftText = normalizeSemanticTaskText(left);
+  const rightText = normalizeSemanticTaskText(right);
+
+  if (!leftText || !rightText) {
+    return 0;
+  }
+
+  if (leftText === rightText) {
+    return 1;
+  }
+
+  if ((leftText.length > 8 || rightText.length > 8) && (leftText.includes(rightText) || rightText.includes(leftText))) {
+    return 0.9;
+  }
+
+  const leftTokens = getSemanticTaskTokens(left);
+  const rightTokens = getSemanticTaskTokens(right);
+
+  if (leftTokens.size === 0 || rightTokens.size === 0) {
+    return 0;
+  }
+
+  const overlap = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  if (overlap === 0) {
+    return 0;
+  }
+
+  const shorterOverlap = overlap / Math.min(leftTokens.size, rightTokens.size);
+  const dice = (2 * overlap) / (leftTokens.size + rightTokens.size);
+  const contextualScore = shorterOverlap * 0.72 + dice * 0.28;
+  const overlapBoost = overlap >= 3 ? 0.08 : overlap >= 2 ? 0.04 : 0;
+
+  return Math.min(1, contextualScore + overlapBoost);
+}
+
+function getCandidateTaskNames(selectedEvent: TaskDistributionEvent | undefined, targets: SelectorTargetEntry[]) {
+  const names = new Set<string>();
+
+  for (const target of targets) {
+    const targetName = target.taskName.trim() || selectedEvent?.name.trim() || "";
+    if (targetName) {
+      names.add(targetName);
+    }
+  }
+
+  if (names.size === 0 && selectedEvent?.name.trim()) {
+    names.add(selectedEvent.name.trim());
+  }
+
+  return [...names];
+}
+
+function findDuplicateTaskMatch(
+  selectedEvent: TaskDistributionEvent | undefined,
+  targets: SelectorTargetEntry[],
+  tasks: MatterTaskView[]
+): DuplicateTaskMatch | null {
+  const candidateNames = getCandidateTaskNames(selectedEvent, targets);
+  const activeTasks = tasks.filter((task) => task.state !== "COMPLETED" && !task.isMatterFallback);
+  let bestMatch: DuplicateTaskMatch | null = null;
+
+  for (const candidateName of candidateNames) {
+    for (const task of activeTasks) {
+      const existingTaskName = task.subject || task.trackLabel;
+      const score = calculateSemanticTaskSimilarity(candidateName, existingTaskName);
+
+      if (score < DUPLICATE_TASK_THRESHOLD) {
+        continue;
+      }
+
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = {
+          candidateName,
+          existingTaskName,
+          existingTaskTrack: task.trackLabel,
+          score
+        };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
 export function ExecutionTaskPanel({
   module,
   legacyConfig,
@@ -128,6 +344,7 @@ export function ExecutionTaskPanel({
   const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [duplicateWarningAcknowledged, setDuplicateWarningAcknowledged] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -153,6 +370,11 @@ export function ExecutionTaskPanel({
 
     return distributionEvents.filter((event) => event.name.toLowerCase().includes(query));
   }, [distributionEvents, taskSearch]);
+  const duplicateSelectionKey = selectorTargets.map((target) => `${target.id}:${target.taskName}:${target.reportedMonth}`).join("|");
+  const duplicateTaskMatch = useMemo(
+    () => (mode === "create" ? findDuplicateTaskMatch(selectedEvent, selectorTargets, tasks) : null),
+    [mode, selectedEvent, selectorTargets, tasks]
+  );
 
   useEffect(() => {
     if (!matter || !mode) {
@@ -166,7 +388,12 @@ export function ExecutionTaskPanel({
     setResponsible(module.defaultResponsible);
     setDueDate(addBusinessDays(new Date(), 3));
     setSuccessMessage(null);
+    setDuplicateWarningAcknowledged(false);
   }, [matter?.id, mode, module.defaultResponsible]);
+
+  useEffect(() => {
+    setDuplicateWarningAcknowledged(false);
+  }, [selectedEventId, duplicateSelectionKey, matter?.id]);
 
   useEffect(() => {
     if (!taskSearchOpen) {
@@ -224,6 +451,12 @@ export function ExecutionTaskPanel({
       return;
     }
 
+    if (duplicateTaskMatch && !duplicateWarningAcknowledged) {
+      setDuplicateWarningAcknowledged(true);
+      setSuccessMessage(null);
+      return;
+    }
+
     setSubmitting(true);
     setSuccessMessage(null);
     try {
@@ -243,6 +476,7 @@ export function ExecutionTaskPanel({
       setTaskSearch("");
       setTaskSearchOpen(false);
       setSelectorTargets([]);
+      setDuplicateWarningAcknowledged(false);
       setSuccessMessage("La tarea fue distribuida correctamente.");
     } catch {
       // The parent owns the visible error banner; keep the selector open without a false success state.
@@ -266,16 +500,21 @@ export function ExecutionTaskPanel({
         className={`execution-panel ${mode === "create" ? "execution-panel-selector" : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-label={mode === "create" ? "Selector de Tareas" : "Lista de tareas"}
+        aria-label={mode === "create" ? "Crear tareas" : "Lista de tareas"}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="execution-panel-header">
           <div>
             <p className="eyebrow">Ejecucion / {module.shortLabel}</p>
-            <h3>{mode === "create" ? "Selector de Tareas" : "Lista de tareas"}</h3>
+            <h3>{mode === "create" ? "Crear tareas" : "Lista de tareas"}</h3>
             <p className="muted execution-panel-copy">
               {matter.clientName || "Cliente sin nombre"} - {matter.subject || "Asunto sin nombre"}
             </p>
+            {mode === "create" ? (
+              <div className="execution-panel-ri-anchor">
+                <RusconiIntelligenceBadge connectionId={CREATE_TASKS_RI_CONNECTION_ID} label="Ejecucion / Crear tareas" />
+              </div>
+            ) : null}
           </div>
           <button type="button" className="secondary-button" onClick={onClose}>
             Cerrar
@@ -289,7 +528,7 @@ export function ExecutionTaskPanel({
               className="secondary-button"
               onClick={() => onModeChange("create")}
             >
-              Selector de tareas
+              Crear tareas
             </button>
           </div>
         ) : null}
@@ -347,8 +586,23 @@ export function ExecutionTaskPanel({
                   onClick={() => void handleCreate()}
                   disabled={submitting || !selectedEvent || selectorTargets.length === 0 || !dueDate || missingTargetNames}
                 >
-                  {submitting ? "Procesando..." : "Distribuir Tareas"}
+                  {submitting ? "Procesando..." : duplicateTaskMatch && duplicateWarningAcknowledged ? "Distribuir de todos modos" : "Distribuir Tareas"}
                 </button>
+
+                {duplicateTaskMatch ? (
+                  <div className="message-banner message-warning execution-duplicate-warning">
+                    <RusconiIntelligenceBadge connectionId={CREATE_TASKS_RI_CONNECTION_ID} label="Ejecucion / Crear tareas" />
+                    <div>
+                      <strong>Posible tarea duplicada vigente</strong>
+                      <span>
+                        "{duplicateTaskMatch.candidateName}" se parece a "{duplicateTaskMatch.existingTaskName}" en {duplicateTaskMatch.existingTaskTrack}.
+                        {duplicateWarningAcknowledged
+                          ? " Si deseas conservar ambas tareas, presiona Distribuir de todos modos."
+                          : " Si necesitas registrarla de todas formas, presiona Distribuir Tareas para confirmar la excepcion."}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
 
                 {successMessage ? (
                   <div className="message-banner message-success">{successMessage}</div>
@@ -455,7 +709,7 @@ export function ExecutionTaskPanel({
 
                     {task.isMatterFallback ? (
                       <p className="muted execution-task-meta">
-                        Esta fila viene del origen del asunto. Para gestionarla desde Ejecucion, crea una tarea en el Selector de Tareas.
+                        Esta fila viene del origen del asunto. Para gestionarla desde Ejecucion, crea una tarea en Crear tareas.
                       </p>
                     ) : (
                       <div className="execution-task-actions">

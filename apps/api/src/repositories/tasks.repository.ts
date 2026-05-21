@@ -390,6 +390,7 @@ export class PrismaTasksRepository implements TasksRepository {
         const sourceTable = getSourceTable(target);
         const tableCode = normalizeRequiredText(target.tableCode) || sourceTable;
         const taskName = normalizeRequiredText(target.taskName) || payload.eventName;
+        const targetResponsible = target.responsible === undefined ? payload.responsible : target.responsible;
         targetTables.push(tableCode);
 
         const trackingRecord = await tx.taskTrackingRecord.create({
@@ -406,7 +407,7 @@ export class PrismaTasksRepository implements TasksRepository {
             matterIdentifier: normalizeOptionalText(payload.matterIdentifier),
             taskName,
             eventName: payload.eventName,
-            responsible: payload.responsible,
+            responsible: normalizeRequiredText(targetResponsible),
             dueDate: parseOptionalDateValue(target.dueDate),
             termDate: parseOptionalDateValue(target.termDate),
             status: target.status ?? "pendiente",
@@ -440,7 +441,7 @@ export class PrismaTasksRepository implements TasksRepository {
               matterIdentifier: normalizeOptionalText(payload.matterIdentifier),
               eventName: payload.eventName,
               pendingTaskLabel: taskName,
-              responsible: payload.responsible,
+              responsible: normalizeRequiredText(targetResponsible),
               dueDate: parseOptionalDateValue(target.dueDate),
               termDate: parseOptionalDateValue(target.termDate),
               status: target.status ?? "pendiente",

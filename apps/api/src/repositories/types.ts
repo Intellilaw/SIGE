@@ -670,6 +670,7 @@ export interface TaskDistributionTargetRecord {
   sourceTable: string;
   tableLabel: string;
   taskName: string;
+  responsible?: string | null;
   dueDate?: string | null;
   termDate?: string | null;
   status?: TaskTrackingRecord["status"];

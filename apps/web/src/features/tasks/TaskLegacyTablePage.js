@@ -4,7 +4,7 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
-import { buildDistributionHistoryTaskNameMap, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
+import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, hasValidTrackingResponsible, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { getAdjacentLegacyTaskTable, getLegacyTaskTable, LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { findLegacyTableByAnyName } from "./task-distribution-utils";
 function toDateInput(value) {
@@ -18,8 +18,12 @@ function todayInput() {
 function currentMonthInput() {
     return todayInput().slice(0, 7);
 }
-function getRowDate(record) {
-    return toDateInput(record.dueDate || record.termDate);
+function getRowDate(record, table) {
+    const dueDate = toDateInput(record.dueDate);
+    if (dueDate) {
+        return dueDate;
+    }
+    return isTrackingTermEnabled(record, table) ? toDateInput(record.termDate) : "";
 }
 function getPresentationDate(record) {
     return toDateInput(record.dueDate);
@@ -55,13 +59,16 @@ function isRowRed(record, tab, showDateColumn, table, taskNamesByRecordId, histo
         const termDate = toDateInput(record.termDate);
         const termEnabled = isTrackingTermEnabled(record, table);
         return !taskName
-            || !record.responsible
+            || !hasValidTrackingResponsible(record, table)
             || !presentationDate
             || presentationDate <= todayInput()
             || (termEnabled && (!termDate || termDate <= todayInput()));
     }
-    const dueDate = getRowDate(record);
-    return !taskName || !record.responsible || (showDateColumn && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
+    const dueDate = getRowDate(record, table);
+    return !taskName
+        || !hasValidTrackingResponsible(record, table)
+        || (showDateColumn && !dueDate)
+        || (Boolean(dueDate) && dueDate <= todayInput());
 }
 export function TaskLegacyTablePage() {
     const { slug, tableId } = useParams();
@@ -139,6 +146,6 @@ export function TaskLegacyTablePage() {
                                         const red = isRowRed(record, activeTab, showDateColumn, tableConfig, taskNamesByRecordId, historyTaskName);
                                         const green = !red && !activeTab.isCompleted;
                                         const taskName = resolveTrackingTaskName(record, tableConfig, taskNamesByRecordId, historyTaskName);
-                                        return (_jsxs("tr", { className: red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined, children: [_jsx("td", { children: record.clientName || "-" }), _jsx("td", { children: record.subject || "-" }), _jsx("td", { children: _jsx("span", { className: "tasks-legacy-process-pill", children: record.specificProcess || "N/A" }) }), _jsx("td", { children: record.matterIdentifier || record.matterNumber || "-" }), _jsx("td", { className: "tasks-legacy-task-cell", children: _jsx("div", { className: "tasks-legacy-task-readonly", children: taskName || "-" }) }), _jsx("td", { className: "tasks-legacy-responsible-cell", children: _jsx("div", { className: "tasks-legacy-readonly-value", children: record.responsible || "-" }) }), showDateColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : usesPresentationAndTermDates(tableConfig) ? getPresentationDate(record) : getRowDate(record)) }) })) : null, tableConfig.showReportedPeriod ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: record.reportedMonth || "-" }) })) : null, showTermColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: isTrackingTermEnabled(record, tableConfig) ? formatDisplayDate(record.termDate) : "-" }) })) : null] }, record.id));
+                                        return (_jsxs("tr", { className: red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined, children: [_jsx("td", { children: record.clientName || "-" }), _jsx("td", { children: record.subject || "-" }), _jsx("td", { children: _jsx("span", { className: "tasks-legacy-process-pill", children: record.specificProcess || "N/A" }) }), _jsx("td", { children: record.matterIdentifier || record.matterNumber || "-" }), _jsx("td", { className: "tasks-legacy-task-cell", children: _jsx("div", { className: "tasks-legacy-task-readonly", children: taskName || "-" }) }), _jsx("td", { className: "tasks-legacy-responsible-cell", children: _jsx("div", { className: "tasks-legacy-readonly-value", children: getEffectiveTrackingResponsible(record, tableConfig) || "-" }) }), showDateColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : usesPresentationAndTermDates(tableConfig) ? getPresentationDate(record) : getRowDate(record, tableConfig)) }) })) : null, tableConfig.showReportedPeriod ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: record.reportedMonth || "-" }) })) : null, showTermColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: isTrackingTermEnabled(record, tableConfig) ? formatDisplayDate(record.termDate) : "-" }) })) : null] }, record.id));
                                     })) })] }) })] })] }));
 }

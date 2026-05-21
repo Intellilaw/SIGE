@@ -102,6 +102,7 @@ const distributionSchema = z.object({
     sourceTable: z.string().min(1),
     tableLabel: z.string().min(1),
     taskName: z.string().min(1),
+    responsible: z.string().optional(),
     dueDate: z.string().nullable().optional(),
     termDate: z.string().nullable().optional(),
     status: legacyStatusSchema.optional(),

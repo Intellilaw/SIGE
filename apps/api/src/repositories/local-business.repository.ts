@@ -460,6 +460,7 @@ export class LocalBusinessStore {
       const sourceTable = this.resolveSourceTable(module, target.tableCode, target.sourceTable);
       const tableCode = text(target.tableCode) || sourceTable;
       const taskName = text(target.taskName) || payload.eventName;
+      const targetResponsible = target.responsible === undefined ? payload.responsible : target.responsible;
       const trackingId = `local-tracking-${randomUUID()}`;
       const termId = target.createTerm ? `local-term-${randomUUID()}` : undefined;
 
@@ -485,7 +486,7 @@ export class LocalBusinessStore {
         id_asunto: text(payload.matterIdentifier) || text(payload.matterNumber) || text(payload.matterId),
         proceso_especifico: text(payload.specificProcess),
         asunto: text(payload.subject),
-        responsable: text(payload.responsible),
+        responsable: text(targetResponsible),
         workflow_stage: target.workflowStage ?? 1,
         reported_month: text(target.reportedMonth),
         source: "local-fallback",
@@ -516,7 +517,7 @@ export class LocalBusinessStore {
           id_asunto: text(payload.matterIdentifier) || text(payload.matterNumber) || text(payload.matterId),
           proceso_especifico: text(payload.specificProcess),
           asunto: text(payload.subject),
-          responsable: text(payload.responsible),
+          responsable: text(targetResponsible),
           reported_month: text(target.reportedMonth),
           es_recurrente: false,
           deleted_at: null,
@@ -763,6 +764,11 @@ export class LocalBusinessStore {
     const createdAt = isoDate(row.created_at) ?? new Date(0).toISOString();
     const updatedAt = isoDate(row.updated_at) ?? createdAt;
     const completedAt = isoDate(row.fecha_presentacion);
+    const responsible = text(row.responsable);
+    const keepBlankResponsible = source.slug === "escritos-fondo"
+      || source.slug === "desahogo-prevenciones"
+      || source.sourceTable === "escritos_fondo"
+      || source.sourceTable === "desahogo_prevenciones";
 
     return {
       id: text(row.id),
@@ -778,7 +784,7 @@ export class LocalBusinessStore {
       matterIdentifier: optionalText(row.id_asunto),
       taskName: text(row.escrito) || text(row.tarea) || text(row.nombre_tarea) || text(row.evento) || source.slug,
       eventName: optionalText(row.evento_nombre) ?? optionalText(row.evento),
-      responsible: text(row.responsable) || module.defaultResponsible || "",
+      responsible: responsible || (keepBlankResponsible ? "" : module.defaultResponsible || ""),
       dueDate: isoDate(row.fecha_debe_presentarse) ?? isoDate(row.fecha_limite) ?? isoDate(row.fecha_pruebas),
       termDate: isoDate(row.fecha_termino),
       completedAt,
@@ -796,6 +802,9 @@ export class LocalBusinessStore {
   private mapTerm(row: ExportRow, module: ExportModuleConfig) {
     const createdAt = isoDate(row.created_at) ?? new Date(0).toISOString();
     const updatedAt = isoDate(row.updated_at) ?? createdAt;
+    const responsible = text(row.responsable);
+    const keepBlankResponsible = text(row.source_table) === "escritos_fondo"
+      || text(row.source_table) === "desahogo_prevenciones";
 
     return {
       id: text(row.id),
@@ -811,7 +820,7 @@ export class LocalBusinessStore {
       matterIdentifier: optionalText(row.id_asunto),
       eventName: text(row.evento) || text(row.escrito) || "Termino",
       pendingTaskLabel: optionalText(row.escrito),
-      responsible: text(row.responsable) || module.defaultResponsible || "",
+      responsible: responsible || (keepBlankResponsible ? "" : module.defaultResponsible || ""),
       dueDate: isoDate(row.fecha_debe_presentarse),
       termDate: isoDate(row.fecha_termino),
       status: legacyStatus(row.status, row.fecha_presentacion),

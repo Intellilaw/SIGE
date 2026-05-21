@@ -12,6 +12,31 @@ export const TASK_DASHBOARD_CONFIG_BY_MODULE_ID = {
                 aliases: ["LAMR", "ALEJANDRA MEJIA", "LITIGIO (COLABORADOR)"]
             },
             {
+                id: "ARR",
+                name: "Alfonso Ramirez",
+                aliases: ["ARR", "ALFONSO RAMIREZ"]
+            },
+            {
+                id: "EMRT",
+                name: "Eduardo Rusconi",
+                aliases: ["EMRT", "EDUARDO RUSCONI"]
+            },
+            {
+                id: "IAMP",
+                name: "Axel Mendoza",
+                aliases: ["IAMP", "AXEL MENDOZA"]
+            },
+            {
+                id: "MAVH",
+                name: "Miguel Angel Valencia",
+                aliases: ["MAVH", "MIGUEL ANGEL VALENCIA"]
+            },
+            {
+                id: "MVSE",
+                name: "Veronica Salas",
+                aliases: ["MVSE", "VERONICA SALAS"]
+            },
+            {
                 id: "EKPO",
                 name: "Evelyng Perez",
                 aliases: ["EKPO", "EVELYNG PEREZ", "PROYECTISTA 1"]

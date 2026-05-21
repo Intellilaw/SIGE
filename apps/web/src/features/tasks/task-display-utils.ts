@@ -36,6 +36,10 @@ function normalize(value?: string | null) {
   return (value ?? "").trim();
 }
 
+function normalizeResponsible(value?: string | null) {
+  return normalize(value).toUpperCase();
+}
+
 function normalizeComparable(value?: string | null) {
   return normalize(value)
     .toLowerCase()
@@ -63,7 +67,7 @@ function normalizeBoolean(value: unknown) {
 }
 
 export function isAlwaysTermTable(table: LegacyTaskTableConfig | undefined) {
-  return table?.slug === "desahogo-prevenciones" || table?.slug === "albacea";
+  return table?.slug === "desahogo-prevenciones";
 }
 
 export function isNeverTermTable(table: LegacyTaskTableConfig | undefined) {
@@ -77,6 +81,7 @@ export function isNeverTermTable(table: LegacyTaskTableConfig | undefined) {
     || table?.slug === "copias"
     || table?.slug === "publicaciones"
     || table?.slug === "esperar-resolucion"
+    || table?.slug === "albacea"
     || table?.slug === "archivo-judicial"
     || table?.slug === "devoluciones"
     || table?.slug === "escaneados"
@@ -122,6 +127,23 @@ export function isTrackingTermEnabled(record: TaskTrackingRecord, table: LegacyT
   }
 
   return Boolean(table.autoTerm) || Boolean(table.termManagedDate);
+}
+
+export function getEffectiveTrackingResponsible(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
+  return normalize(table?.fixedResponsible) || normalize(record.responsible);
+}
+
+export function hasValidTrackingResponsible(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
+  const responsible = normalizeResponsible(getEffectiveTrackingResponsible(record, table));
+  if (!responsible) {
+    return false;
+  }
+
+  if (!table?.restrictResponsibleOptions) {
+    return true;
+  }
+
+  return (table.responsibleOptions ?? []).map(normalizeResponsible).includes(responsible);
 }
 
 export function getTermEnabledRecordData(record: TaskTrackingRecord, enabled: boolean) {

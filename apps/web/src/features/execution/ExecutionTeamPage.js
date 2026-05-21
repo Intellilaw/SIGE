@@ -654,11 +654,14 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                 targets: payload.targets.map((target) => {
                     const table = legacyConfig.tables.find((candidate) => candidate.slug === target.tableCode);
                     const taskName = target.taskName.trim() || table?.title || eventName;
+                    const requiresResponsibleAssignment = table?.slug === "escritos-fondo" || table?.slug === "desahogo-prevenciones";
+                    const targetResponsible = table?.fixedResponsible ?? (requiresResponsibleAssignment ? "" : payload.responsible);
                     return {
                         tableCode: target.tableCode,
                         sourceTable: table?.sourceTable ?? target.tableCode,
                         tableLabel: table?.title ?? target.tableCode,
                         taskName,
+                        responsible: targetResponsible,
                         dueDate: payload.dueDate,
                         termDate: table?.autoTerm ? target.termDate || payload.dueDate : target.termDate || null,
                         status: "pendiente",

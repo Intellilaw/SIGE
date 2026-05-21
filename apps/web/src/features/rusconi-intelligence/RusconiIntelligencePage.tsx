@@ -70,6 +70,28 @@ const INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
       "Referencia visual RI-001 en el encabezado de la columna."
     ],
     cadence: "Ajuste de prompt cuando direccion refine la supervision de asuntos en ejecucion."
+  },
+  {
+    id: "RI-002",
+    section: "Ejecucion",
+    surface: "Pestana emergente Crear tareas",
+    status: "active",
+    promptName: "Deteccion semantica de tareas duplicadas",
+    promptVersion: "v0.1",
+    prompt:
+      "Antes de distribuir una nueva tarea, compara semanticamente su nombre, contexto del asunto y proceso especifico contra tareas vigentes del mismo proceso. Si detectas una coincidencia contextual relevante, alerta al usuario sin impedir que confirme el registro duplicado.",
+    context: [
+      "Nombre de la tarea seleccionada y nombres editados en los destinos de distribucion.",
+      "Tareas vigentes del mismo asunto o proceso, excluyendo tareas completadas.",
+      "Cliente, asunto, proceso especifico e ID del asunto visibles en la pestana emergente.",
+      "Sinonimos juridicos y operativos que puedan expresar la misma obligacion con textos distintos."
+    ],
+    output: [
+      "Alerta no bloqueante dentro de Crear tareas cuando exista posible duplicado vigente.",
+      "Referencia visual RI-002 en la pestana emergente y en la alerta.",
+      "Permiso explicito para registrar la tarea duplicada si el usuario confirma la excepcion."
+    ],
+    cadence: "Ajuste de prompt cuando direccion refine los criterios de duplicidad por equipo o tipo de proceso."
   }
 ];
 
@@ -85,6 +107,9 @@ const summaryCards = [
   { label: "Registro base", value: "RI-000", tone: "base" },
   { label: "Prompts gobernados", value: String(INTELLIGENCE_CONNECTIONS.length), tone: "prompt" }
 ];
+
+const sigeConnections = INTELLIGENCE_CONNECTIONS.filter((connection) => connection.id !== "RI-000");
+const visibleConnectionBadges = sigeConnections;
 
 export function RusconiIntelligenceContent() {
   return (
@@ -134,19 +159,19 @@ export function RusconiIntelligenceContent() {
           <span>RI + ID</span>
         </div>
         <div className="ri-identity-strip">
-          <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
-          <RusconiIntelligenceBadge connectionId="RI-014" label="Flujo conectado de ejemplo visual" />
-          <RusconiIntelligenceBadge connectionId="RI-027" label="Columna conectada de ejemplo visual" />
+          {visibleConnectionBadges.map((connection) => (
+            <RusconiIntelligenceBadge key={connection.id} connectionId={connection.id} label={`${connection.section} / ${connection.surface}`} />
+          ))}
         </div>
       </section>
 
       <section className="panel ri-panel">
         <div className="panel-header">
           <h2>Conexiones SIGE</h2>
-          <span>{INTELLIGENCE_CONNECTIONS.length} registro</span>
+          <span>{sigeConnections.length} registro</span>
         </div>
         <div className="ri-connection-list">
-          {INTELLIGENCE_CONNECTIONS.map((connection) => (
+          {sigeConnections.map((connection) => (
             <article key={connection.id} className="ri-connection-card">
               <header className="ri-connection-head">
                 <div>

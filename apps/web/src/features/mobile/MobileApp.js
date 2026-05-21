@@ -11,7 +11,7 @@ import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisio
 import { KpisPage } from "../kpis/KpisPage";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
-import { buildDistributionHistoryTaskNameMap, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
+import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
 import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
 const MOBILE_LEAD_CHANNELS = [
     { value: "WHATSAPP", label: "WhatsApp" },
@@ -22,6 +22,8 @@ const MOBILE_LEAD_CHANNELS = [
 ];
 const TERMS_TABLE_ID = "terminos";
 const RECURRING_TERMS_TABLE_ID = "terminos-recurrentes";
+const LITIGATION_MODULE_ID = "litigation";
+const LITIGATION_TERM_DASHBOARD_MEMBER_IDS = new Set(["LAMR", "MEOO"]);
 const MOBILE_GENERAL_EXPENSE_TEAMS = [
     { value: "Litigio", label: "Litigio" },
     { value: "Corporativo y laboral", label: "Corporativo y laboral" },
@@ -46,6 +48,10 @@ function mobileResponsibleMatches(value, member, sharedAliases) {
     const normalizedValues = splitResponsibleOptions(value);
     const normalizedAliases = new Set([...member.aliases, member.id, member.name, ...sharedAliases].map(normalizeResponsibleOption));
     return normalizedValues.some((option) => normalizedAliases.has(option)) || normalizedAliases.has(normalizeResponsibleOption(value));
+}
+function mobileTermDashboardMatches(moduleId, responsible, member, sharedAliases) {
+    return moduleId === LITIGATION_MODULE_ID && LITIGATION_TERM_DASHBOARD_MEMBER_IDS.has(member.id)
+        || mobileResponsibleMatches(responsible, member, sharedAliases);
 }
 function dedupeResponsibleOptions(values) {
     return Array.from(new Set(values.map(normalizeResponsibleOption).filter(Boolean))).sort((left, right) => left.localeCompare(right));
@@ -331,7 +337,7 @@ function termFromTrackingRecord(moduleConfig, record, linkedTerm) {
         matterIdentifier: record.matterIdentifier,
         eventName: taskName || record.eventName || "Termino",
         pendingTaskLabel: taskName || undefined,
-        responsible: record.responsible,
+        responsible: getEffectiveTrackingResponsible(record, table),
         dueDate: record.dueDate,
         termDate: getManagerTermDate(table, record),
         status: record.status,
@@ -485,8 +491,15 @@ export function MobileDashboardModulePage() {
     const activeRecords = records.filter(isPendingRecord);
     const activeTerms = buildVisibleTerms(legacyConfig, terms, records, false).filter(isPendingRecord);
     const memberSummaries = (dashboardConfig?.members ?? []).map((member) => {
-        const memberRecords = activeRecords.filter((record) => mobileResponsibleMatches(record.responsible, member, sharedAliases));
-        const memberTerms = activeTerms.filter((term) => mobileResponsibleMatches(term.responsible, member, sharedAliases));
+        const memberRecords = activeRecords.filter((record) => {
+            const table = findTrackingTable(legacyConfig, record);
+            const responsible = getEffectiveTrackingResponsible(record, table);
+            if (isTrackingTermEnabled(record, table)) {
+                return mobileTermDashboardMatches(module.moduleId, responsible, member, sharedAliases);
+            }
+            return mobileResponsibleMatches(responsible, member, sharedAliases);
+        });
+        const memberTerms = activeTerms.filter((term) => mobileTermDashboardMatches(module.moduleId, term.responsible, member, sharedAliases));
         const nextItem = sortByDate([...memberRecords, ...memberTerms])[0];
         return {
             member,

@@ -7,6 +7,8 @@ import { useAuth } from "../auth/AuthContext";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import {
   buildDistributionHistoryTaskNameMap,
+  getEffectiveTrackingResponsible,
+  hasValidTrackingResponsible,
   isTrackingTermEnabled,
   resolveHistoryTaskName,
   resolveTrackingTaskName,
@@ -36,8 +38,13 @@ function currentMonthInput() {
   return todayInput().slice(0, 7);
 }
 
-function getRowDate(record: TaskTrackingRecord) {
-  return toDateInput(record.dueDate || record.termDate);
+function getRowDate(record: TaskTrackingRecord, table?: LegacyTaskTableConfig) {
+  const dueDate = toDateInput(record.dueDate);
+  if (dueDate) {
+    return dueDate;
+  }
+
+  return isTrackingTermEnabled(record, table) ? toDateInput(record.termDate) : "";
 }
 
 function getPresentationDate(record: TaskTrackingRecord) {
@@ -91,14 +98,17 @@ function isRowRed(
     const termEnabled = isTrackingTermEnabled(record, table);
 
     return !taskName
-      || !record.responsible
+      || !hasValidTrackingResponsible(record, table)
       || !presentationDate
       || presentationDate <= todayInput()
       || (termEnabled && (!termDate || termDate <= todayInput()));
   }
 
-  const dueDate = getRowDate(record);
-  return !taskName || !record.responsible || (showDateColumn && !dueDate) || (Boolean(dueDate) && dueDate <= todayInput());
+  const dueDate = getRowDate(record, table);
+  return !taskName
+    || !hasValidTrackingResponsible(record, table)
+    || (showDateColumn && !dueDate)
+    || (Boolean(dueDate) && dueDate <= todayInput());
 }
 
 export function TaskLegacyTablePage() {
@@ -300,13 +310,13 @@ export function TaskLegacyTablePage() {
                       </td>
                       <td className="tasks-legacy-responsible-cell">
                         <div className="tasks-legacy-readonly-value">
-                          {record.responsible || "-"}
+                          {getEffectiveTrackingResponsible(record, tableConfig) || "-"}
                         </div>
                       </td>
                       {showDateColumn ? (
                         <td>
                           <div className="tasks-legacy-readonly-value tasks-legacy-date-readonly">
-                            {formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : usesPresentationAndTermDates(tableConfig) ? getPresentationDate(record) : getRowDate(record))}
+                            {formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : usesPresentationAndTermDates(tableConfig) ? getPresentationDate(record) : getRowDate(record, tableConfig))}
                           </div>
                         </td>
                       ) : null}

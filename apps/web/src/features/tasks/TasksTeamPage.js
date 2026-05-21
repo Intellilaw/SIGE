@@ -5,7 +5,7 @@ import { apiGet } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
-import { isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
+import { getEffectiveTrackingResponsible, hasValidTrackingResponsible, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_ID } from "./task-legacy-config";
 const TIMEFRAMES = [
     { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
@@ -14,6 +14,25 @@ const TIMEFRAMES = [
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const LITIGATION_MISSING_NEXT_TASK_DASHBOARD_OWNER = "LAMR";
+const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
+const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
+const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
+const LITIGATION_PREVENTIONS_TABLE_SLUG = "desahogo-prevenciones";
+const LITIGATION_JUDGES_TABLE_SLUG = "jueces-magistrados";
+const LITIGATION_AUDIENCES_TABLE_SLUG = "audiencias";
+const LITIGATION_ACTUARY_APPOINTMENTS_TABLE_SLUG = "citas-actuarios";
+const LITIGATION_NOTIFICATIONS_TABLE_SLUG = "notificaciones";
+const LITIGATION_EVIDENCE_TABLE_SLUG = "pruebas";
+const LITIGATION_PUBLICATIONS_TABLE_SLUG = "publicaciones";
+const LITIGATION_WAIT_RESOLUTION_TABLE_SLUG = "esperar-resolucion";
+const LITIGATION_COPIES_TABLE_SLUG = "copias";
+const LITIGATION_OFFICIAL_LETTERS_TABLE_SLUG = "oficios";
+const LITIGATION_APPEALS_AND_AMPAROS_TABLE_SLUG = "amparos";
+const LITIGATION_RETURNED_COURT_FILES_TABLE_SLUG = "archivo-judicial";
+const LITIGATION_DOCUMENT_RETURNS_TABLE_SLUG = "devoluciones";
+const LITIGATION_FILES_TO_SCAN_TABLE_SLUG = "escaneados";
+const LITIGATION_THIRD_PARTY_ACTIONS_TABLE_SLUG = "terceros-ajenos";
+const LITIGATION_OTHER_PROCEDURES_TABLE_SLUG = "otros-tramites";
 const LITIGATION_MODULE_ID = "litigation";
 function normalizeText(value) {
     return (value ?? "").trim();
@@ -118,11 +137,127 @@ function isVerificationComplete(term) {
 function isLinkedVerificationComplete(term) {
     return term ? isVerificationComplete(term) : false;
 }
+function isLinkedTermTableEnabled(table) {
+    return !table || usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
+}
+function isLitigationWritingTable(table) {
+    return table?.slug === LITIGATION_WRITINGS_TABLE_SLUG;
+}
+function isLitigationPreventionTable(table) {
+    return table?.slug === LITIGATION_PREVENTIONS_TABLE_SLUG;
+}
+function isLitigationJudgesTable(table) {
+    return table?.slug === LITIGATION_JUDGES_TABLE_SLUG;
+}
+function isLitigationAudienceTable(table) {
+    return table?.slug === LITIGATION_AUDIENCES_TABLE_SLUG;
+}
+function isLitigationActuaryAppointmentTable(table) {
+    return table?.slug === LITIGATION_ACTUARY_APPOINTMENTS_TABLE_SLUG;
+}
+function isLitigationNotificationTable(table) {
+    return table?.slug === LITIGATION_NOTIFICATIONS_TABLE_SLUG;
+}
+function isLitigationEvidenceTable(table) {
+    return table?.slug === LITIGATION_EVIDENCE_TABLE_SLUG;
+}
+function isLitigationPublicationsTable(table) {
+    return table?.slug === LITIGATION_PUBLICATIONS_TABLE_SLUG;
+}
+function isLitigationWaitResolutionTable(table) {
+    return table?.slug === LITIGATION_WAIT_RESOLUTION_TABLE_SLUG;
+}
+function isLitigationCopiesTable(table) {
+    return table?.slug === LITIGATION_COPIES_TABLE_SLUG;
+}
+function isLitigationOfficialLettersTable(table) {
+    return table?.slug === LITIGATION_OFFICIAL_LETTERS_TABLE_SLUG;
+}
+function isLitigationAppealsAndAmparosTable(table) {
+    return table?.slug === LITIGATION_APPEALS_AND_AMPAROS_TABLE_SLUG;
+}
+function isLitigationReturnedCourtFilesTable(table) {
+    return table?.slug === LITIGATION_RETURNED_COURT_FILES_TABLE_SLUG;
+}
+function isLitigationDocumentReturnsTable(table) {
+    return table?.slug === LITIGATION_DOCUMENT_RETURNS_TABLE_SLUG;
+}
+function isLitigationFilesToScanTable(table) {
+    return table?.slug === LITIGATION_FILES_TO_SCAN_TABLE_SLUG;
+}
+function isLitigationThirdPartyActionsTable(table) {
+    return table?.slug === LITIGATION_THIRD_PARTY_ACTIONS_TABLE_SLUG;
+}
+function isLitigationOtherProceduresTable(table) {
+    return table?.slug === LITIGATION_OTHER_PROCEDURES_TABLE_SLUG;
+}
+function isLitigationCollaboratorMirrorTable(table) {
+    return isLitigationJudgesTable(table)
+        || isLitigationAudienceTable(table)
+        || isLitigationActuaryAppointmentTable(table)
+        || isLitigationNotificationTable(table)
+        || isLitigationPublicationsTable(table)
+        || isLitigationWaitResolutionTable(table)
+        || isLitigationCopiesTable(table)
+        || isLitigationOfficialLettersTable(table)
+        || isLitigationAppealsAndAmparosTable(table)
+        || isLitigationReturnedCourtFilesTable(table)
+        || isLitigationDocumentReturnsTable(table)
+        || isLitigationFilesToScanTable(table)
+        || isLitigationThirdPartyActionsTable(table)
+        || isLitigationOtherProceduresTable(table);
+}
+function isResponsibleAssignmentTable(table) {
+    return isLitigationWritingTable(table) || isLitigationPreventionTable(table);
+}
 function isCompletedTrackingRecord(table, record) {
     if (record.status === "presentado" || record.status === "concluida") {
         return true;
     }
     return table?.mode === "workflow" && record.workflowStage >= table.tabs.length;
+}
+function isResponsibleAssignmentPending(table, record) {
+    return isResponsibleAssignmentTable(table) && !hasValidTrackingResponsible(record, table);
+}
+function isLitigationTermOversightMember(member) {
+    return member.id === LITIGATION_COLLABORATOR_MEMBER_ID
+        || member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER;
+}
+function matchesTermDashboardOwner(responsible, member, sharedResponsibleAliases) {
+    return isLitigationTermOversightMember(member)
+        || matchesResponsible(responsible, member, sharedResponsibleAliases);
+}
+function matchesTrackingDashboardOwner(table, record, member, sharedResponsibleAliases) {
+    const responsible = getEffectiveTrackingResponsible(record, table);
+    if (isTrackingTermEnabled(record, table)) {
+        return matchesTermDashboardOwner(responsible, member, sharedResponsibleAliases);
+    }
+    if (isLitigationEvidenceTable(table)) {
+        return member.id === LITIGATION_COLLABORATOR_MEMBER_ID
+            || member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER;
+    }
+    if (isLitigationCollaboratorMirrorTable(table)) {
+        return member.id === LITIGATION_COLLABORATOR_MEMBER_ID
+            || (hasValidTrackingResponsible(record, table) && matchesResponsible(responsible, member, sharedResponsibleAliases));
+    }
+    if (!isResponsibleAssignmentTable(table)) {
+        return matchesResponsible(responsible, member, sharedResponsibleAliases);
+    }
+    if (isResponsibleAssignmentPending(table, record)) {
+        return member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER;
+    }
+    if (member.id === LITIGATION_COLLABORATOR_MEMBER_ID && isLitigationWritingTable(table)) {
+        return false;
+    }
+    return member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER
+        || (isLitigationPreventionTable(table) && member.id === LITIGATION_COLLABORATOR_MEMBER_ID)
+        || matchesResponsible(responsible, member, []);
+}
+function getTrackingDashboardDateForMember(table, record, member) {
+    if (isResponsibleAssignmentPending(table, record) && member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER) {
+        return getLocalDateInput();
+    }
+    return getTrackingDashboardDate(table, record);
 }
 function matterKeyMatches(recordValue, matterValues) {
     const normalizedRecordValue = normalizeText(recordValue);
@@ -165,9 +300,6 @@ function getTrackingDateCandidates(table, record) {
     if (isTrackingTermEnabled(record, table) && termDate) {
         dates.push(termDate);
     }
-    if (!usesPresentationAndTermDates(table) && dates[0] === "" && termDate) {
-        dates.push(termDate);
-    }
     return dates.filter(Boolean).sort();
 }
 function getTrackingDashboardDate(table, record) {
@@ -179,7 +311,7 @@ function isTrackingDashboardRed(table, record, taskLabel, linkedTerm) {
     }
     const today = getLocalDateInput();
     const termEnabled = isTrackingTermEnabled(record, table);
-    if (!taskLabel || !record.responsible) {
+    if (!taskLabel || !hasValidTrackingResponsible(record, table)) {
         return true;
     }
     if (usesPresentationAndTermDates(table)) {
@@ -273,26 +405,37 @@ export function TasksTeamPage() {
     }, [terms]);
     function buildTrackingRows(member, timeframe) {
         return trackingRecords
-            .filter((record) => matchesResponsible(record.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []))
-            .filter((record) => belongsToTimeframe({
-            state: isCompletedTrackingRecord(resolveRecordTable(tableLookup, record), record) ? "closed" : "open",
-            date: getTrackingDashboardDate(resolveRecordTable(tableLookup, record), record)
+            .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
+            .filter(({ record, table }) => matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? []))
+            .filter(({ record, table }) => belongsToTimeframe({
+            state: isCompletedTrackingRecord(table, record) ? "closed" : "open",
+            date: getTrackingDashboardDateForMember(table, record, member)
         }, timeframe))
-            .map((record) => {
-            const table = resolveRecordTable(tableLookup, record);
+            .map(({ record, table }) => {
             const linkedTerm = (record.termId ? termLookup.byId.get(record.termId) : undefined) ?? termLookup.bySourceRecordId.get(record.id);
-            const dueDate = getTrackingDashboardDate(table, record);
-            const taskLabel = resolveTrackingTaskName(record, table, undefined, record.eventName);
+            const dueDate = getTrackingDashboardDateForMember(table, record, member);
+            const baseTaskLabel = resolveTrackingTaskName(record, table, undefined, record.eventName);
             const completed = isCompletedTrackingRecord(table, record);
-            const highlighted = isTrackingDashboardRed(table, record, taskLabel, linkedTerm);
+            const assignmentPending = !completed
+                && isResponsibleAssignmentPending(table, record)
+                && member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER;
+            const highlighted = assignmentPending || isTrackingDashboardRed(table, record, baseTaskLabel, linkedTerm);
             return {
                 taskId: `tracking-${record.id}`,
                 clientNumber: record.clientNumber || "-",
                 clientName: record.clientName || "-",
                 subject: record.subject || "-",
                 specificProcess: record.specificProcess || "-",
-                taskLabel: taskLabel || "Tarea",
-                typeLabel: completed ? "Completada" : isTrackingTermEnabled(record, table) ? "Termino / seguimiento" : highlighted ? "Vencida / incompleta" : "Seguimiento",
+                taskLabel: assignmentPending
+                    ? `Definir responsable: ${baseTaskLabel || "Tarea"}`
+                    : baseTaskLabel || "Tarea",
+                typeLabel: completed
+                    ? "Completada"
+                    : assignmentPending
+                        ? "Definir responsable"
+                        : isTrackingTermEnabled(record, table)
+                            ? "Termino / seguimiento"
+                            : highlighted ? "Vencida / incompleta" : "Seguimiento",
                 displayDate: completed ? toDateInput(record.completedAt || record.updatedAt) : dueDate,
                 originLabel: table?.title ?? record.sourceTable,
                 originPath: `/app/tasks/${slug}/distribuidor`,
@@ -304,7 +447,7 @@ export function TasksTeamPage() {
     function buildTermRows(member, timeframe) {
         return terms
             .filter((term) => term.recurring && !term.sourceRecordId)
-            .filter((term) => matchesResponsible(term.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []))
+            .filter((term) => matchesTermDashboardOwner(term.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []))
             .filter((term) => belongsToTimeframe({
             state: term.status === "concluida" || term.status === "presentado" ? "closed" : "open",
             date: toDateInput(term.termDate || term.dueDate)
@@ -338,6 +481,12 @@ export function TasksTeamPage() {
             .filter((term) => !term.deletedAt)
             .flatMap((term) => {
             const table = tableLookup.get(normalizeComparableText(term.sourceTable));
+            if (term.sourceRecordId && !isLinkedTermTableEnabled(table)) {
+                return [];
+            }
+            if (isLitigationWritingTable(table) && member.id === LITIGATION_COLLABORATOR_MEMBER_ID) {
+                return [];
+            }
             const taskLabel = normalizeText(term.pendingTaskLabel) || normalizeText(term.eventName) || "Termino sin nombre";
             const sourcePath = term.sourceRecordId
                 ? `/app/tasks/${slug}/distribuidor`

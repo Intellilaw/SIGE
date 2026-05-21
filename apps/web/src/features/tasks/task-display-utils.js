@@ -28,6 +28,9 @@ const LEGACY_TASK_NAME_KEYS = [
 function normalize(value) {
     return (value ?? "").trim();
 }
+function normalizeResponsible(value) {
+    return normalize(value).toUpperCase();
+}
 function normalizeComparable(value) {
     return normalize(value)
         .toLowerCase()
@@ -50,7 +53,7 @@ function normalizeBoolean(value) {
     return undefined;
 }
 export function isAlwaysTermTable(table) {
-    return table?.slug === "desahogo-prevenciones" || table?.slug === "albacea";
+    return table?.slug === "desahogo-prevenciones";
 }
 export function isNeverTermTable(table) {
     return table?.slug === "jueces-magistrados"
@@ -63,6 +66,7 @@ export function isNeverTermTable(table) {
         || table?.slug === "copias"
         || table?.slug === "publicaciones"
         || table?.slug === "esperar-resolucion"
+        || table?.slug === "albacea"
         || table?.slug === "archivo-judicial"
         || table?.slug === "devoluciones"
         || table?.slug === "escaneados"
@@ -99,6 +103,19 @@ export function isTrackingTermEnabled(record, table) {
         return Boolean(record.termDate);
     }
     return Boolean(table.autoTerm) || Boolean(table.termManagedDate);
+}
+export function getEffectiveTrackingResponsible(record, table) {
+    return normalize(table?.fixedResponsible) || normalize(record.responsible);
+}
+export function hasValidTrackingResponsible(record, table) {
+    const responsible = normalizeResponsible(getEffectiveTrackingResponsible(record, table));
+    if (!responsible) {
+        return false;
+    }
+    if (!table?.restrictResponsibleOptions) {
+        return true;
+    }
+    return (table.responsibleOptions ?? []).map(normalizeResponsible).includes(responsible);
 }
 export function getTermEnabledRecordData(record, enabled) {
     return {

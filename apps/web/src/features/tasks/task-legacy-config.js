@@ -16,36 +16,44 @@ const table = (config) => ({
     ...config
 });
 const litigationTables = [
-    table({ slug: "escritos-fondo", sourceTable: "escritos_fondo", title: "1. Escritos de fondo", mode: "workflow", tabs: workflowTabs(["1. Pendientes", "2. Terminados sin presentar", "3. Presentados"]), dateLabel: "Fecha debe presentarse" }),
-    table({ slug: "escritos", sourceTable: "escritos_kpi", title: "2. Escritos que deben ser presentados", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
-    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones", title: "3. Desahogo de Prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse" }),
-    table({ slug: "jueces-magistrados", sourceTable: "hablar_jueces_magistrados", title: "4. Hablar con jueces y magistrados", tabs: statusTabs("1. Pendientes", "2. Hecho"), dateLabel: "Fecha en que la tarea debe ser realizada" }),
-    table({ slug: "sentencias", sourceTable: "sentencias_pendientes", title: "5. Sentencias pendientes", dateLabel: "Fecha Esperada" }),
+    table({ slug: "escritos-fondo", sourceTable: "escritos_fondo", title: "1. Escritos de fondo", mode: "workflow", tabs: workflowTabs(["1. Pendientes", "2. Terminados sin presentar", "3. Presentados"]), dateLabel: "Fecha debe presentarse", responsibleOptions: ["MEOO", "EKPO", "NBSG"], restrictResponsibleOptions: true }),
+    table({ slug: "escritos", sourceTable: "escritos_kpi", title: "2. Escritos que deben ser presentados", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse", responsibleOptions: ["LAMR"], restrictResponsibleOptions: true, fixedResponsible: "LAMR" }),
+    table({ slug: "desahogo-prevenciones", sourceTable: "desahogo_prevenciones", title: "3. Desahogo de Prevenciones", autoTerm: true, termManagedDate: true, tabs: statusTabs("1. Pendientes", "2. Presentados"), dateLabel: "Fecha debe presentarse", responsibleOptions: ["MEOO", "LAMR", "EKPO", "NBSG"], restrictResponsibleOptions: true }),
+    table({ slug: "jueces-magistrados", sourceTable: "hablar_jueces_magistrados", title: "4. Hablar con jueces y magistrados", tabs: statusTabs("1. Pendientes", "2. Hecho"), dateLabel: "Fecha en que la tarea debe ser realizada", responsibleOptions: ["ARR", "EMRT"] }),
+    table({ slug: "sentencias", sourceTable: "sentencias_pendientes", title: "5. Sentencias pendientes", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR"], restrictResponsibleOptions: true, fixedResponsible: "LAMR" }),
     table({ slug: "audiencias", sourceTable: "audiencias_citas_oficiales", title: "6. Audiencias y citas oficiales", dateLabel: "Fecha de la audiencia/cita", responsibleOptions: ["EMRT", "ARR"] }),
     table({ slug: "citas-actuarios", sourceTable: "citas_actuarios", title: "7. Citas con actuarios", dateLabel: "Fecha de la cita" }),
     table({ slug: "notificaciones", sourceTable: "notificaciones_emplazamientos_pendientes", title: "8. Notificaciones y emplazamientos", dateLabel: "Fecha en la que la tarea debe ser realizada" }),
-    table({ slug: "apelaciones-preventiva", sourceTable: "apelaciones_tramitacion_preventiva", title: "9. Apelaciones de tramitacion preventiva", dateLabel: "Fecha en la que se espera la sentencia" }),
+    table({ slug: "apelaciones-preventiva", sourceTable: "apelaciones_tramitacion_preventiva", title: "9. Apelaciones de tramitacion preventiva", dateLabel: "Fecha en la que se espera la sentencia", responsibleOptions: ["LAMR"], restrictResponsibleOptions: true, fixedResponsible: "LAMR" }),
     table({ slug: "amparos", sourceTable: "apelaciones_recursos_amparos_pendientes", title: "10. Apelaciones, recursos y amparos pendientes de ser radicados", dateLabel: "Fecha en la que se espera que la instancia esté radicada" }),
-    table({ slug: "copias", sourceTable: "copias_pendientes", title: "11. Copias pendientes", dateLabel: "Fecha Limite" }),
-    table({ slug: "oficios", sourceTable: "oficios_exhortos_pendientes", title: "12. Oficios y exhortos pendientes", dateLabel: "Fecha en la que la tarea debe ser realizada" }),
-    table({ slug: "pruebas", sourceTable: "pruebas_pendientes", title: "13. Pruebas pendientes", dateLabel: "Fecha en la que la prueba debe ser presentada" }),
-    table({ slug: "publicaciones", sourceTable: "publicaciones", title: "14. Publicaciones", dateLabel: "Fecha de la publicacion" }),
-    table({ slug: "esperar-resolucion", sourceTable: "esperar_resolucion", title: "15. Esperar resolucion", dateLabel: "Fecha esperada" }),
+    table({ slug: "copias", sourceTable: "copias_pendientes", title: "11. Copias pendientes", dateLabel: "Fecha Limite", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+    table({ slug: "oficios", sourceTable: "oficios_exhortos_pendientes", title: "12. Oficios y exhortos pendientes", dateLabel: "Fecha en la que la tarea debe ser realizada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+    table({ slug: "pruebas", sourceTable: "pruebas_pendientes", title: "13. Pruebas pendientes", dateLabel: "Fecha en la que la prueba debe ser presentada", responsibleOptions: ["LAMR", "MEOO"], restrictResponsibleOptions: true }),
+    table({ slug: "publicaciones", sourceTable: "publicaciones", title: "14. Publicaciones", dateLabel: "Fecha de la publicacion", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+    table({ slug: "esperar-resolucion", sourceTable: "esperar_resolucion", title: "15. Esperar resolucion", dateLabel: "Fecha esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
     table({
         slug: "albacea",
         sourceTable: "fechas_aceptacion_albacea",
         title: "16. Fechas de aceptacion del cargo de albacea",
         tabs: statusTabs("1. Pendientes", "2. Sucesiones finalizadas"),
         dateLabel: "Fecha en que se acepto el cargo",
-        termDateLabel: "Término de próx. rendición de cuentas anual"
+        responsibleOptions: ["LAMR"],
+        restrictResponsibleOptions: true,
+        fixedResponsible: "LAMR"
     }),
-    table({ slug: "archivo-judicial", sourceTable: "expedientes_devueltos_archivo", title: "17. Expedientes devueltos del Archivo Judicial", dateLabel: "Fecha esperada" }),
-    table({ slug: "devoluciones", sourceTable: "devoluciones_documentos_pendientes", title: "18. Devoluciones de documentos", tabs: statusTabs("1. Pendientes", "2. Devueltos / Concluidos") }),
-    table({ slug: "escaneados", sourceTable: "expedientes_escaneados", title: "19. Expedientes a escanear", tabs: statusTabs("1. Pendientes", "2. Escaneados / Concluidos") }),
-    table({ slug: "delegados", sourceTable: "asuntos_delegados_corporativo", title: "20. Asuntos delegados Corporativo-Laboral", tabs: statusTabs("1. Pendientes", "2. Concluidos") }),
-    table({ slug: "terceros-ajenos", sourceTable: "seguimiento_terceros_ajenos", title: "21. Dar seguimiento a acciones de terceros", dateLabel: "Fecha Esperada" }),
-    table({ slug: "otros-tramites", sourceTable: "otros_tramites", title: "22. Otros tramites", dateLabel: "Fecha Esperada" })
+    table({ slug: "archivo-judicial", sourceTable: "expedientes_devueltos_archivo", title: "17. Expedientes devueltos del Archivo Judicial", dateLabel: "Fecha esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+    table({ slug: "devoluciones", sourceTable: "devoluciones_documentos_pendientes", title: "18. Devoluciones de documentos", tabs: statusTabs("1. Pendientes", "2. Devueltos / Concluidos"), responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+    table({ slug: "escaneados", sourceTable: "expedientes_escaneados", title: "19. Expedientes a escanear", tabs: statusTabs("1. Pendientes", "2. Escaneados / Concluidos"), responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+    table({ slug: "delegados", sourceTable: "asuntos_delegados_corporativo", title: "20. Asuntos delegados Corporativo-Laboral", tabs: statusTabs("1. Pendientes", "2. Concluidos"), responsibleOptions: ["LAMR"], restrictResponsibleOptions: true, fixedResponsible: "LAMR" }),
+    table({ slug: "terceros-ajenos", sourceTable: "seguimiento_terceros_ajenos", title: "21. Dar seguimiento a acciones de terceros", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR", "MEOO"], restrictResponsibleOptions: true }),
+    table({ slug: "otros-tramites", sourceTable: "otros_tramites", title: "22. Otros tramites", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true })
 ];
+litigationTables.forEach((entry) => {
+    if (entry.slug === "amparos") {
+        entry.responsibleOptions = ["LAMR", "IAMP", "MAVH", "MVSE"];
+        entry.restrictResponsibleOptions = true;
+    }
+});
 const corporateTables = [
     table({ slug: "tramites-impi", sourceTable: "tramites_impi", title: "1. Ingresar tramite IMPI", dateEditable: true }),
     table({ slug: "tramites-sai", sourceTable: "tramites_sai", title: "2. Ingresar SAI", dateEditable: true }),
