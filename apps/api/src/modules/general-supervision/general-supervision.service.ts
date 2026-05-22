@@ -4,9 +4,6 @@ import {
   type KpiMetricStatus,
   type LegacyTaskStatus,
   type ManagedUser,
-  type Matter,
-  type TaskAdditionalTask,
-  type TaskItem,
   type TaskModuleDefinition,
   type TaskTerm,
   type TaskTrackingRecord
@@ -120,11 +117,7 @@ const TASK_MODULE_SLUGS: Record<string, string> = {
 };
 
 const OPEN_LEGACY_STATUSES: LegacyTaskStatus[] = ["pendiente"];
-const OPEN_TASK_STATES: TaskItem["state"][] = ["PENDING", "IN_PROGRESS"];
 const KPI_ALERT_STATUSES: KpiMetricStatus[] = ["missed", "warning"];
-const LITIGATION_MODULE_ID = "litigation";
-const LITIGATION_TEAM = "LITIGATION";
-const LITIGATION_MISSING_NEXT_TASK_OWNER = "LAMR";
 const TASK_VERIFICATION_COLUMNS: Record<string, Array<{ key: string; label: string }>> = {
   litigation: [
     { key: "verificado_meoo", label: "V. MEOO" },
@@ -227,18 +220,12 @@ function getVerificationResponsible(column: { key: string; label: string }) {
   return column.key.replace(/^verificado[_-]?/i, "").replace(/[_-]+/g, " ").trim();
 }
 
-function statusLabel(status: LegacyTaskStatus | TaskItem["state"]) {
+function statusLabel(status: LegacyTaskStatus) {
   if (status === "presentado") {
     return "Presentado";
   }
-  if (status === "concluida" || status === "COMPLETED") {
+  if (status === "concluida") {
     return "Concluida";
-  }
-  if (status === "IN_PROGRESS") {
-    return "En proceso";
-  }
-  if (status === "MONTHLY_VIEW") {
-    return "Vista mensual";
   }
 
   return "Pendiente";
@@ -278,60 +265,6 @@ function getRecordSourceLabel(module: TaskModuleDefinition | undefined, record: 
     ?? record.sourceTable
     ?? record.tableCode
     ?? "Seguimiento";
-}
-
-function normalizeMatterIdentity(value?: string | null) {
-  return (value ?? "").trim();
-}
-
-function matterKeyMatches(recordValue: string | undefined | null, matterValues: string[]) {
-  const normalizedRecordValue = normalizeMatterIdentity(recordValue);
-  return Boolean(normalizedRecordValue && matterValues.includes(normalizedRecordValue));
-}
-
-function getMatterIdentityValues(matter: Matter) {
-  return [
-    matter.id,
-    matter.matterNumber,
-    matter.matterIdentifier
-  ].map(normalizeMatterIdentity).filter(Boolean);
-}
-
-function isCompletedTrackingRecord(record: TaskTrackingRecord) {
-  return record.status === "presentado" || record.status === "concluida";
-}
-
-function hasActiveLinkedTrackingRecord(matter: Matter, records: TaskTrackingRecord[]) {
-  const matterValues = getMatterIdentityValues(matter);
-
-  return records.some((record) =>
-    !record.deletedAt
-    && !isCompletedTrackingRecord(record)
-    && (
-      matterKeyMatches(record.matterId, matterValues)
-      || matterKeyMatches(record.matterNumber, matterValues)
-      || matterKeyMatches(record.matterIdentifier, matterValues)
-    )
-  );
-}
-
-function hasActiveStandaloneTerm(matter: Matter, terms: TaskTerm[]) {
-  const matterValues = getMatterIdentityValues(matter);
-
-  return terms.some((term) =>
-    !term.deletedAt
-    && !term.sourceRecordId
-    && term.status === "pendiente"
-    && (
-      matterKeyMatches(term.matterId, matterValues)
-      || matterKeyMatches(term.matterNumber, matterValues)
-      || matterKeyMatches(term.matterIdentifier, matterValues)
-    )
-  );
-}
-
-function hasExecutionNextTask(matter: Matter, records: TaskTrackingRecord[], terms: TaskTerm[]) {
-  return hasActiveLinkedTrackingRecord(matter, records) || hasActiveStandaloneTerm(matter, terms);
 }
 
 function splitResponsibleAliases(value?: string | null) {
@@ -586,36 +519,22 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
 }
 
 function buildTaskCandidates(input: {
-  taskItems: TaskItem[];
   trackingRecords: TaskTrackingRecord[];
   terms: TaskTerm[];
-  additionalTasks: TaskAdditionalTask[];
-  matters: Matter[];
   moduleDefinitions: Map<string, TaskModuleDefinition>;
   todayKey: string;
 }) {
   const candidates: SupervisionTaskCandidate[] = [];
+  const managerRecordIds = new Set<string>();
+  const managerTermIds = new Set<string>();
 
-  input.taskItems
-    .filter((task) => OPEN_TASK_STATES.includes(task.state))
-    .forEach((task) => {
-      const module = input.moduleDefinitions.get(task.moduleId);
-      const dueDate = toDateKey(task.dueDate);
-
-      candidates.push({
-        id: `task-item:${task.id}`,
-        moduleId: task.moduleId,
-        moduleLabel: getModuleLabel(module, task.moduleId),
-        teamLabel: getTeamLabelFromModule(module, task.moduleId),
-        taskLabel: getTrackLabel(module, task.trackId) ?? task.subject,
-        clientName: task.clientName || "-",
-        subject: task.subject || "-",
-        responsible: task.responsible,
-        dueDate,
-        statusLabel: statusLabel(task.state),
-        sourceLabel: getTrackLabel(module, task.trackId) ?? "Tarea",
-        originPath: getModulePath(task.moduleId)
-      });
+  input.trackingRecords
+    .filter((record) => !record.deletedAt)
+    .forEach((record) => {
+      managerRecordIds.add(record.id);
+      if (record.termId) {
+        managerTermIds.add(record.termId);
+      }
     });
 
   input.trackingRecords
@@ -642,37 +561,15 @@ function buildTaskCandidates(input: {
       });
     });
 
-  input.additionalTasks
-    .filter((task) => OPEN_LEGACY_STATUSES.includes(task.status) && !task.deletedAt)
-    .forEach((task) => {
-      const module = input.moduleDefinitions.get(task.moduleId);
-      const dueDate = toDateKey(task.dueDate);
-
-      const responsible = [task.responsible, task.responsible2].filter(Boolean).join("/");
-
-      candidates.push({
-        id: `additional:${task.id}`,
-        moduleId: task.moduleId,
-        moduleLabel: getModuleLabel(module, task.moduleId),
-        teamLabel: getTeamLabelFromModule(module, task.moduleId),
-        taskLabel: task.task,
-        clientName: "-",
-        subject: "-",
-        responsible,
-        dueDate,
-        statusLabel: statusLabel(task.status),
-        sourceLabel: task.recurring ? "Tarea adicional recurrente" : "Tarea adicional",
-        originPath: getModulePath(task.moduleId, "/adicionales")
-      });
-    });
-
   input.terms
     .filter((term) => !term.deletedAt)
+    .filter((term) =>
+      term.sourceRecordId
+        ? managerRecordIds.has(term.sourceRecordId)
+        : managerTermIds.has(term.id)
+    )
     .forEach((term) => {
       const module = input.moduleDefinitions.get(term.moduleId);
-      const sourcePath = term.sourceRecordId
-        ? getModulePath(term.moduleId, "/distribuidor")
-        : getModulePath(term.moduleId, term.recurring ? "/terminos-recurrentes" : "/terminos");
 
       (TASK_VERIFICATION_COLUMNS[term.moduleId] ?? [])
         .filter((column) => !isVerificationValueComplete(term.verification[column.key]))
@@ -691,31 +588,9 @@ function buildTaskCandidates(input: {
             dueDate: input.todayKey,
             statusLabel: "Pendiente",
             sourceLabel: "Verificacion de termino",
-            originPath: sourcePath
+            originPath: getModulePath(term.moduleId, "/distribuidor")
           });
         });
-    });
-
-  const litigationModule = input.moduleDefinitions.get(LITIGATION_MODULE_ID);
-  input.matters
-    .filter((matter) => matter.responsibleTeam === LITIGATION_TEAM)
-    .filter((matter) => !matter.deletedAt && !matter.concluded)
-    .filter((matter) => !hasExecutionNextTask(matter, input.trackingRecords, input.terms))
-    .forEach((matter) => {
-      candidates.push({
-        id: `litigation-missing-next-task:${matter.id}`,
-        moduleId: LITIGATION_MODULE_ID,
-        moduleLabel: getModuleLabel(litigationModule, LITIGATION_MODULE_ID),
-        teamLabel: getTeamLabelFromModule(litigationModule, LITIGATION_MODULE_ID),
-        taskLabel: "Agregar una tarea en Siguiente tarea",
-        clientName: matter.clientName || "-",
-        subject: matter.subject || "-",
-        responsible: LITIGATION_MISSING_NEXT_TASK_OWNER,
-        dueDate: input.todayKey,
-        statusLabel: "Pendiente",
-        sourceLabel: "Ejecucion / Litigio",
-        originPath: "/app/execution/litigio"
-      });
     });
 
   return candidates;
@@ -727,10 +602,19 @@ function buildTermCandidates(input: {
   moduleDefinitions: Map<string, TaskModuleDefinition>;
 }) {
   const candidates: SupervisionTermCandidate[] = [];
-  const linkedSourceRecordIds = new Set(input.terms.map((term) => term.sourceRecordId).filter(Boolean));
-  const termIds = new Set(input.terms.map((term) => term.id));
+  const managerRecords = input.trackingRecords.filter((record) => !record.deletedAt);
+  const managerRecordIds = new Set(managerRecords.map((record) => record.id));
+  const managerTermIds = new Set(managerRecords.map((record) => record.termId).filter((termId): termId is string => Boolean(termId)));
+  const managerTerms = input.terms.filter((term) =>
+    !term.deletedAt &&
+    (term.sourceRecordId
+      ? managerRecordIds.has(term.sourceRecordId)
+      : managerTermIds.has(term.id))
+  );
+  const linkedSourceRecordIds = new Set(managerTerms.map((term) => term.sourceRecordId).filter(Boolean));
+  const termIds = new Set(managerTerms.map((term) => term.id));
 
-  input.terms
+  managerTerms
     .filter((term) => OPEN_LEGACY_STATUSES.includes(term.status) && !term.deletedAt)
     .forEach((term) => {
       const module = input.moduleDefinitions.get(term.moduleId);
@@ -751,7 +635,7 @@ function buildTermCandidates(input: {
         termDate,
         statusLabel: statusLabel(term.status),
         sourceLabel: getTrackLabel(module, term.sourceTable) ?? term.sourceTable ?? "Terminos",
-        originPath: getModulePath(term.moduleId, term.recurring ? "/terminos-recurrentes" : "/terminos")
+        originPath: getModulePath(term.moduleId, "/distribuidor")
       });
     });
 
@@ -804,31 +688,24 @@ export class GeneralSupervisionService {
     const currentWeekStart = getWeekStartKey(todayKey);
     const currentWeekEnd = addDaysKey(currentWeekStart, 6);
 
-    const [storedModules, taskItems, trackingRecords, matters, users] = await Promise.all([
+    const [storedModules, trackingRecords, users] = await Promise.all([
       this.repositories.tasks.listModules(),
-      this.repositories.tasks.listTasks(),
       this.repositories.tasks.listTrackingRecords({ includeDeleted: false }),
-      this.repositories.matters.list(),
       this.repositories.users.list()
     ]);
 
     const moduleDefinitions = getTaskModuleDefinitions(storedModules);
     const moduleIds = Array.from(moduleDefinitions.keys());
 
-    const [termsByModule, additionalTasksByModule] = await Promise.all([
-      Promise.all(moduleIds.map((moduleId) => this.repositories.tasks.listTerms(moduleId))),
-      Promise.all(moduleIds.map((moduleId) => this.repositories.tasks.listAdditionalTasks(moduleId)))
-    ]);
+    const termsByModule = await Promise.all(
+      moduleIds.map((moduleId) => this.repositories.tasks.listTerms(moduleId))
+    );
 
     const allTerms = termsByModule.flat();
-    const allAdditionalTasks = additionalTasksByModule.flat();
     const { aliasLookup } = buildUserDirectory(users);
     const taskCandidates = buildTaskCandidates({
-      taskItems,
       trackingRecords,
       terms: allTerms,
-      additionalTasks: allAdditionalTasks,
-      matters,
       moduleDefinitions,
       todayKey
     });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { Client, Matter, TaskAdditionalTask, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import type { TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -43,7 +43,6 @@ const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: str
   { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
-const LITIGATION_MISSING_NEXT_TASK_DASHBOARD_OWNER = "LAMR";
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
 const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
@@ -63,7 +62,6 @@ const LITIGATION_DOCUMENT_RETURNS_TABLE_SLUG = "devoluciones";
 const LITIGATION_FILES_TO_SCAN_TABLE_SLUG = "escaneados";
 const LITIGATION_THIRD_PARTY_ACTIONS_TABLE_SLUG = "terceros-ajenos";
 const LITIGATION_OTHER_PROCEDURES_TABLE_SLUG = "otros-tramites";
-const LITIGATION_MODULE_ID = "litigation";
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
@@ -99,16 +97,6 @@ function getLocalDateInput(offset = 0) {
   date.setDate(date.getDate() + offset);
 
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function getEffectiveClientNumber(matter: Matter | undefined, clients: Client[]) {
-  if (!matter) {
-    return "";
-  }
-
-  const normalizedName = normalizeComparableText(matter.clientName);
-  const match = clients.find((client) => normalizeComparableText(client.name) === normalizedName);
-  return match?.clientNumber ?? normalizeText(matter.clientNumber);
 }
 
 function matchesResponsible(taskResponsible: string, member: TaskDashboardMember, sharedResponsibleAliases: string[]) {
@@ -362,63 +350,6 @@ function getTrackingDashboardDateForMember(
   return getTrackingDashboardDate(table, record);
 }
 
-function matterKeyMatches(recordValue: string | undefined | null, matterValues: string[]) {
-  const normalizedRecordValue = normalizeText(recordValue);
-  return Boolean(normalizedRecordValue && matterValues.includes(normalizedRecordValue));
-}
-
-function getMatterIdentityValues(matter: Matter) {
-  return [
-    matter.id,
-    matter.matterNumber,
-    matter.matterIdentifier
-  ].map(normalizeText).filter(Boolean);
-}
-
-function hasActiveLinkedTrackingRecord(
-  matter: Matter,
-  records: TaskTrackingRecord[],
-  tableLookup: Map<string, LegacyTaskTableConfig>
-) {
-  const matterValues = getMatterIdentityValues(matter);
-
-  return records.some((record) => {
-    const table = resolveRecordTable(tableLookup, record);
-    return !record.deletedAt
-      && !isCompletedTrackingRecord(table, record)
-      && (
-        matterKeyMatches(record.matterId, matterValues)
-        || matterKeyMatches(record.matterNumber, matterValues)
-        || matterKeyMatches(record.matterIdentifier, matterValues)
-      );
-  });
-}
-
-function hasActiveStandaloneTerm(matter: Matter, terms: TaskTerm[]) {
-  const matterValues = getMatterIdentityValues(matter);
-
-  return terms.some((term) =>
-    !term.deletedAt
-    && !term.sourceRecordId
-    && term.status === "pendiente"
-    && (
-      matterKeyMatches(term.matterId, matterValues)
-      || matterKeyMatches(term.matterNumber, matterValues)
-      || matterKeyMatches(term.matterIdentifier, matterValues)
-    )
-  );
-}
-
-function hasExecutionNextTask(
-  matter: Matter,
-  records: TaskTrackingRecord[],
-  terms: TaskTerm[],
-  tableLookup: Map<string, LegacyTaskTableConfig>
-) {
-  return hasActiveLinkedTrackingRecord(matter, records, tableLookup)
-    || hasActiveStandaloneTerm(matter, terms);
-}
-
 function getTrackingDateCandidates(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
   const dates = [toDateInput(record.dueDate)];
   const termDate = toDateInput(record.termDate);
@@ -480,11 +411,8 @@ export function TasksTeamPage() {
   const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
 
-  const [clients, setClients] = useState<Client[]>([]);
-  const [matters, setMatters] = useState<Matter[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
-  const [additionalTasks, setAdditionalTasks] = useState<TaskAdditionalTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedView, setExpandedView] = useState<{ memberId: string; timeframe: DashboardTimeframe } | null>(null);
 
@@ -514,19 +442,13 @@ export function TasksTeamPage() {
       setLoading(true);
 
       try {
-        const [loadedClients, loadedMatters, loadedTracking, loadedTerms, loadedAdditional] = await Promise.all([
-          apiGet<Client[]>("/clients"),
-          apiGet<Matter[]>("/matters"),
+        const [loadedTracking, loadedTerms] = await Promise.all([
           apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
-          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`),
-          apiGet<TaskAdditionalTask[]>(`/tasks/additional?moduleId=${currentModule.moduleId}`)
+          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`)
         ]);
 
-        setClients(loadedClients);
-        setMatters(loadedMatters.filter((matter) => matter.responsibleTeam === currentModule.team));
         setTrackingRecords(loadedTracking);
         setTerms(loadedTerms);
-        setAdditionalTasks(loadedAdditional);
       } finally {
         setLoading(false);
       }
@@ -535,19 +457,26 @@ export function TasksTeamPage() {
     void loadDashboard();
   }, [canAccess, module]);
 
-  const matterLookup = useMemo(() => {
-    const map = new Map<string, Matter>();
-    matters.forEach((matter) => {
-      const keys = [normalizeText(matter.id), normalizeText(matter.matterNumber)].filter(Boolean);
-      keys.forEach((key) => map.set(key, matter));
-    });
-    return map;
-  }, [matters]);
-
   const tableLookup = useMemo(
     () => buildLegacyTableLookup(legacyConfig?.tables ?? []),
     [legacyConfig]
   );
+
+  const managerSourceLookup = useMemo(() => {
+    const recordIds = new Set<string>();
+    const termIds = new Set<string>();
+
+    trackingRecords
+      .filter((record) => !record.deletedAt)
+      .forEach((record) => {
+        recordIds.add(record.id);
+        if (record.termId) {
+          termIds.add(record.termId);
+        }
+      });
+
+    return { recordIds, termIds };
+  }, [trackingRecords]);
 
   const termLookup = useMemo(() => {
     const byId = new Map<string, TaskTerm>();
@@ -565,6 +494,7 @@ export function TasksTeamPage() {
 
   function buildTrackingRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
     return trackingRecords
+      .filter((record) => !record.deletedAt)
       .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
       .filter(({ record, table }) =>
         matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? [])
@@ -610,38 +540,6 @@ export function TasksTeamPage() {
       });
   }
 
-  function buildTermRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
-    return terms
-      .filter((term) => term.recurring && !term.sourceRecordId)
-      .filter((term) => matchesTermDashboardOwner(term.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []))
-      .filter((term) =>
-        belongsToTimeframe({
-          state: term.status === "concluida" || term.status === "presentado" ? "closed" : "open",
-          date: toDateInput(term.termDate || term.dueDate)
-        }, timeframe)
-      )
-      .map((term) => {
-        const dueDate = toDateInput(term.termDate || term.dueDate);
-        const completed = term.status === "concluida" || term.status === "presentado";
-        const highlighted = !completed && (!term.responsible || !dueDate || dueDate <= getLocalDateInput() || !isVerificationComplete(term));
-
-        return {
-          taskId: `term-${term.id}`,
-          clientNumber: term.clientNumber || "-",
-          clientName: term.clientName || "-",
-          subject: term.subject || "-",
-          specificProcess: term.specificProcess || "-",
-          taskLabel: `${term.recurring ? "[Recurrente] " : ""}${term.eventName}`,
-          typeLabel: "Termino",
-          displayDate: dueDate,
-          originLabel: term.recurring ? "Terminos recurrentes" : "Terminos",
-          originPath: `/app/tasks/${slug}/${term.recurring ? "terminos-recurrentes" : "terminos"}`,
-          actionLabel: "Ir a terminos",
-          highlighted
-        };
-      });
-  }
-
   function buildTermVerificationRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
     if (timeframe !== "hoy") {
       return [];
@@ -651,6 +549,11 @@ export function TasksTeamPage() {
 
     return terms
       .filter((term) => !term.deletedAt)
+      .filter((term) =>
+        term.sourceRecordId
+          ? managerSourceLookup.recordIds.has(term.sourceRecordId)
+          : managerSourceLookup.termIds.has(term.id)
+      )
       .flatMap((term) => {
         const table = tableLookup.get(normalizeComparableText(term.sourceTable));
         if (term.sourceRecordId && !isLinkedTermTableEnabled(table)) {
@@ -662,10 +565,6 @@ export function TasksTeamPage() {
         }
 
         const taskLabel = normalizeText(term.pendingTaskLabel) || normalizeText(term.eventName) || "Termino sin nombre";
-        const sourcePath = term.sourceRecordId
-          ? `/app/tasks/${slug}/distribuidor`
-          : `/app/tasks/${slug}/${term.recurring ? "terminos-recurrentes" : "terminos"}`;
-
         return (legacyConfig?.verificationColumns ?? [])
           .filter((column) => matchesVerificationColumn(column, member))
           .filter((column) => !isVerificationValueComplete(term.verification[column.key]))
@@ -678,84 +577,18 @@ export function TasksTeamPage() {
             taskLabel: `Verificar termino: ${taskLabel}`,
             typeLabel: "Verificacion de termino",
             displayDate: today,
-            originLabel: table?.title ?? (term.recurring ? "Terminos recurrentes" : "Terminos"),
-            originPath: sourcePath,
-            actionLabel: term.sourceRecordId ? "Ir al Manager" : "Ir a terminos",
+            originLabel: table?.title ?? "Manager de tareas",
+            originPath: `/app/tasks/${slug}/distribuidor`,
+            actionLabel: "Ir al Manager",
             highlighted: true
           }));
       });
   }
 
-  function buildAdditionalRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
-    return additionalTasks
-      .filter((task) =>
-        matchesResponsible(task.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? []) ||
-        matchesResponsible(task.responsible2 ?? "", member, dashboardConfig?.sharedResponsibleAliases ?? [])
-      )
-      .filter((task) =>
-        belongsToTimeframe({
-          state: task.status === "concluida" ? "closed" : "open",
-          date: toDateInput(task.dueDate)
-        }, timeframe)
-      )
-      .map((task) => {
-        const dueDate = toDateInput(task.dueDate);
-        const highlighted = task.status !== "concluida" && (!task.task || !task.responsible || !dueDate || dueDate < getLocalDateInput());
-
-        return {
-          taskId: `additional-${task.id}`,
-          clientNumber: "-",
-          clientName: "-",
-          subject: "-",
-          specificProcess: "-",
-          taskLabel: task.task,
-          typeLabel: task.status === "concluida" ? "Completada" : task.recurring ? "Termino recurrente" : "Tarea adicional",
-          displayDate: dueDate,
-          originLabel: "Tareas adicionales",
-          originPath: `/app/tasks/${slug}/adicionales`,
-          actionLabel: "Ir a adicionales",
-          highlighted
-        };
-      });
-  }
-
-  function buildMissingExecutionNextTaskRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
-    if (
-      module?.moduleId !== LITIGATION_MODULE_ID ||
-      member.id !== LITIGATION_MISSING_NEXT_TASK_DASHBOARD_OWNER ||
-      timeframe !== "hoy"
-    ) {
-      return [];
-    }
-
-    const today = getLocalDateInput();
-
-    return matters
-      .filter((matter) => !matter.concluded)
-      .filter((matter) => !hasExecutionNextTask(matter, trackingRecords, terms, tableLookup))
-      .map((matter) => ({
-        taskId: `litigation-missing-next-task-${matter.id}`,
-        clientNumber: getEffectiveClientNumber(matter, clients) || "-",
-        clientName: matter.clientName || "-",
-        subject: matter.subject || "-",
-        specificProcess: matter.specificProcess || "-",
-        taskLabel: "Agregar una tarea en Siguiente tarea",
-        typeLabel: "Falta siguiente tarea",
-        displayDate: today,
-        originLabel: "Ejecucion / Litigio",
-        originPath: "/app/execution/litigio",
-        actionLabel: "Ir a Ejecucion",
-        highlighted: true
-      }));
-  }
-
   function buildRows(member: TaskDashboardMember, timeframe: DashboardTimeframe) {
     return [
       ...buildTrackingRows(member, timeframe),
-      ...buildTermRows(member, timeframe),
-      ...buildTermVerificationRows(member, timeframe),
-      ...buildAdditionalRows(member, timeframe),
-      ...buildMissingExecutionNextTaskRows(member, timeframe)
+      ...buildTermVerificationRows(member, timeframe)
     ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
   }
 

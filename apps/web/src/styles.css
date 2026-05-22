@@ -3748,6 +3748,22 @@ textarea {
   padding: 10px 12px;
 }
 
+.execution-selector-target-name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.execution-selector-clear-button {
+  min-height: 38px;
+  padding: 8px 12px;
+  background: rgba(180, 35, 24, 0.1);
+  color: #b42318;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 .execution-selector-submit {
   justify-self: start;
 }
@@ -3759,19 +3775,47 @@ textarea {
 
 .execution-duplicate-warning {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 44px 1fr;
   align-items: start;
-  gap: 10px;
+  gap: 12px;
   padding: 12px;
   border-radius: 16px;
 }
 
-.execution-duplicate-warning strong,
-.execution-duplicate-warning span {
+.execution-duplicate-warning .ri-badge {
+  display: inline-grid;
+  justify-items: center;
+  gap: 4px;
+  width: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #92400e;
+  white-space: normal;
+}
+
+.execution-duplicate-warning .ri-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.execution-duplicate-warning .ri-mark::before {
+  inset: 6px;
+}
+
+.execution-duplicate-warning .ri-badge-id {
+  font-size: 0.74rem;
+  line-height: 1;
+}
+
+.execution-duplicate-warning > div > strong,
+.execution-duplicate-warning > div > span {
   display: block;
 }
 
-.execution-duplicate-warning span {
+.execution-duplicate-warning > div > span {
   margin-top: 4px;
   color: #92400e;
   font-size: 0.85rem;
@@ -7093,6 +7137,11 @@ textarea {
   text-align: right;
 }
 
+.mobile-ri-anchor {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .mobile-action-grid {
   display: grid;
   gap: 12px;
@@ -7417,6 +7466,32 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.mobile-target-name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-target-name-row input {
+  min-width: 0;
+}
+
+.mobile-target-card .mobile-clear-target-name-button {
+  align-self: stretch;
+  min-height: 44px;
+  padding: 8px 11px;
+  background: rgba(180, 35, 24, 0.1);
+  color: #b42318;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.mobile-target-card .mobile-clear-target-name-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .mobile-submit {
   min-height: 48px;
   border: none;
@@ -7447,6 +7522,31 @@ textarea {
   background: #f0fdf4;
   color: #047857;
   border: 1px solid rgba(4, 120, 87, 0.18);
+}
+
+.mobile-alert-warning {
+  background: #fff7ed;
+  color: #92400e;
+  border: 1px solid rgba(154, 103, 0, 0.22);
+}
+
+.mobile-duplicate-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.mobile-duplicate-warning > div > strong,
+.mobile-duplicate-warning > div > span {
+  display: block;
+}
+
+.mobile-duplicate-warning > div > span {
+  margin-top: 4px;
+  color: #92400e;
+  font-size: 0.85rem;
+  line-height: 1.35;
 }
 
 .mobile-empty {

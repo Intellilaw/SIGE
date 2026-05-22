@@ -7,8 +7,10 @@ import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
+import { CREATE_TASKS_RI_CONNECTION_ID, findDuplicateTaskMatch } from "../execution/execution-task-intelligence";
 import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisionPage";
 import { KpisPage } from "../kpis/KpisPage";
+import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
@@ -910,6 +912,7 @@ export function MobileExecutionTeamPage() {
     const [responsible, setResponsible] = useState(getDefaultResponsibleOption(module?.defaultResponsible));
     const [responsibleOptions, setResponsibleOptions] = useState([]);
     const [dueDate, setDueDate] = useState(addBusinessDays(new Date(), 3));
+    const [duplicateWarningAcknowledged, setDuplicateWarningAcknowledged] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const eventSearchRef = useRef(null);
     const selectedMatter = useMemo(() => matters.find((matter) => matter.id === selectedMatterId) ?? null, [matters, selectedMatterId]);
@@ -927,6 +930,7 @@ export function MobileExecutionTeamPage() {
         ...fallbackResponsibleOptions,
         responsible
     ]), [fallbackResponsibleOptions, responsible, responsibleOptions]);
+    const duplicateSelectionKey = targets.map((target) => `${target.id}:${target.taskName}:${target.reportedMonth}`).join("|");
     async function loadModuleData() {
         if (!module) {
             return;
@@ -972,7 +976,11 @@ export function MobileExecutionTeamPage() {
         setResponsible(getDefaultResponsibleOption(module?.defaultResponsible));
         setDueDate(addBusinessDays(new Date(), 3));
         setSuccessMessage(null);
+        setDuplicateWarningAcknowledged(false);
     }, [selectedMatterId, module?.moduleId, module?.defaultResponsible]);
+    useEffect(() => {
+        setDuplicateWarningAcknowledged(false);
+    }, [selectedEventId, duplicateSelectionKey, selectedMatterId]);
     useEffect(() => {
         if (!module || !canAccess) {
             setResponsibleOptions([]);
@@ -1046,18 +1054,48 @@ export function MobileExecutionTeamPage() {
     const matterTerms = selectedMatter
         ? sortByDate(terms.filter((term) => recordBelongsToMatter(term, selectedMatter)).filter(isPendingRecord))
         : [];
+    const historyTaskNames = buildDistributionHistoryTaskNameMap(histories);
+    const duplicateTaskMatch = selectedMatter && selectedEvent
+        ? findDuplicateTaskMatch(selectedEvent, targets, [
+            ...matterRecords.map((record) => {
+                const table = findTrackingTable(currentLegacyConfig, record);
+                const historyFallback = resolveHistoryTaskName(record, histories, table);
+                const title = resolveTrackingTaskName(record, table, historyTaskNames, historyFallback) || getRecordTitle(record);
+                return {
+                    subject: title,
+                    trackLabel: table?.title ?? getTableDisplayName(currentLegacyConfig, record.tableCode),
+                    state: record.status
+                };
+            }),
+            ...matterTerms.map((term) => ({
+                subject: getRecordTitle(term),
+                trackLabel: "Terminos",
+                state: term.status
+            }))
+        ])
+        : null;
     function handleEventChange(eventId) {
         const nextEvent = events.find((event) => event.id === eventId);
         setSelectedEventId(eventId);
         setEventSearch(nextEvent?.name ?? "");
         setEventSearchOpen(false);
         setSuccessMessage(null);
+        setDuplicateWarningAcknowledged(false);
         setTargets(nextEvent
             ? getCatalogTargetEntries(nextEvent, currentLegacyConfig).map((target) => ({ ...target, reportedMonth: "" }))
             : []);
     }
+    function handleClearMobileTargetName(targetId) {
+        setTargets((current) => current.map((candidate) => (candidate.id === targetId ? { ...candidate, taskName: "" } : candidate)));
+        setSuccessMessage(null);
+    }
     async function handleSubmit() {
         if (!selectedMatter || !selectedEvent || targets.length === 0) {
+            return;
+        }
+        if (duplicateTaskMatch && !duplicateWarningAcknowledged) {
+            setDuplicateWarningAcknowledged(true);
+            setSuccessMessage(null);
             return;
         }
         setSubmitting(true);
@@ -1068,6 +1106,7 @@ export function MobileExecutionTeamPage() {
             setSelectedEventId("");
             setEventSearch("");
             setTargets([]);
+            setDuplicateWarningAcknowledged(false);
             setSuccessMessage("Tarea enviada al manager de tareas.");
             await loadModuleData();
         }
@@ -1082,7 +1121,7 @@ export function MobileExecutionTeamPage() {
         if (!selectedMatter) {
             return null;
         }
-        return (_jsxs(_Fragment, { children: [_jsxs("section", { className: "mobile-section mobile-form-panel mobile-inline-task-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nueva tarea" }), _jsx("span", { children: selectedMatter.clientName })] }), _jsx(MobileMatterSummary, { matter: selectedMatter, clientNumber: getEffectiveClientNumber(selectedMatter, clients) }), _jsxs("label", { className: "mobile-field mobile-event-search-field", children: [_jsx("span", { children: "Selector de tareas" }), _jsxs("div", { className: "mobile-event-search", ref: eventSearchRef, children: [_jsx("input", { value: eventSearch, onChange: (event) => {
+        return (_jsxs(_Fragment, { children: [_jsxs("section", { className: "mobile-section mobile-form-panel mobile-inline-task-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Nueva tarea" }), _jsx("span", { children: selectedMatter.clientName })] }), _jsx("div", { className: "mobile-ri-anchor", children: _jsx(RusconiIntelligenceBadge, { connectionId: CREATE_TASKS_RI_CONNECTION_ID, label: "Ejecucion movil / Crear tareas" }) }), _jsx(MobileMatterSummary, { matter: selectedMatter, clientNumber: getEffectiveClientNumber(selectedMatter, clients) }), _jsxs("label", { className: "mobile-field mobile-event-search-field", children: [_jsx("span", { children: "Selector de tareas" }), _jsxs("div", { className: "mobile-event-search", ref: eventSearchRef, children: [_jsx("input", { value: eventSearch, onChange: (event) => {
                                                 setEventSearch(event.target.value);
                                                 setEventSearchOpen(true);
                                                 setSuccessMessage(null);
@@ -1095,8 +1134,14 @@ export function MobileExecutionTeamPage() {
                                                     handleEventChange(event.id);
                                                 }, children: event.name }, event.id)))) })) : null] })] }), _jsxs("div", { className: "mobile-two-fields", children: [_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Responsable" }), _jsxs("select", { value: responsible, onChange: (event) => setResponsible(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar responsable" }), moduleResponsibleOptions.map((option) => (_jsx("option", { value: option, children: option }, option)))] })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: dueDate, onChange: (event) => setDueDate(event.target.value) })] })] }), targets.length > 0 ? (_jsx("div", { className: "mobile-target-list", children: targets.map((target) => {
                                 const table = currentLegacyConfig.tables.find((candidate) => candidate.slug === target.tableSlug);
-                                return (_jsxs("article", { className: "mobile-target-card", children: [_jsxs("div", { children: [_jsx("strong", { children: getTableDisplayName(currentLegacyConfig, target.tableSlug) }), _jsx("button", { type: "button", onClick: () => setTargets((current) => current.filter((candidate) => candidate.id !== target.id)), children: "Quitar" })] }), _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Nombre del registro" }), _jsx("input", { value: target.taskName, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, taskName: event.target.value } : candidate)) })] }), table?.showReportedPeriod ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: table.reportedPeriodLabel ?? "Periodo reportado" }), _jsx("input", { type: "month", value: target.reportedMonth, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, reportedMonth: event.target.value } : candidate)) })] })) : null] }, target.id));
-                            }) })) : null, _jsx("button", { type: "button", className: "mobile-submit", disabled: submitting || !selectedEvent || targets.length === 0 || !dueDate, onClick: () => void handleSubmit(), children: submitting ? "Enviando..." : "Enviar al manager de tareas" })] }), _jsxs("section", { className: "mobile-section mobile-inline-pending-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Pendientes del asunto" }), _jsx("span", { children: matterRecords.length + matterTerms.length })] }), _jsx(MobileRecordList, { records: [...matterRecords, ...matterTerms], legacyConfig: currentLegacyConfig, histories: histories })] })] }));
+                                return (_jsxs("article", { className: "mobile-target-card", children: [_jsxs("div", { children: [_jsx("strong", { children: getTableDisplayName(currentLegacyConfig, target.tableSlug) }), _jsx("button", { type: "button", onClick: () => setTargets((current) => current.filter((candidate) => candidate.id !== target.id)), children: "Quitar" })] }), _jsxs("div", { className: "mobile-field", children: [_jsx("span", { children: "Nombre del registro" }), _jsxs("div", { className: "mobile-target-name-row", children: [_jsx("input", { value: target.taskName, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, taskName: event.target.value } : candidate)), "aria-label": `Nombre del registro para ${getTableDisplayName(currentLegacyConfig, target.tableSlug)}` }), _jsx("button", { type: "button", className: "mobile-clear-target-name-button", onClick: () => handleClearMobileTargetName(target.id), disabled: !target.taskName, "aria-label": `Borrar texto de ${getTableDisplayName(currentLegacyConfig, target.tableSlug)}`, title: "Borrar texto", children: "Limpiar" })] })] }), table?.showReportedPeriod ? (_jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: table.reportedPeriodLabel ?? "Periodo reportado" }), _jsx("input", { type: "month", value: target.reportedMonth, onChange: (event) => setTargets((current) => current.map((candidate) => candidate.id === target.id ? { ...candidate, reportedMonth: event.target.value } : candidate)) })] })) : null] }, target.id));
+                            }) })) : null, duplicateTaskMatch ? (_jsxs("div", { className: "mobile-alert mobile-alert-warning mobile-duplicate-warning", children: [_jsx(RusconiIntelligenceBadge, { connectionId: CREATE_TASKS_RI_CONNECTION_ID, label: "Ejecucion movil / Crear tareas" }), _jsxs("div", { children: [_jsx("strong", { children: "Posible tarea duplicada vigente" }), _jsxs("span", { children: ["\"", duplicateTaskMatch.candidateName, "\" se parece a \"", duplicateTaskMatch.existingTaskName, "\" en", " ", duplicateTaskMatch.existingTaskTrack, ".", duplicateWarningAcknowledged
+                                                    ? " Si deseas conservar ambas tareas, presiona Enviar de todos modos."
+                                                    : " Si necesitas registrarla de todas formas, presiona Enviar al manager de tareas para confirmar la excepcion."] })] })] })) : null, _jsx("button", { type: "button", className: "mobile-submit", disabled: submitting || !selectedEvent || targets.length === 0 || !dueDate, onClick: () => void handleSubmit(), children: submitting
+                                ? "Enviando..."
+                                : duplicateTaskMatch && duplicateWarningAcknowledged
+                                    ? "Enviar de todos modos"
+                                    : "Enviar al manager de tareas" })] }), _jsxs("section", { className: "mobile-section mobile-inline-pending-panel", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Pendientes del asunto" }), _jsx("span", { children: matterRecords.length + matterTerms.length })] }), _jsx(MobileRecordList, { records: [...matterRecords, ...matterTerms], legacyConfig: currentLegacyConfig, histories: histories })] })] }));
     }
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: currentModule.label, subtitle: "Crea tareas y revisa pendientes ligados al asunto." }), errorMessage ? _jsx("div", { className: "mobile-alert mobile-alert-error", children: errorMessage }) : null, successMessage ? _jsx("div", { className: "mobile-alert mobile-alert-success", children: successMessage }) : null, _jsxs("label", { className: "mobile-field", children: [_jsx("span", { children: "Buscar asunto" }), _jsx("input", { value: search, onChange: (event) => setSearch(event.target.value), placeholder: "Cliente, asunto, ID..." })] }), _jsxs("section", { className: "mobile-section", children: [_jsxs("div", { className: "mobile-section-head", children: [_jsx("h2", { children: "Asuntos" }), _jsx("span", { children: filteredMatters.length })] }), _jsx("div", { className: "mobile-card-list", children: loading ? (_jsx("div", { className: "mobile-empty", children: "Cargando asuntos..." })) : filteredMatters.length === 0 ? (_jsx("div", { className: "mobile-empty", children: "No hay asuntos para esta busqueda." })) : (filteredMatters.map((matter) => {
                             const pendingCount = records.filter((record) => recordBelongsToMatter(record, matter)).filter(isPendingRecord).length +
