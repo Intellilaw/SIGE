@@ -466,9 +466,12 @@ export function TasksTeamPage() {
     const recordIds = new Set<string>();
     const termIds = new Set<string>();
 
-    trackingRecords
-      .filter((record) => !record.deletedAt)
-      .forEach((record) => {
+    trackingRecords.forEach((record) => {
+        const table = resolveRecordTable(tableLookup, record);
+        if (record.deletedAt || isCompletedTrackingRecord(table, record)) {
+          return;
+        }
+
         recordIds.add(record.id);
         if (record.termId) {
           termIds.add(record.termId);
@@ -476,7 +479,7 @@ export function TasksTeamPage() {
       });
 
     return { recordIds, termIds };
-  }, [trackingRecords]);
+  }, [tableLookup, trackingRecords]);
 
   const termLookup = useMemo(() => {
     const byId = new Map<string, TaskTerm>();

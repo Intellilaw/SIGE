@@ -333,16 +333,18 @@ export function TasksTeamPage() {
     const managerSourceLookup = useMemo(() => {
         const recordIds = new Set();
         const termIds = new Set();
-        trackingRecords
-            .filter((record) => !record.deletedAt)
-            .forEach((record) => {
+        trackingRecords.forEach((record) => {
+            const table = resolveRecordTable(tableLookup, record);
+            if (record.deletedAt || isCompletedTrackingRecord(table, record)) {
+                return;
+            }
             recordIds.add(record.id);
             if (record.termId) {
                 termIds.add(record.termId);
             }
         });
         return { recordIds, termIds };
-    }, [trackingRecords]);
+    }, [tableLookup, trackingRecords]);
     const termLookup = useMemo(() => {
         const byId = new Map();
         const bySourceRecordId = new Map();

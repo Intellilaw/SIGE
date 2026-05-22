@@ -529,7 +529,7 @@ function buildTaskCandidates(input: {
   const managerTermIds = new Set<string>();
 
   input.trackingRecords
-    .filter((record) => !record.deletedAt)
+    .filter((record) => OPEN_LEGACY_STATUSES.includes(record.status) && !record.deletedAt)
     .forEach((record) => {
       managerRecordIds.add(record.id);
       if (record.termId) {
@@ -602,7 +602,9 @@ function buildTermCandidates(input: {
   moduleDefinitions: Map<string, TaskModuleDefinition>;
 }) {
   const candidates: SupervisionTermCandidate[] = [];
-  const managerRecords = input.trackingRecords.filter((record) => !record.deletedAt);
+  const managerRecords = input.trackingRecords.filter((record) =>
+    OPEN_LEGACY_STATUSES.includes(record.status) && !record.deletedAt
+  );
   const managerRecordIds = new Set(managerRecords.map((record) => record.id));
   const managerTermIds = new Set(managerRecords.map((record) => record.termId).filter((termId): termId is string => Boolean(termId)));
   const managerTerms = input.terms.filter((term) =>

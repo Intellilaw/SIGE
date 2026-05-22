@@ -30,7 +30,7 @@ module.exports = {
   },
   android: {
     package: "com.intellilaw.sige.mobile",
-    versionCode: 4,
+    versionCode: 5,
     adaptiveIcon: {
       foregroundImage: "./assets/app-icon.png",
       backgroundColor: "#ffffff"
