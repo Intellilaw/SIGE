@@ -13,7 +13,7 @@ import type {
   TaskTrackingRecord,
   Team
 } from "@sige/contracts";
-import { APP_VERSION_BADGE, TEAM_OPTIONS } from "@sige/contracts";
+import { APP_VERSION_BADGE, TEAM_OPTIONS, buildDisplayName } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
@@ -130,6 +130,22 @@ const MOBILE_GENERAL_EXPENSE_BANKS: Array<NonNullable<GeneralExpense["bank"]>> =
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function looksLikeHandle(value: string) {
+  return /[@._-]/.test(value);
+}
+
+function getMobileUserName(user: MobileAuthUser) {
+  const displayName = normalizeText(user.displayName);
+  const username = normalizeText(user.username);
+  const email = normalizeText(user.email);
+
+  if (displayName && !looksLikeHandle(displayName)) {
+    return displayName;
+  }
+
+  return buildDisplayName(username || displayName || email || "Usuario");
 }
 
 function normalizeResponsibleOption(value?: string | null) {
@@ -611,12 +627,14 @@ export function MobileProtectedLayout() {
     return <Navigate to="/intranet-login?redirect=/mobile" replace />;
   }
 
+  const mobileUserName = getMobileUserName(user);
+
   return (
     <div className="mobile-app-shell">
       <header className="mobile-topbar">
         <div>
           <strong>SIGE movil <span className="mobile-topbar-version">{APP_VERSION_BADGE}</span></strong>
-          <span>{user.displayName}</span>
+          <span>{mobileUserName}</span>
         </div>
         <button type="button" onClick={logout}>Salir</button>
       </header>

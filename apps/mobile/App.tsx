@@ -1,5 +1,4 @@
-import { StatusBar } from "expo-status-bar";
-import { APP_VERSION_TEXT } from "@sige/contracts";
+import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -7,6 +6,7 @@ import {
   Pressable,
   SafeAreaView,
   StyleSheet,
+  StatusBar as NativeStatusBar,
   Text,
   View
 } from "react-native";
@@ -64,13 +64,8 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <StatusBar style="light" />
+      <ExpoStatusBar style="light" backgroundColor="#0f172a" translucent={false} />
       <View style={styles.header}>
-        <View>
-          <Text style={styles.eyebrow}>SIGE</Text>
-          <Text style={styles.title}>Mobile</Text>
-          <Text style={styles.version}>{APP_VERSION_TEXT}</Text>
-        </View>
         <Pressable style={styles.headerButton} onPress={reload}>
           <Text style={styles.headerButtonText}>Recargar</Text>
         </Pressable>
@@ -124,26 +119,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.12)",
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     paddingHorizontal: 16,
-    paddingVertical: 10
-  },
-  eyebrow: {
-    color: "#94a3b8",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1
-  },
-  title: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "800"
-  },
-  version: {
-    color: "#cbd5e1",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 2
+    paddingBottom: 10,
+    paddingTop: (NativeStatusBar.currentHeight ?? 0) + 8
   },
   headerButton: {
     borderColor: "rgba(255,255,255,0.28)",

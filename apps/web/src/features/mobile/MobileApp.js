@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { APP_VERSION_BADGE, TEAM_OPTIONS } from "@sige/contracts";
+import { APP_VERSION_BADGE, TEAM_OPTIONS, buildDisplayName } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
@@ -36,6 +36,18 @@ const MOBILE_GENERAL_EXPENSE_TEAMS = [
 const MOBILE_GENERAL_EXPENSE_BANKS = ["Banamex", "HSBC"];
 function normalizeText(value) {
     return (value ?? "").trim();
+}
+function looksLikeHandle(value) {
+    return /[@._-]/.test(value);
+}
+function getMobileUserName(user) {
+    const displayName = normalizeText(user.displayName);
+    const username = normalizeText(user.username);
+    const email = normalizeText(user.email);
+    if (displayName && !looksLikeHandle(displayName)) {
+        return displayName;
+    }
+    return buildDisplayName(username || displayName || email || "Usuario");
 }
 function normalizeResponsibleOption(value) {
     return normalizeText(value).toUpperCase();
@@ -415,7 +427,8 @@ export function MobileProtectedLayout() {
     if (!user) {
         return _jsx(Navigate, { to: "/intranet-login?redirect=/mobile", replace: true });
     }
-    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: user.displayName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
+    const mobileUserName = getMobileUserName(user);
+    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: mobileUserName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
 }
 export function MobileHomePage() {
     const { user } = useAuth();

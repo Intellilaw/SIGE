@@ -468,7 +468,7 @@ export function TasksTeamPage() {
 
     trackingRecords.forEach((record) => {
         const table = resolveRecordTable(tableLookup, record);
-        if (record.deletedAt || isCompletedTrackingRecord(table, record)) {
+        if (record.deletedAt || isCompletedTrackingRecord(table, record) || !isTrackingTermEnabled(record, table)) {
           return;
         }
 

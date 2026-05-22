@@ -207,6 +207,24 @@ function getStringDataValue(data: unknown, keys: string[]) {
   return undefined;
 }
 
+function normalizeBoolean(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeKey(value);
+    if (["1", "true", "si", "yes"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return undefined;
+}
+
 function isVerificationValueComplete(value?: string | null) {
   return ["si", "yes"].includes(normalizeKey(value));
 }
@@ -265,6 +283,15 @@ function getRecordSourceLabel(module: TaskModuleDefinition | undefined, record: 
     ?? record.sourceTable
     ?? record.tableCode
     ?? "Seguimiento";
+}
+
+function isTrackingTermEnabledForDashboard(record: TaskTrackingRecord) {
+  const configured = normalizeBoolean(getDataRecord(record.data).termEnabled);
+  if (configured !== undefined) {
+    return configured;
+  }
+
+  return Boolean(record.termDate || record.termId);
 }
 
 function splitResponsibleAliases(value?: string | null) {
@@ -530,6 +557,7 @@ function buildTaskCandidates(input: {
 
   input.trackingRecords
     .filter((record) => OPEN_LEGACY_STATUSES.includes(record.status) && !record.deletedAt)
+    .filter(isTrackingTermEnabledForDashboard)
     .forEach((record) => {
       managerRecordIds.add(record.id);
       if (record.termId) {
@@ -603,7 +631,7 @@ function buildTermCandidates(input: {
 }) {
   const candidates: SupervisionTermCandidate[] = [];
   const managerRecords = input.trackingRecords.filter((record) =>
-    OPEN_LEGACY_STATUSES.includes(record.status) && !record.deletedAt
+    OPEN_LEGACY_STATUSES.includes(record.status) && !record.deletedAt && isTrackingTermEnabledForDashboard(record)
   );
   const managerRecordIds = new Set(managerRecords.map((record) => record.id));
   const managerTermIds = new Set(managerRecords.map((record) => record.termId).filter((termId): termId is string => Boolean(termId)));

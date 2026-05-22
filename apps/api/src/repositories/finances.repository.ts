@@ -334,7 +334,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async updateRecord(recordId: string, payload: FinanceRecordWriteRecord) {
-    await this.findRecordOrThrow(this.prisma, recordId);
+    const currentRecord = await this.findRecordOrThrow(this.prisma, recordId);
 
     const data: Prisma.FinanceRecordUncheckedUpdateInput = {};
 
@@ -444,9 +444,21 @@ export class PrismaFinanceRepository implements FinanceRepository {
       data.financeComments = normalizeOptionalText(payload.financeComments);
     }
 
-    const record = await this.prisma.financeRecord.update({
-      where: { id: recordId },
-      data
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.financeRecord.update({
+        where: { id: recordId },
+        data
+      });
+
+      if (hasOwn(payload, "closingCommissionRecipient")) {
+        await this.updateMatchedMatterCommissionAssignee(
+          tx,
+          currentRecord,
+          normalizeOptionalText(payload.closingCommissionRecipient)
+        );
+      }
+
+      return updated;
     });
 
     return mapFinanceRecord(record);
@@ -598,7 +610,6 @@ export class PrismaFinanceRepository implements FinanceRepository {
             responsibleTeam: matterPayload.responsibleTeam ?? null,
             totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
             nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
-            closingCommissionRecipient: normalizeOptionalText(matterPayload.closingCommissionRecipient),
             milestone: normalizeOptionalText(matterPayload.milestone),
             concluded: matterPayload.concluded ?? false
           }
@@ -721,7 +732,6 @@ export class PrismaFinanceRepository implements FinanceRepository {
         record.matterType !== matter.matterType ||
         teamMismatch ||
         Number(record.totalMatterMxn) !== matter.totalFeesMxn ||
-        normalizeComparableText(record.closingCommissionRecipient) !== normalizeComparableText(matter.commissionAssignee) ||
         toDateKey(record.nextPaymentDate) !== toDateKey(matter.nextPaymentDate) ||
         normalizeComparableText(record.milestone) !== normalizeComparableText(matter.milestone) ||
         record.concluded !== matter.concluded ||
@@ -739,7 +749,6 @@ export class PrismaFinanceRepository implements FinanceRepository {
         subject: normalizeRequiredText(matter.subject),
         totalMatterMxn: toDecimal(matter.totalFeesMxn),
         nextPaymentDate: parseDateValue(matter.nextPaymentDate),
-        closingCommissionRecipient: normalizeOptionalText(matter.commissionAssignee),
         milestone: normalizeOptionalText(matter.milestone),
         concluded: matter.concluded
       };
@@ -814,6 +823,42 @@ export class PrismaFinanceRepository implements FinanceRepository {
     }
 
     return record;
+  }
+
+  private async updateMatchedMatterCommissionAssignee(
+    prisma: PrismaExecutor,
+    record: { quoteNumber?: string | null; clientName?: string | null; subject?: string | null },
+    commissionAssignee: string | null
+  ) {
+    const quoteNumber = normalizeOptionalText(record.quoteNumber);
+    if (quoteNumber) {
+      await prisma.matter.updateMany({
+        where: {
+          deletedAt: null,
+          quoteNumber: {
+            equals: quoteNumber,
+            mode: "insensitive"
+          }
+        },
+        data: { commissionAssignee }
+      });
+      return;
+    }
+
+    await prisma.matter.updateMany({
+      where: {
+        deletedAt: null,
+        clientName: {
+          equals: normalizeRequiredText(record.clientName),
+          mode: "insensitive"
+        },
+        subject: {
+          equals: normalizeRequiredText(record.subject),
+          mode: "insensitive"
+        }
+      },
+      data: { commissionAssignee }
+    });
   }
 
   private async findMatterProjectionOrThrow(prisma: PrismaExecutor, matterId: string): Promise<FinanceMatterProjection> {
