@@ -765,6 +765,12 @@ export interface CommissionSnapshotData {
   executionRecords: CommissionBreakdownEntry[];
   clientRecords: CommissionBreakdownEntry[];
   closingRecords: CommissionBreakdownEntry[];
+  group1GrossMxn?: number;
+  group1NetMxn?: number;
+  group1PayableMxn?: number;
+  group2TotalMxn?: number;
+  group3TotalMxn?: number;
+  totalCommissionsMxn?: number;
   grossTotalMxn: number;
   deductionRate: number;
   deductionBaseMxn: number;

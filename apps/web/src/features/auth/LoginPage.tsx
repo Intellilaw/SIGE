@@ -119,5 +119,9 @@ function getSafeRedirectTarget(value: string | null) {
     return value;
   }
 
+  if (value === "/app/brief-manager") {
+    return value;
+  }
+
   return "/app";
 }

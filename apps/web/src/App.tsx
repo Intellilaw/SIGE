@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import { EntryPage } from "./features/auth/EntryPage";
 import { LoginPage } from "./features/auth/LoginPage";
+import { ManagerSsoBridgePage } from "./features/auth/ManagerSsoBridgePage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
 import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
@@ -114,7 +115,7 @@ export default function App() {
             <Route path="general-supervision" element={<GeneralSupervisionPage />} />
             <Route path="rusconi-intelligence" element={<RusconiIntelligencePage />} />
             <Route path="matter-catalog" element={<MatterCatalogPage />} />
-            <Route path="brief-manager" element={<Navigate to="/app" replace />} />
+            <Route path="brief-manager" element={<ManagerSsoBridgePage />} />
             <Route path="internal-contracts" element={<InternalContractsPage />} />
             <Route path="labor-file" element={<LaborFilesPage />} />
             <Route path="daily-documents" element={<DailyDocumentsPage />} />
