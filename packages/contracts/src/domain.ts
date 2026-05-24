@@ -734,9 +734,21 @@ export interface CommissionBreakdownEntry {
   group: "EXECUTION" | "CLIENT" | "CLOSING";
   baseNetMxn: number;
   amountMxn: number;
+  teamKey?: Team;
+  teamLabel?: string;
   excluded?: boolean;
   highlighted?: boolean;
   highlightReason?: string;
+}
+
+export interface CommissionGroup1TeamBreakdown {
+  teamKey: Team;
+  teamLabel: string;
+  grossMxn: number;
+  deductionBaseMxn: number;
+  deductionMxn: number;
+  netMxn: number;
+  payableMxn: number;
 }
 
 export interface CommissionExclusion {
@@ -765,6 +777,7 @@ export interface CommissionSnapshotData {
   executionRecords: CommissionBreakdownEntry[];
   clientRecords: CommissionBreakdownEntry[];
   closingRecords: CommissionBreakdownEntry[];
+  group1TeamBreakdowns?: CommissionGroup1TeamBreakdown[];
   group1GrossMxn?: number;
   group1NetMxn?: number;
   group1PayableMxn?: number;

@@ -3,8 +3,8 @@ import type {
   Client,
   CommissionBreakdownEntry,
   CommissionExclusion,
+  CommissionGroup1TeamBreakdown,
   CommissionReceiver,
-  CommissionSection,
   CommissionSnapshot,
   CommissionSnapshotData,
   FinanceRecord,
@@ -44,6 +44,7 @@ interface SectionCalculation {
   executionRecords: CommissionBreakdownEntry[];
   clientRecords: CommissionBreakdownEntry[];
   closingRecords: CommissionBreakdownEntry[];
+  group1TeamBreakdowns: CommissionGroup1TeamBreakdown[];
   highlightedCount: number;
   group1GrossMxn: number;
   group1NetMxn: number;
@@ -78,6 +79,7 @@ const EMPTY_CALCULATION: SectionCalculation = {
   executionRecords: [],
   clientRecords: [],
   closingRecords: [],
+  group1TeamBreakdowns: [],
   highlightedCount: 0,
   group1GrossMxn: 0,
   group1NetMxn: 0,
@@ -92,6 +94,50 @@ const EMPTY_CALCULATION: SectionCalculation = {
   netTotalMxn: 0
 };
 const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
+const COMMISSION_TOTALS_SECTION = "Totales de comisiones";
+
+const ONE_PERCENT_GROUP_SECTIONS = [
+  CLIENT_RELATIONS_COMMISSION_SECTION,
+  "Finanzas"
+];
+
+const COMMISSION_GROUP_TEAMS = [
+  {
+    teamKey: "LITIGATION" as const,
+    teamLabel: "Litigio",
+    expenseTeamLabel: "Litigio",
+    distributionKey: "pctLitigation" as const
+  },
+  {
+    teamKey: "CORPORATE_LABOR" as const,
+    teamLabel: "Corporativo",
+    expenseTeamLabel: "Corporativo y laboral",
+    distributionKey: "pctCorporateLabor" as const
+  },
+  {
+    teamKey: "SETTLEMENTS" as const,
+    teamLabel: "Convenios",
+    expenseTeamLabel: "Convenios",
+    distributionKey: "pctSettlements" as const
+  },
+  {
+    teamKey: "FINANCIAL_LAW" as const,
+    teamLabel: "Derecho financiero",
+    expenseTeamLabel: "Der Financiero",
+    distributionKey: "pctFinancialLaw" as const
+  },
+  {
+    teamKey: "TAX_COMPLIANCE" as const,
+    teamLabel: "Compliance fiscal",
+    expenseTeamLabel: "Compliance Fiscal",
+    distributionKey: "pctTaxCompliance" as const
+  }
+];
+
+interface CommissionTotalsRow {
+  section: string;
+  calculation: SectionCalculation;
+}
 
 function normalizeText(value?: string | null) {
   return (value ?? "")
@@ -147,16 +193,54 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function usesOnePercentGroupBreakdown(section?: string | null) {
+  return ONE_PERCENT_GROUP_SECTIONS.some((targetSection) => normalizeText(targetSection) === normalizeText(section));
+}
+
+function isCommissionTotalsSection(section?: string | null) {
+  return normalizeText(section) === normalizeText(COMMISSION_TOTALS_SECTION);
+}
+
+function getGroup1RateLabel(section?: string | null) {
+  const normalizedSection = normalizeText(section);
+
+  if (usesOnePercentGroupBreakdown(section)) {
+    return "1%";
+  }
+
+  if (normalizedSection === normalizeText("Der Financiero (lider)")) {
+    return "10%";
+  }
+
+  if (normalizedSection.includes("colaborador")) {
+    return "1%";
+  }
+
+  return "8%";
+}
+
 function sumIncludedCommissionRows(records: CommissionBreakdownEntry[]) {
   return records.reduce((sum, record) => sum + (record.excluded ? 0 : record.amountMxn), 0);
 }
 
 function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
-  const group1GrossMxn = data.group1GrossMxn ?? sumIncludedCommissionRows(data.executionRecords);
+  const group1TeamBreakdowns = data.group1TeamBreakdowns ?? [];
+  const hasTeamBreakdowns = group1TeamBreakdowns.length > 0;
+  const group1GrossMxn = data.group1GrossMxn ?? (
+    hasTeamBreakdowns
+      ? group1TeamBreakdowns.reduce((sum, team) => sum + team.grossMxn, 0)
+      : sumIncludedCommissionRows(data.executionRecords)
+  );
   const group2TotalMxn = data.group2TotalMxn ?? sumIncludedCommissionRows(data.clientRecords);
   const group3TotalMxn = data.group3TotalMxn ?? sumIncludedCommissionRows(data.closingRecords);
-  const group1NetMxn = data.group1NetMxn ?? (group1GrossMxn - data.deductionMxn);
-  const group1PayableMxn = data.group1PayableMxn ?? Math.max(group1NetMxn, 0);
+  const group1NetMxn = data.group1NetMxn ?? (
+    hasTeamBreakdowns
+      ? group1TeamBreakdowns.reduce((sum, team) => sum + team.payableMxn, 0)
+      : group1GrossMxn - data.deductionMxn
+  );
+  const group1PayableMxn = data.group1PayableMxn ?? (
+    hasTeamBreakdowns ? group1NetMxn : Math.max(group1NetMxn, 0)
+  );
   const totalCommissionsMxn = data.totalCommissionsMxn ?? data.netTotalMxn ?? (
     group1PayableMxn +
     group2TotalMxn +
@@ -169,7 +253,8 @@ function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
     group1PayableMxn,
     group2TotalMxn,
     group3TotalMxn,
-    totalCommissionsMxn
+    totalCommissionsMxn,
+    group1TeamBreakdowns
   };
 }
 
@@ -398,6 +483,37 @@ function getExpenseDeductionBaseAmount(
   return 0;
 }
 
+function buildOnePercentGroupTeamBreakdowns(
+  executionRecords: CommissionBreakdownEntry[],
+  generalExpenses: GeneralExpense[]
+): CommissionGroup1TeamBreakdown[] {
+  return COMMISSION_GROUP_TEAMS.map((team) => {
+    const grossMxn = executionRecords
+      .filter((record) => !record.excluded && record.teamKey === team.teamKey)
+      .reduce((sum, record) => sum + record.amountMxn, 0);
+    const deductionBaseMxn = generalExpenses.reduce((sum, expense) => {
+      return sum + getExpenseDeductionBaseAmount(expense, {
+        rate: 0.01,
+        teamLabel: team.expenseTeamLabel,
+        distributionKey: team.distributionKey,
+        useAllExpenses: false
+      });
+    }, 0);
+    const deductionMxn = deductionBaseMxn * 0.01;
+    const netMxn = grossMxn - deductionMxn;
+
+    return {
+      teamKey: team.teamKey,
+      teamLabel: team.teamLabel,
+      grossMxn,
+      deductionBaseMxn,
+      deductionMxn,
+      netMxn,
+      payableMxn: Math.max(netMxn, 0)
+    };
+  });
+}
+
 function buildHighlightReason(record: FinanceRecord, stats: FinanceRecordStats, clients: Client[]) {
   const effectiveClientNumber = resolveEffectiveClientNumber(record, clients);
   const requiredFields = [
@@ -495,9 +611,11 @@ function calculateSection(
           return null;
         }
 
-        const showOnePercentBase = ["Comunicacion con cliente", "Finanzas"].some(
-          (targetSection) => normalizeText(targetSection) === normalizeText(section)
-        );
+        const showOnePercentBase = usesOnePercentGroupBreakdown(section);
+        const teamConfig = COMMISSION_GROUP_TEAMS.find((team) => team.teamKey === record.responsibleTeam);
+        if (showOnePercentBase && !teamConfig) {
+          return null;
+        }
 
         return {
           financeRecordId: record.id,
@@ -508,6 +626,8 @@ function calculateSection(
           group: "EXECUTION",
           baseNetMxn: record.netFeesMxn,
           amountMxn,
+          teamKey: teamConfig?.teamKey,
+          teamLabel: teamConfig?.teamLabel,
           highlighted: record.highlighted,
           highlightReason: record.highlightReason
         };
@@ -549,19 +669,33 @@ function calculateSection(
       }))
   );
 
-  const group1GrossMxn = sumIncludedCommissionRows(executionRecords);
   const group2TotalMxn = sumIncludedCommissionRows(clientRecords);
   const group3TotalMxn = sumIncludedCommissionRows(closingRecords);
-  const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn;
 
   const deductionConfiguration = getDeductionConfiguration(section);
-  const deductionBaseMxn = generalExpenses.reduce((sum, expense) => {
+  let group1TeamBreakdowns: CommissionGroup1TeamBreakdown[] = [];
+  let group1GrossMxn = sumIncludedCommissionRows(executionRecords);
+  let deductionBaseMxn = generalExpenses.reduce((sum, expense) => {
     return sum + getExpenseDeductionBaseAmount(expense, deductionConfiguration);
   }, 0);
 
-  const deductionMxn = deductionBaseMxn * deductionConfiguration.rate;
-  const group1NetMxn = group1GrossMxn - deductionMxn;
-  const group1PayableMxn = Math.max(group1NetMxn, 0);
+  if (usesOnePercentGroupBreakdown(section)) {
+    group1TeamBreakdowns = buildOnePercentGroupTeamBreakdowns(executionRecords, generalExpenses);
+    group1GrossMxn = group1TeamBreakdowns.reduce((sum, team) => sum + team.grossMxn, 0);
+    deductionBaseMxn = group1TeamBreakdowns.reduce((sum, team) => sum + team.deductionBaseMxn, 0);
+  }
+
+  const deductionMxn = usesOnePercentGroupBreakdown(section)
+    ? group1TeamBreakdowns.reduce((sum, team) => sum + team.deductionMxn, 0)
+    : deductionBaseMxn * deductionConfiguration.rate;
+  const rawGroup1NetMxn = group1GrossMxn - deductionMxn;
+  const group1NetMxn = usesOnePercentGroupBreakdown(section)
+    ? group1TeamBreakdowns.reduce((sum, team) => sum + team.payableMxn, 0)
+    : rawGroup1NetMxn;
+  const group1PayableMxn = usesOnePercentGroupBreakdown(section)
+    ? group1NetMxn
+    : Math.max(group1NetMxn, 0);
+  const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn;
   const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn;
 
   return {
@@ -569,6 +703,7 @@ function calculateSection(
     executionRecords,
     clientRecords,
     closingRecords,
+    group1TeamBreakdowns,
     highlightedCount: computedRecords.filter((record) => record.highlighted).length,
     group1GrossMxn,
     group1NetMxn,
@@ -596,6 +731,47 @@ function CurrencyMetricCard(props: {
       <strong>{formatCurrency(props.value)}</strong>
       {props.helper ? <small>{props.helper}</small> : null}
     </article>
+  );
+}
+
+function CountMetricCard(props: {
+  label: string;
+  value: number;
+  accentClass: string;
+  helper?: string;
+}) {
+  return (
+    <article className={`commissions-metric-card ${props.accentClass}`}>
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
+      {props.helper ? <small>{props.helper}</small> : null}
+    </article>
+  );
+}
+
+function CommissionTeamBreakdownCards(props: {
+  teams: CommissionGroup1TeamBreakdown[];
+}) {
+  return (
+    <div className="commissions-team-breakdown-grid">
+      {props.teams.map((team) => (
+        <CurrencyMetricCard
+          key={`${team.teamKey}-gross`}
+          label={`Brutas ${team.teamLabel} (1%)`}
+          value={team.grossMxn}
+          accentClass="is-primary"
+        />
+      ))}
+      {props.teams.map((team) => (
+        <CurrencyMetricCard
+          key={`${team.teamKey}-deduction`}
+          label={`Deduccion ${team.teamLabel}`}
+          value={team.deductionMxn}
+          accentClass="is-warning"
+          helper={`Neto: ${formatCurrency(team.netMxn)} | aporta ${formatCurrency(team.payableMxn)}`}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -713,12 +889,53 @@ function CommissionGroupTable(props: {
   );
 }
 
+function CommissionTotalsTable(props: {
+  rows: CommissionTotalsRow[];
+}) {
+  const totalCommissionsMxn = props.rows.reduce((sum, row) => sum + row.calculation.totalCommissionsMxn, 0);
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h2>Comisiones a pagar por receptor</h2>
+        <span>{props.rows.length} secciones</span>
+      </div>
+      <div className="table-scroll">
+        <table className="data-table commissions-totals-table">
+          <thead>
+            <tr>
+              <th>Receptor</th>
+              <th>Comision a pagar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.rows.map((row) => (
+              <tr key={row.section}>
+                <td>{row.section}</td>
+                <td className="commissions-total-strong">{formatCurrency(row.calculation.totalCommissionsMxn)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>Total general</td>
+              <td>{formatCurrency(totalCommissionsMxn)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function SnapshotDetailModal(props: {
   snapshot: CommissionSnapshot;
   onClose: () => void;
 }) {
   const data = props.snapshot.snapshotData as CommissionSnapshotData | undefined;
   const totals = data ? getSnapshotCommissionTotals(data) : null;
+  const snapshotGroup1RateLabel = getGroup1RateLabel(props.snapshot.section);
+  const snapshotUsesTeamBreakdown = Boolean(totals?.group1TeamBreakdowns.length);
 
   return (
     <div className="commissions-modal-backdrop" onClick={props.onClose}>
@@ -742,19 +959,25 @@ function SnapshotDetailModal(props: {
         ) : (
           <div className="commissions-modal-body">
             <div className="commissions-metrics-grid">
+              {snapshotUsesTeamBreakdown ? (
+                <CommissionTeamBreakdownCards teams={totals?.group1TeamBreakdowns ?? []} />
+              ) : (
+                <>
+                  <CurrencyMetricCard
+                    label={`Comisiones brutas Grupo 1 (${snapshotGroup1RateLabel})`}
+                    value={totals?.group1GrossMxn ?? 0}
+                    accentClass="is-primary"
+                  />
+                  <CurrencyMetricCard
+                    label="Deduccion por gastos"
+                    value={data.deductionMxn}
+                    accentClass="is-warning"
+                    helper={`${Math.round(data.deductionRate * 100)}% de ${formatCurrency(data.deductionBaseMxn)}`}
+                  />
+                </>
+              )}
               <CurrencyMetricCard
-                label="Comisiones brutas Grupo 1 (8%)"
-                value={totals?.group1GrossMxn ?? 0}
-                accentClass="is-primary"
-              />
-              <CurrencyMetricCard
-                label="Deduccion por gastos"
-                value={data.deductionMxn}
-                accentClass="is-warning"
-                helper={`${Math.round(data.deductionRate * 100)}% de ${formatCurrency(data.deductionBaseMxn)}`}
-              />
-              <CurrencyMetricCard
-                label="Comisiones netas Grupo 1 (8%)"
+                label={`Comisiones netas Grupo 1 (${snapshotGroup1RateLabel})`}
                 value={totals?.group1NetMxn ?? 0}
                 accentClass="is-success"
               />
@@ -819,7 +1042,7 @@ export function CommissionsPage() {
     const userRole = normalizeText(user?.specificRole);
 
     if (canReadAllCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
-      return [...COMMISSION_SECTIONS];
+      return [...COMMISSION_SECTIONS, COMMISSION_TOTALS_SECTION];
     }
 
     if (canWriteClientRelationsCommissions) {
@@ -836,15 +1059,19 @@ export function CommissionsPage() {
     () => new Set(visibleSections.map((section) => normalizeText(section))),
     [visibleSections]
   );
+  const isTotalsActiveSection = isCommissionTotalsSection(activeSection);
   const canWriteActiveSection = Boolean(
-    canWriteCommissions ||
+    !isTotalsActiveSection &&
     (
-      canWriteClientRelationsCommissions &&
-      normalizeText(activeSection) === normalizeText(CLIENT_RELATIONS_COMMISSION_SECTION)
-    ) ||
-    (
-      canWriteOwnCommissionSection &&
-      visibleSectionKeys.has(normalizeText(activeSection))
+      canWriteCommissions ||
+      (
+        canWriteClientRelationsCommissions &&
+        normalizeText(activeSection) === normalizeText(CLIENT_RELATIONS_COMMISSION_SECTION)
+      ) ||
+      (
+        canWriteOwnCommissionSection &&
+        visibleSectionKeys.has(normalizeText(activeSection))
+      )
     )
   );
 
@@ -854,7 +1081,7 @@ export function CommissionsPage() {
       return;
     }
 
-    if (!visibleSections.includes(activeSection as CommissionSection)) {
+    if (!visibleSections.includes(activeSection)) {
       setActiveSection(visibleSections[0]);
     }
   }, [activeSection, visibleSections]);
@@ -911,6 +1138,35 @@ export function CommissionsPage() {
   const sectionCalculation = useMemo(
     () => calculateSection(financeRecords, generalExpenses, clients, activeSection, selectedYear, selectedMonth, exclusions),
     [activeSection, clients, exclusions, financeRecords, generalExpenses, selectedMonth, selectedYear]
+  );
+  const commissionTotalsRows = useMemo<CommissionTotalsRow[]>(() => {
+    if (!isTotalsActiveSection) {
+      return [];
+    }
+
+    return COMMISSION_SECTIONS
+      .filter((section) => normalizeText(section) !== normalizeText("Direccion general"))
+      .map((section) => ({
+        section,
+        calculation: calculateSection(financeRecords, generalExpenses, clients, section, selectedYear, selectedMonth, exclusions)
+      }));
+  }, [clients, exclusions, financeRecords, generalExpenses, isTotalsActiveSection, selectedMonth, selectedYear]);
+  const commissionTotalsSummary = useMemo(
+    () => commissionTotalsRows.reduce(
+      (acc, row) => ({
+        group1PayableMxn: acc.group1PayableMxn + row.calculation.group1PayableMxn,
+        group2TotalMxn: acc.group2TotalMxn + row.calculation.group2TotalMxn,
+        group3TotalMxn: acc.group3TotalMxn + row.calculation.group3TotalMxn,
+        totalCommissionsMxn: acc.totalCommissionsMxn + row.calculation.totalCommissionsMxn
+      }),
+      {
+        group1PayableMxn: 0,
+        group2TotalMxn: 0,
+        group3TotalMxn: 0,
+        totalCommissionsMxn: 0
+      }
+    ),
+    [commissionTotalsRows]
   );
 
   async function handleToggleCommissionExclusion(row: CommissionBreakdownEntry, excluded: boolean) {
@@ -1054,6 +1310,7 @@ export function CommissionsPage() {
       executionRecords: sectionCalculation.executionRecords,
       clientRecords: sectionCalculation.clientRecords,
       closingRecords: sectionCalculation.closingRecords,
+      group1TeamBreakdowns: sectionCalculation.group1TeamBreakdowns,
       group1GrossMxn: sectionCalculation.group1GrossMxn,
       group1NetMxn: sectionCalculation.group1NetMxn,
       group1PayableMxn: sectionCalculation.group1PayableMxn,
@@ -1093,6 +1350,9 @@ export function CommissionsPage() {
       : snapshots.filter((snapshot) => visibleSectionKeys.has(normalizeText(snapshot.section)));
   const activeSectionLabel = activeSection || "Sin seccion";
   const shouldShowDeductionPanel = Boolean(activeSection && normalizeText(activeSection) !== normalizeText("Direccion general"));
+  const group1RateLabel = getGroup1RateLabel(activeSection);
+  const usesTeamGroup1Breakdown = sectionCalculation.group1TeamBreakdowns.length > 0;
+  const hasNegativeTeamBalance = sectionCalculation.group1TeamBreakdowns.some((team) => team.netMxn < 0);
   const yearOptions = Array.from({ length: 7 }, (_, index) => 2024 + index);
 
   return (
@@ -1198,44 +1458,68 @@ export function CommissionsPage() {
                   <button className="secondary-button" type="button" onClick={() => void loadBoard()}>
                     Refrescar
                   </button>
-                  <button className="primary-button" type="button" onClick={() => void handleCreateSnapshot()} disabled={savingSnapshot || !canWriteActiveSection}>
-                    {savingSnapshot ? "Guardando..." : "Guardar estampa"}
-                  </button>
+                  {!isTotalsActiveSection ? (
+                    <button className="primary-button" type="button" onClick={() => void handleCreateSnapshot()} disabled={savingSnapshot || !canWriteActiveSection}>
+                      {savingSnapshot ? "Guardando..." : "Guardar estampa"}
+                    </button>
+                  ) : null}
                 </div>
 
-                <div className="commissions-metrics-grid">
+                <div className={`commissions-metrics-grid${isTotalsActiveSection ? " is-totals" : ""}`}>
+                  {!isTotalsActiveSection ? (
+                    usesTeamGroup1Breakdown ? (
+                      <CommissionTeamBreakdownCards teams={sectionCalculation.group1TeamBreakdowns} />
+                    ) : (
+                      <>
+                        <CurrencyMetricCard
+                          label={`Comisiones brutas Grupo 1 (${group1RateLabel})`}
+                          value={sectionCalculation.group1GrossMxn}
+                          accentClass="is-primary"
+                        />
+                        <CurrencyMetricCard
+                          label="Deduccion por gastos"
+                          value={sectionCalculation.deductionMxn}
+                          accentClass="is-warning"
+                          helper={`${Math.round(sectionCalculation.deductionRate * 100)}% de ${formatCurrency(sectionCalculation.deductionBaseMxn)}`}
+                        />
+                      </>
+                    )
+                  ) : null}
                   <CurrencyMetricCard
-                    label="Comisiones brutas Grupo 1 (8%)"
-                    value={sectionCalculation.group1GrossMxn}
-                    accentClass="is-primary"
-                  />
-                  <CurrencyMetricCard
-                    label="Deduccion por gastos"
-                    value={sectionCalculation.deductionMxn}
-                    accentClass="is-warning"
-                    helper={`${Math.round(sectionCalculation.deductionRate * 100)}% de ${formatCurrency(sectionCalculation.deductionBaseMxn)}`}
-                  />
-                  <CurrencyMetricCard
-                    label="Comisiones netas Grupo 1 (8%)"
-                    value={sectionCalculation.group1NetMxn}
+                    label={isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1 (${group1RateLabel})`}
+                    value={isTotalsActiveSection ? commissionTotalsSummary.group1PayableMxn : sectionCalculation.group1NetMxn}
                     accentClass="is-success"
                   />
                   <CurrencyMetricCard
                     label="Comisiones Grupo 2 (20%)"
-                    value={sectionCalculation.group2TotalMxn}
+                    value={isTotalsActiveSection ? commissionTotalsSummary.group2TotalMxn : sectionCalculation.group2TotalMxn}
                     accentClass="is-neutral"
                   />
                   <CurrencyMetricCard
                     label="Comisiones Grupo 3 (10%)"
-                    value={sectionCalculation.group3TotalMxn}
+                    value={isTotalsActiveSection ? commissionTotalsSummary.group3TotalMxn : sectionCalculation.group3TotalMxn}
                     accentClass="is-neutral"
                   />
-                  <CurrencyMetricCard
-                    label="Comisiones totales"
-                    value={sectionCalculation.totalCommissionsMxn}
-                    accentClass="is-success"
-                    helper={sectionCalculation.group1NetMxn < 0 ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3" : undefined}
-                  />
+                  {isTotalsActiveSection ? (
+                    <CurrencyMetricCard
+                      label="Total a pagar"
+                      value={commissionTotalsSummary.totalCommissionsMxn}
+                      accentClass="is-success"
+                    />
+                  ) : (
+                    <CurrencyMetricCard
+                      label="Comisiones totales"
+                      value={sectionCalculation.totalCommissionsMxn}
+                      accentClass="is-success"
+                      helper={
+                        usesTeamGroup1Breakdown && hasNegativeTeamBalance
+                          ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
+                          : sectionCalculation.group1NetMxn < 0
+                            ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
+                            : undefined
+                      }
+                    />
+                  )}
                 </div>
               </section>
 
@@ -1243,6 +1527,8 @@ export function CommissionsPage() {
                 <section className="panel">
                   <div className="centered-inline-message">Cargando informacion de comisiones...</div>
                 </section>
+              ) : isTotalsActiveSection ? (
+                <CommissionTotalsTable rows={commissionTotalsRows} />
               ) : (
                 <>
                   <div className="commissions-group-grid">
@@ -1290,18 +1576,26 @@ export function CommissionsPage() {
                         <h2>Deduccion de gastos sobre Grupo 1 ({Math.round(sectionCalculation.deductionRate * 100)}%)</h2>
                         <span>{formatCurrency(sectionCalculation.deductionMxn)}</span>
                       </div>
-                      <p className="muted commissions-caption">
-                        El total de gastos atribuibles a tu equipo este mes asciende a{" "}
-                        <strong>{formatCurrency(sectionCalculation.deductionBaseMxn)}</strong>. De dicha suma, el{" "}
-                        {Math.round(sectionCalculation.deductionRate * 100)}%, que asciende a{" "}
-                        <strong>{formatCurrency(sectionCalculation.deductionMxn)}</strong>, se restara unicamente de las
-                        comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque
-                        el Grupo 1 quede con saldo negativo.
-                      </p>
+                      {usesTeamGroup1Breakdown ? (
+                        <p className="muted commissions-caption">
+                          Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un
+                          equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo
+                          positivo.
+                        </p>
+                      ) : (
+                        <p className="muted commissions-caption">
+                          El total de gastos atribuibles a tu equipo este mes asciende a{" "}
+                          <strong>{formatCurrency(sectionCalculation.deductionBaseMxn)}</strong>. De dicha suma, el{" "}
+                          {Math.round(sectionCalculation.deductionRate * 100)}%, que asciende a{" "}
+                          <strong>{formatCurrency(sectionCalculation.deductionMxn)}</strong>, se restara unicamente de las
+                          comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque
+                          el Grupo 1 quede con saldo negativo.
+                        </p>
+                      )}
                       <div className="commissions-deduction-summary">
-                        <span>Comisiones brutas Grupo 1 (8%): <strong>{formatCurrency(sectionCalculation.group1GrossMxn)}</strong></span>
+                        <span>Comisiones brutas Grupo 1 ({group1RateLabel}): <strong>{formatCurrency(sectionCalculation.group1GrossMxn)}</strong></span>
                         <span>(-) Deduccion Gastos: <strong>{formatCurrency(sectionCalculation.deductionMxn)}</strong></span>
-                        <span>Comisiones netas Grupo 1 (8%): <strong>{formatCurrency(sectionCalculation.group1NetMxn)}</strong></span>
+                        <span>Comisiones netas Grupo 1 ({group1RateLabel}): <strong>{formatCurrency(sectionCalculation.group1NetMxn)}</strong></span>
                         <span>Grupo 1 aplicado al total: <strong>{formatCurrency(sectionCalculation.group1PayableMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 2 (20%): <strong>{formatCurrency(sectionCalculation.group2TotalMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 3 (10%): <strong>{formatCurrency(sectionCalculation.group3TotalMxn)}</strong></span>

@@ -22,6 +22,10 @@ const DEFAULT_PG_CTL_PATHS = [
 ].filter((value): value is string => Boolean(value));
 
 function getLocalDatabaseTarget() {
+  if (process.env.SIGE_SKIP_LOCAL_POSTGRES === "true") {
+    return null;
+  }
+
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     return null;

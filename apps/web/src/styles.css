@@ -5602,6 +5602,10 @@ textarea {
   gap: 16px;
 }
 
+.commissions-toolbar {
+  margin-bottom: 28px;
+}
+
 .commissions-receiver-input {
   flex: 1;
   min-width: 260px;
@@ -5624,6 +5628,57 @@ textarea {
 
 .commissions-metrics-grid {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.commissions-metrics-grid.is-totals .commissions-metric-card {
+  display: grid;
+  grid-template-rows: 52px auto;
+  align-content: start;
+  gap: 8px;
+}
+
+.commissions-metrics-grid.is-totals .commissions-metric-card span {
+  align-self: start;
+  line-height: 1.45;
+}
+
+.commissions-metrics-grid.is-totals .commissions-metric-card strong {
+  align-self: start;
+  line-height: 1.2;
+}
+
+.commissions-team-breakdown-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.commissions-team-breakdown-grid .commissions-metric-card {
+  display: grid;
+  grid-template-rows: 66px 42px minmax(42px, auto);
+  gap: 12px;
+  min-height: 178px;
+}
+
+.commissions-team-breakdown-grid .commissions-metric-card span,
+.commissions-team-breakdown-grid .commissions-metric-card strong,
+.commissions-team-breakdown-grid .commissions-metric-card small {
+  align-self: start;
+}
+
+.commissions-team-breakdown-grid .commissions-metric-card span {
+  display: flex;
+  align-items: flex-start;
+  line-height: 1.55;
+}
+
+.commissions-team-breakdown-grid .commissions-metric-card strong {
+  line-height: 1.2;
+}
+
+.commissions-team-breakdown-grid .commissions-metric-card small {
+  line-height: 1.5;
 }
 
 .commissions-group-grid {
@@ -5684,6 +5739,44 @@ textarea {
 
 .commissions-group-table.tone-tertiary thead th {
   background: rgba(12, 74, 110, 0.1);
+}
+
+.commissions-totals-table {
+  min-width: 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.commissions-totals-table thead th {
+  background: rgba(29, 78, 216, 0.1);
+}
+
+.commissions-totals-table th:first-child,
+.commissions-totals-table td:first-child {
+  width: 70%;
+}
+
+.commissions-totals-table th:last-child,
+.commissions-totals-table td:last-child {
+  width: 30%;
+}
+
+.commissions-totals-table td {
+  overflow-wrap: anywhere;
+}
+
+.commissions-totals-table td:not(:first-child),
+.commissions-totals-table th:not(:first-child) {
+  text-align: right;
+}
+
+.commissions-totals-table tfoot td,
+.commissions-total-strong {
+  font-weight: 800;
+}
+
+.commissions-total-negative {
+  color: #b42318;
 }
 
 .commissions-amount-cell {
@@ -7732,6 +7825,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .commissions-team-breakdown-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .supervision-task-overview-head,
   .supervision-task-user-row,
   .ri-model-policy {
@@ -7820,6 +7917,10 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .commissions-team-breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+
   .tasks-team-timeframes {
     grid-template-columns: 1fr;
   }
