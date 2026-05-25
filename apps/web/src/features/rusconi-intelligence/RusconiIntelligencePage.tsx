@@ -92,6 +92,30 @@ const INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
       "Permiso explicito para registrar la tarea duplicada si el usuario confirma la excepcion."
     ],
     cadence: "Ajuste de prompt cuando direccion refine los criterios de duplicidad por equipo o tipo de proceso."
+  },
+  {
+    id: "RI-003",
+    section: "Expedientes laborales / Gastos generales",
+    surface: "Salario diario en Expedientes laborales y Gastos generales / 2. Nomina",
+    status: "active",
+    promptName: "Validacion de salario diario contra contrato laboral",
+    promptVersion: "v0.1",
+    prompt:
+      "Compara el salario diario capturado en el expediente laboral contra el salario diario o salario mensual bruto extraido del contrato laboral cargado. Cuando el mismo distintivo aparezca en Nomina, confirma adicionalmente que el salario diario de nomina coincide con el salario diario verificado de Expedientes Laborales. Si falta cualquier pieza de evidencia, marca la validacion como no coincidente.",
+    context: [
+      "Salario diario capturado en Informacion general del expediente laboral.",
+      "Contrato laboral cargado en Word o PDF firmado cuando exista.",
+      "Salario diario contractual extraido directamente o calculado a partir de salario mensual bruto dividido entre 30.",
+      "Salario diario visible en Gastos generales / 2. Nomina cuando la fila esta vinculada a un expediente laboral.",
+      "Nombre del colaborador, fecha de ingreso y metadatos del documento contractual."
+    ],
+    output: [
+      "Distintivo RI-003 visible en la tarjeta Salario diario.",
+      "Distintivo RI-003 visible en el campo Salario diario de Nomina.",
+      "Palomita verde cuando el salario diario coincide con el contrato laboral.",
+      "Tache rojo cuando no coincide, falta contrato, falta salario legible en el contrato o la nomina no esta vinculada al expediente."
+    ],
+    cadence: "Ajuste de prompt cuando direccion defina tolerancias o reglas especiales por tipo de contrato laboral."
   }
 ];
 

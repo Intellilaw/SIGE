@@ -17,6 +17,7 @@ import {
 import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { SummaryCard } from "../../components/SummaryCard";
 import { useAuth } from "../auth/AuthContext";
+import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 
 type FlashState =
   | {
@@ -27,6 +28,7 @@ type FlashState =
 
 type LaborFileProfileForm = {
   hireDate: string;
+  dailySalaryMxn: string;
   personalPhone: string;
   personalEmail: string;
   emergencyContactName: string;
@@ -42,6 +44,7 @@ type PreviousYearPendingVacationForm = LaborPreviousYearPendingVacationInput & {
 
 const EMPTY_PROFILE_FORM: LaborFileProfileForm = {
   hireDate: "",
+  dailySalaryMxn: "",
   personalPhone: "",
   personalEmail: "",
   emergencyContactName: "",
@@ -104,6 +107,8 @@ const EMPTY_CONTRACT_FORM: LaborContractFieldValues = {
   signingCity: "Ciudad de México"
 };
 
+const LABOR_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
+
 const CONTRACT_FIELD_LABELS: Record<keyof LaborContractFieldValues, string> = {
   employeeName: "Nombre completo",
   rfc: "RFC",
@@ -148,6 +153,36 @@ function formatDateTime(value?: string) {
   }
 
   return new Date(value).toLocaleString("es-MX");
+}
+
+function formatMoney(value?: number) {
+  if (!value || !Number.isFinite(value)) {
+    return "-";
+  }
+
+  return value.toLocaleString("es-MX", {
+    currency: "MXN",
+    minimumFractionDigits: 2,
+    style: "currency"
+  });
+}
+
+function parseMoneyValue(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value
+    .replace(/[^0-9.,-]/g, "")
+    .replace(/,(?=\d{3}(\D|$))/g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function formatFileSize(value?: number) {
@@ -224,6 +259,102 @@ function getLatestDocument(documents: LaborFileDocument[], documentType: LaborFi
   return [...documents]
     .filter((document) => document.documentType === documentType)
     .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt))[0];
+}
+
+function getRecordNumber(record: unknown, keys: string[]) {
+  if (!record || typeof record !== "object") {
+    return undefined;
+  }
+
+  const source = record as Record<string, unknown>;
+  for (const key of keys) {
+    const parsed = parseMoneyValue(source[key]);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function getContractDailySalary(laborFile: LaborFile, contractDocument?: LaborFileDocument) {
+  const dailySalary =
+    getRecordNumber(contractDocument, [
+      "contractDailySalaryMxn",
+      "dailySalaryMxn",
+      "extractedDailySalaryMxn",
+      "riExtractedDailySalaryMxn",
+      "employmentContractDailySalaryMxn"
+    ]) ??
+    getRecordNumber(laborFile, [
+      "contractDailySalaryMxn",
+      "extractedContractDailySalaryMxn",
+      "riContractDailySalaryMxn",
+      "employmentContractDailySalaryMxn"
+    ]);
+
+  if (dailySalary !== undefined) {
+    return dailySalary;
+  }
+
+  const monthlySalary =
+    getRecordNumber(contractDocument, [
+      "contractMonthlyGrossSalaryMxn",
+      "monthlyGrossSalaryMxn",
+      "monthlySalaryMxn",
+      "extractedMonthlyGrossSalaryMxn",
+      "riExtractedMonthlyGrossSalaryMxn"
+    ]) ??
+    getRecordNumber(laborFile, [
+      "contractMonthlyGrossSalaryMxn",
+      "extractedContractMonthlyGrossSalaryMxn",
+      "riContractMonthlyGrossSalaryMxn",
+      "employmentContractMonthlyGrossSalaryMxn"
+    ]);
+
+  return monthlySalary !== undefined ? monthlySalary / 30 : undefined;
+}
+
+function getDailySalaryValidation(laborFile: LaborFile, contractDocument?: LaborFileDocument) {
+  if (!contractDocument) {
+    return {
+      status: "mismatch" as const,
+      label: "No coincide",
+      detail: "Falta contrato laboral cargado."
+    };
+  }
+
+  const profileDailySalary = Number(laborFile.dailySalaryMxn ?? 0);
+  if (!profileDailySalary) {
+    return {
+      status: "mismatch" as const,
+      label: "No coincide",
+      detail: "Falta salario diario en el expediente."
+    };
+  }
+
+  const contractDailySalary = getContractDailySalary(laborFile, contractDocument);
+  if (contractDailySalary === undefined) {
+    return {
+      status: "mismatch" as const,
+      label: "No coincide",
+      detail: "Contrato cargado sin salario diario legible."
+    };
+  }
+
+  const matches = Math.abs(profileDailySalary - contractDailySalary) <= 0.05;
+
+  return matches
+    ? {
+        status: "match" as const,
+        label: "Coincide",
+        detail: "Coincide con el contrato laboral."
+      }
+    : {
+        status: "mismatch" as const,
+        label: "No coincide",
+        detail: `Contrato: ${formatMoney(contractDailySalary)}.`
+      };
 }
 
 function getDocumentsByType(documents: LaborFileDocument[], documentType: LaborFileDocumentType) {
@@ -623,6 +754,7 @@ export function LaborFilesPage() {
 
     setProfileForm({
       hireDate: selectedLaborFile.hireDate.slice(0, 10),
+      dailySalaryMxn: selectedLaborFile.dailySalaryMxn ? String(selectedLaborFile.dailySalaryMxn) : "",
       personalPhone: selectedLaborFile.personalPhone ?? "",
       personalEmail: selectedLaborFile.personalEmail ?? "",
       emergencyContactName: selectedLaborFile.emergencyContactName ?? "",
@@ -722,8 +854,9 @@ export function LaborFilesPage() {
     setFlash(null);
 
     try {
-      await apiPatch<LaborFile>(`/labor-files/${selectedLaborFile.id}`, {
+      const updatedLaborFile = await apiPatch<LaborFile>(`/labor-files/${selectedLaborFile.id}`, {
         hireDate: profileForm.hireDate,
+        dailySalaryMxn: profileForm.dailySalaryMxn ? Number(profileForm.dailySalaryMxn) : null,
         personalPhone: profileForm.personalPhone || null,
         personalEmail: profileForm.personalEmail || null,
         emergencyContactName: profileForm.emergencyContactName || null,
@@ -731,6 +864,11 @@ export function LaborFilesPage() {
         emergencyContactAddress: profileForm.emergencyContactAddress || null,
         notes: profileForm.notes || null
       });
+      setLaborFiles((current) =>
+        sortLaborFiles(current.map((laborFile) =>
+          laborFile.id === updatedLaborFile.id ? updatedLaborFile : laborFile
+        ))
+      );
       setFlash({ tone: "success", text: "Expediente actualizado." });
       await loadLaborFiles(selectedLaborFile.id);
     } catch (error) {
@@ -1160,6 +1298,12 @@ export function LaborFilesPage() {
   const contractDocument = selectedLaborFile
     ? getLatestDocument(selectedLaborFile.documents, "EMPLOYMENT_CONTRACT")
     : undefined;
+  const displayedDailySalaryMxn = canWrite
+    ? parseMoneyValue(profileForm.dailySalaryMxn)
+    : selectedLaborFile?.dailySalaryMxn;
+  const dailySalaryValidation = selectedLaborFile
+    ? getDailySalaryValidation({ ...selectedLaborFile, dailySalaryMxn: displayedDailySalaryMxn }, contractDocument)
+    : undefined;
   const latestVacationFormatEvent = selectedLaborFile?.vacationEvents
     .filter((event) => event.eventType === "VACATION" && event.acceptanceOriginalFileName)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
@@ -1382,6 +1526,26 @@ export function LaborFilesPage() {
                     <span>Fecha de ingreso</span>
                     <strong>{formatDate(selectedLaborFile.hireDate)}</strong>
                   </div>
+                  <div className={`labor-file-profile-salary-card is-${dailySalaryValidation?.status ?? "mismatch"}`}>
+                    <span className="labor-file-profile-card-head">
+                      <span>Salario diario</span>
+                      <span className="labor-file-ri-badge">
+                        <RusconiIntelligenceBadge connectionId={LABOR_DAILY_SALARY_RI_CONNECTION_ID} label="Expedientes laborales / Salario diario" />
+                      </span>
+                    </span>
+                    <strong className="labor-file-salary-value">
+                      {formatMoney(displayedDailySalaryMxn)}
+                      <span
+                        aria-label={dailySalaryValidation?.label ?? "No coincide"}
+                        className={`labor-file-ri-validation-icon is-${dailySalaryValidation?.status ?? "mismatch"}`}
+                        role="img"
+                        title={dailySalaryValidation?.detail}
+                      />
+                    </strong>
+                    <small className={`labor-file-ri-validation-copy is-${dailySalaryValidation?.status ?? "mismatch"}`}>
+                      {dailySalaryValidation?.detail}
+                    </small>
+                  </div>
                   <div>
                     <span>Última actualización</span>
                     <strong>{formatDateTime(selectedLaborFile.updatedAt)}</strong>
@@ -1417,6 +1581,19 @@ export function LaborFilesPage() {
                         value={profileForm.hireDate}
                         onChange={(event) => setProfileForm((current) => ({ ...current, hireDate: event.target.value }))}
                       />
+                    </label>
+                    <label className="form-field">
+                      <span>Salario diario</span>
+                      <div className="money-input-control">
+                        <span className="money-input-prefix">$</span>
+                        <input
+                          min="0"
+                          step="0.01"
+                          type="number"
+                          value={profileForm.dailySalaryMxn}
+                          onChange={(event) => setProfileForm((current) => ({ ...current, dailySalaryMxn: event.target.value }))}
+                        />
+                      </div>
                     </label>
                     <label className="form-field">
                       <span>Teléfono personal</span>

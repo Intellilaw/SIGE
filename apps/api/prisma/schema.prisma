@@ -8,55 +8,57 @@ datasource db {
 }
 
 model User {
-  id                   String               @id @default(uuid())
-  email                String               @unique
-  username             String               @unique
-  displayName          String
-  shortName            String?
-  role                 String
-  legacyRole           String
-  team                 String?
-  legacyTeam           String?
-  specificRole         String?
-  permissions          Json                 @default("[]")
-  isActive             Boolean              @default(true)
-  passwordResetRequired Boolean             @default(false)
-  lastLoginAt          DateTime?
-  emailConfirmedAt     DateTime?
-  passwordHash         String
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
-  refreshTokens        RefreshToken[]
-  passwordResetTokens  PasswordResetToken[]
-  auditLogs            AuditLog[]
-  laborFile            LaborFile?
+  id                    String               @id @default(uuid())
+  email                 String               @unique
+  username              String               @unique
+  displayName           String
+  shortName             String?
+  role                  String
+  legacyRole            String
+  team                  String?
+  legacyTeam            String?
+  specificRole          String?
+  permissions           Json                 @default("[]")
+  isActive              Boolean              @default(true)
+  passwordResetRequired Boolean              @default(false)
+  lastLoginAt           DateTime?
+  emailConfirmedAt      DateTime?
+  passwordHash          String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  refreshTokens         RefreshToken[]
+  passwordResetTokens   PasswordResetToken[]
+  auditLogs             AuditLog[]
+  laborFile             LaborFile?
 }
 
 model LaborFile {
-  id                 String                @id @default(uuid())
-  userId             String?               @unique
-  employeeName       String
-  employeeEmail      String?
-  employeeUsername   String
-  employeeShortName  String?
-  personalPhone      String?
-  personalEmail      String?
-  emergencyContactName    String?
-  emergencyContactPhone   String?
-  emergencyContactAddress String?
-  team               String?
-  legacyTeam         String?
-  specificRole       String?
-  status             String                @default("INCOMPLETE")
-  employmentStatus   String                @default("ACTIVE")
-  hireDate           DateTime              @db.Date
-  employmentEndedAt  DateTime?             @db.Date
-  notes              String?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  user               User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
-  documents          LaborFileDocument[]
-  vacationEvents     LaborVacationEvent[]
+  id                           String                       @id @default(uuid())
+  userId                       String?                      @unique
+  employeeName                 String
+  employeeEmail                String?
+  employeeUsername             String
+  employeeShortName            String?
+  personalPhone                String?
+  personalEmail                String?
+  emergencyContactName         String?
+  emergencyContactPhone        String?
+  emergencyContactAddress      String?
+  team                         String?
+  legacyTeam                   String?
+  specificRole                 String?
+  status                       String                       @default("INCOMPLETE")
+  employmentStatus             String                       @default("ACTIVE")
+  hireDate                     DateTime                     @db.Date
+  dailySalaryMxn               Decimal                      @default(0)
+  employmentEndedAt            DateTime?                    @db.Date
+  notes                        String?
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  user                         User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  documents                    LaborFileDocument[]
+  vacationEvents               LaborVacationEvent[]
+  generalExpensePayrollEntries GeneralExpensePayrollEntry[]
 
   @@index([status, employmentStatus])
   @@index([employeeName])
@@ -114,73 +116,73 @@ model LaborGlobalVacationDay {
 }
 
 model RefreshToken {
-  id         String   @id @default(uuid())
-  userId     String
-  tokenHash  String   @unique
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, revokedAt])
 }
 
 model PasswordResetToken {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   userId     String
-  tokenHash  String   @unique
+  tokenHash  String    @unique
   purpose    String
   expiresAt  DateTime
   consumedAt DateTime?
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, consumedAt, expiresAt])
 }
 
 model Client {
-  id           String   @id @default(uuid())
-  clientNumber String   @unique
-  name         String
-  deletedAt    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  quotes       Quote[]
-  leads        Lead[]
-  matters      Matter[]
-  internalContracts InternalContract[]
+  id                       String                    @id @default(uuid())
+  clientNumber             String                    @unique
+  name                     String
+  deletedAt                DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  quotes                   Quote[]
+  leads                    Lead[]
+  matters                  Matter[]
+  internalContracts        InternalContract[]
   dailyDocumentAssignments DailyDocumentAssignment[]
 
   @@index([deletedAt, clientNumber])
 }
 
 model InternalContract {
-  id                String   @id @default(uuid())
-  contractNumber    String   @unique
-  title             String?
-  contractType      String
-  documentKind      String   @default("CONTRACT")
-  clientId          String?
-  clientNumber      String?
-  clientName        String?
-  collaboratorName  String?
-  sourceMatterId    String?  @unique
-  sourceQuoteId     String?
-  signatureStatus   String   @default("PENDING")
-  originalFileName  String?
-  fileMimeType      String?
-  fileSizeBytes     Int?
-  fileContent       Bytes?
+  id                  String   @id @default(uuid())
+  contractNumber      String   @unique
+  title               String?
+  contractType        String
+  documentKind        String   @default("CONTRACT")
+  clientId            String?
+  clientNumber        String?
+  clientName          String?
+  collaboratorName    String?
+  sourceMatterId      String?  @unique
+  sourceQuoteId       String?
+  signatureStatus     String   @default("PENDING")
+  originalFileName    String?
+  fileMimeType        String?
+  fileSizeBytes       Int?
+  fileContent         Bytes?
   pdfOriginalFileName String?
-  pdfFileMimeType   String?
-  pdfFileSizeBytes  Int?
-  pdfFileContent    Bytes?
-  paymentMilestones Json     @default("[]")
-  generatedPayload  Json?
-  notes             String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  client            Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  pdfFileMimeType     String?
+  pdfFileSizeBytes    Int?
+  pdfFileContent      Bytes?
+  paymentMilestones   Json     @default("[]")
+  generatedPayload    Json?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  client              Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
   @@index([contractType, contractNumber])
   @@index([title])
@@ -223,28 +225,28 @@ model DailyDocumentAssignment {
 }
 
 model Quote {
-  id          String   @id @default(uuid())
-  title       String   @default("")
-  quoteNumber String   @unique
-  clientId    String
-  clientName  String
+  id              String   @id @default(uuid())
+  title           String   @default("")
+  quoteNumber     String   @unique
+  clientId        String
+  clientName      String
   responsibleTeam String?
-  subject     String
-  status      String
-  quoteType   String
-  language    String   @default("es")
-  quoteDate   DateTime @default(now()) @db.Date
-  amountColumns Json?
-  tableRows   Json?
-  lineItems   Json
-  totalMxn    Decimal
-  milestone   String?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  client      Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  leads       Lead[]
-  matters     Matter[]
+  subject         String
+  status          String
+  quoteType       String
+  language        String   @default("es")
+  quoteDate       DateTime @default(now()) @db.Date
+  amountColumns   Json?
+  tableRows       Json?
+  lineItems       Json
+  totalMxn        Decimal
+  milestone       String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  leads           Lead[]
+  matters         Matter[]
 
   @@index([title])
 }
@@ -271,16 +273,16 @@ model QuoteTemplate {
 }
 
 model Lead {
-  id                   String   @id @default(uuid())
+  id                   String    @id @default(uuid())
   clientId             String?
   quoteId              String?
-  clientName           String   @default("")
+  clientName           String    @default("")
   prospectName         String?
   commissionAssignee   String?
   quoteNumber          String?
-  subject              String   @default("")
-  amountMxn            Decimal  @default(0)
-  communicationChannel String   @default("WHATSAPP")
+  subject              String    @default("")
+  amountMxn            Decimal   @default(0)
+  communicationChannel String    @default("WHATSAPP")
   lastInteractionLabel String?
   lastInteraction      DateTime?
   nextInteractionLabel String?
@@ -288,60 +290,60 @@ model Lead {
   notes                String?
   sentToClientAt       DateTime?
   sentToMattersAt      DateTime?
-  hiddenFromTracking   Boolean  @default(false)
-  status               String   @default("ACTIVE")
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  client               Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  quote                Quote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  hiddenFromTracking   Boolean   @default(false)
+  status               String    @default("ACTIVE")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  client               Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  quote                Quote?    @relation(fields: [quoteId], references: [id], onDelete: SetNull)
 
   @@index([status, hiddenFromTracking, sentToMattersAt])
   @@index([sentToClientAt])
 }
 
 model Matter {
-  id                   String   @id @default(uuid())
-  matterNumber         String   @unique
-  clientId             String?
-  clientNumber         String?
-  quoteId              String?
-  clientName           String   @default("")
-  quoteNumber          String?
-  commissionAssignee   String?
-  matterType           String   @default("ONE_TIME")
-  subject              String   @default("")
-  specificProcess      String?
-  totalFeesMxn         Decimal  @default(0)
-  responsibleTeam      String?
-  nextPaymentDate      DateTime?
-  communicationChannel String   @default("WHATSAPP")
-  r1InternalCreated    Boolean  @default(false)
-  telegramBotLinked    Boolean  @default(false)
-  rdCreated            Boolean  @default(false)
-  rfCreated            String   @default("NO")
-  r1ExternalCreated    Boolean  @default(false)
-  billingChatCreated   Boolean  @default(false)
-  matterIdentifier     String?
-  executionLinkedModule String?
-  executionLinkedAt    DateTime?
-  executionPrompt      String?
+  id                        String     @id @default(uuid())
+  matterNumber              String     @unique
+  clientId                  String?
+  clientNumber              String?
+  quoteId                   String?
+  clientName                String     @default("")
+  quoteNumber               String?
+  commissionAssignee        String?
+  matterType                String     @default("ONE_TIME")
+  subject                   String     @default("")
+  specificProcess           String?
+  totalFeesMxn              Decimal    @default(0)
+  responsibleTeam           String?
+  nextPaymentDate           DateTime?
+  communicationChannel      String     @default("WHATSAPP")
+  r1InternalCreated         Boolean    @default(false)
+  telegramBotLinked         Boolean    @default(false)
+  rdCreated                 Boolean    @default(false)
+  rfCreated                 String     @default("NO")
+  r1ExternalCreated         Boolean    @default(false)
+  billingChatCreated        Boolean    @default(false)
+  matterIdentifier          String?
+  executionLinkedModule     String?
+  executionLinkedAt         DateTime?
+  executionPrompt           String?
   holidayAuthorityShortName String?
-  internalTelegramGroupId String?
+  internalTelegramGroupId   String?
   internalTelegramGroupName String?
-  nextAction           String?
-  nextActionDueAt      DateTime?
-  nextActionSource     String?
-  milestone            String?
-  concluded            Boolean  @default(false)
-  stage                String   @default("INTAKE")
-  origin               String   @default("MANUAL")
-  notes                String?
-  deletedAt            DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  client               Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  quote                Quote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
-  tasks                TaskItem[]
+  nextAction                String?
+  nextActionDueAt           DateTime?
+  nextActionSource          String?
+  milestone                 String?
+  concluded                 Boolean    @default(false)
+  stage                     String     @default("INTAKE")
+  origin                    String     @default("MANUAL")
+  notes                     String?
+  deletedAt                 DateTime?
+  createdAt                 DateTime   @default(now())
+  updatedAt                 DateTime   @updatedAt
+  client                    Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  quote                     Quote?     @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  tasks                     TaskItem[]
 
   @@index([deletedAt, createdAt])
   @@index([matterType, deletedAt])
@@ -376,6 +378,33 @@ model GeneralExpense {
   updatedAt          DateTime  @updatedAt
 
   @@index([year, month, createdAt])
+}
+
+model GeneralExpensePayrollEntry {
+  id                         String     @id @default(uuid())
+  year                       Int
+  month                      Int
+  half                       Int
+  laborFileId                String?
+  employeeName               String     @default("")
+  dailySalaryMxn             Decimal    @default(0)
+  grossSalaryMxn             Decimal    @default(0)
+  punctualityBonusMxn        Decimal    @default(0)
+  attendanceBonusMxn         Decimal    @default(0)
+  overtimeHours              Decimal    @default(0)
+  overtimeDetail             String     @default("")
+  overtimeApprovedByEmrt     Boolean    @default(false)
+  isrWithholdingMxn          Decimal    @default(0)
+  imssWithholdingMxn         Decimal    @default(0)
+  payrollStampedByAraceli    Boolean    @default(false)
+  finalPaymentApprovedByEmrt Boolean    @default(false)
+  reviewedByJnls             Boolean    @default(false)
+  createdAt                  DateTime   @default(now())
+  updatedAt                  DateTime   @updatedAt
+  laborFile                  LaborFile? @relation(fields: [laborFileId], references: [id], onDelete: SetNull)
+
+  @@index([year, month, half, createdAt])
+  @@index([laborFileId])
 }
 
 model BudgetPlan {
@@ -435,46 +464,46 @@ model CommissionExclusion {
 }
 
 model FinanceRecord {
-  id                         String   @id @default(uuid())
+  id                         String    @id @default(uuid())
   year                       Int
   month                      Int
   clientNumber               String?
-  clientName                 String   @default("")
+  clientName                 String    @default("")
   quoteNumber                String?
-  matterType                 String   @default("ONE_TIME")
-  subject                    String   @default("")
-  contractSignedStatus       String   @default("NO")
+  matterType                 String    @default("ONE_TIME")
+  subject                    String    @default("")
+  contractSignedStatus       String    @default("NO")
   responsibleTeam            String?
-  totalMatterMxn             Decimal  @default(0)
+  totalMatterMxn             Decimal   @default(0)
   workingConcepts            String?
-  conceptFeesMxn             Decimal  @default(0)
-  previousPaymentsMxn        Decimal  @default(0)
+  conceptFeesMxn             Decimal   @default(0)
+  previousPaymentsMxn        Decimal   @default(0)
   nextPaymentDate            DateTime?
   nextPaymentNotes           String?
-  paidThisMonthMxn           Decimal  @default(0)
-  payment2Mxn                Decimal  @default(0)
-  payment3Mxn                Decimal  @default(0)
+  paidThisMonthMxn           Decimal   @default(0)
+  payment2Mxn                Decimal   @default(0)
+  payment3Mxn                Decimal   @default(0)
   paymentDate1               DateTime?
   paymentDate2               DateTime?
   paymentDate3               DateTime?
   expenseNotes1              String?
   expenseNotes2              String?
   expenseNotes3              String?
-  expenseAmount1Mxn          Decimal  @default(0)
-  expenseAmount2Mxn          Decimal  @default(0)
-  expenseAmount3Mxn          Decimal  @default(0)
-  pctLitigation              Int      @default(0)
-  pctCorporateLabor          Int      @default(0)
-  pctSettlements             Int      @default(0)
-  pctFinancialLaw            Int      @default(0)
-  pctTaxCompliance           Int      @default(0)
+  expenseAmount1Mxn          Decimal   @default(0)
+  expenseAmount2Mxn          Decimal   @default(0)
+  expenseAmount3Mxn          Decimal   @default(0)
+  pctLitigation              Int       @default(0)
+  pctCorporateLabor          Int       @default(0)
+  pctSettlements             Int       @default(0)
+  pctFinancialLaw            Int       @default(0)
+  pctTaxCompliance           Int       @default(0)
   clientCommissionRecipient  String?
   closingCommissionRecipient String?
   milestone                  String?
-  concluded                  Boolean  @default(false)
+  concluded                  Boolean   @default(false)
   financeComments            String?
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
   @@index([year, month, createdAt])
   @@index([year, month, quoteNumber])
@@ -496,14 +525,14 @@ model FinanceSnapshot {
 }
 
 model CommissionSnapshot {
-  id          String   @id @default(uuid())
-  year        Int
-  month       Int
-  section     String
-  title       String
-  totalNetMxn Decimal  @default(0)
+  id           String   @id @default(uuid())
+  year         Int
+  month        Int
+  section      String
+  title        String
+  totalNetMxn  Decimal  @default(0)
   snapshotData Json?
-  createdAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   @@index([year, month, section, createdAt])
 }
@@ -520,15 +549,15 @@ model TaskModule {
 }
 
 model TaskTrack {
-  id             String   @id @default(uuid())
+  id             String     @id @default(uuid())
   moduleId       String
   trackCode      String
   label          String
   mode           String
-  recurring      Boolean  @default(false)
+  recurring      Boolean    @default(false)
   recurrenceRule Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
   module         TaskModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@unique([moduleId, trackCode])
@@ -555,31 +584,31 @@ model TaskItem {
 }
 
 model TaskTrackingRecord {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   moduleId         String
   tableCode        String
   sourceTable      String
   matterId         String?
   matterNumber     String?
   clientNumber     String?
-  clientName       String   @default("")
-  subject          String   @default("")
+  clientName       String    @default("")
+  subject          String    @default("")
   specificProcess  String?
   matterIdentifier String?
-  taskName         String   @default("")
+  taskName         String    @default("")
   eventName        String?
-  responsible      String   @default("")
+  responsible      String    @default("")
   dueDate          DateTime? @db.Date
   termDate         DateTime? @db.Date
   completedAt      DateTime?
-  status           String   @default("pendiente")
-  workflowStage    Int      @default(1)
+  status           String    @default("pendiente")
+  workflowStage    Int       @default(1)
   reportedMonth    String?
   termId           String?
-  data             Json     @default("{}")
+  data             Json      @default("{}")
   deletedAt        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([moduleId, tableCode, status, dueDate])
   @@index([sourceTable, status])
@@ -587,30 +616,30 @@ model TaskTrackingRecord {
 }
 
 model TaskTerm {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   moduleId         String
   sourceTable      String?
   sourceRecordId   String?
   matterId         String?
   matterNumber     String?
   clientNumber     String?
-  clientName       String   @default("")
-  subject          String   @default("")
+  clientName       String    @default("")
+  subject          String    @default("")
   specificProcess  String?
   matterIdentifier String?
-  eventName        String   @default("")
+  eventName        String    @default("")
   pendingTaskLabel String?
-  responsible      String   @default("")
+  responsible      String    @default("")
   dueDate          DateTime? @db.Date
   termDate         DateTime? @db.Date
-  status           String   @default("pendiente")
-  recurring        Boolean  @default(false)
+  status           String    @default("pendiente")
+  recurring        Boolean   @default(false)
   reportedMonth    String?
-  verification     Json     @default("{}")
-  data             Json     @default("{}")
+  verification     Json      @default("{}")
+  data             Json      @default("{}")
   deletedAt        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([moduleId, status, termDate])
   @@index([sourceTable, sourceRecordId])
@@ -629,39 +658,39 @@ model TaskDistributionEvent {
 }
 
 model TaskDistributionHistory {
-  id               String   @id @default(uuid())
-  moduleId         String
-  matterId         String?
-  matterNumber     String?
-  clientNumber     String?
-  clientName       String   @default("")
-  subject          String   @default("")
-  specificProcess  String?
-  matterIdentifier String?
-  eventName        String   @default("")
-  targetTables     Json     @default("[]")
-  eventNamesPerTable Json   @default("[]")
-  createdIds       Json     @default("{}")
-  data             Json     @default("{}")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  moduleId           String
+  matterId           String?
+  matterNumber       String?
+  clientNumber       String?
+  clientName         String   @default("")
+  subject            String   @default("")
+  specificProcess    String?
+  matterIdentifier   String?
+  eventName          String   @default("")
+  targetTables       Json     @default("[]")
+  eventNamesPerTable Json     @default("[]")
+  createdIds         Json     @default("{}")
+  data               Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([moduleId, createdAt])
   @@index([matterId])
 }
 
 model TaskAdditionalTask {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   moduleId     String
-  task          String
+  task         String
   responsible  String
   responsible2 String?
   dueDate      DateTime? @db.Date
-  recurring    Boolean  @default(false)
-  status       String   @default("pendiente")
+  recurring    Boolean   @default(false)
+  status       String    @default("pendiente")
   deletedAt    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([moduleId, status, dueDate])
 }
@@ -694,13 +723,13 @@ model AuditLog {
 }
 
 model LegacyImportBatch {
-  id         String              @id @default(uuid())
+  id         String                @id @default(uuid())
   source     String
   exportName String?
   exportedAt DateTime?
   appliedAt  DateTime?
   summary    Json?
-  createdAt  DateTime            @default(now())
+  createdAt  DateTime              @default(now())
   rows       LegacyImportArchive[]
 
   @@index([source, createdAt])

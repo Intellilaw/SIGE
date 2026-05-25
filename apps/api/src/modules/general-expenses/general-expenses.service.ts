@@ -1,6 +1,8 @@
 import type {
   GeneralExpenseActor,
   GeneralExpenseCreateRecord,
+  GeneralExpensePayrollCreateRecord,
+  GeneralExpensePayrollUpdateRecord,
   GeneralExpenseUpdateRecord,
   GeneralExpensesRepository
 } from "../../repositories/types";
@@ -26,5 +28,33 @@ export class GeneralExpensesService {
 
   public copyRecurringToNextMonth(year: number, month: number) {
     return this.repository.copyRecurringToNextMonth(year, month);
+  }
+
+  public copyPayrollToNextMonth(year: number, month: number) {
+    return this.repository.copyPayrollToNextMonth(year, month);
+  }
+
+  public listPayrollEmployeeOptions() {
+    return this.repository.listPayrollEmployeeOptions();
+  }
+
+  public listPayrollEntries(year: number, month: number) {
+    return this.repository.listPayrollEntries(year, month);
+  }
+
+  public createPayrollEntry(payload?: GeneralExpensePayrollCreateRecord) {
+    return this.repository.createPayrollEntry(payload);
+  }
+
+  public updatePayrollEntry(
+    payrollEntryId: string,
+    payload: GeneralExpensePayrollUpdateRecord,
+    actor: GeneralExpenseActor
+  ) {
+    return this.repository.updatePayrollEntry(payrollEntryId, payload, actor);
+  }
+
+  public deletePayrollEntry(payrollEntryId: string) {
+    return this.repository.deletePayrollEntry(payrollEntryId);
   }
 }

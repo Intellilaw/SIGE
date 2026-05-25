@@ -54,10 +54,94 @@ const copySchema = z.object({
   month: z.number().int().min(1).max(12)
 });
 
+const payrollCreateSchema = z.object({
+  year: z.number().int().min(2024).max(2035).optional(),
+  month: z.number().int().min(1).max(12).optional(),
+  half: z.union([z.literal(1), z.literal(2)]).optional(),
+  laborFileId: z.string().nullable().optional()
+});
+
+const payrollUpdateSchema = z.object({
+  laborFileId: z.string().nullable().optional(),
+  grossSalaryMxn: z.number().nonnegative().optional(),
+  punctualityBonusMxn: z.number().nonnegative().optional(),
+  attendanceBonusMxn: z.number().nonnegative().optional(),
+  overtimeHours: z.number().nonnegative().optional(),
+  overtimeDetail: z.string().optional(),
+  isrWithholdingMxn: z.number().nonnegative().optional(),
+  imssWithholdingMxn: z.number().nonnegative().optional(),
+  payrollStampedByAraceli: z.boolean().optional(),
+  finalPaymentApprovedByEmrt: z.boolean().optional(),
+  reviewedByJnls: z.boolean().optional()
+});
+
+const payrollParamsSchema = z.object({
+  payrollEntryId: z.string().min(1)
+});
+
+function normalizeComparableText(value?: string | null) {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[._]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isFinanceUser(user: ReturnType<typeof getSessionUser>) {
+  return user.team === "FINANCE" || normalizeComparableText(user.legacyTeam) === "finanzas";
+}
+
+function isAraceliLozano(user: ReturnType<typeof getSessionUser>) {
+  const normalizedEmail = normalizeComparableText(user.email);
+  return isFinanceUser(user) && (
+    normalizeComparableText(user.username) === "araceli lozano" ||
+    normalizeComparableText(user.displayName) === "araceli lozano" ||
+    normalizedEmail.startsWith("araceli lozano") ||
+    normalizedEmail.startsWith("araceli.lozano")
+  );
+}
+
 export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.GeneralExpensesService(app.repositories.generalExpenses);
   const readGuards = [requireAuth, requireAnyPermissions(["general-expenses:read", "general-expenses:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["general-expenses:write"])];
+  const payrollPatchGuards = [requireAuth, async (request: FastifyRequest) => {
+    const payload = payrollUpdateSchema.parse(request.body ?? {});
+    const payloadKeys = Object.keys(payload);
+    const user = getSessionUser(request);
+    const permissions = deriveEffectivePermissions({
+      legacyRole: user.legacyRole,
+      team: user.team,
+      legacyTeam: user.legacyTeam,
+      specificRole: user.specificRole,
+      permissions: user.permissions
+    });
+    const isStampOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "payrollStampedByAraceli");
+    const isJnlsApprovalOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "reviewedByJnls");
+
+    if (isStampOnlyPatch && isAraceliLozano(user)) {
+      return;
+    }
+
+    if (isJnlsApprovalOnlyPatch) {
+      if (!permissions.includes("general-expenses:jnls-approval:write")) {
+        throw new app.errors.AppError(403, "FORBIDDEN", "Only the audit team can update the JNLS approval flag.");
+      }
+      return;
+    }
+
+    if (payloadKeys.includes("reviewedByJnls")) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "The JNLS approval flag must be updated separately by the audit team.");
+    }
+
+    if (permissions.includes("*") || permissions.includes("general-expenses:write")) {
+      return;
+    }
+
+    throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+  }];
   const patchGuards = [requireAuth, async (request: FastifyRequest) => {
     const payload = updateSchema.parse(request.body ?? {});
     const payloadKeys = Object.keys(payload);
@@ -97,6 +181,42 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
   app.post("/general-expenses", { preHandler: writeGuards }, async (request) => {
     const payload = createSchema.parse(request.body ?? {});
     return service.create(payload);
+  });
+
+  app.get("/general-expenses/payroll-employees", { preHandler: readGuards }, async () => {
+    return service.listPayrollEmployeeOptions();
+  });
+
+  app.get("/general-expenses/payroll", { preHandler: readGuards }, async (request) => {
+    const query = querySchema.parse(request.query ?? {});
+    const now = new Date();
+    const year = query.year ?? now.getFullYear();
+    const month = query.month ?? now.getMonth() + 1;
+    return service.listPayrollEntries(year, month);
+  });
+
+  app.post("/general-expenses/payroll", { preHandler: writeGuards }, async (request) => {
+    const payload = payrollCreateSchema.parse(request.body ?? {});
+    return service.createPayrollEntry(payload);
+  });
+
+  app.post("/general-expenses/payroll/copy-to-next-month", { preHandler: writeGuards }, async (request) => {
+    const payload = copySchema.parse(request.body ?? {});
+    return service.copyPayrollToNextMonth(payload.year, payload.month);
+  });
+
+  app.patch("/general-expenses/payroll/:payrollEntryId", { preHandler: payrollPatchGuards }, async (request) => {
+    const params = payrollParamsSchema.parse(request.params);
+    const payload = payrollUpdateSchema.parse(request.body ?? {});
+    const actor = getSessionUser(request);
+    return service.updatePayrollEntry(params.payrollEntryId, payload, actor);
+  });
+
+  app.delete("/general-expenses/payroll/:payrollEntryId", { preHandler: writeGuards }, async (request, reply) => {
+    const params = payrollParamsSchema.parse(request.params);
+    await service.deletePayrollEntry(params.payrollEntryId);
+    reply.code(204);
+    return null;
   });
 
   app.patch("/general-expenses/:expenseId", { preHandler: patchGuards }, async (request) => {

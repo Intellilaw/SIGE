@@ -330,6 +330,7 @@ export interface LaborFile {
   status: LaborFileStatus;
   employmentStatus: LaborEmploymentStatus;
   hireDate: string;
+  dailySalaryMxn?: number;
   employmentEndedAt?: string;
   notes?: string;
   documents: LaborFileDocument[];
@@ -342,6 +343,7 @@ export interface LaborFile {
 
 export interface LaborFileUpdateInput {
   hireDate?: string;
+  dailySalaryMxn?: number | null;
   personalPhone?: string | null;
   personalEmail?: string | null;
   emergencyContactName?: string | null;
@@ -924,6 +926,44 @@ export interface GeneralExpense {
   paidAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type GeneralExpensePayrollHalf = 1 | 2;
+
+export interface GeneralExpensePayrollEntry {
+  id: string;
+  year: number;
+  month: number;
+  half: GeneralExpensePayrollHalf;
+  laborFileId?: string;
+  employeeName: string;
+  dailySalaryMxn: number;
+  laborFileDailySalaryMxn?: number;
+  dailySalaryRiVerified?: boolean;
+  dailySalaryRiVerificationDetail?: string;
+  grossSalaryMxn: number;
+  punctualityBonusMxn: number;
+  attendanceBonusMxn: number;
+  overtimeHourlyRateMxn: number;
+  overtimeHours: number;
+  overtimeTotalMxn: number;
+  overtimeDetail: string;
+  isrWithholdingMxn: number;
+  imssWithholdingMxn: number;
+  netDepositMxn: number;
+  payrollStampedByAraceli: boolean;
+  finalPaymentApprovedByEmrt: boolean;
+  reviewedByJnls: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeneralExpensePayrollEmployeeOption {
+  laborFileId: string;
+  employeeName: string;
+  dailySalaryMxn: number;
+  dailySalaryRiVerified?: boolean;
+  dailySalaryRiVerificationDetail?: string;
 }
 
 export interface BudgetPlan {

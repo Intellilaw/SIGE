@@ -1,11 +1,13 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { GeneralExpense } from "@sige/contracts";
+import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpensePayrollEntry } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
-import { mapGeneralExpense } from "./mappers";
+import { mapGeneralExpense, mapGeneralExpensePayrollEntry } from "./mappers";
 import type {
   GeneralExpenseActor,
   GeneralExpenseCreateRecord,
+  GeneralExpensePayrollCreateRecord,
+  GeneralExpensePayrollUpdateRecord,
   GeneralExpenseUpdateRecord,
   GeneralExpensesRepository
 } from "./types";
@@ -43,6 +45,19 @@ const PCT_KEYS: Array<keyof Pick<
 ];
 
 type StoredGeneralExpense = Awaited<ReturnType<PrismaClient["generalExpense"]["findUniqueOrThrow"]>>;
+const PAYROLL_ENTRY_INCLUDE = {
+  laborFile: {
+    select: {
+      employeeName: true,
+      dailySalaryMxn: true,
+      documents: {
+        where: { documentType: "EMPLOYMENT_CONTRACT" },
+        select: { documentType: true }
+      }
+    }
+  }
+} satisfies Prisma.GeneralExpensePayrollEntryInclude;
+type StoredGeneralExpensePayrollEntry = Prisma.GeneralExpensePayrollEntryGetPayload<{ include: typeof PAYROLL_ENTRY_INCLUDE }>;
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
@@ -129,6 +144,16 @@ function isFinance(actor: GeneralExpenseActor) {
   return actor.team === "FINANCE" || normalizeComparableText(actor.legacyTeam) === "finanzas";
 }
 
+function isAraceliLozano(actor: GeneralExpenseActor) {
+  const normalizedEmail = normalizeComparableText(actor.email);
+  return isFinance(actor) && (
+    normalizeComparableText(actor.username) === "araceli lozano" ||
+    normalizeComparableText(actor.displayName) === "araceli lozano" ||
+    normalizedEmail.startsWith("araceli lozano") ||
+    normalizedEmail.startsWith("araceli.lozano")
+  );
+}
+
 function isEduardoRusconi(actor: GeneralExpenseActor) {
   return (
     normalizeComparableText(actor.username) === "eduardo rusconi" ||
@@ -148,6 +173,48 @@ function assertMonth(month: number) {
   if (month < DEFAULT_MONTH_RANGE.min || month > DEFAULT_MONTH_RANGE.max) {
     throw new AppError(400, "INVALID_MONTH", "Month must be between 1 and 12.");
   }
+}
+
+function assertPayrollHalf(half: number): asserts half is GeneralExpensePayrollEntry["half"] {
+  if (half !== 1 && half !== 2) {
+    throw new AppError(400, "INVALID_PAYROLL_HALF", "Payroll half must be 1 or 2.");
+  }
+}
+
+function normalizeMoney(value?: number | null) {
+  const numeric = Number(value ?? 0);
+  return new Prisma.Decimal(Number.isFinite(numeric) ? Math.max(0, numeric) : 0);
+}
+
+function normalizeHours(value?: number | null) {
+  const numeric = Number(value ?? 0);
+  return new Prisma.Decimal(Number.isFinite(numeric) ? Math.max(0, numeric) : 0);
+}
+
+function getPayrollDailySalaryRiStatus(laborFile: {
+  dailySalaryMxn: Prisma.Decimal | number | null;
+  documents?: Array<{ documentType: string }>;
+}) {
+  const dailySalaryMxn = Number(laborFile.dailySalaryMxn ?? 0);
+  if (!dailySalaryMxn) {
+    return {
+      verified: false,
+      detail: "Falta salario diario en Expedientes Laborales."
+    };
+  }
+
+  const hasEmploymentContract = Boolean(laborFile.documents?.some((document) => document.documentType === "EMPLOYMENT_CONTRACT"));
+  if (!hasEmploymentContract) {
+    return {
+      verified: false,
+      detail: "Expedientes Laborales no tiene contrato laboral cargado."
+    };
+  }
+
+  return {
+    verified: false,
+    detail: "Contrato laboral cargado; falta salario contractual verificable."
+  };
 }
 
 function getNextMonth(year: number, month: number) {
@@ -284,6 +351,158 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     };
   }
 
+  public async listPayrollEmployeeOptions(): Promise<GeneralExpensePayrollEmployeeOption[]> {
+    const records = await this.prisma.laborFile.findMany({
+      select: {
+        id: true,
+        employeeName: true,
+        dailySalaryMxn: true,
+        documents: {
+          where: { documentType: "EMPLOYMENT_CONTRACT" },
+          select: { documentType: true }
+        }
+      },
+      orderBy: [{ employmentStatus: "asc" }, { employeeName: "asc" }]
+    });
+
+    return records.map((record) => {
+      const riStatus = getPayrollDailySalaryRiStatus(record);
+      return {
+        laborFileId: record.id,
+        employeeName: record.employeeName,
+        dailySalaryMxn: Number(record.dailySalaryMxn),
+        dailySalaryRiVerified: riStatus.verified,
+        dailySalaryRiVerificationDetail: riStatus.detail
+      };
+    });
+  }
+
+  public async listPayrollEntries(year: number, month: number) {
+    assertMonth(month);
+
+    const records = await this.prisma.generalExpensePayrollEntry.findMany({
+      where: { year, month },
+      include: PAYROLL_ENTRY_INCLUDE,
+      orderBy: [{ half: "asc" }, { createdAt: "asc" }]
+    });
+
+    return records.map(mapGeneralExpensePayrollEntry);
+  }
+
+  public async copyPayrollToNextMonth(year: number, month: number) {
+    assertMonth(month);
+
+    const { year: targetYear, month: targetMonth } = getNextMonth(year, month);
+    const [sourceRows, existingTargetRows] = await Promise.all([
+      this.prisma.generalExpensePayrollEntry.findMany({
+        where: { year, month },
+        orderBy: [{ half: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.generalExpensePayrollEntry.count({
+        where: { year: targetYear, month: targetMonth }
+      })
+    ]);
+
+    if (sourceRows.length === 0) {
+      return { year: targetYear, month: targetMonth, copied: 0 };
+    }
+
+    if (existingTargetRows > 0) {
+      throw new AppError(
+        409,
+        "GENERAL_EXPENSE_PAYROLL_TARGET_NOT_EMPTY",
+        "El mes destino ya tiene registros de nómina. Borra o ajusta esos registros antes de copiar la nómina."
+      );
+    }
+
+    const result = await this.prisma.generalExpensePayrollEntry.createMany({
+      data: sourceRows.map((row) => ({
+        year: targetYear,
+        month: targetMonth,
+        half: row.half,
+        laborFileId: row.laborFileId,
+        employeeName: row.employeeName,
+        dailySalaryMxn: row.dailySalaryMxn,
+        grossSalaryMxn: row.grossSalaryMxn,
+        punctualityBonusMxn: row.punctualityBonusMxn,
+        attendanceBonusMxn: row.attendanceBonusMxn,
+        overtimeHours: new Prisma.Decimal(0),
+        overtimeDetail: "",
+        isrWithholdingMxn: row.isrWithholdingMxn,
+        imssWithholdingMxn: row.imssWithholdingMxn,
+        payrollStampedByAraceli: false,
+        finalPaymentApprovedByEmrt: false,
+        reviewedByJnls: false
+      }))
+    });
+
+    return {
+      year: targetYear,
+      month: targetMonth,
+      copied: result.count
+    };
+  }
+
+  public async createPayrollEntry(payload: GeneralExpensePayrollCreateRecord = {}) {
+    const now = new Date();
+    const year = payload.year ?? now.getFullYear();
+    const month = payload.month ?? now.getMonth() + 1;
+    const half = payload.half ?? 1;
+    assertMonth(month);
+    assertPayrollHalf(half);
+    const laborFile = payload.laborFileId ? await this.findPayrollLaborFileOrThrow(payload.laborFileId) : null;
+
+    const record = await this.prisma.generalExpensePayrollEntry.create({
+      data: {
+        year,
+        month,
+        half,
+        ...(laborFile ? { laborFile: { connect: { id: laborFile.id } } } : {}),
+        employeeName: laborFile?.employeeName ?? "",
+        dailySalaryMxn: normalizeMoney(Number(laborFile?.dailySalaryMxn ?? 0)),
+        grossSalaryMxn: new Prisma.Decimal(0),
+        punctualityBonusMxn: new Prisma.Decimal(0),
+        attendanceBonusMxn: new Prisma.Decimal(0),
+        overtimeHours: new Prisma.Decimal(0),
+        overtimeDetail: "",
+        isrWithholdingMxn: new Prisma.Decimal(0),
+        imssWithholdingMxn: new Prisma.Decimal(0),
+        payrollStampedByAraceli: false,
+        finalPaymentApprovedByEmrt: false,
+        reviewedByJnls: false
+      },
+      include: PAYROLL_ENTRY_INCLUDE
+    });
+
+    return mapGeneralExpensePayrollEntry(record);
+  }
+
+  public async updatePayrollEntry(
+    payrollEntryId: string,
+    payload: GeneralExpensePayrollUpdateRecord,
+    actor: GeneralExpenseActor
+  ) {
+    const current = await this.findPayrollEntryOrThrow(payrollEntryId);
+    this.assertPayrollFieldAccess(current, payload, actor);
+
+    const data = await this.buildPayrollUpdatePayload(current, payload);
+    const record = await this.prisma.generalExpensePayrollEntry.update({
+      where: { id: payrollEntryId },
+      data,
+      include: PAYROLL_ENTRY_INCLUDE
+    });
+
+    return mapGeneralExpensePayrollEntry(record);
+  }
+
+  public async deletePayrollEntry(payrollEntryId: string) {
+    await this.findPayrollEntryOrThrow(payrollEntryId);
+
+    await this.prisma.generalExpensePayrollEntry.delete({
+      where: { id: payrollEntryId }
+    });
+  }
+
   private async findOrThrow(expenseId: string) {
     const record = await this.prisma.generalExpense.findUnique({
       where: { id: expenseId }
@@ -294,6 +513,45 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     }
 
     return record;
+  }
+
+  private async findPayrollEntryOrThrow(payrollEntryId: string) {
+    const record = await this.prisma.generalExpensePayrollEntry.findUnique({
+      where: { id: payrollEntryId },
+      include: PAYROLL_ENTRY_INCLUDE
+    });
+
+    if (!record) {
+      throw new AppError(404, "GENERAL_EXPENSE_PAYROLL_NOT_FOUND", "The requested payroll entry does not exist.");
+    }
+
+    return record;
+  }
+
+  private async findPayrollLaborFileOrThrow(laborFileId: string) {
+    const normalizedLaborFileId = normalizeOptionalText(laborFileId);
+    if (!normalizedLaborFileId) {
+      return null;
+    }
+
+    const laborFile = await this.prisma.laborFile.findUnique({
+      where: { id: normalizedLaborFileId },
+      select: {
+        id: true,
+        employeeName: true,
+        dailySalaryMxn: true,
+        documents: {
+          where: { documentType: "EMPLOYMENT_CONTRACT" },
+          select: { documentType: true }
+        }
+      }
+    });
+
+    if (!laborFile) {
+      throw new AppError(404, "GENERAL_EXPENSE_PAYROLL_LABOR_FILE_NOT_FOUND", "The selected labor file does not exist.");
+    }
+
+    return laborFile;
   }
 
   private assertFieldAccess(current: StoredGeneralExpense, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor) {
@@ -447,6 +705,93 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "paidAt")) {
       data.paidAt = parseDateOnly(payload.paidAt);
+    }
+
+    return data;
+  }
+
+  private assertPayrollFieldAccess(
+    current: StoredGeneralExpensePayrollEntry,
+    payload: GeneralExpensePayrollUpdateRecord,
+    actor: GeneralExpenseActor
+  ) {
+    const payloadKeys = Object.keys(payload);
+    const isFinalApprovalOnlyPatch = payloadKeys.length === 1 && hasOwn(payload, "finalPaymentApprovedByEmrt");
+
+    if (current.finalPaymentApprovedByEmrt && payloadKeys.length > 0 && !isFinalApprovalOnlyPatch) {
+      throw new AppError(400, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_LOCKED", "La fila ya fue autorizada por EMRT y no admite cambios.");
+    }
+
+    if (hasOwn(payload, "payrollStampedByAraceli") && !isAraceliLozano(actor)) {
+      throw new AppError(403, "GENERAL_EXPENSE_PAYROLL_STAMP_FORBIDDEN", "Solo Araceli Lozano del equipo de Finanzas puede verificar el timbrado de nómina.");
+    }
+
+    if (hasOwn(payload, "finalPaymentApprovedByEmrt") && !isSuperadmin(actor)) {
+      throw new AppError(403, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_APPROVE_FORBIDDEN", "Only superadmin can approve the final payroll payment.");
+    }
+
+    if (hasOwn(payload, "reviewedByJnls")) {
+      if (!canReviewJnls(actor)) {
+        throw new AppError(403, "GENERAL_EXPENSE_PAYROLL_REVIEW_FORBIDDEN", "Only the audit team can update the JNLS approval flag.");
+      }
+    }
+  }
+
+  private async buildPayrollUpdatePayload(
+    current: StoredGeneralExpensePayrollEntry,
+    payload: GeneralExpensePayrollUpdateRecord
+  ): Promise<Prisma.GeneralExpensePayrollEntryUpdateInput> {
+    const data: Prisma.GeneralExpensePayrollEntryUpdateInput = {};
+
+    if (hasOwn(payload, "laborFileId")) {
+      const laborFile = payload.laborFileId ? await this.findPayrollLaborFileOrThrow(payload.laborFileId) : null;
+      if (laborFile) {
+        data.laborFile = { connect: { id: laborFile.id } };
+      } else if (current.laborFileId) {
+        data.laborFile = { disconnect: true };
+      }
+      data.employeeName = laborFile?.employeeName ?? "";
+      data.dailySalaryMxn = normalizeMoney(Number(laborFile?.dailySalaryMxn ?? 0));
+    }
+
+    if (hasOwn(payload, "grossSalaryMxn")) {
+      data.grossSalaryMxn = normalizeMoney(payload.grossSalaryMxn);
+    }
+
+    if (hasOwn(payload, "punctualityBonusMxn")) {
+      data.punctualityBonusMxn = normalizeMoney(payload.punctualityBonusMxn);
+    }
+
+    if (hasOwn(payload, "attendanceBonusMxn")) {
+      data.attendanceBonusMxn = normalizeMoney(payload.attendanceBonusMxn);
+    }
+
+    if (hasOwn(payload, "overtimeHours")) {
+      data.overtimeHours = normalizeHours(payload.overtimeHours);
+    }
+
+    if (hasOwn(payload, "overtimeDetail")) {
+      data.overtimeDetail = payload.overtimeDetail ?? "";
+    }
+
+    if (hasOwn(payload, "isrWithholdingMxn")) {
+      data.isrWithholdingMxn = normalizeMoney(payload.isrWithholdingMxn);
+    }
+
+    if (hasOwn(payload, "imssWithholdingMxn")) {
+      data.imssWithholdingMxn = normalizeMoney(payload.imssWithholdingMxn);
+    }
+
+    if (hasOwn(payload, "payrollStampedByAraceli")) {
+      data.payrollStampedByAraceli = Boolean(payload.payrollStampedByAraceli);
+    }
+
+    if (hasOwn(payload, "finalPaymentApprovedByEmrt")) {
+      data.finalPaymentApprovedByEmrt = Boolean(payload.finalPaymentApprovedByEmrt);
+    }
+
+    if (hasOwn(payload, "reviewedByJnls")) {
+      data.reviewedByJnls = Boolean(payload.reviewedByJnls);
     }
 
     return data;

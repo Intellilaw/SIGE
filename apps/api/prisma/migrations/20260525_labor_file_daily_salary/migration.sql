@@ -1,0 +1,2 @@
+ALTER TABLE "LaborFile"
+  ADD COLUMN "dailySalaryMxn" DECIMAL NOT NULL DEFAULT 0;

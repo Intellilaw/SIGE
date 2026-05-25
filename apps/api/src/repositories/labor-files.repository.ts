@@ -169,6 +169,11 @@ function normalizeText(value?: string | null) {
   return (value ?? "").trim();
 }
 
+function normalizeMoney(value?: number | null) {
+  const numeric = Number(value ?? 0);
+  return new Prisma.Decimal(Number.isFinite(numeric) ? Math.max(0, numeric) : 0);
+}
+
 function normalizeRoleText(value?: string | null) {
   return normalizeText(value)
     .normalize("NFD")
@@ -535,6 +540,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       where: { id: laborFileId },
       data: {
         hireDate: payload.hireDate ? toDate(payload.hireDate) ?? undefined : undefined,
+        dailySalaryMxn: payload.dailySalaryMxn === undefined ? undefined : normalizeMoney(payload.dailySalaryMxn),
         personalPhone: payload.personalPhone === undefined ? undefined : normalizeText(payload.personalPhone) || null,
         personalEmail: payload.personalEmail === undefined ? undefined : normalizeText(payload.personalEmail) || null,
         emergencyContactName: payload.emergencyContactName === undefined ? undefined : normalizeText(payload.emergencyContactName) || null,
@@ -1104,6 +1110,9 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       if (payload.hireDate !== undefined) {
         laborFile.hireDate = normalizeDateKey(payload.hireDate) ?? laborFile.hireDate;
       }
+      if (payload.dailySalaryMxn !== undefined) {
+        laborFile.dailySalaryMxn = normalizeMoney(payload.dailySalaryMxn).toNumber();
+      }
       if (payload.personalPhone !== undefined) {
         laborFile.personalPhone = normalizeText(payload.personalPhone) || null;
       }
@@ -1648,6 +1657,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       status: record.status,
       employmentStatus: record.employmentStatus,
       hireDate: localDate(record.hireDate),
+      dailySalaryMxn: new Prisma.Decimal(record.dailySalaryMxn ?? 0),
       employmentEndedAt: record.employmentEndedAt ? localDate(record.employmentEndedAt) : null,
       notes: record.notes ?? null,
       documents: record.documents.map((document) => this.mapDocumentRecord(document)),

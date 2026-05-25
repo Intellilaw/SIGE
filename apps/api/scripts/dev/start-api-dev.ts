@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { spawn } from "node:child_process";
+import { watch } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -87,12 +88,70 @@ function run(command: string, args: string[]) {
 }
 
 async function ensureLocalPrismaEngineIsEnabled() {
-  const generatedClient = await fs.readFile(generatedPrismaClientPath, "utf8");
+  let generatedClient: string;
+  try {
+    generatedClient = await fs.readFile(generatedPrismaClientPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
   const patchedClient = generatedClient.replaceAll('"copyEngine": false', '"copyEngine": true');
 
   if (patchedClient !== generatedClient) {
     await fs.writeFile(generatedPrismaClientPath, patchedClient);
+    console.log("[dev] Re-enabled local Prisma query engine.");
   }
+}
+
+function startLocalPrismaEngineGuard() {
+  let timeout: NodeJS.Timeout | null = null;
+  let isPatching = false;
+
+  const patch = () => {
+    if (isPatching) {
+      return;
+    }
+
+    isPatching = true;
+    void ensureLocalPrismaEngineIsEnabled()
+      .catch((error: unknown) => {
+        console.error(error);
+      })
+      .finally(() => {
+        isPatching = false;
+      });
+  };
+
+  const schedulePatch = () => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+
+    timeout = setTimeout(patch, 100);
+    timeout.unref();
+  };
+
+  const watcher = watch(path.dirname(generatedPrismaClientPath), (eventType, filename) => {
+    if (eventType === "change" && filename === path.basename(generatedPrismaClientPath)) {
+      schedulePatch();
+    }
+  });
+  watcher.unref();
+
+  const interval = setInterval(patch, 1500);
+  interval.unref();
+
+  return () => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    clearInterval(interval);
+    watcher.close();
+  };
 }
 
 async function findPgCtl() {
@@ -157,6 +216,7 @@ async function main() {
 
   await run(process.execPath, [prismaCliPath, "generate"]);
   await ensureLocalPrismaEngineIsEnabled();
+  const stopPrismaGuard = startLocalPrismaEngineGuard();
   const api = startApi();
 
   if (target && pgCtlPath) {
@@ -173,6 +233,7 @@ async function main() {
   }
 
   const stop = () => {
+    stopPrismaGuard();
     api.kill();
   };
 

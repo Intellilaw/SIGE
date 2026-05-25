@@ -11,6 +11,7 @@ import type {
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  GeneralExpensePayrollEntry,
   Holiday,
   InternalContract,
   InternalContractCollaborator,
@@ -845,6 +846,7 @@ export function mapLaborFile(record: {
   status: string;
   employmentStatus: string;
   hireDate: Date;
+  dailySalaryMxn: Prisma.Decimal | number | null;
   employmentEndedAt: Date | null;
   notes: string | null;
   documents: Array<Parameters<typeof mapLaborFileDocument>[0]>;
@@ -876,6 +878,7 @@ export function mapLaborFile(record: {
     status: record.status as LaborFile["status"],
     employmentStatus: record.employmentStatus as LaborFile["employmentStatus"],
     hireDate,
+    dailySalaryMxn: Number(record.dailySalaryMxn ?? 0) || undefined,
     employmentEndedAt,
     notes: record.notes ?? undefined,
     documents,
@@ -1327,6 +1330,108 @@ export function mapGeneralExpense(record: {
     reviewedByJnls: record.reviewedByJnls,
     paid: record.paid,
     paidAt: record.paidAt?.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+function getPayrollDailySalaryRiStatus(laborFile?: {
+  dailySalaryMxn: Prisma.Decimal | number | null;
+  documents?: Array<{ documentType: string }>;
+} | null) {
+  if (!laborFile) {
+    return {
+      verified: false,
+      detail: "Sin expediente laboral vinculado."
+    };
+  }
+
+  const dailySalaryMxn = Number(laborFile.dailySalaryMxn ?? 0);
+  if (!dailySalaryMxn) {
+    return {
+      verified: false,
+      detail: "Falta salario diario en Expedientes Laborales."
+    };
+  }
+
+  const hasEmploymentContract = Boolean(laborFile.documents?.some((document) => document.documentType === "EMPLOYMENT_CONTRACT"));
+  if (!hasEmploymentContract) {
+    return {
+      verified: false,
+      detail: "Expedientes Laborales no tiene contrato laboral cargado."
+    };
+  }
+
+  return {
+    verified: false,
+    detail: "Contrato laboral cargado; falta salario contractual verificable."
+  };
+}
+
+export function mapGeneralExpensePayrollEntry(record: {
+  id: string;
+  year: number;
+  month: number;
+  half: number;
+  laborFileId: string | null;
+  employeeName: string;
+  dailySalaryMxn: Prisma.Decimal;
+  laborFile?: {
+    employeeName: string;
+    dailySalaryMxn: Prisma.Decimal | number | null;
+    documents?: Array<{
+      documentType: string;
+    }>;
+  } | null;
+  grossSalaryMxn: Prisma.Decimal;
+  punctualityBonusMxn: Prisma.Decimal;
+  attendanceBonusMxn: Prisma.Decimal;
+  overtimeHours: Prisma.Decimal;
+  overtimeDetail: string;
+  isrWithholdingMxn: Prisma.Decimal;
+  imssWithholdingMxn: Prisma.Decimal;
+  payrollStampedByAraceli: boolean;
+  finalPaymentApprovedByEmrt: boolean;
+  reviewedByJnls: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}): GeneralExpensePayrollEntry {
+  const employeeName = record.laborFile?.employeeName ?? record.employeeName;
+  const dailySalaryMxn = Number(record.laborFile?.dailySalaryMxn ?? record.dailySalaryMxn);
+  const dailySalaryRiStatus = getPayrollDailySalaryRiStatus(record.laborFile);
+  const grossSalaryMxn = Number(record.grossSalaryMxn);
+  const punctualityBonusMxn = Number(record.punctualityBonusMxn);
+  const attendanceBonusMxn = Number(record.attendanceBonusMxn);
+  const overtimeHours = Number(record.overtimeHours);
+  const isrWithholdingMxn = Number(record.isrWithholdingMxn);
+  const imssWithholdingMxn = Number(record.imssWithholdingMxn);
+  const overtimeHourlyRateMxn = dailySalaryMxn / 8;
+  const overtimeTotalMxn = overtimeHourlyRateMxn * overtimeHours;
+
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    half: (record.half === 2 ? 2 : 1) as GeneralExpensePayrollEntry["half"],
+    laborFileId: record.laborFileId ?? undefined,
+    employeeName,
+    dailySalaryMxn,
+    laborFileDailySalaryMxn: record.laborFile ? Number(record.laborFile.dailySalaryMxn ?? 0) : undefined,
+    dailySalaryRiVerified: dailySalaryRiStatus.verified,
+    dailySalaryRiVerificationDetail: dailySalaryRiStatus.detail,
+    grossSalaryMxn,
+    punctualityBonusMxn,
+    attendanceBonusMxn,
+    overtimeHourlyRateMxn,
+    overtimeHours,
+    overtimeTotalMxn,
+    overtimeDetail: record.overtimeDetail,
+    isrWithholdingMxn,
+    imssWithholdingMxn,
+    netDepositMxn: grossSalaryMxn + punctualityBonusMxn + attendanceBonusMxn + overtimeTotalMxn - isrWithholdingMxn - imssWithholdingMxn,
+    payrollStampedByAraceli: record.payrollStampedByAraceli,
+    finalPaymentApprovedByEmrt: record.finalPaymentApprovedByEmrt,
+    reviewedByJnls: record.reviewedByJnls,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

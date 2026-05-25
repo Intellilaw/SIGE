@@ -1856,6 +1856,39 @@ textarea {
   min-height: 110px;
 }
 
+.form-field .money-input-control {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d9e2ec;
+  border-radius: 14px;
+  display: flex;
+  min-width: 0;
+}
+
+.form-field .money-input-prefix {
+  color: #52657a;
+  flex: 0 0 auto;
+  font-size: 1rem;
+  font-weight: 800;
+  padding-left: 14px;
+}
+
+.form-field .money-input-control input {
+  border: 0;
+  border-radius: 0 14px 14px 0;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.form-field .money-input-control input:focus {
+  outline: none;
+}
+
+.form-field .money-input-control:focus-within {
+  border-color: #9fb7ff;
+  box-shadow: 0 0 0 3px rgba(75, 111, 255, 0.12);
+}
+
 .checkbox-field {
   align-content: end;
 }
@@ -3047,8 +3080,22 @@ textarea {
 }
 
 .general-expense-table thead th,
-.general-expense-emrt-table thead th {
+.general-expense-emrt-table thead th,
+.general-expense-payroll-table thead th {
   background: #eef4fb;
+}
+
+.general-expense-payroll-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.general-expense-payroll-table-wrapper {
+  max-height: 58vh;
+}
+
+.general-expense-payroll-table {
+  min-width: 2300px;
 }
 
 .general-expense-input {
@@ -3068,6 +3115,16 @@ textarea {
 
 .general-expense-number-input {
   min-width: 130px;
+}
+
+.general-expense-payroll-employee-input {
+  min-width: 230px;
+}
+
+.general-expense-payroll-detail-input {
+  min-width: 260px;
+  min-height: 54px;
+  resize: vertical;
 }
 
 .general-expense-currency-input {
@@ -3104,6 +3161,82 @@ textarea {
 .general-expense-readonly-cell.is-disabled {
   background: #f5f7fa;
   color: #94a3b8;
+}
+
+.general-expense-readonly-cell.is-payroll-total {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.general-expense-payroll-ri-salary {
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 250px;
+}
+
+.general-expense-payroll-ri-salary.is-match {
+  border-color: rgba(15, 118, 110, 0.24);
+}
+
+.general-expense-payroll-ri-salary.is-mismatch {
+  border-color: rgba(180, 35, 24, 0.2);
+}
+
+.general-expense-payroll-ri-salary-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.general-expense-payroll-ri-salary .ri-badge {
+  gap: 4px;
+  padding: 2px 6px 2px 2px;
+}
+
+.general-expense-payroll-ri-salary .ri-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.general-expense-payroll-ri-salary .ri-mark::before {
+  inset: 4px;
+}
+
+.general-expense-payroll-ri-salary .ri-mark-core,
+.general-expense-payroll-ri-salary .ri-badge-id {
+  font-size: 0.56rem;
+}
+
+.general-expense-payroll-ri-icon {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+  font-size: 0.84rem;
+  font-weight: 950;
+}
+
+.general-expense-payroll-ri-icon.is-match {
+  background: rgba(15, 118, 110, 0.14);
+  color: #0f766e;
+}
+
+.general-expense-payroll-ri-icon.is-match::before {
+  content: "\2713";
+}
+
+.general-expense-payroll-ri-icon.is-mismatch {
+  background: rgba(180, 35, 24, 0.12);
+  color: #b42318;
+}
+
+.general-expense-payroll-ri-icon.is-mismatch::before {
+  content: "\00d7";
 }
 
 .general-expense-vat-stack {
@@ -8731,6 +8864,93 @@ textarea {
 .labor-file-profile-grid strong {
   color: #1f354f;
   overflow-wrap: anywhere;
+}
+
+.labor-file-profile-grid .labor-file-profile-salary-card {
+  border-color: rgba(180, 35, 24, 0.18);
+}
+
+.labor-file-profile-grid .labor-file-profile-salary-card.is-match {
+  border-color: rgba(15, 118, 110, 0.24);
+}
+
+.labor-file-profile-card-head,
+.labor-file-salary-value {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.labor-file-ri-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.labor-file-profile-grid .labor-file-ri-badge .ri-badge {
+  gap: 4px;
+  padding: 2px 6px 2px 2px;
+  color: #102a43;
+}
+
+.labor-file-profile-grid .labor-file-ri-badge .ri-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.labor-file-profile-grid .labor-file-ri-badge .ri-mark::before {
+  inset: 4px;
+}
+
+.labor-file-profile-grid .labor-file-ri-badge .ri-mark-core {
+  color: #f8fafc;
+  font-size: 0.56rem;
+}
+
+.labor-file-profile-grid .labor-file-ri-badge .ri-badge-id {
+  color: #102a43;
+  font-size: 0.56rem;
+}
+
+.labor-file-ri-validation-icon {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+  font-size: 0.84rem;
+  font-weight: 950;
+}
+
+.labor-file-ri-validation-icon.is-match {
+  background: rgba(15, 118, 110, 0.14);
+  color: #0f766e;
+}
+
+.labor-file-ri-validation-icon.is-match::before {
+  content: "\2713";
+}
+
+.labor-file-ri-validation-icon.is-mismatch {
+  background: rgba(180, 35, 24, 0.12);
+  color: #b42318;
+}
+
+.labor-file-ri-validation-icon.is-mismatch::before {
+  content: "\00d7";
+}
+
+.labor-file-profile-grid .labor-file-ri-validation-copy {
+  color: #b42318;
+  font-weight: 850;
+}
+
+.labor-file-profile-grid .labor-file-ri-validation-copy.is-match {
+  color: #0f766e;
 }
 
 .labor-file-profile-wide-card {

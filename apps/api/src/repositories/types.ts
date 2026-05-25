@@ -13,6 +13,8 @@ import type {
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  GeneralExpensePayrollEntry,
+  GeneralExpensePayrollEmployeeOption,
   Holiday,
   HolidayAuthorityShortName,
   InternalContract,
@@ -408,6 +410,13 @@ export interface GeneralExpenseCreateRecord {
   month?: number;
 }
 
+export interface GeneralExpensePayrollCreateRecord {
+  year?: number;
+  month?: number;
+  half?: GeneralExpensePayrollEntry["half"];
+  laborFileId?: string | null;
+}
+
 export interface GeneralExpenseUpdateRecord {
   detail?: string;
   amountMxn?: number;
@@ -431,6 +440,20 @@ export interface GeneralExpenseUpdateRecord {
   paidAt?: string | null;
 }
 
+export interface GeneralExpensePayrollUpdateRecord {
+  laborFileId?: string | null;
+  grossSalaryMxn?: number;
+  punctualityBonusMxn?: number;
+  attendanceBonusMxn?: number;
+  overtimeHours?: number;
+  overtimeDetail?: string;
+  isrWithholdingMxn?: number;
+  imssWithholdingMxn?: number;
+  payrollStampedByAraceli?: boolean;
+  finalPaymentApprovedByEmrt?: boolean;
+  reviewedByJnls?: boolean;
+}
+
 export interface GeneralExpenseActor extends Pick<
   AuthUser,
   "email" | "username" | "displayName" | "shortName" | "role" | "legacyRole" | "team" | "legacyTeam" | "specificRole" | "permissions"
@@ -446,6 +469,20 @@ export interface GeneralExpensesRepository {
     month: number;
     copied: number;
   }>;
+  copyPayrollToNextMonth(year: number, month: number): Promise<{
+    year: number;
+    month: number;
+    copied: number;
+  }>;
+  listPayrollEmployeeOptions(): Promise<GeneralExpensePayrollEmployeeOption[]>;
+  listPayrollEntries(year: number, month: number): Promise<GeneralExpensePayrollEntry[]>;
+  createPayrollEntry(payload?: GeneralExpensePayrollCreateRecord): Promise<GeneralExpensePayrollEntry>;
+  updatePayrollEntry(
+    payrollEntryId: string,
+    payload: GeneralExpensePayrollUpdateRecord,
+    actor: GeneralExpenseActor
+  ): Promise<GeneralExpensePayrollEntry | null>;
+  deletePayrollEntry(payrollEntryId: string): Promise<void>;
 }
 
 export interface HolidayWriteRecord {

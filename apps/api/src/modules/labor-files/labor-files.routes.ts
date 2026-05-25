@@ -35,6 +35,7 @@ const globalVacationDayIdParamsSchema = z.object({
 
 const updateLaborFileSchema = z.object({
   hireDate: z.string().min(10).max(30).optional(),
+  dailySalaryMxn: z.number().nonnegative().nullable().optional(),
   personalPhone: z.string().nullable().optional(),
   personalEmail: z.string().email().or(z.literal("")).nullable().optional(),
   emergencyContactName: z.string().nullable().optional(),

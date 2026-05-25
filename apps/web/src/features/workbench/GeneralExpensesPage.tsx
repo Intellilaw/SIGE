@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GeneralExpense } from "@sige/contracts";
+import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpensePayrollEntry } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
+import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 
-type ActiveTab = "registro" | "emrt";
+type ActiveTab = "registro" | "payroll" | "emrt";
 type ExpenseDraftField =
   | "detail"
   | "amountMxn"
@@ -15,6 +16,17 @@ type ExpenseDraftField =
   | "pctTaxCompliance";
 
 type ExpenseDraftMap = Record<string, Partial<Record<ExpenseDraftField, string>>>;
+
+type PayrollDraftField =
+  | "grossSalaryMxn"
+  | "punctualityBonusMxn"
+  | "attendanceBonusMxn"
+  | "overtimeHours"
+  | "overtimeDetail"
+  | "isrWithholdingMxn"
+  | "imssWithholdingMxn";
+
+type PayrollDraftMap = Record<string, Partial<Record<PayrollDraftField, string>>>;
 
 type GeneralExpensePatchPayload = {
   detail?: string;
@@ -44,6 +56,25 @@ type CopyNextMonthResult = {
   month: number;
   copied: number;
 };
+
+type PayrollPatchPayload = {
+  laborFileId?: string | null;
+  grossSalaryMxn?: number;
+  punctualityBonusMxn?: number;
+  attendanceBonusMxn?: number;
+  overtimeHours?: number;
+  overtimeDetail?: string;
+  isrWithholdingMxn?: number;
+  imssWithholdingMxn?: number;
+  payrollStampedByAraceli?: boolean;
+  finalPaymentApprovedByEmrt?: boolean;
+  reviewedByJnls?: boolean;
+};
+
+type PayrollLocalPatchPayload = PayrollPatchPayload & Partial<Pick<
+  GeneralExpensePayrollEntry,
+  "employeeName" | "dailySalaryMxn" | "laborFileDailySalaryMxn" | "dailySalaryRiVerified" | "dailySalaryRiVerificationDetail"
+>>;
 
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
 const MONTH_NAMES = [
@@ -76,6 +107,14 @@ const PCT_DRAFT_FIELDS: ExpenseDraftField[] = [
 ];
 const PAYMENT_METHOD_OPTIONS: GeneralExpense["paymentMethod"][] = ["Transferencia", "Efectivo"];
 const BANK_OPTIONS: NonNullable<GeneralExpense["bank"]>[] = ["Banamex", "HSBC"];
+const PAYROLL_MONEY_FIELDS = [
+  "grossSalaryMxn",
+  "punctualityBonusMxn",
+  "attendanceBonusMxn",
+  "isrWithholdingMxn",
+  "imssWithholdingMxn"
+] as const;
+const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -125,6 +164,47 @@ function formatEditableNumber(value: number) {
   return Number.isFinite(value) ? String(value) : "0";
 }
 
+function getPayrollDailySalaryRiValidation(
+  entry: GeneralExpensePayrollEntry,
+  employeeOption?: GeneralExpensePayrollEmployeeOption
+) {
+  if (!entry.laborFileId) {
+    return {
+      status: "mismatch" as const,
+      label: "No verificado",
+      detail: "Sin expediente laboral vinculado."
+    };
+  }
+
+  const payrollDailySalary = Number(entry.dailySalaryMxn || 0);
+  const laborFileDailySalary = Number(employeeOption?.dailySalaryMxn ?? entry.laborFileDailySalaryMxn ?? entry.dailySalaryMxn ?? 0);
+
+  if (!payrollDailySalary || !laborFileDailySalary || Math.abs(payrollDailySalary - laborFileDailySalary) > 0.05) {
+    return {
+      status: "mismatch" as const,
+      label: "No coincide",
+      detail: "No coincide con el salario diario de Expedientes Laborales."
+    };
+  }
+
+  const riVerified = Boolean(employeeOption?.dailySalaryRiVerified ?? entry.dailySalaryRiVerified);
+  if (!riVerified) {
+    return {
+      status: "mismatch" as const,
+      label: "No verificado",
+      detail: employeeOption?.dailySalaryRiVerificationDetail ??
+        entry.dailySalaryRiVerificationDetail ??
+        "El salario de Expedientes Laborales aun no esta verificado contra contrato."
+    };
+  }
+
+  return {
+    status: "match" as const,
+    label: "Verificado",
+    detail: "Coincide con Expedientes Laborales y el contrato laboral."
+  };
+}
+
 function clampPercentage(value?: number | null) {
   const numeric = Number(value ?? 0);
   if (!Number.isFinite(numeric)) {
@@ -151,6 +231,22 @@ function isFinanceUser(input: {
   legacyTeam?: string;
 }) {
   return input.team === "FINANCE" || normalizeComparableText(input.legacyTeam) === "finanzas";
+}
+
+function isAraceliLozano(input: {
+  username?: string;
+  displayName?: string;
+  email?: string;
+  team?: string;
+  legacyTeam?: string;
+}) {
+  const normalizedEmail = normalizeComparableText(input.email);
+  return isFinanceUser(input) && (
+    normalizeComparableText(input.username) === "araceli lozano" ||
+    normalizeComparableText(input.displayName) === "araceli lozano" ||
+    normalizedEmail.startsWith("araceli lozano") ||
+    normalizedEmail.startsWith("araceli.lozano")
+  );
 }
 
 function isEduardoRusconi(input: {
@@ -339,6 +435,30 @@ function replaceExpense(items: GeneralExpense[], updated: GeneralExpense) {
   return items.map((item) => (item.id === updated.id ? updated : item));
 }
 
+function replacePayrollEntry(items: GeneralExpensePayrollEntry[], updated: GeneralExpensePayrollEntry) {
+  return items.map((item) => (item.id === updated.id ? updated : item));
+}
+
+function applyPayrollCalculations(entry: GeneralExpensePayrollEntry): GeneralExpensePayrollEntry {
+  const overtimeHourlyRateMxn = Number(entry.dailySalaryMxn || 0) / 8;
+  const overtimeTotalMxn = overtimeHourlyRateMxn * Number(entry.overtimeHours || 0);
+  const netDepositMxn = (
+    Number(entry.grossSalaryMxn || 0) +
+    Number(entry.punctualityBonusMxn || 0) +
+    Number(entry.attendanceBonusMxn || 0) +
+    overtimeTotalMxn -
+    Number(entry.isrWithholdingMxn || 0) -
+    Number(entry.imssWithholdingMxn || 0)
+  );
+
+  return {
+    ...entry,
+    overtimeHourlyRateMxn,
+    overtimeTotalMxn,
+    netDepositMxn
+  };
+}
+
 function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayload): GeneralExpense {
   const next: GeneralExpense = {
     ...expense,
@@ -364,22 +484,48 @@ function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayl
   return next;
 }
 
+function applyPayrollLocalPatch(
+  entry: GeneralExpensePayrollEntry,
+  patch: PayrollLocalPatchPayload
+): GeneralExpensePayrollEntry {
+  const next: GeneralExpensePayrollEntry = {
+    ...entry,
+    ...patch,
+    laborFileId: patch.laborFileId === null ? undefined : patch.laborFileId ?? entry.laborFileId
+  };
+
+  return applyPayrollCalculations(next);
+}
+
 export function GeneralExpensesPage() {
   const { user } = useAuth();
   const now = new Date();
   const expensePatchSequenceRef = useRef<Record<string, number>>({});
+  const payrollPatchSequenceRef = useRef<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState<ActiveTab>("registro");
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [records, setRecords] = useState<GeneralExpense[]>([]);
+  const [payrollEntries, setPayrollEntries] = useState<GeneralExpensePayrollEntry[]>([]);
+  const [payrollEmployeeOptions, setPayrollEmployeeOptions] = useState<GeneralExpensePayrollEmployeeOption[]>([]);
   const [drafts, setDrafts] = useState<ExpenseDraftMap>({});
+  const [payrollDrafts, setPayrollDrafts] = useState<PayrollDraftMap>({});
   const [loading, setLoading] = useState(true);
+  const [loadingPayroll, setLoadingPayroll] = useState(true);
+  const [loadingPayrollEmployees, setLoadingPayrollEmployees] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedSummaryDate, setCopiedSummaryDate] = useState("");
 
   const canRead = hasPermission(user?.permissions, "general-expenses:read") || hasPermission(user?.permissions, "general-expenses:write");
   const canWrite = hasPermission(user?.permissions, "general-expenses:write");
   const canApprove = Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN");
+  const canStampPayroll = Boolean(user && isAraceliLozano({
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email,
+    team: user.team,
+    legacyTeam: user.legacyTeam
+  }));
   const canPay = Boolean(user && isFinanceUser({ team: user.team, legacyTeam: user.legacyTeam }));
   const canEditEmrtDate = Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
   const canReviewJnlsFlag = Boolean(user && canReviewJnls({
@@ -412,9 +558,57 @@ export function GeneralExpensesPage() {
     }
   }
 
+  async function loadPayrollEntries() {
+    if (!canRead) {
+      setPayrollEntries([]);
+      setLoadingPayroll(false);
+      return;
+    }
+
+    setLoadingPayroll(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await apiGet<GeneralExpensePayrollEntry[]>(`/general-expenses/payroll?year=${selectedYear}&month=${selectedMonth}`);
+      setPayrollEntries(response);
+      setPayrollDrafts({});
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setLoadingPayroll(false);
+    }
+  }
+
+  async function loadPayrollEmployeeOptions() {
+    if (!canRead) {
+      setPayrollEmployeeOptions([]);
+      setLoadingPayrollEmployees(false);
+      return;
+    }
+
+    setLoadingPayrollEmployees(true);
+
+    try {
+      const response = await apiGet<GeneralExpensePayrollEmployeeOption[]>("/general-expenses/payroll-employees");
+      setPayrollEmployeeOptions(response);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setLoadingPayrollEmployees(false);
+    }
+  }
+
   useEffect(() => {
     void loadRecords();
   }, [canRead, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    void loadPayrollEntries();
+  }, [canRead, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    void loadPayrollEmployeeOptions();
+  }, [canRead]);
 
   function setDraft(expenseId: string, field: ExpenseDraftField, value: string) {
     setDrafts((current) => ({
@@ -452,8 +646,44 @@ export function GeneralExpensesPage() {
     fields.forEach((field) => clearDraft(expenseId, field));
   }
 
+  function setPayrollDraft(entryId: string, field: PayrollDraftField, value: string) {
+    setPayrollDrafts((current) => ({
+      ...current,
+      [entryId]: {
+        ...current[entryId],
+        [field]: value
+      }
+    }));
+  }
+
+  function clearPayrollDraft(entryId: string, field: PayrollDraftField) {
+    setPayrollDrafts((current) => {
+      if (!current[entryId]) {
+        return current;
+      }
+
+      const nextFields = { ...current[entryId] };
+      delete nextFields[field];
+
+      if (Object.keys(nextFields).length === 0) {
+        const next = { ...current };
+        delete next[entryId];
+        return next;
+      }
+
+      return {
+        ...current,
+        [entryId]: nextFields
+      };
+    });
+  }
+
   function updateExpenseLocal(expenseId: string, patch: GeneralExpensePatchPayload) {
     setRecords((items) => items.map((item) => (item.id === expenseId ? applyLocalPatch(item, patch) : item)));
+  }
+
+  function updatePayrollEntryLocal(entryId: string, patch: PayrollLocalPatchPayload) {
+    setPayrollEntries((items) => items.map((item) => (item.id === entryId ? applyPayrollLocalPatch(item, patch) : item)));
   }
 
   async function persistExpensePatch(
@@ -517,6 +747,70 @@ export function GeneralExpensesPage() {
     );
   }
 
+  async function persistPayrollPatch(
+    entryId: string,
+    payload: PayrollPatchPayload,
+    localPatch: PayrollLocalPatchPayload = payload
+  ) {
+    const currentEntry = payrollEntries.find((entry) => entry.id === entryId);
+    const payloadKeys = Object.keys(payload);
+    const isFinalApprovalOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt");
+
+    if (currentEntry?.finalPaymentApprovedByEmrt && !isFinalApprovalOnlyPatch) {
+      return;
+    }
+
+    const canApplyFinalApprovalPatch = Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt") && canApprove;
+    const canApplyStampPatch = Object.prototype.hasOwnProperty.call(payload, "payrollStampedByAraceli") && canStampPayroll;
+    const canApplyJnlsPatch = Object.prototype.hasOwnProperty.call(payload, "reviewedByJnls") && canReviewJnlsFlag;
+
+    if (!canWrite && !canApplyFinalApprovalPatch && !canApplyStampPatch && !canApplyJnlsPatch) {
+      return;
+    }
+
+    updatePayrollEntryLocal(entryId, localPatch);
+    const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
+    payrollPatchSequenceRef.current[entryId] = requestSequence;
+
+    try {
+      const updated = await apiPatch<GeneralExpensePayrollEntry>(`/general-expenses/payroll/${entryId}`, payload);
+      if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+        return;
+      }
+
+      setPayrollEntries((items) => replacePayrollEntry(items, updated));
+    } catch (error) {
+      if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+        return;
+      }
+
+      setErrorMessage(toErrorMessage(error));
+      await loadPayrollEntries();
+    }
+  }
+
+  async function flushPayrollDraftField(entryId: string, field: PayrollDraftField) {
+    const rawValue = payrollDrafts[entryId]?.[field];
+    if (rawValue === undefined) {
+      return;
+    }
+
+    clearPayrollDraft(entryId, field);
+
+    if (field === "overtimeDetail") {
+      await persistPayrollPatch(entryId, { [field]: rawValue } as PayrollPatchPayload, { [field]: rawValue } as PayrollPatchPayload);
+      return;
+    }
+
+    const numericValue = Math.max(0, Number(rawValue || 0));
+
+    await persistPayrollPatch(
+      entryId,
+      { [field]: numericValue } as PayrollPatchPayload,
+      { [field]: numericValue } as PayrollPatchPayload
+    );
+  }
+
   async function handleAddRow() {
     if (!canWrite) {
       return;
@@ -528,6 +822,23 @@ export function GeneralExpensesPage() {
         month: selectedMonth
       });
       setRecords((items) => [...items, created]);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
+  async function handleAddPayrollEntry(half: GeneralExpensePayrollEntry["half"]) {
+    if (!canWrite) {
+      return;
+    }
+
+    try {
+      const created = await apiPost<GeneralExpensePayrollEntry>("/general-expenses/payroll", {
+        year: selectedYear,
+        month: selectedMonth,
+        half
+      });
+      setPayrollEntries((items) => [...items, created]);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     }
@@ -576,6 +887,49 @@ export function GeneralExpensesPage() {
       });
 
       window.alert(`${result.copied} gastos copiados exitosamente a ${getMonthName(result.month)}.`);
+      if (window.confirm("Ir al mes siguiente?")) {
+        setSelectedYear(result.year);
+        setSelectedMonth(result.month);
+      }
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
+  async function handleCopyPayrollToNextMonth() {
+    if (!canWrite) {
+      return;
+    }
+
+    if (payrollEntries.length === 0) {
+      window.alert("No hay registros de nómina para copiar.");
+      return;
+    }
+
+    const nextMonthDate = new Date(selectedYear, selectedMonth, 1);
+    const targetYear = nextMonthDate.getFullYear();
+    const targetMonth = nextMonthDate.getMonth() + 1;
+
+    const confirmed = window.confirm(
+      `Copiar ${payrollEntries.length} registros de nómina de ${getMonthName(selectedMonth)}/${selectedYear} a ${getMonthName(targetMonth)}/${targetYear}?\n\n` +
+      "Se copiarán empleados, salarios, bonos y retenciones. Las horas extra y autorizaciones EMRT se reiniciarán para evitar pagos accidentales."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const result = await apiPost<CopyNextMonthResult>("/general-expenses/payroll/copy-to-next-month", {
+        year: selectedYear,
+        month: selectedMonth
+      });
+
+      if (result.copied === 0) {
+        window.alert("No se copiaron registros porque este mes no tiene nómina capturada.");
+        return;
+      }
+
+      window.alert(`${result.copied} registros de nómina copiados exitosamente a ${getMonthName(result.month)}.`);
       if (window.confirm("Ir al mes siguiente?")) {
         setSelectedYear(result.year);
         setSelectedMonth(result.month);
@@ -700,6 +1054,228 @@ export function GeneralExpensesPage() {
     [emrtDailyTotals]
   );
 
+  const payrollEntriesByHalf = useMemo(() => ({
+    1: payrollEntries.filter((entry) => entry.half === 1),
+    2: payrollEntries.filter((entry) => entry.half === 2)
+  }), [payrollEntries]);
+
+  const payrollEmployeeOptionsById = useMemo(() => new Map<string, GeneralExpensePayrollEmployeeOption>(
+    payrollEmployeeOptions.map((option): [string, GeneralExpensePayrollEmployeeOption] => [option.laborFileId, option])
+  ), [payrollEmployeeOptions]);
+
+  function handlePayrollEmployeeChange(entry: GeneralExpensePayrollEntry, laborFileId: string) {
+    const selectedEmployee = payrollEmployeeOptionsById.get(laborFileId);
+    const localPatch: PayrollLocalPatchPayload = selectedEmployee
+      ? {
+          laborFileId,
+          employeeName: selectedEmployee.employeeName,
+          dailySalaryMxn: selectedEmployee.dailySalaryMxn,
+          laborFileDailySalaryMxn: selectedEmployee.dailySalaryMxn,
+          dailySalaryRiVerified: selectedEmployee.dailySalaryRiVerified,
+          dailySalaryRiVerificationDetail: selectedEmployee.dailySalaryRiVerificationDetail
+        }
+      : {
+          laborFileId: null,
+          employeeName: "",
+          dailySalaryMxn: 0,
+          laborFileDailySalaryMxn: undefined,
+          dailySalaryRiVerified: false,
+          dailySalaryRiVerificationDetail: "Sin expediente laboral vinculado."
+        };
+
+    void persistPayrollPatch(entry.id, { laborFileId: selectedEmployee ? laborFileId : null }, localPatch);
+  }
+
+  function renderPayrollMoneyInput(
+    entry: GeneralExpensePayrollEntry,
+    field: (typeof PAYROLL_MONEY_FIELDS)[number]
+  ) {
+    return (
+      <div className="general-expense-currency-input">
+        <span aria-hidden="true">$</span>
+        <input
+          className="general-expense-input general-expense-number-input"
+          type="number"
+          min="0"
+          step="0.01"
+          value={payrollDrafts[entry.id]?.[field] ?? formatEditableNumber(Number(entry[field] || 0))}
+          onChange={(event) => setPayrollDraft(entry.id, field, event.target.value)}
+          onBlur={() => void flushPayrollDraftField(entry.id, field)}
+          disabled={!canWrite || entry.finalPaymentApprovedByEmrt}
+        />
+      </div>
+    );
+  }
+
+  function renderPayrollTable(half: GeneralExpensePayrollEntry["half"], title: string) {
+    const rows = payrollEntriesByHalf[half];
+
+    return (
+      <section className="panel">
+        <div className="panel-header">
+          <h2>{title}</h2>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void handleAddPayrollEntry(half)}
+            disabled={!canWrite}
+          >
+            + Agregar fila
+          </button>
+        </div>
+
+        <div className="lead-table-shell">
+          <div className="lead-table-wrapper general-expense-payroll-table-wrapper">
+            <table className="lead-table general-expense-payroll-table">
+              <thead>
+                <tr>
+                  <th>Nombre de empleado</th>
+                  <th>Salario diario</th>
+                  <th>Salario bruto</th>
+                  <th>Bono de puntualidad</th>
+                  <th>Bono de asistencia</th>
+                  <th>Horas extras (valor)</th>
+                  <th>Número de horas extras</th>
+                  <th>Total horas extras</th>
+                  <th>Detalle de horas extras</th>
+                  <th>Retenciones ISR</th>
+                  <th>Retenciones IMSS</th>
+                  <th>Depósito neto</th>
+                  <th>Confirmo que la nómina está timbrada (Araceli Lozano)</th>
+                  <th>Pago autorizado EMRT</th>
+                  <th>Aprobado por JNLS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingPayroll ? (
+                  <tr>
+                    <td colSpan={15} className="centered-inline-message">
+                      Cargando nómina...
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={15} className="centered-inline-message">
+                      Sin registros de nómina en esta quincena.
+                    </td>
+                  </tr>
+                ) : rows.map((entry) => {
+                  const employeeOption = entry.laborFileId ? payrollEmployeeOptionsById.get(entry.laborFileId) : undefined;
+                  const dailySalaryValidation = getPayrollDailySalaryRiValidation(entry, employeeOption);
+
+                  return (
+                    <tr key={entry.id}>
+                    <td>
+                      <select
+                        className="general-expense-input general-expense-payroll-employee-input"
+                        value={entry.laborFileId ?? ""}
+                        onChange={(event) => handlePayrollEmployeeChange(entry, event.target.value)}
+                        disabled={!canWrite || loadingPayrollEmployees || entry.finalPaymentApprovedByEmrt}
+                      >
+                        <option value="">
+                          {entry.laborFileId || !entry.employeeName ? "Seleccionar empleado" : `${entry.employeeName} (sin expediente)`}
+                        </option>
+                        {entry.laborFileId && !payrollEmployeeOptionsById.has(entry.laborFileId) ? (
+                          <option value={entry.laborFileId}>{entry.employeeName || "Empleado seleccionado"}</option>
+                        ) : null}
+                        {payrollEmployeeOptions.map((option) => (
+                          <option key={option.laborFileId} value={option.laborFileId}>
+                            {option.employeeName}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <div className={`general-expense-readonly-cell general-expense-payroll-ri-salary is-${dailySalaryValidation.status}`}>
+                        <span className="general-expense-payroll-ri-salary-main">
+                          <RusconiIntelligenceBadge connectionId={PAYROLL_DAILY_SALARY_RI_CONNECTION_ID} label="Gastos generales / Nomina / Salario diario" />
+                          <span>{formatCurrency(entry.dailySalaryMxn)}</span>
+                        </span>
+                        <span
+                          aria-label={dailySalaryValidation.label}
+                          className={`general-expense-payroll-ri-icon is-${dailySalaryValidation.status}`}
+                          role="img"
+                          title={dailySalaryValidation.detail}
+                        />
+                      </div>
+                    </td>
+                    <td>{renderPayrollMoneyInput(entry, "grossSalaryMxn")}</td>
+                    <td>{renderPayrollMoneyInput(entry, "punctualityBonusMxn")}</td>
+                    <td>{renderPayrollMoneyInput(entry, "attendanceBonusMxn")}</td>
+                    <td>
+                      <div className="general-expense-readonly-cell">
+                        {formatCurrency(entry.overtimeHourlyRateMxn)}
+                      </div>
+                    </td>
+                    <td>
+                      <input
+                        className="general-expense-input general-expense-number-input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={payrollDrafts[entry.id]?.overtimeHours ?? formatEditableNumber(Number(entry.overtimeHours || 0))}
+                        onChange={(event) => setPayrollDraft(entry.id, "overtimeHours", event.target.value)}
+                        onBlur={() => void flushPayrollDraftField(entry.id, "overtimeHours")}
+                        disabled={!canWrite || entry.finalPaymentApprovedByEmrt}
+                      />
+                    </td>
+                    <td>
+                      <div className="general-expense-readonly-cell">
+                        {formatCurrency(entry.overtimeTotalMxn)}
+                      </div>
+                    </td>
+                    <td>
+                      <textarea
+                        className="general-expense-input general-expense-payroll-detail-input"
+                        value={payrollDrafts[entry.id]?.overtimeDetail ?? entry.overtimeDetail}
+                        onChange={(event) => setPayrollDraft(entry.id, "overtimeDetail", event.target.value)}
+                        onBlur={() => void flushPayrollDraftField(entry.id, "overtimeDetail")}
+                        rows={2}
+                        disabled={!canWrite || entry.finalPaymentApprovedByEmrt}
+                      />
+                    </td>
+                    <td>{renderPayrollMoneyInput(entry, "isrWithholdingMxn")}</td>
+                    <td>{renderPayrollMoneyInput(entry, "imssWithholdingMxn")}</td>
+                    <td>
+                      <div className="general-expense-readonly-cell is-payroll-total">
+                        {formatCurrency(entry.netDepositMxn)}
+                      </div>
+                    </td>
+                    <td className="general-expense-checkbox-cell">
+                      <input
+                        type="checkbox"
+                        checked={entry.payrollStampedByAraceli}
+                        onChange={(event) => void persistPayrollPatch(entry.id, { payrollStampedByAraceli: event.target.checked })}
+                        disabled={!canStampPayroll || entry.finalPaymentApprovedByEmrt}
+                      />
+                    </td>
+                    <td className="general-expense-checkbox-cell">
+                      <input
+                        type="checkbox"
+                        checked={entry.finalPaymentApprovedByEmrt}
+                        onChange={(event) => void persistPayrollPatch(entry.id, { finalPaymentApprovedByEmrt: event.target.checked })}
+                        disabled={!canApprove}
+                      />
+                    </td>
+                    <td className="general-expense-checkbox-cell">
+                      <input
+                        type="checkbox"
+                        checked={entry.reviewedByJnls}
+                        onChange={(event) => void persistPayrollPatch(entry.id, { reviewedByJnls: event.target.checked })}
+                        disabled={!canReviewJnlsFlag || entry.finalPaymentApprovedByEmrt}
+                      />
+                    </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="page-stack general-expenses-page">
       <header className="hero module-hero">
@@ -728,10 +1304,17 @@ export function GeneralExpensesPage() {
           </button>
           <button
             type="button"
+            className={`lead-tab ${activeTab === "payroll" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("payroll")}
+          >
+            2. Nómina
+          </button>
+          <button
+            type="button"
             className={`lead-tab ${activeTab === "emrt" ? "is-active" : ""}`}
             onClick={() => setActiveTab("emrt")}
           >
-            2. Pagado por EMRT
+            3. Pagado por EMRT
           </button>
         </div>
       </section>
@@ -763,7 +1346,11 @@ export function GeneralExpensesPage() {
         </div>
 
         <div className="general-expenses-actions">
-          <button type="button" className="secondary-button" onClick={() => void loadRecords()}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => activeTab === "payroll" ? void loadPayrollEntries() : void loadRecords()}
+          >
             Refrescar
           </button>
           {activeTab === "registro" ? (
@@ -775,6 +1362,10 @@ export function GeneralExpensesPage() {
                 + Agregar Gasto
               </button>
             </>
+          ) : activeTab === "payroll" ? (
+            <button type="button" className="secondary-button" onClick={() => void handleCopyPayrollToNextMonth()} disabled={!canWrite}>
+              Copiar nómina al mes siguiente
+            </button>
           ) : null}
         </div>
       </section>
@@ -1105,6 +1696,11 @@ export function GeneralExpensesPage() {
             </div>
           </section>
         </>
+      ) : activeTab === "payroll" ? (
+        <div className="general-expense-payroll-stack">
+          {renderPayrollTable(1, "Primera quincena")}
+          {renderPayrollTable(2, "Segunda quincena")}
+        </div>
       ) : (
         <section className="panel">
           <div className="general-expense-emrt-total-card">
