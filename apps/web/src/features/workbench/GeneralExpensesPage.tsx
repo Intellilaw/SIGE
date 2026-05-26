@@ -21,10 +21,13 @@ type PayrollDraftField =
   | "grossSalaryMxn"
   | "punctualityBonusMxn"
   | "attendanceBonusMxn"
+  | "absenceDays"
   | "overtimeHours"
   | "overtimeDetail"
   | "isrWithholdingMxn"
-  | "imssWithholdingMxn";
+  | "imssWithholdingMxn"
+  | "employmentSubsidyMxn"
+  | "infonavitCreditMxn";
 
 type PayrollDraftMap = Record<string, Partial<Record<PayrollDraftField, string>>>;
 
@@ -62,10 +65,13 @@ type PayrollPatchPayload = {
   grossSalaryMxn?: number;
   punctualityBonusMxn?: number;
   attendanceBonusMxn?: number;
+  absenceDays?: number;
   overtimeHours?: number;
   overtimeDetail?: string;
   isrWithholdingMxn?: number;
   imssWithholdingMxn?: number;
+  employmentSubsidyMxn?: number;
+  infonavitCreditMxn?: number;
   payrollStampedByAraceli?: boolean;
   finalPaymentApprovedByEmrt?: boolean;
   reviewedByJnls?: boolean;
@@ -112,7 +118,9 @@ const PAYROLL_MONEY_FIELDS = [
   "punctualityBonusMxn",
   "attendanceBonusMxn",
   "isrWithholdingMxn",
-  "imssWithholdingMxn"
+  "imssWithholdingMxn",
+  "employmentSubsidyMxn",
+  "infonavitCreditMxn"
 ] as const;
 const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
 
@@ -158,6 +166,14 @@ function formatCurrency(value: number) {
     currency: "MXN",
     minimumFractionDigits: 2
   }).format(Number(value || 0));
+}
+
+function formatPayrollDays(value: number) {
+  const numeric = Number(value || 0);
+  return new Intl.NumberFormat("es-MX", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number.isInteger(numeric) ? 0 : 2
+  }).format(numeric);
 }
 
 function formatEditableNumber(value: number) {
@@ -442,17 +458,24 @@ function replacePayrollEntry(items: GeneralExpensePayrollEntry[], updated: Gener
 function applyPayrollCalculations(entry: GeneralExpensePayrollEntry): GeneralExpensePayrollEntry {
   const overtimeHourlyRateMxn = Number(entry.dailySalaryMxn || 0) / 8;
   const overtimeTotalMxn = overtimeHourlyRateMxn * Number(entry.overtimeHours || 0);
+  const vacationPremiumMxn = Number(entry.vacationPremiumMxn || 0);
+  const absenceDiscountMxn = Number(entry.dailySalaryMxn || 0) * Number(entry.absenceDays || 0);
   const netDepositMxn = (
     Number(entry.grossSalaryMxn || 0) +
     Number(entry.punctualityBonusMxn || 0) +
     Number(entry.attendanceBonusMxn || 0) +
+    vacationPremiumMxn +
     overtimeTotalMxn -
     Number(entry.isrWithholdingMxn || 0) -
-    Number(entry.imssWithholdingMxn || 0)
+    Number(entry.imssWithholdingMxn || 0) +
+    Number(entry.employmentSubsidyMxn || 0) -
+    Number(entry.infonavitCreditMxn || 0) -
+    absenceDiscountMxn
   );
 
   return {
     ...entry,
+    absenceDiscountMxn,
     overtimeHourlyRateMxn,
     overtimeTotalMxn,
     netDepositMxn
@@ -912,7 +935,7 @@ export function GeneralExpensesPage() {
 
     const confirmed = window.confirm(
       `Copiar ${payrollEntries.length} registros de nómina de ${getMonthName(selectedMonth)}/${selectedYear} a ${getMonthName(targetMonth)}/${targetYear}?\n\n` +
-      "Se copiarán empleados, salarios, bonos y retenciones. Las horas extra y autorizaciones EMRT se reiniciarán para evitar pagos accidentales."
+      "Se copiarán empleados, salarios, bonos, retenciones, subsidio e Infonavit. Las faltas, horas extra y autorizaciones EMRT se reiniciarán para evitar pagos accidentales."
     );
     if (!confirmed) {
       return;
@@ -1107,6 +1130,21 @@ export function GeneralExpensesPage() {
     );
   }
 
+  function renderPayrollNumberInput(entry: GeneralExpensePayrollEntry, field: "absenceDays" | "overtimeHours") {
+    return (
+      <input
+        className="general-expense-input general-expense-number-input"
+        type="number"
+        min="0"
+        step="0.01"
+        value={payrollDrafts[entry.id]?.[field] ?? formatEditableNumber(Number(entry[field] || 0))}
+        onChange={(event) => setPayrollDraft(entry.id, field, event.target.value)}
+        onBlur={() => void flushPayrollDraftField(entry.id, field)}
+        disabled={!canWrite || entry.finalPaymentApprovedByEmrt}
+      />
+    );
+  }
+
   function renderPayrollTable(half: GeneralExpensePayrollEntry["half"], title: string) {
     const rows = payrollEntriesByHalf[half];
 
@@ -1132,14 +1170,19 @@ export function GeneralExpensesPage() {
                   <th>Nombre de empleado</th>
                   <th>Salario diario</th>
                   <th>Salario bruto</th>
+                  <th>Dias vacaciones</th>
+                  <th>Prima vacacional</th>
                   <th>Bono de puntualidad</th>
                   <th>Bono de asistencia</th>
+                  <th>Faltas</th>
                   <th>Horas extras (valor)</th>
                   <th>Número de horas extras</th>
                   <th>Total horas extras</th>
                   <th>Detalle de horas extras</th>
                   <th>Retenciones ISR</th>
                   <th>Retenciones IMSS</th>
+                  <th>Subsidio al empleo</th>
+                  <th>Credito Infonavit</th>
                   <th>Depósito neto</th>
                   <th>Confirmo que la nómina está timbrada (Araceli Lozano)</th>
                   <th>Pago autorizado EMRT</th>
@@ -1149,13 +1192,13 @@ export function GeneralExpensesPage() {
               <tbody>
                 {loadingPayroll ? (
                   <tr>
-                    <td colSpan={15} className="centered-inline-message">
+                    <td colSpan={20} className="centered-inline-message">
                       Cargando nómina...
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="centered-inline-message">
+                    <td colSpan={20} className="centered-inline-message">
                       Sin registros de nómina en esta quincena.
                     </td>
                   </tr>
@@ -1200,25 +1243,31 @@ export function GeneralExpensesPage() {
                       </div>
                     </td>
                     <td>{renderPayrollMoneyInput(entry, "grossSalaryMxn")}</td>
+                    <td>
+                      <div
+                        className="general-expense-readonly-cell general-expense-payroll-days-cell"
+                        title="Dias de vacaciones aprobadas con PDF firmado en esta quincena."
+                      >
+                        {formatPayrollDays(entry.vacationDays)}
+                      </div>
+                    </td>
+                    <td>
+                      <div
+                        className="general-expense-readonly-cell"
+                        title="Prima calculada desde vacaciones aprobadas del expediente laboral."
+                      >
+                        {formatCurrency(entry.vacationPremiumMxn)}
+                      </div>
+                    </td>
                     <td>{renderPayrollMoneyInput(entry, "punctualityBonusMxn")}</td>
                     <td>{renderPayrollMoneyInput(entry, "attendanceBonusMxn")}</td>
+                    <td>{renderPayrollNumberInput(entry, "absenceDays")}</td>
                     <td>
                       <div className="general-expense-readonly-cell">
                         {formatCurrency(entry.overtimeHourlyRateMxn)}
                       </div>
                     </td>
-                    <td>
-                      <input
-                        className="general-expense-input general-expense-number-input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={payrollDrafts[entry.id]?.overtimeHours ?? formatEditableNumber(Number(entry.overtimeHours || 0))}
-                        onChange={(event) => setPayrollDraft(entry.id, "overtimeHours", event.target.value)}
-                        onBlur={() => void flushPayrollDraftField(entry.id, "overtimeHours")}
-                        disabled={!canWrite || entry.finalPaymentApprovedByEmrt}
-                      />
-                    </td>
+                    <td>{renderPayrollNumberInput(entry, "overtimeHours")}</td>
                     <td>
                       <div className="general-expense-readonly-cell">
                         {formatCurrency(entry.overtimeTotalMxn)}
@@ -1236,6 +1285,8 @@ export function GeneralExpensesPage() {
                     </td>
                     <td>{renderPayrollMoneyInput(entry, "isrWithholdingMxn")}</td>
                     <td>{renderPayrollMoneyInput(entry, "imssWithholdingMxn")}</td>
+                    <td>{renderPayrollMoneyInput(entry, "employmentSubsidyMxn")}</td>
+                    <td>{renderPayrollMoneyInput(entry, "infonavitCreditMxn")}</td>
                     <td>
                       <div className="general-expense-readonly-cell is-payroll-total">
                         {formatCurrency(entry.netDepositMxn)}
@@ -1612,23 +1663,25 @@ export function GeneralExpensesPage() {
                                 />
                               </td>
                               <td>
-                                <div className="general-expense-date-stack">
-                                  <input
-                                    className="general-expense-input"
-                                    type="date"
-                                    value={toDateInput(expense.paidByEmrtAt)}
-                                    onChange={(event) => void persistExpensePatch(expense.id, { paidByEmrtAt: event.target.value || null })}
-                                    disabled={!canEditEmrtDate || expense.paymentMethod !== "Efectivo"}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="general-expense-inline-button"
-                                    onClick={() => void persistExpensePatch(expense.id, { paidByEmrtAt: getTodayInput() })}
-                                    disabled={!canEditEmrtDate || expense.paymentMethod !== "Efectivo"}
-                                  >
-                                    Hoy
-                                  </button>
-                                </div>
+                                {expense.paymentMethod === "Efectivo" ? (
+                                  <div className="general-expense-date-stack">
+                                    <input
+                                      className="general-expense-input"
+                                      type="date"
+                                      value={toDateInput(expense.paidByEmrtAt)}
+                                      onChange={(event) => void persistExpensePatch(expense.id, { paidByEmrtAt: event.target.value || null })}
+                                      disabled={!canEditEmrtDate}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="general-expense-inline-button"
+                                      onClick={() => void persistExpensePatch(expense.id, { paidByEmrtAt: getTodayInput() })}
+                                      disabled={!canEditEmrtDate}
+                                    >
+                                      Hoy
+                                    </button>
+                                  </div>
+                                ) : null}
                               </td>
                               <td className="general-expense-checkbox-cell">
                                 <input

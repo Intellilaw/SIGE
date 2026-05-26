@@ -1437,10 +1437,15 @@ export function mapGeneralExpensePayrollEntry(record: {
   grossSalaryMxn: Prisma.Decimal;
   punctualityBonusMxn: Prisma.Decimal;
   attendanceBonusMxn: Prisma.Decimal;
+  vacationDays?: number;
+  vacationPremiumMxn?: number;
+  absenceDays: Prisma.Decimal;
   overtimeHours: Prisma.Decimal;
   overtimeDetail: string;
   isrWithholdingMxn: Prisma.Decimal;
   imssWithholdingMxn: Prisma.Decimal;
+  employmentSubsidyMxn: Prisma.Decimal;
+  infonavitCreditMxn: Prisma.Decimal;
   payrollStampedByAraceli: boolean;
   finalPaymentApprovedByEmrt: boolean;
   reviewedByJnls: boolean;
@@ -1453,9 +1458,15 @@ export function mapGeneralExpensePayrollEntry(record: {
   const grossSalaryMxn = Number(record.grossSalaryMxn);
   const punctualityBonusMxn = Number(record.punctualityBonusMxn);
   const attendanceBonusMxn = Number(record.attendanceBonusMxn);
+  const vacationDays = Number(record.vacationDays ?? 0);
+  const vacationPremiumMxn = Number(record.vacationPremiumMxn ?? 0);
+  const absenceDays = Number(record.absenceDays);
+  const absenceDiscountMxn = dailySalaryMxn * absenceDays;
   const overtimeHours = Number(record.overtimeHours);
   const isrWithholdingMxn = Number(record.isrWithholdingMxn);
   const imssWithholdingMxn = Number(record.imssWithholdingMxn);
+  const employmentSubsidyMxn = Number(record.employmentSubsidyMxn);
+  const infonavitCreditMxn = Number(record.infonavitCreditMxn);
   const overtimeHourlyRateMxn = dailySalaryMxn / 8;
   const overtimeTotalMxn = overtimeHourlyRateMxn * overtimeHours;
 
@@ -1473,13 +1484,19 @@ export function mapGeneralExpensePayrollEntry(record: {
     grossSalaryMxn,
     punctualityBonusMxn,
     attendanceBonusMxn,
+    vacationDays,
+    vacationPremiumMxn,
+    absenceDays,
+    absenceDiscountMxn,
     overtimeHourlyRateMxn,
     overtimeHours,
     overtimeTotalMxn,
     overtimeDetail: record.overtimeDetail,
     isrWithholdingMxn,
     imssWithholdingMxn,
-    netDepositMxn: grossSalaryMxn + punctualityBonusMxn + attendanceBonusMxn + overtimeTotalMxn - isrWithholdingMxn - imssWithholdingMxn,
+    employmentSubsidyMxn,
+    infonavitCreditMxn,
+    netDepositMxn: grossSalaryMxn + punctualityBonusMxn + attendanceBonusMxn + vacationPremiumMxn + overtimeTotalMxn + employmentSubsidyMxn - isrWithholdingMxn - imssWithholdingMxn - absenceDiscountMxn - infonavitCreditMxn,
     payrollStampedByAraceli: record.payrollStampedByAraceli,
     finalPaymentApprovedByEmrt: record.finalPaymentApprovedByEmrt,
     reviewedByJnls: record.reviewedByJnls,

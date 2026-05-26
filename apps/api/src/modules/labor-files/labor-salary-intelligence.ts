@@ -375,16 +375,16 @@ function getCandidatePeriod(context: string, contextBefore: string): LaborSalary
     return null;
   }
 
-  if (/(quincenal|quincenales|catorcenal|semanal|semanales|dos pagos|dia 10|dias 10|veinticinco)/.test(contextBefore)) {
-    return null;
-  }
-
   if (/(mensual|mensuales|al mes|por mes|cada mes)/.test(context)) {
     return "MONTHLY";
   }
 
   if (/(diario|diaria|por dia|cada dia|salario base diario)/.test(context)) {
     return "DAILY";
+  }
+
+  if (/(quincenal|quincenales|catorcenal|semanal|semanales|dos pagos|dia 10|dias 10|veinticinco)/.test(contextBefore)) {
+    return null;
   }
 
   return null;

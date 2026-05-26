@@ -66,10 +66,13 @@ const payrollUpdateSchema = z.object({
   grossSalaryMxn: z.number().nonnegative().optional(),
   punctualityBonusMxn: z.number().nonnegative().optional(),
   attendanceBonusMxn: z.number().nonnegative().optional(),
+  absenceDays: z.number().nonnegative().optional(),
   overtimeHours: z.number().nonnegative().optional(),
   overtimeDetail: z.string().optional(),
   isrWithholdingMxn: z.number().nonnegative().optional(),
   imssWithholdingMxn: z.number().nonnegative().optional(),
+  employmentSubsidyMxn: z.number().nonnegative().optional(),
+  infonavitCreditMxn: z.number().nonnegative().optional(),
   payrollStampedByAraceli: z.boolean().optional(),
   finalPaymentApprovedByEmrt: z.boolean().optional(),
   reviewedByJnls: z.boolean().optional()

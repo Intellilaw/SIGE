@@ -220,7 +220,11 @@ function getContractDailySalary(laborFile, salaryDocuments) {
             "employmentContractDailySalaryMxn"
         ]);
         if (dailySalary !== undefined) {
-            return dailySalary;
+            return {
+                dailySalaryMxn: dailySalary,
+                documentType: document.documentType,
+                originalFileName: document.originalFileName
+            };
         }
         const monthlySalary = getRecordNumber(document, [
             "contractMonthlyGrossSalaryMxn",
@@ -230,7 +234,12 @@ function getContractDailySalary(laborFile, salaryDocuments) {
             "riExtractedMonthlyGrossSalaryMxn"
         ]);
         if (monthlySalary !== undefined) {
-            return monthlySalary / 30;
+            return {
+                dailySalaryMxn: monthlySalary / 30,
+                documentType: document.documentType,
+                monthlyGrossSalaryMxn: monthlySalary,
+                originalFileName: document.originalFileName
+            };
         }
     }
     const dailySalary = getRecordNumber(laborFile, [
@@ -240,7 +249,9 @@ function getContractDailySalary(laborFile, salaryDocuments) {
         "employmentContractDailySalaryMxn"
     ]);
     if (dailySalary !== undefined) {
-        return dailySalary;
+        return {
+            dailySalaryMxn: dailySalary
+        };
     }
     const monthlySalary = getRecordNumber(laborFile, [
         "contractMonthlyGrossSalaryMxn",
@@ -248,7 +259,23 @@ function getContractDailySalary(laborFile, salaryDocuments) {
         "riContractMonthlyGrossSalaryMxn",
         "employmentContractMonthlyGrossSalaryMxn"
     ]);
-    return monthlySalary !== undefined ? monthlySalary / 30 : undefined;
+    return monthlySalary !== undefined
+        ? {
+            dailySalaryMxn: monthlySalary / 30,
+            monthlyGrossSalaryMxn: monthlySalary
+        }
+        : undefined;
+}
+function formatContractSalaryReference(reference) {
+    const sourceLabel = reference.documentType === "ADDENDUM"
+        ? "addendum"
+        : reference.documentType === "EMPLOYMENT_CONTRACT"
+            ? "contrato"
+            : "contrato/addenda";
+    const salaryDetail = reference.monthlyGrossSalaryMxn
+        ? `${formatMoney(reference.dailySalaryMxn)} diario calculado de ${formatMoney(reference.monthlyGrossSalaryMxn)} mensual / 30`
+        : `${formatMoney(reference.dailySalaryMxn)} diario`;
+    return `${sourceLabel} vigente: ${salaryDetail}.`;
 }
 function getDailySalaryValidation(laborFile, salaryDocuments) {
     const hasContractDocument = salaryDocuments.some((document) => document.documentType === "EMPLOYMENT_CONTRACT");
@@ -267,25 +294,26 @@ function getDailySalaryValidation(laborFile, salaryDocuments) {
             detail: "Falta salario diario en el expediente."
         };
     }
-    const contractDailySalary = getContractDailySalary(laborFile, salaryDocuments);
-    if (contractDailySalary === undefined) {
+    const contractSalaryReference = getContractDailySalary(laborFile, salaryDocuments);
+    if (contractSalaryReference === undefined) {
         return {
             status: "mismatch",
             label: "No coincide",
             detail: "Contrato/addenda cargados sin salario mensual legible."
         };
     }
-    const matches = Math.abs(profileDailySalary - contractDailySalary) <= 0.05;
+    const matches = Math.abs(profileDailySalary - contractSalaryReference.dailySalaryMxn) <= 0.05;
+    const salaryReferenceDetail = formatContractSalaryReference(contractSalaryReference);
     return matches
         ? {
             status: "match",
             label: "Coincide",
-            detail: "Coincide con contrato/addenda vigente."
+            detail: `Coincide con ${salaryReferenceDetail}`
         }
         : {
             status: "mismatch",
             label: "No coincide",
-            detail: `Contrato/addenda vigente: ${formatMoney(contractDailySalary)}.`
+            detail: `RI-003 toma como referencia ${salaryReferenceDetail}`
         };
 }
 function getDocumentsByType(documents, documentType) {

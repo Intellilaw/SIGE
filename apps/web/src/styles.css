@@ -3095,7 +3095,7 @@ textarea {
 }
 
 .general-expense-payroll-table {
-  min-width: 2300px;
+  min-width: 3150px;
 }
 
 .general-expense-input {
@@ -3166,6 +3166,11 @@ textarea {
 .general-expense-readonly-cell.is-payroll-total {
   color: #0f766e;
   font-weight: 800;
+}
+
+.general-expense-payroll-days-cell {
+  justify-content: center;
+  min-width: 120px;
 }
 
 .general-expense-payroll-ri-salary {

@@ -949,12 +949,18 @@ export interface GeneralExpensePayrollEntry {
   grossSalaryMxn: number;
   punctualityBonusMxn: number;
   attendanceBonusMxn: number;
+  vacationDays: number;
+  vacationPremiumMxn: number;
+  absenceDays: number;
+  absenceDiscountMxn: number;
   overtimeHourlyRateMxn: number;
   overtimeHours: number;
   overtimeTotalMxn: number;
   overtimeDetail: string;
   isrWithholdingMxn: number;
   imssWithholdingMxn: number;
+  employmentSubsidyMxn: number;
+  infonavitCreditMxn: number;
   netDepositMxn: number;
   payrollStampedByAraceli: boolean;
   finalPaymentApprovedByEmrt: boolean;

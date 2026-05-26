@@ -42,6 +42,13 @@ type PreviousYearPendingVacationForm = LaborPreviousYearPendingVacationInput & {
   manualOverrideConfirmed: boolean;
 };
 
+type ContractSalaryReference = {
+  dailySalaryMxn: number;
+  monthlyGrossSalaryMxn?: number;
+  originalFileName?: string;
+  documentType?: LaborFileDocumentType;
+};
+
 const EMPTY_PROFILE_FORM: LaborFileProfileForm = {
   hireDate: "",
   dailySalaryMxn: "",
@@ -278,7 +285,7 @@ function getRecordNumber(record: unknown, keys: string[]) {
   return undefined;
 }
 
-function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFileDocument[]) {
+function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFileDocument[]): ContractSalaryReference | undefined {
   const sortedDocuments = [...salaryDocuments]
     .filter((document) => document.documentType === "EMPLOYMENT_CONTRACT" || document.documentType === "ADDENDUM")
     .sort((left, right) =>
@@ -296,7 +303,11 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
     ]);
 
     if (dailySalary !== undefined) {
-      return dailySalary;
+      return {
+        dailySalaryMxn: dailySalary,
+        documentType: document.documentType,
+        originalFileName: document.originalFileName
+      };
     }
 
     const monthlySalary = getRecordNumber(document, [
@@ -308,7 +319,12 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
     ]);
 
     if (monthlySalary !== undefined) {
-      return monthlySalary / 30;
+      return {
+        dailySalaryMxn: monthlySalary / 30,
+        documentType: document.documentType,
+        monthlyGrossSalaryMxn: monthlySalary,
+        originalFileName: document.originalFileName
+      };
     }
   }
 
@@ -320,7 +336,9 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
   ]);
 
   if (dailySalary !== undefined) {
-    return dailySalary;
+    return {
+      dailySalaryMxn: dailySalary
+    };
   }
 
   const monthlySalary = getRecordNumber(laborFile, [
@@ -330,7 +348,25 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
     "employmentContractMonthlyGrossSalaryMxn"
   ]);
 
-  return monthlySalary !== undefined ? monthlySalary / 30 : undefined;
+  return monthlySalary !== undefined
+    ? {
+        dailySalaryMxn: monthlySalary / 30,
+        monthlyGrossSalaryMxn: monthlySalary
+      }
+    : undefined;
+}
+
+function formatContractSalaryReference(reference: ContractSalaryReference) {
+  const sourceLabel = reference.documentType === "ADDENDUM"
+    ? "addendum"
+    : reference.documentType === "EMPLOYMENT_CONTRACT"
+      ? "contrato"
+      : "contrato/addenda";
+  const salaryDetail = reference.monthlyGrossSalaryMxn
+    ? `${formatMoney(reference.dailySalaryMxn)} diario calculado de ${formatMoney(reference.monthlyGrossSalaryMxn)} mensual / 30`
+    : `${formatMoney(reference.dailySalaryMxn)} diario`;
+
+  return `${sourceLabel} vigente: ${salaryDetail}.`;
 }
 
 function getDailySalaryValidation(laborFile: LaborFile, salaryDocuments: LaborFileDocument[]) {
@@ -352,8 +388,8 @@ function getDailySalaryValidation(laborFile: LaborFile, salaryDocuments: LaborFi
     };
   }
 
-  const contractDailySalary = getContractDailySalary(laborFile, salaryDocuments);
-  if (contractDailySalary === undefined) {
+  const contractSalaryReference = getContractDailySalary(laborFile, salaryDocuments);
+  if (contractSalaryReference === undefined) {
     return {
       status: "mismatch" as const,
       label: "No coincide",
@@ -361,18 +397,19 @@ function getDailySalaryValidation(laborFile: LaborFile, salaryDocuments: LaborFi
     };
   }
 
-  const matches = Math.abs(profileDailySalary - contractDailySalary) <= 0.05;
+  const matches = Math.abs(profileDailySalary - contractSalaryReference.dailySalaryMxn) <= 0.05;
+  const salaryReferenceDetail = formatContractSalaryReference(contractSalaryReference);
 
   return matches
     ? {
         status: "match" as const,
         label: "Coincide",
-        detail: "Coincide con contrato/addenda vigente."
+        detail: `Coincide con ${salaryReferenceDetail}`
       }
     : {
         status: "mismatch" as const,
         label: "No coincide",
-        detail: `Contrato/addenda vigente: ${formatMoney(contractDailySalary)}.`
+        detail: `RI-003 toma como referencia ${salaryReferenceDetail}`
       };
 }
 

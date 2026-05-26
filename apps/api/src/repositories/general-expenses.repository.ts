@@ -18,6 +18,7 @@ const DEFAULT_PAYMENT_METHOD: GeneralExpense["paymentMethod"] = "Transferencia";
 const DEFAULT_BANK: NonNullable<GeneralExpense["bank"]> = "Banamex";
 const DEFAULT_HAS_VAT = true;
 const DEFAULT_MONTH_RANGE = { min: 1, max: 12 };
+const PAYROLL_VACATION_PREMIUM_RATE = 0.25;
 const LOCKED_AFTER_APPROVAL_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "detail",
   "amountMxn",
@@ -63,11 +64,24 @@ const PAYROLL_ENTRY_INCLUDE = {
         where: { documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] } },
         select: PAYROLL_LABOR_SALARY_DOCUMENT_SELECT,
         orderBy: [{ uploadedAt: "asc" as const }]
+      },
+      vacationEvents: {
+        where: { eventType: { in: ["VACATION", "GLOBAL_VACATION"] } },
+        select: {
+          eventType: true,
+          startDate: true,
+          endDate: true,
+          vacationDates: true,
+          days: true,
+          acceptanceOriginalFileName: true,
+          acceptanceFileMimeType: true
+        }
       }
     }
   }
 } satisfies Prisma.GeneralExpensePayrollEntryInclude;
 type StoredGeneralExpensePayrollEntry = Prisma.GeneralExpensePayrollEntryGetPayload<{ include: typeof PAYROLL_ENTRY_INCLUDE }>;
+type PayrollVacationEventRecord = NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>["vacationEvents"][number];
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
@@ -111,6 +125,33 @@ function parseDateOnly(value?: string | null) {
 
 function toDateInput(value?: Date | null) {
   return value ? value.toISOString().slice(0, 10) : "";
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function dateKeyToUtcDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDateKey(value: string, days: number) {
+  const date = dateKeyToUtcDate(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
+}
+
+function getMonthLastDateKey(year: number, month: number) {
+  const date = new Date(Date.UTC(year, month, 0));
+  return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
+}
+
+function getPayrollPeriodDateRange(year: number, month: number, half: GeneralExpensePayrollEntry["half"]) {
+  const monthPart = padDatePart(month);
+  return half === 1
+    ? { startDate: `${year}-${monthPart}-01`, endDate: `${year}-${monthPart}-15` }
+    : { startDate: `${year}-${monthPart}-16`, endDate: getMonthLastDateKey(year, month) };
 }
 
 function clampPercentage(value?: number | null) {
@@ -201,6 +242,84 @@ function normalizeHours(value?: number | null) {
   return new Prisma.Decimal(Number.isFinite(numeric) ? Math.max(0, numeric) : 0);
 }
 
+function roundPayrollNumber(value: number) {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+function isApprovedVacationEvent(event: PayrollVacationEventRecord) {
+  const mimeType = (event.acceptanceFileMimeType ?? "").toLowerCase();
+  const filename = (event.acceptanceOriginalFileName ?? "").toLowerCase();
+  return (event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION") &&
+    (mimeType === "application/pdf" || filename.endsWith(".pdf"));
+}
+
+function getVacationDateKeysFromJson(value: Prisma.JsonValue | null) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value.filter((item): item is string => (
+    typeof item === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item)
+  )))].sort();
+}
+
+function enumerateDateKeys(startDate: string, endDate: string) {
+  if (!startDate || !endDate || endDate < startDate) {
+    return [];
+  }
+
+  const result: string[] = [];
+  let current = startDate;
+  while (current <= endDate && result.length < 370) {
+    result.push(current);
+    current = addDateKey(current, 1);
+  }
+
+  return result;
+}
+
+function getVacationEventDateKeys(event: PayrollVacationEventRecord) {
+  const explicitDates = getVacationDateKeysFromJson(event.vacationDates);
+  if (explicitDates.length > 0) {
+    return explicitDates;
+  }
+
+  const startDate = toDateInput(event.startDate);
+  const endDate = toDateInput(event.endDate);
+  if (startDate && endDate) {
+    return enumerateDateKeys(startDate, endDate);
+  }
+
+  const days = Number(event.days ?? 0);
+  if (startDate && Number.isInteger(days) && days > 1 && days <= 31) {
+    return Array.from({ length: days }, (_, index) => addDateKey(startDate, index));
+  }
+
+  return startDate ? [startDate] : [];
+}
+
+function getVacationDaysInPayrollPeriod(
+  event: PayrollVacationEventRecord,
+  period: ReturnType<typeof getPayrollPeriodDateRange>
+) {
+  if (!isApprovedVacationEvent(event)) {
+    return 0;
+  }
+
+  const dateKeys = getVacationEventDateKeys(event);
+  const dateKeysInPeriod = dateKeys.filter((dateKey) => dateKey >= period.startDate && dateKey <= period.endDate);
+  if (dateKeysInPeriod.length === 0) {
+    return 0;
+  }
+
+  const recordedDays = Number(event.days ?? 0);
+  if (recordedDays > 0 && dateKeys.length > 0 && Math.abs(recordedDays - dateKeys.length) > 0.01) {
+    return dateKeysInPeriod.length * (recordedDays / dateKeys.length);
+  }
+
+  return dateKeysInPeriod.length;
+}
+
 function getNextMonth(year: number, month: number) {
   assertMonth(month);
   const nextMonthDate = new Date(year, month, 1);
@@ -213,8 +332,26 @@ function getNextMonth(year: number, month: number) {
 export class PrismaGeneralExpensesRepository implements GeneralExpensesRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
+  private getPayrollVacationTotals(record: StoredGeneralExpensePayrollEntry) {
+    const period = getPayrollPeriodDateRange(record.year, record.month, record.half === 2 ? 2 : 1);
+    const vacationDays = record.laborFile?.vacationEvents.reduce(
+      (total, event) => total + getVacationDaysInPayrollPeriod(event, period),
+      0
+    ) ?? 0;
+    const dailySalaryMxn = Number(record.laborFile?.dailySalaryMxn ?? record.dailySalaryMxn ?? 0);
+    const vacationPremiumMxn = vacationDays * dailySalaryMxn * PAYROLL_VACATION_PREMIUM_RATE;
+
+    return {
+      vacationDays: roundPayrollNumber(vacationDays),
+      vacationPremiumMxn: roundPayrollNumber(vacationPremiumMxn)
+    };
+  }
+
   private async mapPayrollEntryWithSalaryRi(record: StoredGeneralExpensePayrollEntry) {
-    const mapped = mapGeneralExpensePayrollEntry(record);
+    const mapped = mapGeneralExpensePayrollEntry({
+      ...record,
+      ...this.getPayrollVacationTotals(record)
+    });
     const riStatus = await getLaborDailySalaryRiStatus(record.laborFile);
 
     return {
@@ -422,10 +559,13 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         grossSalaryMxn: row.grossSalaryMxn,
         punctualityBonusMxn: row.punctualityBonusMxn,
         attendanceBonusMxn: row.attendanceBonusMxn,
+        absenceDays: new Prisma.Decimal(0),
         overtimeHours: new Prisma.Decimal(0),
         overtimeDetail: "",
         isrWithholdingMxn: row.isrWithholdingMxn,
         imssWithholdingMxn: row.imssWithholdingMxn,
+        employmentSubsidyMxn: row.employmentSubsidyMxn,
+        infonavitCreditMxn: row.infonavitCreditMxn,
         payrollStampedByAraceli: false,
         finalPaymentApprovedByEmrt: false,
         reviewedByJnls: false
@@ -459,10 +599,13 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         grossSalaryMxn: new Prisma.Decimal(0),
         punctualityBonusMxn: new Prisma.Decimal(0),
         attendanceBonusMxn: new Prisma.Decimal(0),
+        absenceDays: new Prisma.Decimal(0),
         overtimeHours: new Prisma.Decimal(0),
         overtimeDetail: "",
         isrWithholdingMxn: new Prisma.Decimal(0),
         imssWithholdingMxn: new Prisma.Decimal(0),
+        employmentSubsidyMxn: new Prisma.Decimal(0),
+        infonavitCreditMxn: new Prisma.Decimal(0),
         payrollStampedByAraceli: false,
         finalPaymentApprovedByEmrt: false,
         reviewedByJnls: false
@@ -763,6 +906,10 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       data.attendanceBonusMxn = normalizeMoney(payload.attendanceBonusMxn);
     }
 
+    if (hasOwn(payload, "absenceDays")) {
+      data.absenceDays = normalizeHours(payload.absenceDays);
+    }
+
     if (hasOwn(payload, "overtimeHours")) {
       data.overtimeHours = normalizeHours(payload.overtimeHours);
     }
@@ -777,6 +924,14 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "imssWithholdingMxn")) {
       data.imssWithholdingMxn = normalizeMoney(payload.imssWithholdingMxn);
+    }
+
+    if (hasOwn(payload, "employmentSubsidyMxn")) {
+      data.employmentSubsidyMxn = normalizeMoney(payload.employmentSubsidyMxn);
+    }
+
+    if (hasOwn(payload, "infonavitCreditMxn")) {
+      data.infonavitCreditMxn = normalizeMoney(payload.infonavitCreditMxn);
     }
 
     if (hasOwn(payload, "payrollStampedByAraceli")) {

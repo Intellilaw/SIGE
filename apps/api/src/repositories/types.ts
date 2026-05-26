@@ -446,10 +446,13 @@ export interface GeneralExpensePayrollUpdateRecord {
   grossSalaryMxn?: number;
   punctualityBonusMxn?: number;
   attendanceBonusMxn?: number;
+  absenceDays?: number;
   overtimeHours?: number;
   overtimeDetail?: string;
   isrWithholdingMxn?: number;
   imssWithholdingMxn?: number;
+  employmentSubsidyMxn?: number;
+  infonavitCreditMxn?: number;
   payrollStampedByAraceli?: boolean;
   finalPaymentApprovedByEmrt?: boolean;
   reviewedByJnls?: boolean;

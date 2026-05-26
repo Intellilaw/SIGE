@@ -1,0 +1,4 @@
+ALTER TABLE "GeneralExpensePayrollEntry"
+  ADD COLUMN "absenceDays" DECIMAL(65,30) NOT NULL DEFAULT 0,
+  ADD COLUMN "employmentSubsidyMxn" DECIMAL(65,30) NOT NULL DEFAULT 0,
+  ADD COLUMN "infonavitCreditMxn" DECIMAL(65,30) NOT NULL DEFAULT 0;
