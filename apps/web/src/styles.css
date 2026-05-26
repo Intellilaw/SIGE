@@ -5204,6 +5204,7 @@ textarea {
 .finance-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 280px));
+  justify-content: center;
   gap: 12px;
   margin-top: 18px;
 }
@@ -5282,7 +5283,7 @@ textarea {
 }
 
 .finance-table-monthly-x-nav-spacer {
-  width: 8600px;
+  width: 8280px;
 }
 
 .finance-active-table-x-nav-spacer {
@@ -5332,7 +5333,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 8600px; font-size: 0.82rem; }
+.finance-table-monthly { min-width: 8280px; font-size: 0.82rem; }
 .finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 

@@ -77,8 +77,6 @@ const MONTHLY_COLUMN_WIDTHS = [
   "300px",
   "170px",
   "170px",
-  "150px",
-  "170px",
   "280px",
   "180px",
   "180px",
@@ -1326,9 +1324,7 @@ export function FinancesPage() {
           <th>Equipo Responsable</th>
           <th>Total Asunto</th>
           <th>Conceptos trabajando</th>
-          <th>Honorarios conceptos</th>
-          <th>Pagos previos</th>
-          <th>Remanente esperado este mes</th>
+          <th>Honorarios pagaderos este mes</th>
           <th>Fecha de proximo pago</th>
           <th>Detalle Fecha</th>
           <th>Pagado este mes</th>
@@ -1415,8 +1411,6 @@ export function FinancesPage() {
                   <td><CurrencyInput value={record.totalMatterMxn} readOnly /></td>
                   <td><input className="finance-input" value={record.workingConcepts ?? ""} onChange={(event) => updateRecordLocal(record.id, { workingConcepts: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value })} /></td>
                   <td><CurrencyInput value={record.conceptFeesMxn} onValueChange={(conceptFeesMxn) => updateRecordLocal(record.id, { conceptFeesMxn })} onValueCommit={(conceptFeesMxn) => void persistRecordPatch(record.id, { conceptFeesMxn })} /></td>
-                  <td><CurrencyInput value={record.previousPaymentsMxn} onValueChange={(previousPaymentsMxn) => updateRecordLocal(record.id, { previousPaymentsMxn })} onValueCommit={(previousPaymentsMxn) => void persistRecordPatch(record.id, { previousPaymentsMxn })} /></td>
-                  <td><CurrencyInput value={stats.remainingMxn} readOnly /></td>
                   <td><input className="finance-input finance-input-readonly" type="date" value={toDateInput(record.nextPaymentDate)} readOnly /></td>
                   <td><input className="finance-input" value={record.nextPaymentNotes ?? ""} onChange={(event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value })} /></td>
                   <td>
@@ -1481,7 +1475,7 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={46}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={44}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
@@ -1490,8 +1484,6 @@ export function FinancesPage() {
               <td>{formatCurrency(totals.totalMatterMxn)}</td>
               <td />
               <td>{formatCurrency(totals.conceptFeesMxn)}</td>
-              <td>{formatCurrency(totals.previousPaymentsMxn)}</td>
-              <td>{formatCurrency(totals.remainingMxn)}</td>
               <td colSpan={2} />
               <td>{formatCurrency(totals.totalPaidMxn)}</td>
               <td />
