@@ -66,6 +66,7 @@ function normalizeComparableText(value: string) {
 
 function normalizeDocumentText(value: string) {
   return normalizeComparableText(value)
+    .replace(/\u0000/g, "")
     .replace(/[“”]/g, "\"")
     .replace(/[‘’]/g, "'")
     .replace(/\s+/g, " ")
@@ -184,6 +185,79 @@ function decodePdfLiteralString(value: string) {
   return decoded;
 }
 
+function looksLikeUtf16Be(bytes: Buffer) {
+  if (bytes.length < 4 || bytes.length % 2 !== 0) {
+    return false;
+  }
+
+  let asciiPairs = 0;
+  const pairs = bytes.length / 2;
+  for (let index = 0; index + 1 < bytes.length; index += 2) {
+    const high = bytes[index];
+    const low = bytes[index + 1];
+    if (high === 0 && low >= 0x20 && low <= 0x7e) {
+      asciiPairs += 1;
+    }
+  }
+
+  return asciiPairs / pairs >= 0.6;
+}
+
+function looksLikeUtf16Le(bytes: Buffer) {
+  if (bytes.length < 4 || bytes.length % 2 !== 0) {
+    return false;
+  }
+
+  let asciiPairs = 0;
+  const pairs = bytes.length / 2;
+  for (let index = 0; index + 1 < bytes.length; index += 2) {
+    const low = bytes[index];
+    const high = bytes[index + 1];
+    if (high === 0 && low >= 0x20 && low <= 0x7e) {
+      asciiPairs += 1;
+    }
+  }
+
+  return asciiPairs / pairs >= 0.6;
+}
+
+function decodeUtf16Be(bytes: Buffer, start = 0) {
+  let decoded = "";
+  for (let index = start; index + 1 < bytes.length; index += 2) {
+    decoded += String.fromCharCode(bytes.readUInt16BE(index));
+  }
+  return decoded;
+}
+
+function decodePdfTextBytes(bytes: Buffer) {
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return decodeUtf16Be(bytes, 2);
+  }
+
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return bytes.subarray(2).toString("utf16le");
+  }
+
+  if (looksLikeUtf16Be(bytes)) {
+    return decodeUtf16Be(bytes);
+  }
+
+  if (looksLikeUtf16Le(bytes)) {
+    return bytes.toString("utf16le");
+  }
+
+  return bytes.toString("latin1");
+}
+
+function decodePdfByteString(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  const bytes = Buffer.from(Array.from(value, (character) => character.charCodeAt(0) & 0xff));
+  return decodePdfTextBytes(bytes);
+}
+
 function decodePdfHexString(value: string) {
   const hex = value.replace(/\s+/g, "");
   if (!hex) {
@@ -192,15 +266,7 @@ function decodePdfHexString(value: string) {
 
   const normalizedHex = hex.length % 2 === 0 ? hex : `${hex}0`;
   const bytes = Buffer.from(normalizedHex, "hex");
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    let decoded = "";
-    for (let index = 2; index + 1 < bytes.length; index += 2) {
-      decoded += String.fromCharCode(bytes.readUInt16BE(index));
-    }
-    return decoded;
-  }
-
-  return bytes.toString("latin1");
+  return decodePdfTextBytes(bytes);
 }
 
 function extractPdfStrings(streamText: string) {
@@ -241,7 +307,7 @@ function extractPdfStrings(streamText: string) {
         cursor += 1;
       }
 
-      const decoded = decodePdfLiteralString(raw).trim();
+      const decoded = decodePdfByteString(decodePdfLiteralString(raw)).trim();
       if (decoded) {
         parts.push(decoded);
       }
@@ -396,10 +462,14 @@ function buildSourceText(text: string, index: number) {
   return text.slice(start, end).replace(/\s+/g, " ").trim();
 }
 
+function buildMoneyAmountPattern() {
+  return /(?:\$|mxn\s*)?\s*\d{1,3}(?:[,\s.]\d{3})*(?:[,.]\d{1,2})?(?:\s*(?:m\.?\s*n\.?|mxn|pesos?))?|(?:\$|mxn\s*)?\s*\d+(?:[,.]\d{1,2})?(?:\s*(?:m\.?\s*n\.?|mxn|pesos?))?/gi;
+}
+
 export function extractLaborSalaryCandidatesFromText(text: string) {
   const normalizedText = normalizeDocumentText(text);
   const candidates: LaborSalaryCandidate[] = [];
-  const amountPattern = /(?:\$|mxn\s*)?\s*\d{1,3}(?:[,\s.]\d{3})*(?:[,.]\d{1,2})?(?:\s*(?:m\.?\s*n\.?|mxn|pesos?))?|(?:\$|mxn\s*)?\s*\d+(?:[,.]\d{1,2})?(?:\s*(?:m\.?\s*n\.?|mxn|pesos?))?/gi;
+  const amountPattern = buildMoneyAmountPattern();
 
   for (const match of normalizedText.matchAll(amountPattern)) {
     const rawValue = match[0];
@@ -439,10 +509,62 @@ export function extractLaborSalaryCandidatesFromText(text: string) {
   return candidates;
 }
 
+function extractFallbackMonthlySalaryFromText(text: string) {
+  const normalizedText = normalizeDocumentText(text);
+  if (!/(salario|sueldo|remuneracion|retribucion|percepcion)/.test(normalizedText)) {
+    return null;
+  }
+
+  const candidates: LaborSalaryCandidate[] = [];
+  const amountPattern = buildMoneyAmountPattern();
+
+  for (const match of normalizedText.matchAll(amountPattern)) {
+    const rawValue = match[0];
+    const index = match.index ?? 0;
+    const amountMxn = parseMoneyAmount(rawValue);
+    if (amountMxn === undefined || amountMxn < 1000) {
+      continue;
+    }
+
+    const contextStart = Math.max(0, index - 250);
+    const contextEnd = Math.min(normalizedText.length, index + rawValue.length + 250);
+    const context = normalizedText.slice(contextStart, contextEnd);
+    const contextBefore = normalizedText.slice(contextStart, index);
+    const moneyContext = normalizedText.slice(Math.max(0, index - 60), Math.min(normalizedText.length, index + rawValue.length + 60));
+
+    if (!/(salario|sueldo|remuneracion|retribucion|percepcion)/.test(context)) {
+      continue;
+    }
+
+    if (!/[$]|mxn|m\.?\s*n\.?|pesos?/i.test(rawValue) && !/(mxn|m\.?\s*n\.?|pesos?)/.test(moneyContext)) {
+      continue;
+    }
+
+    if (/(bono|asistencia|puntualidad|aguinaldo|prima|vacacion|vacaciones|fondo|ahorro|imss|isr|retencion|deduccion|comision|vales|indemnizacion|liquidacion|finiquito)/.test(contextBefore)) {
+      continue;
+    }
+
+    if (/(quincenal|quincenales|catorcenal|semanal|semanales)/.test(context) && !/(mensual|mensuales|al mes|por mes|cada mes)/.test(context)) {
+      continue;
+    }
+
+    candidates.push({
+      period: "MONTHLY",
+      amountMxn,
+      dailySalaryMxn: amountMxn / 30,
+      monthlyGrossSalaryMxn: amountMxn,
+      position: index,
+      sourceText: buildSourceText(normalizedText, index)
+    });
+  }
+
+  return candidates.sort((left, right) => left.amountMxn - right.amountMxn || left.position - right.position).at(-1) ?? null;
+}
+
 export function extractLatestLaborSalaryFromText(text: string) {
   const candidates = extractLaborSalaryCandidatesFromText(text);
   const monthlyCandidates = candidates.filter((candidate) => candidate.period === "MONTHLY");
-  return (monthlyCandidates.length > 0 ? monthlyCandidates : candidates).at(-1) ?? null;
+  return (monthlyCandidates.length > 0 ? monthlyCandidates : candidates).at(-1) ?? extractFallbackMonthlySalaryFromText(text);
 }
 
 export async function extractLaborSalaryFromDocument(
@@ -488,10 +610,22 @@ export async function extractLatestLaborSalaryFromDocuments(documents: LaborSala
       return leftKey[0] - rightKey[0] || leftKey[1] - rightKey[1];
     });
 
-  const extractions = (await Promise.all(salaryDocuments.map(extractLaborSalaryFromDocument)))
-    .filter((extraction): extraction is LaborSalaryExtraction => Boolean(extraction));
+  const extractionEntries = await Promise.all(salaryDocuments.map(async (document) => ({
+    document,
+    extraction: await extractLaborSalaryFromDocument(document)
+  })));
 
-  return extractions.at(-1) ?? null;
+  for (const entry of extractionEntries.slice().reverse()) {
+    if (entry.extraction) {
+      return entry.extraction;
+    }
+
+    if (entry.document.documentType === "ADDENDUM") {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 export async function getLaborDailySalaryRiStatus(laborFile?: LaborDailySalaryRiInput | null): Promise<LaborDailySalaryRiStatus> {

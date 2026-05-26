@@ -257,6 +257,78 @@ function formatCurrency(value: number) {
   }).format(Number(value || 0));
 }
 
+function parseCurrencyValue(value: string) {
+  const parsed = Number(value.replace(/,/g, "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatCurrencyDraftValue(value: number) {
+  return Number.isFinite(value) ? String(value) : "0";
+}
+
+function CurrencyInput({
+  value,
+  readOnly = false,
+  className = "",
+  onValueChange,
+  onValueCommit
+}: {
+  value: number;
+  readOnly?: boolean;
+  className?: string;
+  onValueChange?: (value: number) => void;
+  onValueCommit?: (value: number) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState(formatCurrency(value));
+
+  useEffect(() => {
+    if (!focused) {
+      setDraft(formatCurrency(value));
+    }
+  }, [focused, value]);
+
+  const classNames = [
+    "finance-input",
+    "finance-input-number",
+    "finance-input-currency",
+    readOnly ? "finance-input-readonly" : "",
+    className
+  ].filter(Boolean).join(" ");
+
+  return (
+    <input
+      className={classNames}
+      inputMode="decimal"
+      readOnly={readOnly}
+      type="text"
+      value={focused && !readOnly ? draft : formatCurrency(value)}
+      onFocus={() => {
+        if (!readOnly) {
+          setFocused(true);
+          setDraft(formatCurrencyDraftValue(value));
+        }
+      }}
+      onChange={(event) => {
+        const nextDraft = event.target.value;
+        const nextValue = parseCurrencyValue(nextDraft);
+        setDraft(nextDraft);
+        onValueChange?.(nextValue);
+      }}
+      onBlur={() => {
+        if (readOnly) {
+          return;
+        }
+
+        const nextValue = parseCurrencyValue(draft);
+        setFocused(false);
+        setDraft(formatCurrency(nextValue));
+        onValueCommit?.(nextValue);
+      }}
+    />
+  );
+}
+
 function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
 }
@@ -438,43 +510,19 @@ function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
         const stats = calculateFinanceStats(record);
         return {
           income: acc.income + stats.totalPaidMxn,
-          expenses: acc.expenses + stats.totalExpensesMxn,
-          remainingExpectedThisMonth: acc.remainingExpectedThisMonth + stats.remainingMxn,
-          netBeforeCommissions: acc.netBeforeCommissions + stats.netFeesMxn,
-          commissions:
-            acc.commissions +
-            stats.clientCommissionMxn +
-            stats.closingCommissionMxn +
-            stats.litigationLeaderCommissionMxn +
-            stats.litigationCollaboratorCommissionMxn +
-            stats.corporateLeaderCommissionMxn +
-            stats.corporateCollaboratorCommissionMxn +
-            stats.settlementsLeaderCommissionMxn +
-            stats.settlementsCollaboratorCommissionMxn +
-            stats.financialLeaderCommissionMxn +
-            stats.financialCollaboratorCommissionMxn +
-            stats.taxLeaderCommissionMxn +
-            stats.taxCollaboratorCommissionMxn,
-          netAfterCommissions: acc.netAfterCommissions + stats.netProfitMxn
+          netRemainingExpectedThisMonth: acc.netRemainingExpectedThisMonth + stats.dueTodayMxn
         };
       },
       {
         income: 0,
-        expenses: 0,
-        remainingExpectedThisMonth: 0,
-        netBeforeCommissions: 0,
-        commissions: 0,
-        netAfterCommissions: 0
+        netRemainingExpectedThisMonth: 0
       }
     );
   }, [records]);
 
   const cards = [
     { label: "Ingresos cobrados", value: totals.income, accent: "finance-card-green" },
-    { label: "Remanente esperado este mes", value: totals.remainingExpectedThisMonth, accent: "finance-card-red" },
-    { label: "Neto antes comisiones", value: totals.netBeforeCommissions, accent: "finance-card-blue" },
-    { label: "Comisiones totales", value: totals.commissions, accent: "finance-card-orange" },
-    { label: "Neto despues comisiones", value: totals.netAfterCommissions, accent: "finance-card-rose" }
+    { label: "Remanente neto esperado este mes", value: totals.netRemainingExpectedThisMonth, accent: "finance-card-red" }
   ];
 
   return (
@@ -561,7 +609,6 @@ export function FinancesPage() {
       return;
     }
 
-    shell.style.setProperty("--finance-table-scroll-left", `${source.scrollLeft}px`);
     shell.querySelectorAll<HTMLElement>(".finance-table-scroll, .finance-table-x-nav").forEach((element) => {
       if (element !== source && element.scrollLeft !== source.scrollLeft) {
         element.scrollLeft = source.scrollLeft;
@@ -1326,15 +1373,10 @@ export function FinancesPage() {
           <div className="finance-table-x-nav" onScroll={handleFinanceTableScroll} aria-label="Desplazamiento horizontal de la tabla mensual">
             <div className="finance-table-x-nav-spacer finance-table-monthly-x-nav-spacer" />
           </div>
-          <div className="finance-table-sticky-head">
-            <table className="finance-table finance-table-monthly">
-              {renderMonthlyColGroup()}
-              {renderMonthlyHeader()}
-            </table>
-          </div>
           <div className="finance-table-scroll" onScroll={handleFinanceTableScroll}>
             <table className="finance-table finance-table-monthly">
               {renderMonthlyColGroup()}
+              {renderMonthlyHeader()}
               <tbody>
             {filteredRecords.map((record) => {
               const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
@@ -1370,18 +1412,18 @@ export function FinancesPage() {
                       <input className="finance-input finance-input-readonly" value={TEAM_OPTIONS.find((option) => option.key === record.responsibleTeam)?.label ?? ""} readOnly />
                     )}
                   </td>
-                  <td><input className="finance-input finance-input-readonly finance-input-number" value={record.totalMatterMxn} readOnly /></td>
+                  <td><CurrencyInput value={record.totalMatterMxn} readOnly /></td>
                   <td><input className="finance-input" value={record.workingConcepts ?? ""} onChange={(event) => updateRecordLocal(record.id, { workingConcepts: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value })} /></td>
-                  <td><input className="finance-input finance-input-number" type="number" min="0" step="0.01" value={record.conceptFeesMxn} onChange={(event) => updateRecordLocal(record.id, { conceptFeesMxn: Number(event.target.value || 0) })} onBlur={(event) => void persistRecordPatch(record.id, { conceptFeesMxn: Number(event.target.value || 0) })} /></td>
-                  <td><input className="finance-input finance-input-number" type="number" min="0" step="0.01" value={record.previousPaymentsMxn} onChange={(event) => updateRecordLocal(record.id, { previousPaymentsMxn: Number(event.target.value || 0) })} onBlur={(event) => void persistRecordPatch(record.id, { previousPaymentsMxn: Number(event.target.value || 0) })} /></td>
-                  <td><input className="finance-input finance-input-readonly finance-input-number" value={stats.remainingMxn} readOnly /></td>
+                  <td><CurrencyInput value={record.conceptFeesMxn} onValueChange={(conceptFeesMxn) => updateRecordLocal(record.id, { conceptFeesMxn })} onValueCommit={(conceptFeesMxn) => void persistRecordPatch(record.id, { conceptFeesMxn })} /></td>
+                  <td><CurrencyInput value={record.previousPaymentsMxn} onValueChange={(previousPaymentsMxn) => updateRecordLocal(record.id, { previousPaymentsMxn })} onValueCommit={(previousPaymentsMxn) => void persistRecordPatch(record.id, { previousPaymentsMxn })} /></td>
+                  <td><CurrencyInput value={stats.remainingMxn} readOnly /></td>
                   <td><input className="finance-input finance-input-readonly" type="date" value={toDateInput(record.nextPaymentDate)} readOnly /></td>
                   <td><input className="finance-input" value={record.nextPaymentNotes ?? ""} onChange={(event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value })} /></td>
                   <td>
                     <div className="finance-stack">
-                      <input className="finance-input finance-input-number" type="number" min="0" step="0.01" value={record.paidThisMonthMxn} onChange={(event) => updateRecordLocal(record.id, { paidThisMonthMxn: Number(event.target.value || 0) })} onBlur={(event) => void persistRecordPatch(record.id, { paidThisMonthMxn: Number(event.target.value || 0) })} />
-                      <input className="finance-input finance-input-number" type="number" min="0" step="0.01" value={record.payment2Mxn} onChange={(event) => updateRecordLocal(record.id, { payment2Mxn: Number(event.target.value || 0) })} onBlur={(event) => void persistRecordPatch(record.id, { payment2Mxn: Number(event.target.value || 0) })} />
-                      <input className="finance-input finance-input-number" type="number" min="0" step="0.01" value={record.payment3Mxn} onChange={(event) => updateRecordLocal(record.id, { payment3Mxn: Number(event.target.value || 0) })} onBlur={(event) => void persistRecordPatch(record.id, { payment3Mxn: Number(event.target.value || 0) })} />
+                      <CurrencyInput value={record.paidThisMonthMxn} onValueChange={(paidThisMonthMxn) => updateRecordLocal(record.id, { paidThisMonthMxn })} onValueCommit={(paidThisMonthMxn) => void persistRecordPatch(record.id, { paidThisMonthMxn })} />
+                      <CurrencyInput value={record.payment2Mxn} onValueChange={(payment2Mxn) => updateRecordLocal(record.id, { payment2Mxn })} onValueCommit={(payment2Mxn) => void persistRecordPatch(record.id, { payment2Mxn })} />
+                      <CurrencyInput value={record.payment3Mxn} onValueChange={(payment3Mxn) => updateRecordLocal(record.id, { payment3Mxn })} onValueCommit={(payment3Mxn) => void persistRecordPatch(record.id, { payment3Mxn })} />
                     </div>
                   </td>
                   <td>
@@ -1391,8 +1433,8 @@ export function FinancesPage() {
                       <input className="finance-input" type="date" value={toDateInput(record.paymentDate3)} onChange={(event) => updateRecordLocal(record.id, { paymentDate3: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate3: event.target.value || null })} />
                     </div>
                   </td>
-                  <td><input className={`finance-input finance-input-readonly finance-input-number ${stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""}`} value={stats.dueTodayMxn} readOnly /></td>
-                  <td><input className="finance-input finance-input-readonly finance-input-number finance-cell-positive" value={stats.netFeesMxn} readOnly /></td>
+                  <td><CurrencyInput className={stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""} value={stats.dueTodayMxn} readOnly /></td>
+                  <td><CurrencyInput className="finance-cell-positive" value={stats.netFeesMxn} readOnly /></td>
                   <td>{formatCurrency(stats.clientCommissionMxn)}</td>
                   <td>
                     <select className="finance-input" value={getCanonicalCommissionReceiverName(record.clientCommissionRecipient)} onChange={(event) => { const clientCommissionRecipient = event.target.value || null; updateRecordLocal(record.id, { clientCommissionRecipient }); void persistRecordPatch(record.id, { clientCommissionRecipient }); }}>

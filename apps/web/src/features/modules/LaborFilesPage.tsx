@@ -43,10 +43,14 @@ type PreviousYearPendingVacationForm = LaborPreviousYearPendingVacationInput & {
 };
 
 type ContractSalaryReference = {
+  kind: "salary";
   dailySalaryMxn: number;
   monthlyGrossSalaryMxn?: number;
   originalFileName?: string;
   documentType?: LaborFileDocumentType;
+} | {
+  kind: "unreadable-addendum";
+  originalFileName?: string;
 };
 
 const EMPTY_PROFILE_FORM: LaborFileProfileForm = {
@@ -292,6 +296,7 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
       right.uploadedAt.localeCompare(left.uploadedAt) ||
       (right.documentType === "ADDENDUM" ? 1 : 0) - (left.documentType === "ADDENDUM" ? 1 : 0)
     );
+  let unreadableLatestAddendum: LaborFileDocument | undefined;
 
   for (const document of sortedDocuments) {
     const dailySalary = getRecordNumber(document, [
@@ -303,7 +308,15 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
     ]);
 
     if (dailySalary !== undefined) {
+      if (unreadableLatestAddendum) {
+        return {
+          kind: "unreadable-addendum",
+          originalFileName: unreadableLatestAddendum.originalFileName
+        };
+      }
+
       return {
+        kind: "salary",
         dailySalaryMxn: dailySalary,
         documentType: document.documentType,
         originalFileName: document.originalFileName
@@ -319,13 +332,32 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
     ]);
 
     if (monthlySalary !== undefined) {
+      if (unreadableLatestAddendum) {
+        return {
+          kind: "unreadable-addendum",
+          originalFileName: unreadableLatestAddendum.originalFileName
+        };
+      }
+
       return {
+        kind: "salary",
         dailySalaryMxn: monthlySalary / 30,
         documentType: document.documentType,
         monthlyGrossSalaryMxn: monthlySalary,
         originalFileName: document.originalFileName
       };
     }
+
+    if (document.documentType === "ADDENDUM" && !unreadableLatestAddendum) {
+      unreadableLatestAddendum = document;
+    }
+  }
+
+  if (unreadableLatestAddendum) {
+    return {
+      kind: "unreadable-addendum",
+      originalFileName: unreadableLatestAddendum.originalFileName
+    };
   }
 
   const dailySalary = getRecordNumber(laborFile, [
@@ -337,6 +369,7 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
 
   if (dailySalary !== undefined) {
     return {
+      kind: "salary",
       dailySalaryMxn: dailySalary
     };
   }
@@ -350,6 +383,7 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
 
   return monthlySalary !== undefined
     ? {
+        kind: "salary",
         dailySalaryMxn: monthlySalary / 30,
         monthlyGrossSalaryMxn: monthlySalary
       }
@@ -357,6 +391,12 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
 }
 
 function formatContractSalaryReference(reference: ContractSalaryReference) {
+  if (reference.kind === "unreadable-addendum") {
+    return reference.originalFileName
+      ? `addendum vigente sin salario mensual legible (${reference.originalFileName}).`
+      : "addendum vigente sin salario mensual legible.";
+  }
+
   const sourceLabel = reference.documentType === "ADDENDUM"
     ? "addendum"
     : reference.documentType === "EMPLOYMENT_CONTRACT"
@@ -397,8 +437,16 @@ function getDailySalaryValidation(laborFile: LaborFile, salaryDocuments: LaborFi
     };
   }
 
-  const matches = Math.abs(profileDailySalary - contractSalaryReference.dailySalaryMxn) <= 0.05;
   const salaryReferenceDetail = formatContractSalaryReference(contractSalaryReference);
+  if (contractSalaryReference.kind === "unreadable-addendum") {
+    return {
+      status: "mismatch" as const,
+      label: "No coincide",
+      detail: `RI-003 toma como referencia ${salaryReferenceDetail}`
+    };
+  }
+
+  const matches = Math.abs(profileDailySalary - contractSalaryReference.dailySalaryMxn) <= 0.05;
 
   return matches
     ? {

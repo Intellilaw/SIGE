@@ -211,6 +211,7 @@ function getContractDailySalary(laborFile, salaryDocuments) {
         .filter((document) => document.documentType === "EMPLOYMENT_CONTRACT" || document.documentType === "ADDENDUM")
         .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt) ||
         (right.documentType === "ADDENDUM" ? 1 : 0) - (left.documentType === "ADDENDUM" ? 1 : 0));
+    let unreadableLatestAddendum;
     for (const document of sortedDocuments) {
         const dailySalary = getRecordNumber(document, [
             "contractDailySalaryMxn",
@@ -220,7 +221,14 @@ function getContractDailySalary(laborFile, salaryDocuments) {
             "employmentContractDailySalaryMxn"
         ]);
         if (dailySalary !== undefined) {
+            if (unreadableLatestAddendum) {
+                return {
+                    kind: "unreadable-addendum",
+                    originalFileName: unreadableLatestAddendum.originalFileName
+                };
+            }
             return {
+                kind: "salary",
                 dailySalaryMxn: dailySalary,
                 documentType: document.documentType,
                 originalFileName: document.originalFileName
@@ -234,13 +242,29 @@ function getContractDailySalary(laborFile, salaryDocuments) {
             "riExtractedMonthlyGrossSalaryMxn"
         ]);
         if (monthlySalary !== undefined) {
+            if (unreadableLatestAddendum) {
+                return {
+                    kind: "unreadable-addendum",
+                    originalFileName: unreadableLatestAddendum.originalFileName
+                };
+            }
             return {
+                kind: "salary",
                 dailySalaryMxn: monthlySalary / 30,
                 documentType: document.documentType,
                 monthlyGrossSalaryMxn: monthlySalary,
                 originalFileName: document.originalFileName
             };
         }
+        if (document.documentType === "ADDENDUM" && !unreadableLatestAddendum) {
+            unreadableLatestAddendum = document;
+        }
+    }
+    if (unreadableLatestAddendum) {
+        return {
+            kind: "unreadable-addendum",
+            originalFileName: unreadableLatestAddendum.originalFileName
+        };
     }
     const dailySalary = getRecordNumber(laborFile, [
         "contractDailySalaryMxn",
@@ -250,6 +274,7 @@ function getContractDailySalary(laborFile, salaryDocuments) {
     ]);
     if (dailySalary !== undefined) {
         return {
+            kind: "salary",
             dailySalaryMxn: dailySalary
         };
     }
@@ -261,12 +286,18 @@ function getContractDailySalary(laborFile, salaryDocuments) {
     ]);
     return monthlySalary !== undefined
         ? {
+            kind: "salary",
             dailySalaryMxn: monthlySalary / 30,
             monthlyGrossSalaryMxn: monthlySalary
         }
         : undefined;
 }
 function formatContractSalaryReference(reference) {
+    if (reference.kind === "unreadable-addendum") {
+        return reference.originalFileName
+            ? `addendum vigente sin salario mensual legible (${reference.originalFileName}).`
+            : "addendum vigente sin salario mensual legible.";
+    }
     const sourceLabel = reference.documentType === "ADDENDUM"
         ? "addendum"
         : reference.documentType === "EMPLOYMENT_CONTRACT"
@@ -302,8 +333,15 @@ function getDailySalaryValidation(laborFile, salaryDocuments) {
             detail: "Contrato/addenda cargados sin salario mensual legible."
         };
     }
-    const matches = Math.abs(profileDailySalary - contractSalaryReference.dailySalaryMxn) <= 0.05;
     const salaryReferenceDetail = formatContractSalaryReference(contractSalaryReference);
+    if (contractSalaryReference.kind === "unreadable-addendum") {
+        return {
+            status: "mismatch",
+            label: "No coincide",
+            detail: `RI-003 toma como referencia ${salaryReferenceDetail}`
+        };
+    }
+    const matches = Math.abs(profileDailySalary - contractSalaryReference.dailySalaryMxn) <= 0.05;
     return matches
         ? {
             status: "match",

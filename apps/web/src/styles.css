@@ -5203,7 +5203,7 @@ textarea {
 
 .finance-summary-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(220px, 280px));
   gap: 12px;
   margin-top: 18px;
 }
@@ -5287,25 +5287,6 @@ textarea {
 
 .finance-active-table-x-nav-spacer {
   width: 2560px;
-}
-
-.finance-table-sticky-head {
-  background: #fff;
-  max-width: 100%;
-  overflow: hidden;
-  position: sticky;
-  top: var(--finance-sticky-table-top, 0);
-  z-index: 3;
-}
-
-.finance-table-sticky-head > table {
-  transform: translateX(calc(var(--finance-table-scroll-left, 0px) * -1));
-  will-change: transform;
-}
-
-.finance-table-sticky-head thead th {
-  position: static;
-  top: auto;
 }
 
 .finance-table-scroll {
@@ -5393,6 +5374,7 @@ textarea {
 
 .finance-input-readonly { background: #f8fafc; color: #52606d; }
 .finance-input-number { text-align: right; }
+.finance-input-currency { font-variant-numeric: tabular-nums; }
 
 .finance-stack,
 .finance-target-picker {

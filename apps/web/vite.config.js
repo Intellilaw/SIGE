@@ -5,7 +5,7 @@ function normalizeProxyTarget(value) {
 }
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), "");
-    const apiProxyTarget = normalizeProxyTarget(env.VITE_API_PROXY_TARGET ?? "https://api.pruebasb.online");
+    const apiProxyTarget = normalizeProxyTarget(env.VITE_API_PROXY_TARGET ?? "https://www.intellilaw.ai");
     return {
         plugins: [react()],
         resolve: {
