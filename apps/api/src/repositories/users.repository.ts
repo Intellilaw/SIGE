@@ -1,14 +1,17 @@
 import type { PrismaClient } from "@prisma/client";
 
 import { mapManagedUser } from "./mappers";
-import { buildLaborFileSnapshot, shouldHaveLaborFile } from "./labor-files.repository";
+import { buildLaborFileSnapshot, buildLaborFileUserSyncSnapshot, shouldHaveLaborFile } from "./labor-files.repository";
 import type { CreateManagedUserRecord, UpdateManagedUserRecord, UsersRepository } from "./types";
 
 export class PrismaUsersRepository implements UsersRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async list() {
-    const records = await this.prisma.user.findMany({ orderBy: { createdAt: "desc" } });
+    const records = await this.prisma.user.findMany({
+      where: { isActive: true },
+      orderBy: { createdAt: "desc" }
+    });
     return records.map(mapManagedUser);
   }
 
@@ -62,6 +65,7 @@ export class PrismaUsersRepository implements UsersRepository {
       const user = await tx.user.update({
         where: { id: userId },
         data: {
+          username: payload.username,
           displayName: payload.displayName,
           passwordHash: payload.passwordHash,
           shortName: payload.shortName === undefined ? undefined : payload.shortName,
@@ -89,7 +93,7 @@ export class PrismaUsersRepository implements UsersRepository {
             ...buildLaborFileSnapshot(user),
             status: "INCOMPLETE"
           },
-          update: buildLaborFileSnapshot(user)
+          update: buildLaborFileUserSyncSnapshot(user)
         });
       }
 
@@ -101,10 +105,10 @@ export class PrismaUsersRepository implements UsersRepository {
 
   public async delete(userId: string) {
     await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.update({
-        where: { id: userId },
-        data: { isActive: false }
-      });
+      const user = await tx.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        return;
+      }
 
       const laborFile = await tx.laborFile.findUnique({
         where: { userId },
@@ -115,22 +119,14 @@ export class PrismaUsersRepository implements UsersRepository {
         await tx.laborFile.update({
           where: { id: laborFile.id },
           data: {
-            ...buildLaborFileSnapshot(user),
-            employmentStatus: "FORMER",
-            employmentEndedAt: new Date()
-          }
-        });
-      } else if (shouldHaveLaborFile(user)) {
-        await tx.laborFile.create({
-          data: {
-            user: { connect: { id: user.id } },
-            ...buildLaborFileSnapshot(user),
-            status: "INCOMPLETE",
+            ...buildLaborFileUserSyncSnapshot(user),
             employmentStatus: "FORMER",
             employmentEndedAt: new Date()
           }
         });
       }
+
+      await tx.user.delete({ where: { id: userId } });
     });
   }
 }

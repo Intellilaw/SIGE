@@ -17,6 +17,7 @@ const EMPTY_PROFILE_FORM = {
 };
 const EMPTY_GLOBAL_VACATION_FORM = {
     date: "",
+    vacationDates: [],
     days: 1,
     description: ""
 };
@@ -205,40 +206,53 @@ function getRecordNumber(record, keys) {
     }
     return undefined;
 }
-function getContractDailySalary(laborFile, contractDocument) {
-    const dailySalary = getRecordNumber(contractDocument, [
-        "contractDailySalaryMxn",
-        "dailySalaryMxn",
-        "extractedDailySalaryMxn",
-        "riExtractedDailySalaryMxn",
-        "employmentContractDailySalaryMxn"
-    ]) ??
-        getRecordNumber(laborFile, [
+function getContractDailySalary(laborFile, salaryDocuments) {
+    const sortedDocuments = [...salaryDocuments]
+        .filter((document) => document.documentType === "EMPLOYMENT_CONTRACT" || document.documentType === "ADDENDUM")
+        .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt) ||
+        (right.documentType === "ADDENDUM" ? 1 : 0) - (left.documentType === "ADDENDUM" ? 1 : 0));
+    for (const document of sortedDocuments) {
+        const dailySalary = getRecordNumber(document, [
             "contractDailySalaryMxn",
-            "extractedContractDailySalaryMxn",
-            "riContractDailySalaryMxn",
+            "dailySalaryMxn",
+            "extractedDailySalaryMxn",
+            "riExtractedDailySalaryMxn",
             "employmentContractDailySalaryMxn"
         ]);
+        if (dailySalary !== undefined) {
+            return dailySalary;
+        }
+        const monthlySalary = getRecordNumber(document, [
+            "contractMonthlyGrossSalaryMxn",
+            "monthlyGrossSalaryMxn",
+            "monthlySalaryMxn",
+            "extractedMonthlyGrossSalaryMxn",
+            "riExtractedMonthlyGrossSalaryMxn"
+        ]);
+        if (monthlySalary !== undefined) {
+            return monthlySalary / 30;
+        }
+    }
+    const dailySalary = getRecordNumber(laborFile, [
+        "contractDailySalaryMxn",
+        "extractedContractDailySalaryMxn",
+        "riContractDailySalaryMxn",
+        "employmentContractDailySalaryMxn"
+    ]);
     if (dailySalary !== undefined) {
         return dailySalary;
     }
-    const monthlySalary = getRecordNumber(contractDocument, [
+    const monthlySalary = getRecordNumber(laborFile, [
         "contractMonthlyGrossSalaryMxn",
-        "monthlyGrossSalaryMxn",
-        "monthlySalaryMxn",
-        "extractedMonthlyGrossSalaryMxn",
-        "riExtractedMonthlyGrossSalaryMxn"
-    ]) ??
-        getRecordNumber(laborFile, [
-            "contractMonthlyGrossSalaryMxn",
-            "extractedContractMonthlyGrossSalaryMxn",
-            "riContractMonthlyGrossSalaryMxn",
-            "employmentContractMonthlyGrossSalaryMxn"
-        ]);
+        "extractedContractMonthlyGrossSalaryMxn",
+        "riContractMonthlyGrossSalaryMxn",
+        "employmentContractMonthlyGrossSalaryMxn"
+    ]);
     return monthlySalary !== undefined ? monthlySalary / 30 : undefined;
 }
-function getDailySalaryValidation(laborFile, contractDocument) {
-    if (!contractDocument) {
+function getDailySalaryValidation(laborFile, salaryDocuments) {
+    const hasContractDocument = salaryDocuments.some((document) => document.documentType === "EMPLOYMENT_CONTRACT");
+    if (!hasContractDocument) {
         return {
             status: "mismatch",
             label: "No coincide",
@@ -253,12 +267,12 @@ function getDailySalaryValidation(laborFile, contractDocument) {
             detail: "Falta salario diario en el expediente."
         };
     }
-    const contractDailySalary = getContractDailySalary(laborFile, contractDocument);
+    const contractDailySalary = getContractDailySalary(laborFile, salaryDocuments);
     if (contractDailySalary === undefined) {
         return {
             status: "mismatch",
             label: "No coincide",
-            detail: "Contrato cargado sin salario diario legible."
+            detail: "Contrato/addenda cargados sin salario mensual legible."
         };
     }
     const matches = Math.abs(profileDailySalary - contractDailySalary) <= 0.05;
@@ -266,12 +280,12 @@ function getDailySalaryValidation(laborFile, contractDocument) {
         ? {
             status: "match",
             label: "Coincide",
-            detail: "Coincide con el contrato laboral."
+            detail: "Coincide con contrato/addenda vigente."
         }
         : {
             status: "mismatch",
             label: "No coincide",
-            detail: `Contrato: ${formatMoney(contractDailySalary)}.`
+            detail: `Contrato/addenda vigente: ${formatMoney(contractDailySalary)}.`
         };
 }
 function getDocumentsByType(documents, documentType) {
@@ -454,6 +468,33 @@ function mergeVacationFormatDates(current, laborFile, dates) {
         enjoyedDays: laborFile ? laborFile.vacationSummary.usedDays + vacationDays : current.enjoyedDays
     };
 }
+function mergeGlobalVacationDates(current, dates) {
+    const vacationDates = sortDateKeys(dates);
+    return {
+        ...current,
+        date: vacationDates[0] ?? "",
+        days: vacationDates.length || 1,
+        vacationDates
+    };
+}
+function getGlobalVacationDayDates(day) {
+    const explicitDates = sortDateKeys(day.vacationDates ?? []);
+    if (explicitDates.length > 0) {
+        return explicitDates;
+    }
+    if (!day.date) {
+        return [];
+    }
+    const days = Number(day.days);
+    if (!Number.isInteger(days) || days <= 1) {
+        return [day.date];
+    }
+    return Array.from({ length: days }, (_, index) => addDaysKey(day.date, index));
+}
+function formatGlobalVacationDayDates(day) {
+    const dates = getGlobalVacationDayDates(day);
+    return formatVacationFormatDatesText(dates) || formatDate(day.date);
+}
 function isPdfFile(file) {
     return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
@@ -508,6 +549,8 @@ export function LaborFilesPage() {
     const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
     const [globalVacationDays, setGlobalVacationDays] = useState([]);
     const [globalVacationForm, setGlobalVacationForm] = useState(EMPTY_GLOBAL_VACATION_FORM);
+    const [globalVacationRange, setGlobalVacationRange] = useState({ startDate: "", endDate: "" });
+    const [globalVacationSingleDate, setGlobalVacationSingleDate] = useState("");
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -1007,20 +1050,60 @@ export function LaborFilesPage() {
             setSavingPreviousYearPending(false);
         }
     }
+    function addGlobalVacationDates(dates) {
+        if (dates.length === 0) {
+            setFlash({ tone: "error", text: "Selecciona al menos un día de vacaciones generales." });
+            return;
+        }
+        setGlobalVacationForm((current) => mergeGlobalVacationDates(current, [...(current.vacationDates ?? []), ...dates]));
+        setFlash(null);
+    }
+    function handleGlobalVacationRangeAdd() {
+        if (!globalVacationRange.startDate || !globalVacationRange.endDate) {
+            setFlash({ tone: "error", text: "Captura el inicio y fin del periodo de vacaciones generales." });
+            return;
+        }
+        const dates = enumerateDateKeys(globalVacationRange.startDate, globalVacationRange.endDate);
+        if (dates.length === 0) {
+            setFlash({ tone: "error", text: "La fecha final no puede ser anterior a la inicial." });
+            return;
+        }
+        addGlobalVacationDates(dates);
+        setGlobalVacationRange({ startDate: "", endDate: "" });
+    }
+    function handleGlobalVacationSingleDateAdd() {
+        if (!globalVacationSingleDate) {
+            setFlash({ tone: "error", text: "Selecciona un día de vacaciones generales." });
+            return;
+        }
+        addGlobalVacationDates([globalVacationSingleDate]);
+        setGlobalVacationSingleDate("");
+    }
+    function handleGlobalVacationDateRemove(date) {
+        setGlobalVacationForm((current) => mergeGlobalVacationDates(current, (current.vacationDates ?? []).filter((entry) => entry !== date)));
+    }
     async function handleGlobalVacationSubmit(event) {
         event.preventDefault();
         if (!canWrite) {
+            return;
+        }
+        const vacationDates = sortDateKeys(globalVacationForm.vacationDates ?? []);
+        if (vacationDates.length === 0) {
+            setFlash({ tone: "error", text: "Agrega al menos un día o periodo de vacaciones generales." });
             return;
         }
         setSaving(true);
         setFlash(null);
         try {
             const result = await apiPost("/labor-files/global-vacation-days", {
-                date: globalVacationForm.date,
-                days: globalVacationForm.days ?? 1,
+                date: vacationDates[0],
+                vacationDates,
+                days: vacationDates.length,
                 description: globalVacationForm.description || null
             });
             setGlobalVacationForm(EMPTY_GLOBAL_VACATION_FORM);
+            setGlobalVacationRange({ startDate: "", endDate: "" });
+            setGlobalVacationSingleDate("");
             setFlash({ tone: "success", text: `Vacación general registrada. Se generaron ${result.generatedFormats} formatos individuales.` });
             await loadLaborFiles(selectedLaborFile?.id);
             await downloadGlobalVacationFormats(result.day);
@@ -1066,11 +1149,12 @@ export function LaborFilesPage() {
     const contractDocument = selectedLaborFile
         ? getLatestDocument(selectedLaborFile.documents, "EMPLOYMENT_CONTRACT")
         : undefined;
+    const salaryDocuments = selectedLaborFile?.documents.filter((document) => document.documentType === "EMPLOYMENT_CONTRACT" || document.documentType === "ADDENDUM") ?? [];
     const displayedDailySalaryMxn = canWrite
         ? parseMoneyValue(profileForm.dailySalaryMxn)
         : selectedLaborFile?.dailySalaryMxn;
     const dailySalaryValidation = selectedLaborFile
-        ? getDailySalaryValidation({ ...selectedLaborFile, dailySalaryMxn: displayedDailySalaryMxn }, contractDocument)
+        ? getDailySalaryValidation({ ...selectedLaborFile, dailySalaryMxn: displayedDailySalaryMxn }, salaryDocuments)
         : undefined;
     const latestVacationFormatEvent = selectedLaborFile?.vacationEvents
         .filter((event) => event.eventType === "VACATION" && event.acceptanceOriginalFileName)
@@ -1092,9 +1176,9 @@ export function LaborFilesPage() {
         ? selectedLaborFile.documents.filter((document) => document.documentType === uploadType).length
         : 0;
     const selectedUploadLimitReached = Boolean(selectedUploadDefinition?.maxFiles && selectedUploadCount >= selectedUploadDefinition.maxFiles);
-    return (_jsxs("section", { className: "page-stack labor-files-page", children: [_jsxs("header", { className: "hero module-hero labor-files-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Expedientes" }), _jsx("div", { children: _jsx("h2", { children: "Expedientes Laborales" }) })] }), _jsx("p", { className: "muted", children: "Contratos, documentos obligatorios y vacaciones por usuario, conservados tambi\u00E9n para extrabajadores." })] }), canWrite ? (_jsxs("div", { className: "summary-grid", children: [_jsx(SummaryCard, { label: "Expedientes", value: metrics.total, accent: "#1d4ed8" }), _jsx(SummaryCard, { label: "Completos", value: metrics.complete, accent: "#0f766e" }), _jsx(SummaryCard, { label: "Incompletos", value: metrics.incomplete, accent: "#b42318" }), _jsx(SummaryCard, { label: "Extrabajadores", value: metrics.former, accent: "#9a6700" })] })) : null, flash ? (_jsx("div", { className: `message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`, children: flash.text })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, canWrite ? (_jsxs("section", { className: "panel labor-file-global-vacation-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Vacaciones generales" }), _jsx("span", { children: "Genera los formatos individuales y registra el movimiento en todos los expedientes aplicables." })] }), _jsxs("span", { children: [globalVacationDays.length, " registrados"] })] }), _jsxs("form", { className: "labor-file-global-vacation-form", onSubmit: handleGlobalVacationSubmit, children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDa" }), _jsx("input", { required: true, type: "date", value: globalVacationForm.date, onChange: (event) => setGlobalVacationForm((current) => ({ ...current, date: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas a descontar" }), _jsx("input", { min: "0.5", step: "0.5", type: "number", value: globalVacationForm.days ?? 1, onChange: (event) => setGlobalVacationForm((current) => ({ ...current, days: Number(event.target.value) })) })] }), _jsxs("label", { className: "form-field labor-file-global-vacation-description", children: [_jsx("span", { children: "Descripci\u00F3n" }), _jsx("input", { value: globalVacationForm.description ?? "", onChange: (event) => setGlobalVacationForm((current) => ({ ...current, description: event.target.value })) })] }), _jsx("button", { className: "primary-button", disabled: saving, type: "submit", children: saving ? "Generando..." : "Generar para todos" })] }), _jsx("div", { className: "labor-file-global-vacation-list", children: globalVacationDays.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Sin vacaciones generales registradas." })) : globalVacationDays.map((day) => {
+    return (_jsxs("section", { className: "page-stack labor-files-page", children: [_jsxs("header", { className: "hero module-hero labor-files-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Expedientes" }), _jsx("div", { children: _jsx("h2", { children: "Expedientes Laborales" }) })] }), _jsx("p", { className: "muted", children: "Contratos, documentos obligatorios y vacaciones por usuario, conservados tambi\u00E9n para extrabajadores." })] }), canWrite ? (_jsxs("div", { className: "summary-grid", children: [_jsx(SummaryCard, { label: "Expedientes", value: metrics.total, accent: "#1d4ed8" }), _jsx(SummaryCard, { label: "Completos", value: metrics.complete, accent: "#0f766e" }), _jsx(SummaryCard, { label: "Incompletos", value: metrics.incomplete, accent: "#b42318" }), _jsx(SummaryCard, { label: "Extrabajadores", value: metrics.former, accent: "#9a6700" })] })) : null, flash ? (_jsx("div", { className: `message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`, children: flash.text })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, canWrite ? (_jsxs("section", { className: "panel labor-file-global-vacation-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "Vacaciones generales" }), _jsx("span", { children: "Genera los formatos individuales y registra el movimiento en todos los trabajadores activos." })] }), _jsxs("span", { children: [globalVacationDays.length, " registrados"] })] }), _jsxs("form", { className: "labor-file-global-vacation-form", onSubmit: handleGlobalVacationSubmit, children: [_jsxs("div", { className: "labor-file-vacation-date-tools", children: [_jsxs("div", { className: "labor-file-vacation-date-group is-range", children: [_jsx("h3", { children: "D\u00EDas continuos" }), _jsxs("div", { className: "labor-file-vacation-date-row", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Inicio" }), _jsx("input", { type: "date", value: globalVacationRange.startDate, onChange: (event) => setGlobalVacationRange((current) => ({ ...current, startDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fin" }), _jsx("input", { type: "date", value: globalVacationRange.endDate, onChange: (event) => setGlobalVacationRange((current) => ({ ...current, endDate: event.target.value })) })] }), _jsx("button", { className: "secondary-button", onClick: handleGlobalVacationRangeAdd, type: "button", children: "Agregar periodo" })] })] }), _jsxs("div", { className: "labor-file-vacation-date-group is-single", children: [_jsx("h3", { children: "D\u00EDa suelto" }), _jsxs("div", { className: "labor-file-vacation-date-row", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: globalVacationSingleDate, onChange: (event) => setGlobalVacationSingleDate(event.target.value) })] }), _jsx("button", { className: "secondary-button", onClick: handleGlobalVacationSingleDateAdd, type: "button", children: "Agregar d\u00EDa" })] })] })] }), _jsxs("div", { className: "labor-file-vacation-selected-days", children: [_jsxs("div", { className: "labor-file-vacation-format-section-title", children: [_jsx("h4", { children: "D\u00EDas seleccionados" }), _jsxs("span", { children: [globalVacationForm.vacationDates?.length ?? 0, " d\u00EDas para todos"] })] }), (globalVacationForm.vacationDates ?? []).length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Agrega un d\u00EDa o un periodo." })) : (_jsx("div", { className: "labor-file-vacation-day-chips", children: (globalVacationForm.vacationDates ?? []).map((date) => (_jsxs("button", { onClick: () => handleGlobalVacationDateRemove(date), type: "button", children: [formatDate(date), " ", _jsx("span", { children: "Quitar" })] }, date))) }))] }), _jsxs("label", { className: "form-field labor-file-global-vacation-description", children: [_jsx("span", { children: "Descripci\u00F3n" }), _jsx("input", { value: globalVacationForm.description ?? "", onChange: (event) => setGlobalVacationForm((current) => ({ ...current, description: event.target.value })) })] }), _jsx("div", { className: "labor-file-global-vacation-actions", children: _jsx("button", { className: "primary-button", disabled: saving, type: "submit", children: saving ? "Generando..." : "Generar para todos" }) })] }), _jsx("div", { className: "labor-file-global-vacation-list", children: globalVacationDays.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Sin vacaciones generales registradas." })) : globalVacationDays.map((day) => {
                             const canDeleteDay = canDeleteGlobalVacationDay(day.id);
-                            return (_jsxs("div", { className: "labor-file-vacation-event", children: [_jsxs("div", { children: [_jsx("strong", { children: formatDate(day.date) }), _jsxs("span", { children: [day.days, " ", day.days === 1 ? "día" : "días", " para todos"] })] }), day.description ? _jsx("small", { children: day.description }) : _jsx("small", { children: "Vacaci\u00F3n general" }), _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "ghost-button", disabled: downloadingGlobalVacationId === day.id, onClick: () => void downloadGlobalVacationFormats(day), type: "button", children: downloadingGlobalVacationId === day.id ? "Preparando..." : "Descargar formatos" }), canDeleteDay ? (_jsx("button", { className: "danger-button", disabled: deletingGlobalVacationId === day.id, onClick: () => void handleGlobalVacationDelete(day.id), type: "button", children: "Quitar" })) : null] })] }, day.id));
+                            return (_jsxs("div", { className: "labor-file-vacation-event", children: [_jsxs("div", { children: [_jsx("strong", { children: formatGlobalVacationDayDates(day) }), _jsxs("span", { children: [day.days, " ", day.days === 1 ? "día" : "días", " para todos"] })] }), day.description ? _jsx("small", { children: day.description }) : _jsx("small", { children: "Vacaci\u00F3n general" }), _jsxs("div", { className: "table-actions", children: [_jsx("button", { className: "ghost-button", disabled: downloadingGlobalVacationId === day.id, onClick: () => void downloadGlobalVacationFormats(day), type: "button", children: downloadingGlobalVacationId === day.id ? "Preparando..." : "Descargar formatos" }), canDeleteDay ? (_jsx("button", { className: "danger-button", disabled: deletingGlobalVacationId === day.id, onClick: () => void handleGlobalVacationDelete(day.id), type: "button", children: "Quitar" })) : null] })] }, day.id));
                         }) })] })) : null, _jsxs("section", { className: "labor-files-layout", children: [canWrite ? (_jsxs("aside", { className: "panel labor-files-sidebar", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Colaboradores" }), _jsx("span", { children: filteredLaborFiles.length })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { type: "search", value: query, onChange: (event) => setQuery(event.target.value), placeholder: "Nombre, equipo o rol..." })] }), _jsxs("div", { className: "labor-file-selector-list", children: [loading ? _jsx("div", { className: "centered-inline-message", children: "Cargando expedientes..." }) : null, !loading && filteredLaborFiles.map((laborFile) => (_jsxs("button", { className: [
                                             laborFile.id === selectedLaborFile?.id ? "is-active" : "",
                                             laborFile.status === "COMPLETE" ? "is-complete" : "is-incomplete"

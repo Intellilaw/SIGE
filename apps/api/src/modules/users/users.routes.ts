@@ -27,6 +27,7 @@ const createUserSchema = z.object({
 });
 
 const updateUserSchema = z.object({
+  username: z.string().min(1).optional(),
   displayName: z.string().min(1).optional(),
   password: z.string().min(10).max(128).optional(),
   shortName: z.string().max(10).nullable().optional(),

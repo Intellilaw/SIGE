@@ -19,6 +19,7 @@ import {
 } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { extractLaborSalaryFromDocument, isLaborSalaryDocumentType } from "../modules/labor-files/labor-salary-intelligence";
 import { mapLaborFile, mapLaborFileDocument, mapLaborGlobalVacationDay, mapLaborVacationEvent } from "./mappers";
 import type { LaborFileDocumentUploadRecord, LaborFilesRepository, LaborVacationAcceptanceUploadRecord } from "./types";
 
@@ -111,6 +112,7 @@ const GLOBAL_VACATION_DAY_SELECT = {
   id: true,
   date: true,
   days: true,
+  vacationDates: true,
   description: true,
   createdAt: true,
   updatedAt: true
@@ -260,6 +262,29 @@ function getVacationDateKeys(payload: LaborVacationEventInput) {
   return Array.from(new Set(enumerateDateKeys(startDate, endDate))).sort();
 }
 
+function getGlobalVacationDateKeys(payload: LaborGlobalVacationDayInput) {
+  const explicitDateKeys = (payload.vacationDates ?? [])
+    .map((date) => toDate(date))
+    .filter((date): date is Date => Boolean(date))
+    .map(toDateKey);
+
+  if (explicitDateKeys.length > 0) {
+    return Array.from(new Set(explicitDateKeys)).sort();
+  }
+
+  const startDate = toDate(payload.date);
+  if (!startDate) {
+    return [];
+  }
+
+  const days = Number(payload.days ?? 1);
+  if (!Number.isInteger(days) || days <= 1) {
+    return [toDateKey(startDate)];
+  }
+
+  return Array.from(new Set(enumerateDateKeys(startDate, addDays(startDate, days - 1)))).sort();
+}
+
 function isPdfFile(payload: Pick<LaborFileDocumentUploadRecord, "fileMimeType" | "originalFileName">) {
   const mimeType = normalizeText(payload.fileMimeType).toLowerCase();
   const filename = normalizeText(payload.originalFileName).toLowerCase();
@@ -361,6 +386,24 @@ function computeLaborFileStatus(input: {
   return complete ? "COMPLETE" : "INCOMPLETE";
 }
 
+function attachSalaryExtractionToDocument(
+  document: LaborFileDocument,
+  extraction: Awaited<ReturnType<typeof extractLaborSalaryFromDocument>>
+) {
+  if (!extraction) {
+    return document;
+  }
+
+  return {
+    ...document,
+    riExtractedDailySalaryMxn: extraction.dailySalaryMxn,
+    riExtractedMonthlyGrossSalaryMxn: extraction.monthlyGrossSalaryMxn,
+    riSalaryExtractionDetail: extraction.monthlyGrossSalaryMxn
+      ? `Salario mensual extraido y convertido a diario / 30 desde ${extraction.originalFileName}.`
+      : `Salario diario extraido desde ${extraction.originalFileName}.`
+  } satisfies LaborFileDocument;
+}
+
 export function shouldHaveLaborFile(user: Pick<LaborFileUserSnapshot, "role" | "legacyRole">) {
   return user.role !== "SUPERADMIN" && user.legacyRole !== "SUPERADMIN";
 }
@@ -380,8 +423,65 @@ export function buildLaborFileSnapshot(user: LaborFileUserSnapshot) {
   };
 }
 
+export function buildLaborFileUserSyncSnapshot(user: LaborFileUserSnapshot) {
+  const snapshot = buildLaborFileSnapshot(user);
+  return {
+    employeeName: snapshot.employeeName,
+    employeeEmail: snapshot.employeeEmail,
+    employeeUsername: snapshot.employeeUsername,
+    employeeShortName: snapshot.employeeShortName,
+    team: snapshot.team,
+    legacyTeam: snapshot.legacyTeam,
+    specificRole: snapshot.specificRole,
+    employmentStatus: snapshot.employmentStatus,
+    employmentEndedAt: snapshot.employmentEndedAt
+  };
+}
+
 export class PrismaLaborFilesRepository implements LaborFilesRepository {
   public constructor(private readonly prisma: PrismaClient) {}
+
+  private async enrichLaborFilesWithSalaryIntelligence(laborFiles: LaborFile[]) {
+    const laborFileIds = laborFiles.map((laborFile) => laborFile.id);
+    if (laborFileIds.length === 0) {
+      return laborFiles;
+    }
+
+    const records = await this.prisma.laborFileDocument.findMany({
+      where: {
+        laborFileId: { in: laborFileIds },
+        documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] }
+      },
+      select: {
+        id: true,
+        laborFileId: true,
+        documentType: true,
+        originalFileName: true,
+        fileMimeType: true,
+        uploadedAt: true,
+        fileContent: true
+      }
+    });
+    const extractionEntries = await Promise.all(records.map(async (record) => [
+      record.id,
+      await extractLaborSalaryFromDocument({
+        id: record.id,
+        documentType: record.documentType,
+        originalFileName: record.originalFileName,
+        fileMimeType: record.fileMimeType,
+        uploadedAt: record.uploadedAt,
+        fileContent: Buffer.from(record.fileContent)
+      })
+    ] as const));
+    const extractionsByDocumentId = new Map(extractionEntries);
+
+    return laborFiles.map((laborFile) => ({
+      ...laborFile,
+      documents: laborFile.documents.map((document) =>
+        attachSalaryExtractionToDocument(document, extractionsByDocumentId.get(document.id) ?? null)
+      )
+    }));
+  }
 
   public async list() {
     await this.syncMissingForUsers();
@@ -394,7 +494,8 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       this.findGlobalVacationDayRecords()
     ]);
 
-    return records.map((record) => mapLaborFile(record, globalVacationDays));
+    const laborFiles = records.map((record) => mapLaborFile(record, globalVacationDays));
+    return this.enrichLaborFilesWithSalaryIntelligence(laborFiles);
   }
 
   public async listForUser(userId: string) {
@@ -409,7 +510,8 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       this.findGlobalVacationDayRecords()
     ]);
 
-    return records.map((record) => mapLaborFile(record, globalVacationDays));
+    const laborFiles = records.map((record) => mapLaborFile(record, globalVacationDays));
+    return this.enrichLaborFilesWithSalaryIntelligence(laborFiles);
   }
 
   public async findById(laborFileId: string) {
@@ -421,7 +523,12 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       this.findGlobalVacationDayRecords()
     ]);
 
-    return record ? mapLaborFile(record, globalVacationDays) : null;
+    if (!record) {
+      return null;
+    }
+
+    const [laborFile] = await this.enrichLaborFilesWithSalaryIntelligence([mapLaborFile(record, globalVacationDays)]);
+    return laborFile ?? null;
   }
 
   public async findDocument(documentId: string) {
@@ -551,7 +658,8 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       include: LABOR_FILE_RELATIONS
     });
 
-    return mapLaborFile(record);
+    const [laborFile] = await this.enrichLaborFilesWithSalaryIntelligence([mapLaborFile(record)]);
+    return laborFile;
   }
 
   public async uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord) {
@@ -587,7 +695,18 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     });
 
     await this.refreshStatus(laborFileId);
-    return mapLaborFileDocument(record);
+    const document = mapLaborFileDocument(record);
+    const extraction = isLaborSalaryDocumentType(record.documentType)
+      ? await extractLaborSalaryFromDocument({
+          id: record.id,
+          documentType: record.documentType,
+          originalFileName: record.originalFileName,
+          fileMimeType: record.fileMimeType,
+          uploadedAt: record.uploadedAt,
+          fileContent: payload.fileContent
+        })
+      : null;
+    return attachSalaryExtractionToDocument(document, extraction);
   }
 
   public async deleteDocument(documentId: string) {
@@ -773,12 +892,14 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
   }
 
   public async createGlobalVacationDay(payload: LaborGlobalVacationDayInput) {
-    const date = toDate(payload.date);
+    const vacationDateKeys = getGlobalVacationDateKeys(payload);
+    const date = toDate(vacationDateKeys[0] ?? payload.date);
     if (!date) {
       throw new AppError(400, "LABOR_GLOBAL_VACATION_DATE_REQUIRED", "Captura el día general de vacaciones.");
     }
 
-    const days = Number(payload.days ?? 1);
+    const hasExplicitVacationDates = Boolean(payload.vacationDates?.length);
+    const days = hasExplicitVacationDates ? vacationDateKeys.length : Number(payload.days ?? (vacationDateKeys.length || 1));
     if (!Number.isFinite(days) || days <= 0) {
       throw new AppError(400, "INVALID_LABOR_GLOBAL_VACATION_DAYS", "Los días de vacaciones deben ser mayores a cero.");
     }
@@ -787,11 +908,13 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       where: { date },
       update: {
         days: new Prisma.Decimal(days),
+        vacationDates: vacationDateKeys,
         description: normalizeText(payload.description) || null
       },
       create: {
         date,
         days: new Prisma.Decimal(days),
+        vacationDates: vacationDateKeys,
         description: normalizeText(payload.description) || null
       },
       select: GLOBAL_VACATION_DAY_SELECT
@@ -866,13 +989,56 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     const users = await this.prisma.user.findMany({
       where: {
         role: { not: "SUPERADMIN" },
-        legacyRole: { not: "SUPERADMIN" },
-        laborFile: { is: null }
+        legacyRole: { not: "SUPERADMIN" }
+      },
+      include: {
+        laborFile: {
+          select: {
+            id: true,
+            employeeName: true,
+            employeeEmail: true,
+            employeeUsername: true,
+            employeeShortName: true,
+            team: true,
+            legacyTeam: true,
+            specificRole: true,
+            employmentStatus: true,
+            employmentEndedAt: true
+          }
+        }
       }
     });
 
     for (const user of users) {
-      await this.createForUser(user);
+      if (!shouldHaveLaborFile(user)) {
+        continue;
+      }
+
+      if (!user.laborFile) {
+        await this.createForUser(user);
+        continue;
+      }
+
+      const nextSnapshot = buildLaborFileUserSyncSnapshot(user);
+      const nextEmploymentEndedAt = nextSnapshot.employmentEndedAt?.toISOString().slice(0, 10) ?? null;
+      const currentEmploymentEndedAt = user.laborFile.employmentEndedAt?.toISOString().slice(0, 10) ?? null;
+      const shouldUpdate =
+        user.laborFile.employeeName !== nextSnapshot.employeeName ||
+        user.laborFile.employeeEmail !== nextSnapshot.employeeEmail ||
+        user.laborFile.employeeUsername !== nextSnapshot.employeeUsername ||
+        user.laborFile.employeeShortName !== nextSnapshot.employeeShortName ||
+        user.laborFile.team !== nextSnapshot.team ||
+        user.laborFile.legacyTeam !== nextSnapshot.legacyTeam ||
+        user.laborFile.specificRole !== nextSnapshot.specificRole ||
+        user.laborFile.employmentStatus !== nextSnapshot.employmentStatus ||
+        currentEmploymentEndedAt !== nextEmploymentEndedAt;
+
+      if (shouldUpdate) {
+        await this.prisma.laborFile.update({
+          where: { id: user.laborFile.id },
+          data: nextSnapshot
+        });
+      }
     }
   }
 
@@ -994,6 +1160,29 @@ function localDate(value?: string | null) {
 function normalizeDateKey(value?: string | null) {
   const parsed = toDate(value);
   return parsed ? toDateKey(parsed) : undefined;
+}
+
+function getLocalGlobalVacationDateKeys(payload: LaborGlobalVacationDayInput) {
+  const explicitDateKeys = (payload.vacationDates ?? [])
+    .map((date) => normalizeDateKey(date))
+    .filter((date): date is string => Boolean(date));
+
+  if (explicitDateKeys.length > 0) {
+    return Array.from(new Set(explicitDateKeys)).sort();
+  }
+
+  const startDateKey = normalizeDateKey(payload.date);
+  if (!startDateKey) {
+    return [];
+  }
+
+  const days = Number(payload.days ?? 1);
+  if (!Number.isInteger(days) || days <= 1) {
+    return [startDateKey];
+  }
+
+  const startDate = toDate(startDateKey)!;
+  return Array.from({ length: days }, (_, index) => toDateKey(addDays(startDate, index)));
 }
 
 function getLocalFileSize(payload: LaborFileDocumentUploadRecord) {
@@ -1379,12 +1568,14 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
   }
 
   public async createGlobalVacationDay(payload: LaborGlobalVacationDayInput) {
-    const date = normalizeDateKey(payload.date);
+    const vacationDateKeys = getLocalGlobalVacationDateKeys(payload);
+    const date = vacationDateKeys[0] ?? normalizeDateKey(payload.date);
     if (!date) {
       throw new AppError(400, "LABOR_GLOBAL_VACATION_DATE_REQUIRED", "Captura el dia general de vacaciones.");
     }
 
-    const days = Number(payload.days ?? 1);
+    const hasExplicitVacationDates = Boolean(payload.vacationDates?.length);
+    const days = hasExplicitVacationDates ? vacationDateKeys.length : Number(payload.days ?? (vacationDateKeys.length || 1));
     if (!Number.isFinite(days) || days <= 0) {
       throw new AppError(400, "INVALID_LABOR_GLOBAL_VACATION_DAYS", "Los dias de vacaciones deben ser mayores a cero.");
     }
@@ -1395,6 +1586,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       const existing = state.globalVacationDays.find((day) => day.date === date);
       if (existing) {
         existing.days = days;
+        existing.vacationDates = vacationDateKeys;
         existing.description = normalizeText(payload.description) || undefined;
         existing.updatedAt = now;
         saved = existing;
@@ -1405,6 +1597,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
         id: randomUUID(),
         date,
         days,
+        vacationDates: vacationDateKeys,
         description: normalizeText(payload.description) || undefined,
         createdAt: now,
         updatedAt: now
@@ -1532,7 +1725,14 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     const parsed = JSON.parse(readFileSync(LocalLaborFilesRepository.statePath, "utf8")) as Partial<LocalLaborState>;
     return {
       files: Array.isArray(parsed.files) ? parsed.files : [],
-      globalVacationDays: Array.isArray(parsed.globalVacationDays) ? parsed.globalVacationDays : []
+      globalVacationDays: Array.isArray(parsed.globalVacationDays)
+        ? parsed.globalVacationDays.map((day) => ({
+            ...day,
+            vacationDates: Array.isArray(day.vacationDates)
+              ? day.vacationDates
+              : getLocalGlobalVacationDateKeys({ date: day.date, days: day.days })
+          }))
+        : []
     };
   }
 
@@ -1668,6 +1868,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       id: day.id,
       date: localDate(day.date),
       days: new Prisma.Decimal(day.days),
+      vacationDates: day.vacationDates ?? [],
       description: day.description ?? null,
       createdAt: localDate(day.createdAt),
       updatedAt: localDate(day.updatedAt)

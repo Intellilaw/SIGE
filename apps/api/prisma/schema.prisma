@@ -108,6 +108,7 @@ model LaborGlobalVacationDay {
   id          String   @id @default(uuid())
   date        DateTime @unique @db.Date
   days        Decimal  @default(1) @db.Decimal(6, 2)
+  vacationDates Json?
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

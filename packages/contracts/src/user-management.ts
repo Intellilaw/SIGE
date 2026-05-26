@@ -61,6 +61,7 @@ export interface CreateManagedUserInput {
 }
 
 export interface UpdateManagedUserInput {
+  username?: string;
   displayName?: string;
   password?: string;
   shortName?: string | null;

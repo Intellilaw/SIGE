@@ -80,11 +80,12 @@ const INTELLIGENCE_CONNECTIONS = [
         status: "active",
         promptName: "Validacion de salario diario contra contrato laboral",
         promptVersion: "v0.1",
-        prompt: "Compara el salario diario capturado en el expediente laboral contra el salario diario o salario mensual bruto extraido del contrato laboral cargado. Cuando el mismo distintivo aparezca en Nomina, confirma adicionalmente que el salario diario de nomina coincide con el salario diario verificado de Expedientes Laborales. Si falta cualquier pieza de evidencia, marca la validacion como no coincidente.",
+        prompt: "Compara el salario diario capturado en el expediente laboral contra el salario vigente extraido del contrato laboral y sus addenda. Si el salario esta expresado como salario mensual bruto, toma el salario mensual mas reciente encontrado en contrato/addenda y conviertelo a salario diario dividiendolo entre 30. Cuando el mismo distintivo aparezca en Nomina, confirma adicionalmente que el salario diario de nomina coincide con el salario diario verificado de Expedientes Laborales. Si falta cualquier pieza de evidencia, marca la validacion como no coincidente.",
         context: [
             "Salario diario capturado en Informacion general del expediente laboral.",
             "Contrato laboral cargado en Word o PDF firmado cuando exista.",
-            "Salario diario contractual extraido directamente o calculado a partir de salario mensual bruto dividido entre 30.",
+            "Addenda laboral cargada en PDF cuando exista y pueda actualizar el salario contractual.",
+            "Salario mensual bruto mas reciente extraido de contrato/addenda y convertido a salario diario dividiendolo entre 30.",
             "Salario diario visible en Gastos generales / 2. Nomina cuando la fila esta vinculada a un expediente laboral.",
             "Nombre del colaborador, fecha de ingreso y metadatos del documento contractual."
         ],

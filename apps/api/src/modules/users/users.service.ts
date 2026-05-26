@@ -16,6 +16,10 @@ import { assertStrongPassword } from "../../core/auth/password-policy";
 import { hashPassword } from "../../core/auth/passwords";
 import type { UsersRepository } from "../../repositories/types";
 
+function normalizeEditableUsername(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 export class UsersService {
   public constructor(private readonly repository: UsersRepository) {}
 
@@ -75,16 +79,31 @@ export class UsersService {
     const specificRole = payload.specificRole === undefined
       ? currentUser.specificRole
       : payload.specificRole?.trim() || undefined;
+    const username = payload.username === undefined
+      ? undefined
+      : normalizeEditableUsername(payload.username);
+    const displayName = payload.displayName === undefined
+      ? undefined
+      : normalizeEditableUsername(payload.displayName);
     const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole });
     const permissions = derivePermissions({ legacyRole, legacyTeam, specificRole });
     const nextPassword = payload.password?.trim();
+
+    if (payload.username !== undefined && !username) {
+      throw new AppError(400, "INVALID_USERNAME", "Username is required.");
+    }
+
+    if (payload.displayName !== undefined && !displayName) {
+      throw new AppError(400, "INVALID_DISPLAY_NAME", "Display name is required.");
+    }
 
     if (nextPassword) {
       assertStrongPassword(nextPassword);
     }
 
     return this.repository.update(userId, {
-      displayName: payload.displayName?.trim(),
+      username,
+      displayName,
       passwordHash: nextPassword ? hashPassword(nextPassword) : undefined,
       shortName: payload.shortName === undefined ? undefined : normalizeShortName(payload.shortName) ?? null,
       role,

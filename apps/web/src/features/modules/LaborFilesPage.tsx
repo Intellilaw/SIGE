@@ -55,6 +55,7 @@ const EMPTY_PROFILE_FORM: LaborFileProfileForm = {
 
 const EMPTY_GLOBAL_VACATION_FORM: LaborGlobalVacationDayInput = {
   date: "",
+  vacationDates: [],
   days: 1,
   description: ""
 };
@@ -277,46 +278,64 @@ function getRecordNumber(record: unknown, keys: string[]) {
   return undefined;
 }
 
-function getContractDailySalary(laborFile: LaborFile, contractDocument?: LaborFileDocument) {
-  const dailySalary =
-    getRecordNumber(contractDocument, [
+function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFileDocument[]) {
+  const sortedDocuments = [...salaryDocuments]
+    .filter((document) => document.documentType === "EMPLOYMENT_CONTRACT" || document.documentType === "ADDENDUM")
+    .sort((left, right) =>
+      right.uploadedAt.localeCompare(left.uploadedAt) ||
+      (right.documentType === "ADDENDUM" ? 1 : 0) - (left.documentType === "ADDENDUM" ? 1 : 0)
+    );
+
+  for (const document of sortedDocuments) {
+    const dailySalary = getRecordNumber(document, [
       "contractDailySalaryMxn",
       "dailySalaryMxn",
       "extractedDailySalaryMxn",
       "riExtractedDailySalaryMxn",
       "employmentContractDailySalaryMxn"
-    ]) ??
-    getRecordNumber(laborFile, [
-      "contractDailySalaryMxn",
-      "extractedContractDailySalaryMxn",
-      "riContractDailySalaryMxn",
-      "employmentContractDailySalaryMxn"
     ]);
 
-  if (dailySalary !== undefined) {
-    return dailySalary;
-  }
+    if (dailySalary !== undefined) {
+      return dailySalary;
+    }
 
-  const monthlySalary =
-    getRecordNumber(contractDocument, [
+    const monthlySalary = getRecordNumber(document, [
       "contractMonthlyGrossSalaryMxn",
       "monthlyGrossSalaryMxn",
       "monthlySalaryMxn",
       "extractedMonthlyGrossSalaryMxn",
       "riExtractedMonthlyGrossSalaryMxn"
-    ]) ??
-    getRecordNumber(laborFile, [
-      "contractMonthlyGrossSalaryMxn",
-      "extractedContractMonthlyGrossSalaryMxn",
-      "riContractMonthlyGrossSalaryMxn",
-      "employmentContractMonthlyGrossSalaryMxn"
     ]);
+
+    if (monthlySalary !== undefined) {
+      return monthlySalary / 30;
+    }
+  }
+
+  const dailySalary = getRecordNumber(laborFile, [
+    "contractDailySalaryMxn",
+    "extractedContractDailySalaryMxn",
+    "riContractDailySalaryMxn",
+    "employmentContractDailySalaryMxn"
+  ]);
+
+  if (dailySalary !== undefined) {
+    return dailySalary;
+  }
+
+  const monthlySalary = getRecordNumber(laborFile, [
+    "contractMonthlyGrossSalaryMxn",
+    "extractedContractMonthlyGrossSalaryMxn",
+    "riContractMonthlyGrossSalaryMxn",
+    "employmentContractMonthlyGrossSalaryMxn"
+  ]);
 
   return monthlySalary !== undefined ? monthlySalary / 30 : undefined;
 }
 
-function getDailySalaryValidation(laborFile: LaborFile, contractDocument?: LaborFileDocument) {
-  if (!contractDocument) {
+function getDailySalaryValidation(laborFile: LaborFile, salaryDocuments: LaborFileDocument[]) {
+  const hasContractDocument = salaryDocuments.some((document) => document.documentType === "EMPLOYMENT_CONTRACT");
+  if (!hasContractDocument) {
     return {
       status: "mismatch" as const,
       label: "No coincide",
@@ -333,12 +352,12 @@ function getDailySalaryValidation(laborFile: LaborFile, contractDocument?: Labor
     };
   }
 
-  const contractDailySalary = getContractDailySalary(laborFile, contractDocument);
+  const contractDailySalary = getContractDailySalary(laborFile, salaryDocuments);
   if (contractDailySalary === undefined) {
     return {
       status: "mismatch" as const,
       label: "No coincide",
-      detail: "Contrato cargado sin salario diario legible."
+      detail: "Contrato/addenda cargados sin salario mensual legible."
     };
   }
 
@@ -348,12 +367,12 @@ function getDailySalaryValidation(laborFile: LaborFile, contractDocument?: Labor
     ? {
         status: "match" as const,
         label: "Coincide",
-        detail: "Coincide con el contrato laboral."
+        detail: "Coincide con contrato/addenda vigente."
       }
     : {
         status: "mismatch" as const,
         label: "No coincide",
-        detail: `Contrato: ${formatMoney(contractDailySalary)}.`
+        detail: `Contrato/addenda vigente: ${formatMoney(contractDailySalary)}.`
       };
 }
 
@@ -600,6 +619,39 @@ function mergeVacationFormatDates(
   };
 }
 
+function mergeGlobalVacationDates(current: LaborGlobalVacationDayInput, dates: string[]): LaborGlobalVacationDayInput {
+  const vacationDates = sortDateKeys(dates);
+  return {
+    ...current,
+    date: vacationDates[0] ?? "",
+    days: vacationDates.length || 1,
+    vacationDates
+  };
+}
+
+function getGlobalVacationDayDates(day: LaborGlobalVacationDay) {
+  const explicitDates = sortDateKeys(day.vacationDates ?? []);
+  if (explicitDates.length > 0) {
+    return explicitDates;
+  }
+
+  if (!day.date) {
+    return [];
+  }
+
+  const days = Number(day.days);
+  if (!Number.isInteger(days) || days <= 1) {
+    return [day.date];
+  }
+
+  return Array.from({ length: days }, (_, index) => addDaysKey(day.date, index));
+}
+
+function formatGlobalVacationDayDates(day: LaborGlobalVacationDay) {
+  const dates = getGlobalVacationDayDates(day);
+  return formatVacationFormatDatesText(dates) || formatDate(day.date);
+}
+
 function isPdfFile(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
@@ -663,6 +715,8 @@ export function LaborFilesPage() {
   const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
   const [globalVacationDays, setGlobalVacationDays] = useState<LaborGlobalVacationDay[]>([]);
   const [globalVacationForm, setGlobalVacationForm] = useState<LaborGlobalVacationDayInput>(EMPTY_GLOBAL_VACATION_FORM);
+  const [globalVacationRange, setGlobalVacationRange] = useState({ startDate: "", endDate: "" });
+  const [globalVacationSingleDate, setGlobalVacationSingleDate] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1226,9 +1280,57 @@ export function LaborFilesPage() {
     }
   }
 
+  function addGlobalVacationDates(dates: string[]) {
+    if (dates.length === 0) {
+      setFlash({ tone: "error", text: "Selecciona al menos un día de vacaciones generales." });
+      return;
+    }
+
+    setGlobalVacationForm((current) => mergeGlobalVacationDates(current, [...(current.vacationDates ?? []), ...dates]));
+    setFlash(null);
+  }
+
+  function handleGlobalVacationRangeAdd() {
+    if (!globalVacationRange.startDate || !globalVacationRange.endDate) {
+      setFlash({ tone: "error", text: "Captura el inicio y fin del periodo de vacaciones generales." });
+      return;
+    }
+
+    const dates = enumerateDateKeys(globalVacationRange.startDate, globalVacationRange.endDate);
+    if (dates.length === 0) {
+      setFlash({ tone: "error", text: "La fecha final no puede ser anterior a la inicial." });
+      return;
+    }
+
+    addGlobalVacationDates(dates);
+    setGlobalVacationRange({ startDate: "", endDate: "" });
+  }
+
+  function handleGlobalVacationSingleDateAdd() {
+    if (!globalVacationSingleDate) {
+      setFlash({ tone: "error", text: "Selecciona un día de vacaciones generales." });
+      return;
+    }
+
+    addGlobalVacationDates([globalVacationSingleDate]);
+    setGlobalVacationSingleDate("");
+  }
+
+  function handleGlobalVacationDateRemove(date: string) {
+    setGlobalVacationForm((current) =>
+      mergeGlobalVacationDates(current, (current.vacationDates ?? []).filter((entry) => entry !== date))
+    );
+  }
+
   async function handleGlobalVacationSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canWrite) {
+      return;
+    }
+
+    const vacationDates = sortDateKeys(globalVacationForm.vacationDates ?? []);
+    if (vacationDates.length === 0) {
+      setFlash({ tone: "error", text: "Agrega al menos un día o periodo de vacaciones generales." });
       return;
     }
 
@@ -1237,11 +1339,14 @@ export function LaborFilesPage() {
 
     try {
       const result = await apiPost<LaborGlobalVacationBatchResult>("/labor-files/global-vacation-days", {
-        date: globalVacationForm.date,
-        days: globalVacationForm.days ?? 1,
+        date: vacationDates[0],
+        vacationDates,
+        days: vacationDates.length,
         description: globalVacationForm.description || null
       });
       setGlobalVacationForm(EMPTY_GLOBAL_VACATION_FORM);
+      setGlobalVacationRange({ startDate: "", endDate: "" });
+      setGlobalVacationSingleDate("");
       setFlash({ tone: "success", text: `Vacación general registrada. Se generaron ${result.generatedFormats} formatos individuales.` });
       await loadLaborFiles(selectedLaborFile?.id);
       await downloadGlobalVacationFormats(result.day);
@@ -1298,11 +1403,14 @@ export function LaborFilesPage() {
   const contractDocument = selectedLaborFile
     ? getLatestDocument(selectedLaborFile.documents, "EMPLOYMENT_CONTRACT")
     : undefined;
+  const salaryDocuments = selectedLaborFile?.documents.filter((document) =>
+    document.documentType === "EMPLOYMENT_CONTRACT" || document.documentType === "ADDENDUM"
+  ) ?? [];
   const displayedDailySalaryMxn = canWrite
     ? parseMoneyValue(profileForm.dailySalaryMxn)
     : selectedLaborFile?.dailySalaryMxn;
   const dailySalaryValidation = selectedLaborFile
-    ? getDailySalaryValidation({ ...selectedLaborFile, dailySalaryMxn: displayedDailySalaryMxn }, contractDocument)
+    ? getDailySalaryValidation({ ...selectedLaborFile, dailySalaryMxn: displayedDailySalaryMxn }, salaryDocuments)
     : undefined;
   const latestVacationFormatEvent = selectedLaborFile?.vacationEvents
     .filter((event) => event.eventType === "VACATION" && event.acceptanceOriginalFileName)
@@ -1366,31 +1474,71 @@ export function LaborFilesPage() {
           <div className="panel-header">
             <div>
               <h2>Vacaciones generales</h2>
-              <span>Genera los formatos individuales y registra el movimiento en todos los expedientes aplicables.</span>
+              <span>Genera los formatos individuales y registra el movimiento en todos los trabajadores activos.</span>
             </div>
             <span>{globalVacationDays.length} registrados</span>
           </div>
 
           <form className="labor-file-global-vacation-form" onSubmit={handleGlobalVacationSubmit}>
-            <label className="form-field">
-              <span>Día</span>
-              <input
-                required
-                type="date"
-                value={globalVacationForm.date}
-                onChange={(event) => setGlobalVacationForm((current) => ({ ...current, date: event.target.value }))}
-              />
-            </label>
-            <label className="form-field">
-              <span>Días a descontar</span>
-              <input
-                min="0.5"
-                step="0.5"
-                type="number"
-                value={globalVacationForm.days ?? 1}
-                onChange={(event) => setGlobalVacationForm((current) => ({ ...current, days: Number(event.target.value) }))}
-              />
-            </label>
+            <div className="labor-file-vacation-date-tools">
+              <div className="labor-file-vacation-date-group is-range">
+                <h3>Días continuos</h3>
+                <div className="labor-file-vacation-date-row">
+                  <label className="form-field">
+                    <span>Inicio</span>
+                    <input
+                      type="date"
+                      value={globalVacationRange.startDate}
+                      onChange={(event) => setGlobalVacationRange((current) => ({ ...current, startDate: event.target.value }))}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Fin</span>
+                    <input
+                      type="date"
+                      value={globalVacationRange.endDate}
+                      onChange={(event) => setGlobalVacationRange((current) => ({ ...current, endDate: event.target.value }))}
+                    />
+                  </label>
+                  <button className="secondary-button" onClick={handleGlobalVacationRangeAdd} type="button">
+                    Agregar periodo
+                  </button>
+                </div>
+              </div>
+              <div className="labor-file-vacation-date-group is-single">
+                <h3>Día suelto</h3>
+                <div className="labor-file-vacation-date-row">
+                  <label className="form-field">
+                    <span>Fecha</span>
+                    <input
+                      type="date"
+                      value={globalVacationSingleDate}
+                      onChange={(event) => setGlobalVacationSingleDate(event.target.value)}
+                    />
+                  </label>
+                  <button className="secondary-button" onClick={handleGlobalVacationSingleDateAdd} type="button">
+                    Agregar día
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="labor-file-vacation-selected-days">
+              <div className="labor-file-vacation-format-section-title">
+                <h4>Días seleccionados</h4>
+                <span>{globalVacationForm.vacationDates?.length ?? 0} días para todos</span>
+              </div>
+              {(globalVacationForm.vacationDates ?? []).length === 0 ? (
+                <div className="centered-inline-message">Agrega un día o un periodo.</div>
+              ) : (
+                <div className="labor-file-vacation-day-chips">
+                  {(globalVacationForm.vacationDates ?? []).map((date) => (
+                    <button key={date} onClick={() => handleGlobalVacationDateRemove(date)} type="button">
+                      {formatDate(date)} <span>Quitar</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <label className="form-field labor-file-global-vacation-description">
               <span>Descripción</span>
               <input
@@ -1398,9 +1546,11 @@ export function LaborFilesPage() {
                 onChange={(event) => setGlobalVacationForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
-            <button className="primary-button" disabled={saving} type="submit">
-              {saving ? "Generando..." : "Generar para todos"}
-            </button>
+            <div className="labor-file-global-vacation-actions">
+              <button className="primary-button" disabled={saving} type="submit">
+                {saving ? "Generando..." : "Generar para todos"}
+              </button>
+            </div>
           </form>
 
           <div className="labor-file-global-vacation-list">
@@ -1411,7 +1561,7 @@ export function LaborFilesPage() {
               return (
                 <div className="labor-file-vacation-event" key={day.id}>
                   <div>
-                    <strong>{formatDate(day.date)}</strong>
+                    <strong>{formatGlobalVacationDayDates(day)}</strong>
                     <span>{day.days} {day.days === 1 ? "día" : "días"} para todos</span>
                   </div>
                   {day.description ? <small>{day.description}</small> : <small>Vacación general</small>}

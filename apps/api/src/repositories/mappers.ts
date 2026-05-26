@@ -581,6 +581,19 @@ function parseVacationDateKeys(value: Prisma.JsonValue | null | undefined) {
   )).sort();
 }
 
+function getGlobalVacationDateKeys(day: Pick<LaborGlobalVacationDay, "date" | "days" | "vacationDates">) {
+  if (day.vacationDates.length > 0) {
+    return [...day.vacationDates].sort();
+  }
+
+  const days = Number(day.days);
+  if (!day.date || !Number.isInteger(days) || days <= 1) {
+    return day.date ? [day.date] : [];
+  }
+
+  return Array.from({ length: days }, (_, index) => addDateKey(day.date, index));
+}
+
 function formatVacationDateSelection(event: LaborVacationEvent) {
   const dates = event.vacationDates ?? [];
   if (dates.length === 0) {
@@ -598,6 +611,26 @@ function formatVacationDateSelection(event: LaborVacationEvent) {
   }
 
   return dates.map(formatLongDateKey).join(", ");
+}
+
+function formatGlobalVacationDateSelection(day: LaborGlobalVacationDay) {
+  const dates = getGlobalVacationDateKeys(day);
+  if (dates.length === 0) {
+    return "";
+  }
+
+  return formatVacationDateSelection({
+    id: day.id,
+    laborFileId: "",
+    eventType: "GLOBAL_VACATION",
+    startDate: dates[0],
+    endDate: dates[dates.length - 1],
+    vacationDates: dates,
+    days: day.days,
+    description: day.description,
+    createdAt: day.createdAt,
+    updatedAt: day.updatedAt
+  });
 }
 
 function getMexicoCityDateKey(value = new Date()) {
@@ -712,7 +745,7 @@ function buildVacationSummary(
     ))
     .map((day) => ({
       dateKey: day.date,
-      line: `Vacación general: descuenta ${day.days} ${day.days === 1 ? "día" : "días"} el ${formatLongDateKey(day.date)}${day.description ? ` (${day.description})` : ""}.`
+      line: `Vacación general: descuenta ${day.days} ${day.days === 1 ? "día" : "días"} en ${formatGlobalVacationDateSelection(day)}${day.description ? ` (${day.description})` : ""}.`
     }));
   const sortedEventLines = [...eventLines, ...globalVacationLines]
     .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
@@ -759,10 +792,16 @@ export function mapLaborFileDocument(record: {
   originalFileName: string;
   fileMimeType: string | null;
   fileSizeBytes: number | null;
+  riExtractedDailySalaryMxn?: Prisma.Decimal | number | string | null;
+  riExtractedMonthlyGrossSalaryMxn?: Prisma.Decimal | number | string | null;
+  riSalaryExtractionDetail?: string | null;
   uploadedAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }): LaborFileDocument {
+  const riExtractedDailySalaryMxn = Number(record.riExtractedDailySalaryMxn ?? 0) || undefined;
+  const riExtractedMonthlyGrossSalaryMxn = Number(record.riExtractedMonthlyGrossSalaryMxn ?? 0) || undefined;
+
   return {
     id: record.id,
     laborFileId: record.laborFileId,
@@ -770,6 +809,9 @@ export function mapLaborFileDocument(record: {
     originalFileName: record.originalFileName,
     fileMimeType: record.fileMimeType ?? undefined,
     fileSizeBytes: record.fileSizeBytes ?? undefined,
+    riExtractedDailySalaryMxn,
+    riExtractedMonthlyGrossSalaryMxn,
+    riSalaryExtractionDetail: record.riSalaryExtractionDetail ?? undefined,
     uploadedAt: record.uploadedAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
@@ -814,14 +856,23 @@ export function mapLaborGlobalVacationDay(record: {
   id: string;
   date: Date;
   days: Prisma.Decimal;
+  vacationDates?: Prisma.JsonValue | null;
   description: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): LaborGlobalVacationDay {
+  const date = toDateOnlyKey(record.date);
+  const days = Number(record.days);
+  const explicitDates = parseVacationDateKeys(record.vacationDates);
+  const vacationDates = explicitDates.length > 0
+    ? explicitDates
+    : getGlobalVacationDateKeys({ date, days, vacationDates: [] });
+
   return {
     id: record.id,
-    date: toDateOnlyKey(record.date),
-    days: Number(record.days),
+    date,
+    days,
+    vacationDates,
     description: record.description ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()

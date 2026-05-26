@@ -136,6 +136,7 @@ interface VacationEventRecord {
 interface GlobalVacationDayRecord {
   id: string;
   date: Date;
+  vacationDates: unknown;
 }
 
 interface PeriodContext {
@@ -1070,7 +1071,6 @@ export class PrismaKpisRepository implements KpisRepository {
         },
         where: {
           date: {
-            gte: dateFromKey(startKey),
             lte: dateFromKey(endKey)
           }
         }
@@ -1096,7 +1096,8 @@ export class PrismaKpisRepository implements KpisRepository {
       this.prisma.laborGlobalVacationDay.findMany({
         select: {
           id: true,
-          date: true
+          date: true,
+          vacationDates: true
         },
         where: {
           date: {
@@ -1110,7 +1111,16 @@ export class PrismaKpisRepository implements KpisRepository {
     const holidayKeys = new Set(holidays.map((holiday) => toDateKey(holiday.date)));
     const vacationKeysByUser = buildVacationKeysByUser(vacationEvents as VacationEventRecord[], startKey, endKey);
     const globalVacationKeys = new Set(
-      (globalVacationDays as GlobalVacationDayRecord[]).map((day) => toDateKey(day.date))
+      (globalVacationDays as GlobalVacationDayRecord[]).flatMap((day) => {
+        if (Array.isArray(day.vacationDates)) {
+          return day.vacationDates
+            .filter((date): date is string => typeof date === "string")
+            .map((date) => date.slice(0, 10))
+            .filter((date) => date >= startKey && date <= endKey);
+        }
+
+        return [toDateKey(day.date)];
+      })
     );
     const businessDaysInPeriod = countBusinessDays(startKey, endKey, holidayKeys);
     const businessDaysElapsed = countBusinessDays(startKey, cutoffKey, holidayKeys);

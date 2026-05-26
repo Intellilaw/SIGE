@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpensePayrollEntry } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getLaborDailySalaryRiStatus } from "../modules/labor-files/labor-salary-intelligence";
 import { mapGeneralExpense, mapGeneralExpensePayrollEntry } from "./mappers";
 import type {
   GeneralExpenseActor,
@@ -45,14 +46,23 @@ const PCT_KEYS: Array<keyof Pick<
 ];
 
 type StoredGeneralExpense = Awaited<ReturnType<PrismaClient["generalExpense"]["findUniqueOrThrow"]>>;
+const PAYROLL_LABOR_SALARY_DOCUMENT_SELECT = {
+  id: true,
+  documentType: true,
+  originalFileName: true,
+  fileMimeType: true,
+  uploadedAt: true,
+  fileContent: true
+} satisfies Prisma.LaborFileDocumentSelect;
 const PAYROLL_ENTRY_INCLUDE = {
   laborFile: {
     select: {
       employeeName: true,
       dailySalaryMxn: true,
       documents: {
-        where: { documentType: "EMPLOYMENT_CONTRACT" },
-        select: { documentType: true }
+        where: { documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] } },
+        select: PAYROLL_LABOR_SALARY_DOCUMENT_SELECT,
+        orderBy: [{ uploadedAt: "asc" as const }]
       }
     }
   }
@@ -191,32 +201,6 @@ function normalizeHours(value?: number | null) {
   return new Prisma.Decimal(Number.isFinite(numeric) ? Math.max(0, numeric) : 0);
 }
 
-function getPayrollDailySalaryRiStatus(laborFile: {
-  dailySalaryMxn: Prisma.Decimal | number | null;
-  documents?: Array<{ documentType: string }>;
-}) {
-  const dailySalaryMxn = Number(laborFile.dailySalaryMxn ?? 0);
-  if (!dailySalaryMxn) {
-    return {
-      verified: false,
-      detail: "Falta salario diario en Expedientes Laborales."
-    };
-  }
-
-  const hasEmploymentContract = Boolean(laborFile.documents?.some((document) => document.documentType === "EMPLOYMENT_CONTRACT"));
-  if (!hasEmploymentContract) {
-    return {
-      verified: false,
-      detail: "Expedientes Laborales no tiene contrato laboral cargado."
-    };
-  }
-
-  return {
-    verified: false,
-    detail: "Contrato laboral cargado; falta salario contractual verificable."
-  };
-}
-
 function getNextMonth(year: number, month: number) {
   assertMonth(month);
   const nextMonthDate = new Date(year, month, 1);
@@ -228,6 +212,17 @@ function getNextMonth(year: number, month: number) {
 
 export class PrismaGeneralExpensesRepository implements GeneralExpensesRepository {
   public constructor(private readonly prisma: PrismaClient) {}
+
+  private async mapPayrollEntryWithSalaryRi(record: StoredGeneralExpensePayrollEntry) {
+    const mapped = mapGeneralExpensePayrollEntry(record);
+    const riStatus = await getLaborDailySalaryRiStatus(record.laborFile);
+
+    return {
+      ...mapped,
+      dailySalaryRiVerified: riStatus.verified,
+      dailySalaryRiVerificationDetail: riStatus.detail
+    } satisfies GeneralExpensePayrollEntry;
+  }
 
   public async list(year: number, month: number) {
     assertMonth(month);
@@ -358,15 +353,16 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         employeeName: true,
         dailySalaryMxn: true,
         documents: {
-          where: { documentType: "EMPLOYMENT_CONTRACT" },
-          select: { documentType: true }
+          where: { documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] } },
+          select: PAYROLL_LABOR_SALARY_DOCUMENT_SELECT,
+          orderBy: [{ uploadedAt: "asc" }]
         }
       },
       orderBy: [{ employmentStatus: "asc" }, { employeeName: "asc" }]
     });
 
-    return records.map((record) => {
-      const riStatus = getPayrollDailySalaryRiStatus(record);
+    return Promise.all(records.map(async (record) => {
+      const riStatus = await getLaborDailySalaryRiStatus(record);
       return {
         laborFileId: record.id,
         employeeName: record.employeeName,
@@ -374,7 +370,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         dailySalaryRiVerified: riStatus.verified,
         dailySalaryRiVerificationDetail: riStatus.detail
       };
-    });
+    }));
   }
 
   public async listPayrollEntries(year: number, month: number) {
@@ -386,7 +382,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       orderBy: [{ half: "asc" }, { createdAt: "asc" }]
     });
 
-    return records.map(mapGeneralExpensePayrollEntry);
+    return Promise.all(records.map((record) => this.mapPayrollEntryWithSalaryRi(record)));
   }
 
   public async copyPayrollToNextMonth(year: number, month: number) {
@@ -474,7 +470,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       include: PAYROLL_ENTRY_INCLUDE
     });
 
-    return mapGeneralExpensePayrollEntry(record);
+    return this.mapPayrollEntryWithSalaryRi(record);
   }
 
   public async updatePayrollEntry(
@@ -492,7 +488,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       include: PAYROLL_ENTRY_INCLUDE
     });
 
-    return mapGeneralExpensePayrollEntry(record);
+    return this.mapPayrollEntryWithSalaryRi(record);
   }
 
   public async deletePayrollEntry(payrollEntryId: string) {
@@ -541,8 +537,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         employeeName: true,
         dailySalaryMxn: true,
         documents: {
-          where: { documentType: "EMPLOYMENT_CONTRACT" },
-          select: { documentType: true }
+          where: { documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] } },
+          select: PAYROLL_LABOR_SALARY_DOCUMENT_SELECT,
+          orderBy: [{ uploadedAt: "asc" }]
         }
       }
     });

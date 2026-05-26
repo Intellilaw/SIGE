@@ -95,6 +95,7 @@ const previousYearPendingVacationSchema = z.object({
 
 const globalVacationDaySchema = z.object({
   date: z.string().min(10).max(30),
+  vacationDates: z.array(z.string().min(10).max(30)).optional(),
   days: z.number().positive().optional(),
   description: z.string().nullable().optional()
 });
@@ -215,9 +216,8 @@ function getGlobalVacationDateKeys(startDate: string, days: number) {
   return enumerateDateKeys(startDate, addDateKey(startDate, days - 1));
 }
 
-function isLaborFileApplicableForGlobalVacation(laborFile: LaborFile, dateKey: string) {
-  return dateKey >= laborFile.hireDate.slice(0, 10) &&
-    (!laborFile.employmentEndedAt || dateKey <= laborFile.employmentEndedAt.slice(0, 10));
+function isLaborFileEligibleForGlobalVacationFormat(laborFile: LaborFile) {
+  return laborFile.employmentStatus === "ACTIVE";
 }
 
 function getVacationEventDateKeys(event: LaborVacationEvent) {
@@ -351,14 +351,14 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
     const payload = globalVacationDaySchema.parse(request.body ?? {});
     const laborFiles = await service.list();
     const day = await service.createGlobalVacationDay(payload);
-    const dateKey = day.date.slice(0, 10);
-    const vacationDateKeys = getGlobalVacationDateKeys(dateKey, day.days);
-    const applicableLaborFiles = laborFiles.filter((laborFile) =>
-      isLaborFileApplicableForGlobalVacation(laborFile, dateKey)
-    );
+    const vacationDateKeys = day.vacationDates.length > 0
+      ? day.vacationDates
+      : getGlobalVacationDateKeys(day.date.slice(0, 10), day.days);
+    const dateKey = vacationDateKeys[0] ?? day.date.slice(0, 10);
+    const applicableLaborFiles = laborFiles.filter(isLaborFileEligibleForGlobalVacationFormat);
 
     const generatedFormats = await Promise.all(applicableLaborFiles.map(async (laborFile) => {
-      const vacationDays = day.days;
+      const vacationDays = vacationDateKeys.length || day.days;
       const generatedFormat = await renderLaborVacationFormatDocx(laborFile, {
         employeeName: laborFile.employeeName,
         requestDate: new Date().toISOString().slice(0, 10),

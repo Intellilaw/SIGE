@@ -13,6 +13,7 @@ type FlashState =
   | null;
 
 interface UserFormState {
+  displayName: string;
   username: string;
   password: string;
   shortName: string;
@@ -22,6 +23,7 @@ interface UserFormState {
 }
 
 const EMPTY_FORM: UserFormState = {
+  displayName: "",
   username: "",
   password: "",
   shortName: "",
@@ -150,6 +152,7 @@ export function UsersPage() {
     setEditingUserId(target.id);
     setShowPassword(false);
     setForm({
+      displayName: target.displayName,
       username: target.username,
       password: "",
       shortName: target.shortName ?? "",
@@ -163,7 +166,19 @@ export function UsersPage() {
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFlash(null);
+    const trimmedDisplayName = form.displayName.trim();
+    const trimmedUsername = form.username.trim();
     const trimmedPassword = form.password.trim();
+
+    if (!trimmedDisplayName) {
+      setFlash({ tone: "error", text: "El nombre completo es obligatorio." });
+      return;
+    }
+
+    if (!trimmedUsername) {
+      setFlash({ tone: "error", text: "El nombre de usuario en el sistema es obligatorio." });
+      return;
+    }
 
     if (!isEditing && trimmedPassword.length < 10) {
       setFlash({ tone: "error", text: "La contrasena debe tener al menos 10 caracteres y cumplir la politica segura." });
@@ -180,6 +195,8 @@ export function UsersPage() {
     try {
       if (isEditing && editingUserId) {
         await apiPatch<ManagedUser>(`/users/${editingUserId}`, {
+          username: trimmedUsername,
+          displayName: trimmedDisplayName,
           password: trimmedPassword || undefined,
           shortName: form.shortName.trim() || null,
           legacyTeam: form.legacyTeam || null,
@@ -189,13 +206,14 @@ export function UsersPage() {
         setFlash({ tone: "success", text: "Usuario actualizado correctamente." });
       } else {
         await apiPost<ManagedUser>("/users", {
-          username: form.username,
+          username: trimmedUsername,
+          displayName: trimmedDisplayName,
           password: trimmedPassword,
           shortName: form.shortName.trim() || undefined,
           legacyTeam: form.legacyTeam || undefined,
           specificRole: form.specificRole || undefined
         });
-        setFlash({ tone: "success", text: `Usuario "${form.username}" creado y autorizado correctamente.` });
+        setFlash({ tone: "success", text: `Usuario "${trimmedUsername}" creado y autorizado correctamente.` });
       }
 
       resetForm();
@@ -211,11 +229,11 @@ export function UsersPage() {
     setFlash(null);
 
     if (target.id === user?.id) {
-      setFlash({ tone: "error", text: "No puedes dar de baja la sesion administrativa activa." });
+      setFlash({ tone: "error", text: "No puedes borrar la sesion administrativa activa." });
       return;
     }
 
-    if (!window.confirm(`Seguro que deseas dar de baja al usuario ${target.username}?`)) {
+    if (!window.confirm(`Seguro que deseas borrar al usuario ${target.username}? Esta accion no se puede deshacer.`)) {
       return;
     }
 
@@ -223,7 +241,7 @@ export function UsersPage() {
 
     try {
       await apiDelete(`/users/${target.id}`);
-      setFlash({ tone: "success", text: `Usuario ${target.username} dado de baja correctamente.` });
+      setFlash({ tone: "success", text: `Usuario ${target.username} borrado correctamente.` });
       if (editingUserId === target.id) {
         resetForm();
       }
@@ -300,7 +318,7 @@ export function UsersPage() {
 
         {isEditing ? (
           <div className="editing-banner">
-            Editando a <strong>{rows.find((entry) => entry.id === editingUserId)?.username}</strong>. Puedes cambiar la
+            Editando a <strong>{rows.find((entry) => entry.id === editingUserId)?.displayName}</strong>. Puedes cambiar la
             contrasena aqui o dejarla en blanco para conservar la actual.
           </div>
         ) : null}
@@ -308,13 +326,22 @@ export function UsersPage() {
         <form className="users-form" onSubmit={handleSave}>
           <div className="users-form-grid">
             <label className="form-field">
-              <span>Username (nombre y primer apellido)</span>
+              <span>Nombre completo</span>
+              <input
+                value={form.displayName}
+                onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+                placeholder="Ej. Itari Romero Perez"
+                required
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Nombre de usuario en el sistema</span>
               <input
                 value={form.username}
                 onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                placeholder="Ej. Eduardo Rusconi"
-                disabled={isEditing}
-                required={!isEditing}
+                placeholder="Ej. Itari Romero"
+                required
               />
             </label>
 
@@ -420,7 +447,8 @@ export function UsersPage() {
           <table className="data-table users-table">
             <thead>
               <tr>
-                <th>Usuario</th>
+                <th>Nombre completo</th>
+                <th>Nombre de usuario en el sistema</th>
                 <th>Nombre corto</th>
                 <th>Tipo de acceso</th>
                 <th>Rol sistema</th>
@@ -435,20 +463,21 @@ export function UsersPage() {
             <tbody>
               {loadingUsers ? (
                 <tr>
-                  <td colSpan={10}>Cargando usuarios...</td>
+                  <td colSpan={11}>Cargando usuarios...</td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>No hay usuarios registrados.</td>
+                  <td colSpan={11}>No hay usuarios registrados.</td>
                 </tr>
               ) : (
                 rows.map((entry) => (
                   <tr className={!entry.isActive ? "user-row-inactive" : undefined} key={entry.id}>
                     <td>
                       <div className="user-identity">
-                        <strong>{entry.username}</strong>
+                        <strong>{entry.displayName}</strong>
                       </div>
                     </td>
+                    <td>{entry.username}</td>
                     <td>{entry.shortName ?? "-"}</td>
                     <td>
                       <span className={`status-pill ${entry.legacyRole === "SUPERADMIN" ? "status-live" : "status-migration"}`}>
@@ -476,7 +505,7 @@ export function UsersPage() {
                           onClick={() => void handleDeleteTarget(entry)}
                           type="button"
                         >
-                          {deletingUserId === entry.id ? "Procesando..." : "Dar de baja"}
+                          {deletingUserId === entry.id ? "Procesando..." : "Borrar"}
                         </button>
                       </div>
                     </td>
@@ -496,8 +525,12 @@ export function UsersPage() {
           </div>
           <div className="compatibility-list">
             <div className="compatibility-item">
-              <strong>Username</strong>
-              <span>Se guarda en formato nombre y primer apellido para que sea legible en la operacion diaria.</span>
+              <strong>Nombre completo</strong>
+              <span>Se guarda como nombre visible del usuario en los modulos del sistema.</span>
+            </div>
+            <div className="compatibility-item">
+              <strong>Nombre de usuario en el sistema</strong>
+              <span>Se usa como identificador operativo y para inicio de sesion.</span>
             </div>
             <div className="compatibility-item">
               <strong>short_name</strong>

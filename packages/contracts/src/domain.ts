@@ -204,6 +204,9 @@ export interface LaborFileDocument {
   originalFileName: string;
   fileMimeType?: string;
   fileSizeBytes?: number;
+  riExtractedDailySalaryMxn?: number;
+  riExtractedMonthlyGrossSalaryMxn?: number;
+  riSalaryExtractionDetail?: string;
   uploadedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -230,6 +233,7 @@ export interface LaborGlobalVacationDay {
   id: string;
   date: string;
   days: number;
+  vacationDates: string[];
   description?: string;
   createdAt: string;
   updatedAt: string;
@@ -381,6 +385,7 @@ export interface LaborPreviousYearPendingVacationInput {
 export interface LaborGlobalVacationDayInput {
   date: string;
   days?: number;
+  vacationDates?: string[];
   description?: string | null;
 }
 

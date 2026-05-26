@@ -88,6 +88,7 @@ export interface CreateManagedUserRecord {
 }
 
 export interface UpdateManagedUserRecord {
+  username?: string;
   displayName?: string;
   passwordHash?: string;
   shortName?: string | null;
