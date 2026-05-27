@@ -2,11 +2,18 @@ import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, hasPersistedAuthSession, persistAuthTokens } from "../../api/http-client";
 const AuthContext = createContext(null);
+const AUTH_PROFILE_TIMEOUT_MS = 8_000;
 function persistSession(response) {
     persistAuthTokens();
 }
 function isClearedAuthStorageEvent(event) {
     return event instanceof CustomEvent && event.detail?.reason === "cleared";
+}
+function withTimeout(promise, timeoutMs, message) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+        promise.then(resolve, reject).finally(() => window.clearTimeout(timeoutId));
+    });
 }
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
@@ -16,7 +23,7 @@ export function AuthProvider({ children }) {
             setLoading(false);
             return;
         }
-        apiGet("/auth/me")
+        withTimeout(apiGet("/auth/me"), AUTH_PROFILE_TIMEOUT_MS, "No se pudo validar la sesion actual.")
             .then((profile) => setUser(profile))
             .catch(() => {
             clearAuthTokens();
@@ -28,6 +35,7 @@ export function AuthProvider({ children }) {
         const handleAuthStorageChange = (event) => {
             if (isClearedAuthStorageEvent(event)) {
                 setUser(null);
+                setLoading(false);
             }
         };
         window.addEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);

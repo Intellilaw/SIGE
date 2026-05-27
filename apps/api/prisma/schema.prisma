@@ -72,6 +72,9 @@ model LaborFileDocument {
   fileMimeType     String?
   fileSizeBytes    Int?
   fileContent      Bytes
+  riExtractedDailySalaryMxn        Decimal?  @db.Decimal(12, 2)
+  riExtractedMonthlyGrossSalaryMxn Decimal?  @db.Decimal(12, 2)
+  riSalaryExtractionDetail         String?
   uploadedAt       DateTime  @default(now())
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

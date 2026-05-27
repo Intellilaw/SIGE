@@ -55,6 +55,7 @@ const uploadDocumentSchema = z.object({
     "BANK_ACCOUNT_STATEMENT",
     "OFFICIAL_ID",
     "CV",
+    "EDUCATION_PROOF",
     "PROFESSIONAL_TITLE",
     "PROFESSIONAL_LICENSE",
     "EQUIPMENT_DELIVERY_FORMAT"

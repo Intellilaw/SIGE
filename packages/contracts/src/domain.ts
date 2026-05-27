@@ -152,6 +152,7 @@ export type LaborFileDocumentType =
   | "BANK_ACCOUNT_STATEMENT"
   | "OFFICIAL_ID"
   | "CV"
+  | "EDUCATION_PROOF"
   | "PROFESSIONAL_TITLE"
   | "PROFESSIONAL_LICENSE"
   | "EQUIPMENT_DELIVERY_FORMAT";
@@ -179,6 +180,7 @@ export const LABOR_FILE_DOCUMENT_DEFINITIONS: LaborFileDocumentDefinition[] = [
   { type: "BANK_ACCOUNT_STATEMENT", label: "Estado de cuenta con CLABE y número de cuenta", requirement: "ALWAYS" },
   { type: "OFFICIAL_ID", label: "Identificación oficial", requirement: "ALWAYS" },
   { type: "CV", label: "CV", requirement: "ALWAYS" },
+  { type: "EDUCATION_PROOF", label: "Comprobante de estudios", requirement: "OPTIONAL" },
   { type: "PROFESSIONAL_TITLE", label: "Título profesional", requirement: "OPTIONAL" },
   { type: "PROFESSIONAL_LICENSE", label: "Cédula profesional", requirement: "OPTIONAL" },
   {

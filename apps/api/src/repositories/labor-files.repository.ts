@@ -91,17 +91,20 @@ type PreviousYearPendingVacationWrite = LaborPreviousYearPendingVacationInput & 
 const LABOR_FILE_RELATIONS = {
   documents: {
     orderBy: [{ documentType: "asc" as const }, { uploadedAt: "desc" as const }],
-    select: {
-      id: true,
-      laborFileId: true,
-      documentType: true,
-      originalFileName: true,
-      fileMimeType: true,
-      fileSizeBytes: true,
-      uploadedAt: true,
-      createdAt: true,
-      updatedAt: true
-    }
+      select: {
+        id: true,
+        laborFileId: true,
+        documentType: true,
+        originalFileName: true,
+        fileMimeType: true,
+        fileSizeBytes: true,
+        riExtractedDailySalaryMxn: true,
+        riExtractedMonthlyGrossSalaryMxn: true,
+        riSalaryExtractionDetail: true,
+        uploadedAt: true,
+        createdAt: true,
+        updatedAt: true
+      }
   },
   vacationEvents: {
     orderBy: [{ startDate: "asc" as const }, { createdAt: "asc" as const }]
@@ -441,48 +444,6 @@ export function buildLaborFileUserSyncSnapshot(user: LaborFileUserSnapshot) {
 export class PrismaLaborFilesRepository implements LaborFilesRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
-  private async enrichLaborFilesWithSalaryIntelligence(laborFiles: LaborFile[]) {
-    const laborFileIds = laborFiles.map((laborFile) => laborFile.id);
-    if (laborFileIds.length === 0) {
-      return laborFiles;
-    }
-
-    const records = await this.prisma.laborFileDocument.findMany({
-      where: {
-        laborFileId: { in: laborFileIds },
-        documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] }
-      },
-      select: {
-        id: true,
-        laborFileId: true,
-        documentType: true,
-        originalFileName: true,
-        fileMimeType: true,
-        uploadedAt: true,
-        fileContent: true
-      }
-    });
-    const extractionEntries = await Promise.all(records.map(async (record) => [
-      record.id,
-      await extractLaborSalaryFromDocument({
-        id: record.id,
-        documentType: record.documentType,
-        originalFileName: record.originalFileName,
-        fileMimeType: record.fileMimeType,
-        uploadedAt: record.uploadedAt,
-        fileContent: Buffer.from(record.fileContent)
-      })
-    ] as const));
-    const extractionsByDocumentId = new Map(extractionEntries);
-
-    return laborFiles.map((laborFile) => ({
-      ...laborFile,
-      documents: laborFile.documents.map((document) =>
-        attachSalaryExtractionToDocument(document, extractionsByDocumentId.get(document.id) ?? null)
-      )
-    }));
-  }
-
   public async list() {
     await this.syncMissingForUsers();
     await this.refreshStatuses();
@@ -494,8 +455,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       this.findGlobalVacationDayRecords()
     ]);
 
-    const laborFiles = records.map((record) => mapLaborFile(record, globalVacationDays));
-    return this.enrichLaborFilesWithSalaryIntelligence(laborFiles);
+    return records.map((record) => mapLaborFile(record, globalVacationDays));
   }
 
   public async listForUser(userId: string) {
@@ -510,8 +470,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       this.findGlobalVacationDayRecords()
     ]);
 
-    const laborFiles = records.map((record) => mapLaborFile(record, globalVacationDays));
-    return this.enrichLaborFilesWithSalaryIntelligence(laborFiles);
+    return records.map((record) => mapLaborFile(record, globalVacationDays));
   }
 
   public async findById(laborFileId: string) {
@@ -527,8 +486,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       return null;
     }
 
-    const [laborFile] = await this.enrichLaborFilesWithSalaryIntelligence([mapLaborFile(record, globalVacationDays)]);
-    return laborFile ?? null;
+    return mapLaborFile(record, globalVacationDays);
   }
 
   public async findDocument(documentId: string) {
@@ -658,8 +616,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       include: LABOR_FILE_RELATIONS
     });
 
-    const [laborFile] = await this.enrichLaborFilesWithSalaryIntelligence([mapLaborFile(record)]);
-    return laborFile;
+    return mapLaborFile(record);
   }
 
   public async uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord) {
@@ -681,6 +638,16 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       where: { laborFileId, documentType: payload.documentType }
     });
     assertDocumentLimit(payload.documentType, currentCount);
+    const salaryExtraction = isLaborSalaryDocumentType(payload.documentType)
+      ? await extractLaborSalaryFromDocument({
+          id: "pending",
+          documentType: payload.documentType,
+          originalFileName: filename,
+          fileMimeType: mimeType || null,
+          uploadedAt: new Date(),
+          fileContent: payload.fileContent
+        })
+      : null;
 
     const record = await this.prisma.laborFileDocument.create({
       data: {
@@ -689,24 +656,24 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
         originalFileName: filename,
         fileMimeType: mimeType || null,
         fileSizeBytes: payload.fileSizeBytes ?? payload.fileContent.byteLength,
-        fileContent: toPrismaBytes(payload.fileContent)
+        fileContent: toPrismaBytes(payload.fileContent),
+        riExtractedDailySalaryMxn: salaryExtraction?.dailySalaryMxn === undefined
+          ? undefined
+          : normalizeMoney(salaryExtraction.dailySalaryMxn),
+        riExtractedMonthlyGrossSalaryMxn: salaryExtraction?.monthlyGrossSalaryMxn === undefined
+          ? undefined
+          : normalizeMoney(salaryExtraction.monthlyGrossSalaryMxn),
+        riSalaryExtractionDetail: salaryExtraction
+          ? salaryExtraction.monthlyGrossSalaryMxn
+            ? `Salario mensual extraido y convertido a diario / 30 desde ${filename}.`
+            : `Salario diario extraido desde ${filename}.`
+          : undefined
       },
       select: LABOR_FILE_RELATIONS.documents.select
     });
 
     await this.refreshStatus(laborFileId);
-    const document = mapLaborFileDocument(record);
-    const extraction = isLaborSalaryDocumentType(record.documentType)
-      ? await extractLaborSalaryFromDocument({
-          id: record.id,
-          documentType: record.documentType,
-          originalFileName: record.originalFileName,
-          fileMimeType: record.fileMimeType,
-          uploadedAt: record.uploadedAt,
-          fileContent: payload.fileContent
-        })
-      : null;
-    return attachSalaryExtractionToDocument(document, extraction);
+    return mapLaborFileDocument(record);
   }
 
   public async deleteDocument(documentId: string) {
@@ -1341,6 +1308,16 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
 
     const mimeType = normalizeText(payload.fileMimeType).toLowerCase();
     validateLaborDocumentFile(payload.documentType, payload);
+    const salaryExtraction = isLaborSalaryDocumentType(payload.documentType)
+      ? await extractLaborSalaryFromDocument({
+          id: "pending",
+          documentType: payload.documentType,
+          originalFileName: filename,
+          fileMimeType: mimeType || null,
+          uploadedAt: new Date(),
+          fileContent: payload.fileContent
+        })
+      : null;
 
     let created: LocalLaborFileDocumentState | null = null;
     this.updateState((state) => {
@@ -1356,6 +1333,13 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
         fileMimeType: mimeType || null,
         fileSizeBytes: getLocalFileSize(payload),
         fileBase64: payload.fileContent.toString("base64"),
+        riExtractedDailySalaryMxn: salaryExtraction?.dailySalaryMxn,
+        riExtractedMonthlyGrossSalaryMxn: salaryExtraction?.monthlyGrossSalaryMxn,
+        riSalaryExtractionDetail: salaryExtraction
+          ? salaryExtraction.monthlyGrossSalaryMxn
+            ? `Salario mensual extraido y convertido a diario / 30 desde ${filename}.`
+            : `Salario diario extraido desde ${filename}.`
+          : undefined,
         uploadedAt: now,
         createdAt: now,
         updatedAt: now
@@ -1887,6 +1871,9 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       originalFileName: document.originalFileName,
       fileMimeType: document.fileMimeType ?? null,
       fileSizeBytes: document.fileSizeBytes ?? null,
+      riExtractedDailySalaryMxn: document.riExtractedDailySalaryMxn ?? null,
+      riExtractedMonthlyGrossSalaryMxn: document.riExtractedMonthlyGrossSalaryMxn ?? null,
+      riSalaryExtractionDetail: document.riSalaryExtractionDetail ?? null,
       uploadedAt: localDate(document.uploadedAt),
       createdAt: localDate(document.createdAt),
       updatedAt: localDate(document.updatedAt)

@@ -25,6 +25,7 @@ function resolveApiBaseUrl(configuredBaseUrl?: string) {
 }
 
 const API_BASE_URL = resolveApiBaseUrl(configuredApiBaseUrl);
+const REQUEST_TIMEOUT_MS = 30_000;
 
 const ACCESS_TOKEN_STORAGE_KEY = "sige.accessToken";
 const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";
@@ -134,9 +135,29 @@ async function refreshAccessToken() {
   return refreshRequest;
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init.signal ?? controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("La solicitud tardo demasiado. Intenta refrescar la pagina.");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 async function request(path: string, init: RequestInit, fallback: string): Promise<Response> {
   const execute = () =>
-    fetch(`${API_BASE_URL}${path}`, {
+    fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...init,
       credentials: "include",
       headers: withAuthHeaders(init.headers)

@@ -154,6 +154,7 @@ const DOCUMENT_LABELS: Record<LaborFileDocumentType, string> = {
   BANK_ACCOUNT_STATEMENT: "Estado de cuenta con CLABE y numero de cuenta",
   OFFICIAL_ID: "Identificacion oficial",
   CV: "CV",
+  EDUCATION_PROOF: "Comprobante de estudios",
   PROFESSIONAL_TITLE: "Titulo profesional",
   PROFESSIONAL_LICENSE: "Cedula profesional",
   EQUIPMENT_DELIVERY_FORMAT: "Formato de entrega de equipo"

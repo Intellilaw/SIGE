@@ -6,6 +6,10 @@ import JSZip from "jszip";
 const LABOR_SALARY_DOCUMENT_TYPES = new Set(["EMPLOYMENT_CONTRACT", "ADDENDUM"]);
 const PDF_MIME_TYPE = "application/pdf";
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const MAX_PDF_SCAN_BYTES = 2 * 1024 * 1024;
+const MAX_PDF_FALLBACK_BYTES = 256 * 1024;
+const MAX_PDF_STRING_CHARS = 32 * 1024;
+const MAX_EXTRACTED_TEXT_CHARS = 80 * 1024;
 
 type LaborSalaryPeriod = "DAILY" | "MONTHLY";
 
@@ -272,8 +276,13 @@ function decodePdfHexString(value: string) {
 function extractPdfStrings(streamText: string) {
   const parts: string[] = [];
   let index = 0;
+  let extractedLength = 0;
 
   while (index < streamText.length) {
+    if (extractedLength >= MAX_EXTRACTED_TEXT_CHARS) {
+      break;
+    }
+
     const character = streamText[index];
     if (character === "(") {
       let depth = 1;
@@ -302,7 +311,9 @@ function extractPdfStrings(streamText: string) {
         }
 
         if (depth > 0) {
-          raw += current;
+          if (raw.length < MAX_PDF_STRING_CHARS) {
+            raw += current;
+          }
         }
         cursor += 1;
       }
@@ -310,6 +321,7 @@ function extractPdfStrings(streamText: string) {
       const decoded = decodePdfByteString(decodePdfLiteralString(raw)).trim();
       if (decoded) {
         parts.push(decoded);
+        extractedLength += decoded.length;
       }
       index = cursor;
       continue;
@@ -321,6 +333,7 @@ function extractPdfStrings(streamText: string) {
         const decoded = decodePdfHexString(streamText.slice(index + 1, end)).trim();
         if (decoded) {
           parts.push(decoded);
+          extractedLength += decoded.length;
         }
         index = end + 1;
         continue;
@@ -334,7 +347,7 @@ function extractPdfStrings(streamText: string) {
 }
 
 function extractPdfText(content: Buffer) {
-  const binary = content.toString("latin1");
+  const binary = content.subarray(0, MAX_PDF_SCAN_BYTES).toString("latin1");
   const textParts: string[] = [];
   const streamPattern = /(<<[\s\S]{0,4000}?>>)\s*stream\r?\n?([\s\S]*?)\r?\n?endstream/g;
 
@@ -362,9 +375,11 @@ function extractPdfText(content: Buffer) {
     }
   }
 
-  const fallback = extractPdfStrings(binary);
-  if (fallback) {
-    textParts.push(fallback);
+  if (content.byteLength <= MAX_PDF_FALLBACK_BYTES) {
+    const fallback = extractPdfStrings(binary);
+    if (fallback) {
+      textParts.push(fallback);
+    }
   }
 
   return textParts.join("\n");
@@ -574,23 +589,27 @@ export async function extractLaborSalaryFromDocument(
     return null;
   }
 
-  const text = await extractDocumentText(document);
-  const candidate = extractLatestLaborSalaryFromText(text);
-  if (!candidate) {
+  try {
+    const text = await extractDocumentText(document);
+    const candidate = extractLatestLaborSalaryFromText(text);
+    if (!candidate) {
+      return null;
+    }
+
+    return {
+      documentId: document.id,
+      documentType: document.documentType,
+      originalFileName: document.originalFileName,
+      uploadedAt: document.uploadedAt,
+      period: candidate.period,
+      amountMxn: candidate.amountMxn,
+      dailySalaryMxn: candidate.dailySalaryMxn,
+      monthlyGrossSalaryMxn: candidate.monthlyGrossSalaryMxn,
+      sourceText: candidate.sourceText
+    } satisfies LaborSalaryExtraction;
+  } catch {
     return null;
   }
-
-  return {
-    documentId: document.id,
-    documentType: document.documentType,
-    originalFileName: document.originalFileName,
-    uploadedAt: document.uploadedAt,
-    period: candidate.period,
-    amountMxn: candidate.amountMxn,
-    dailySalaryMxn: candidate.dailySalaryMxn,
-    monthlyGrossSalaryMxn: candidate.monthlyGrossSalaryMxn,
-    sourceText: candidate.sourceText
-  } satisfies LaborSalaryExtraction;
 }
 
 function getDocumentSortKey(document: Pick<LaborSalaryDocumentInput, "documentType" | "uploadedAt">) {

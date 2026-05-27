@@ -48,6 +48,7 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_PROFILE_TIMEOUT_MS = 8_000;
 
 function persistSession(response: LoginResponse) {
   persistAuthTokens();
@@ -55,6 +56,14 @@ function persistSession(response: LoginResponse) {
 
 function isClearedAuthStorageEvent(event: Event) {
   return event instanceof CustomEvent && (event.detail as AuthStorageChangeDetail | undefined)?.reason === "cleared";
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise.then(resolve, reject).finally(() => window.clearTimeout(timeoutId));
+  });
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -67,7 +76,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    apiGet<SessionUser>("/auth/me")
+    withTimeout(
+      apiGet<SessionUser>("/auth/me"),
+      AUTH_PROFILE_TIMEOUT_MS,
+      "No se pudo validar la sesion actual."
+    )
       .then((profile) => setUser(profile))
       .catch(() => {
         clearAuthTokens();
@@ -80,6 +93,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const handleAuthStorageChange = (event: Event) => {
       if (isClearedAuthStorageEvent(event)) {
         setUser(null);
+        setLoading(false);
       }
     };
 
