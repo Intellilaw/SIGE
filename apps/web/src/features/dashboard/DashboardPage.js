@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 import { getVisibleAppModules } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
+import { useModuleAvailability } from "../modules/ModuleAvailabilityContext";
 import { openBriefManagerWindow, reportBriefManagerOpenError } from "../modules/openBriefManagerWindow";
 export function DashboardPage() {
     const { user } = useAuth();
-    const visibleModules = getVisibleAppModules(user);
+    const { disabledModuleIds } = useModuleAvailability();
+    const visibleModules = getVisibleAppModules(user, disabledModuleIds);
     const handleOpenBriefManager = () => {
         void openBriefManagerWindow().catch(reportBriefManagerOpenError);
     };

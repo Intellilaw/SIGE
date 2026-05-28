@@ -10,6 +10,7 @@ import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../executi
 import { CREATE_TASKS_RI_CONNECTION_ID, findDuplicateTaskMatch } from "../execution/execution-task-intelligence";
 import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisionPage";
 import { KpisPage } from "../kpis/KpisPage";
+import { ModuleAvailabilityProvider, useModuleAvailability } from "../modules/ModuleAvailabilityContext";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
@@ -415,49 +416,60 @@ function buildDistributionPayload(module, legacyConfig, matter, clients, eventNa
 }
 export function MobileProtectedLayout() {
     const { user, loading, logout } = useAuth();
-    const showLeads = canReadMobileLeads(user);
-    const showFinances = canReadMobileFinances(user);
-    const showGeneralExpenses = canReadMobileGeneralExpenses(user);
-    const showKpis = canReadMobileKpis(user);
-    const showGeneralSupervision = canReadMobileGeneralSupervision(user);
-    const showExecution = canReadMobileExecution(user);
     if (loading) {
         return _jsx("div", { className: "mobile-centered", children: "Cargando SIGE..." });
     }
     if (!user) {
         return _jsx(Navigate, { to: "/intranet-login?redirect=/mobile", replace: true });
     }
+    return (_jsx(ModuleAvailabilityProvider, { children: _jsx(MobileProtectedShell, { user: user, logout: logout }) }));
+}
+function MobileProtectedShell({ user, logout }) {
+    const { isModuleEnabled } = useModuleAvailability();
+    const showLeads = isModuleEnabled("lead-tracking") && canReadMobileLeads(user);
+    const showFinances = isModuleEnabled("finances") && canReadMobileFinances(user);
+    const showGeneralExpenses = isModuleEnabled("general-expenses") && canReadMobileGeneralExpenses(user);
+    const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
+    const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
+    const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
+    const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
     const mobileUserName = getMobileUserName(user);
-    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: mobileUserName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
+    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: mobileUserName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showTracking ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
 }
 export function MobileHomePage() {
     const { user } = useAuth();
-    const showLeads = canReadMobileLeads(user);
-    const showFinances = canReadMobileFinances(user);
-    const showGeneralExpenses = canReadMobileGeneralExpenses(user);
-    const showKpis = canReadMobileKpis(user);
-    const showGeneralSupervision = canReadMobileGeneralSupervision(user);
-    const showExecution = canReadMobileExecution(user);
-    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showKpis ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/kpis", children: "KPI's" })) : null, showGeneralSupervision ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-supervision", children: "Supervision general" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
+    const { isModuleEnabled } = useModuleAvailability();
+    const showLeads = isModuleEnabled("lead-tracking") && canReadMobileLeads(user);
+    const showFinances = isModuleEnabled("finances") && canReadMobileFinances(user);
+    const showGeneralExpenses = isModuleEnabled("general-expenses") && canReadMobileGeneralExpenses(user);
+    const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
+    const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
+    const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
+    const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
+    return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showKpis ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/kpis", children: "KPI's" })) : null, showGeneralSupervision ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-supervision", children: "Supervision general" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showTracking ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
 }
 export function MobileKpisPage() {
     const { user } = useAuth();
-    if (!canReadMobileKpis(user)) {
+    const { isModuleEnabled } = useModuleAvailability();
+    if (!isModuleEnabled("kpis") || !canReadMobileKpis(user)) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     return (_jsx("section", { className: "mobile-embedded-module", children: _jsx(KpisPage, {}) }));
 }
 export function MobileGeneralSupervisionPage() {
     const { user } = useAuth();
-    if (!canReadMobileGeneralSupervision(user)) {
+    const { isModuleEnabled } = useModuleAvailability();
+    if (!isModuleEnabled("general-supervision") || !canReadMobileGeneralSupervision(user)) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     return (_jsx("section", { className: "mobile-embedded-module", children: _jsx(GeneralSupervisionPage, {}) }));
 }
 export function MobileDashboardIndexPage() {
     const { user } = useAuth();
-    const visibleModules = getVisibleExecutionModules(user);
-    if (!canReadMobileExecution(user)) {
+    const { isModuleEnabled } = useModuleAvailability();
+    const executionEnabled = isModuleEnabled("execution");
+    const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+    if (!executionEnabled || !canReadMobileExecution(user)) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Dashboard", subtitle: "Vista rapida de pendientes por equipo." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/dashboard/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Ver dashboard" })] }, module.moduleId))) })] }));
@@ -465,11 +477,13 @@ export function MobileDashboardIndexPage() {
 export function MobileDashboardModulePage() {
     const { slug } = useParams();
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
+    const executionEnabled = isModuleEnabled("execution");
     const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
-    const visibleModules = getVisibleExecutionModules(user);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+    const canAccess = Boolean(executionEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
     const [records, setRecords] = useState([]);
     const [terms, setTerms] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -528,6 +542,7 @@ export function MobileDashboardModulePage() {
 }
 export function MobileLeadsPage() {
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
     const [form, setForm] = useState(() => initialLeadForm());
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -535,8 +550,8 @@ export function MobileLeadsPage() {
     const [search, setSearch] = useState("");
     const [errorMessage, setErrorMessage] = useState(null);
     const [successMessage, setSuccessMessage] = useState(null);
-    const canRead = canReadMobileLeads(user);
-    const canWrite = canWriteModule(user, "lead-tracking");
+    const canRead = isModuleEnabled("lead-tracking") && canReadMobileLeads(user);
+    const canWrite = isModuleEnabled("lead-tracking") && canWriteModule(user, "lead-tracking");
     const visibleLeads = useMemo(() => {
         const query = normalizeComparableText(search);
         const sorted = [...leads].sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
@@ -630,11 +645,12 @@ export function MobileLeadsPage() {
 }
 export function MobileFinancesPage() {
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
-    const canRead = canReadMobileFinances(user);
-    const canWrite = canWriteMobileFinances(user);
+    const canRead = isModuleEnabled("finances") && canReadMobileFinances(user);
+    const canWrite = isModuleEnabled("finances") && canWriteMobileFinances(user);
     const [selectedYear, setSelectedYear] = useState(currentYear);
     const [selectedMonth, setSelectedMonth] = useState(currentMonth);
     const [form, setForm] = useState(() => initialFinanceForm());
@@ -763,11 +779,12 @@ export function MobileFinancesPage() {
 }
 export function MobileGeneralExpensesPage() {
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
-    const canRead = canReadMobileGeneralExpenses(user);
-    const canWrite = canWriteMobileGeneralExpenses(user);
+    const canRead = isModuleEnabled("general-expenses") && canReadMobileGeneralExpenses(user);
+    const canWrite = isModuleEnabled("general-expenses") && canWriteMobileGeneralExpenses(user);
     const [selectedYear, setSelectedYear] = useState(currentYear);
     const [selectedMonth, setSelectedMonth] = useState(currentMonth);
     const [form, setForm] = useState(() => initialGeneralExpenseForm());
@@ -885,8 +902,10 @@ export function MobileGeneralExpensesPage() {
 }
 export function MobileExecutionIndexPage() {
     const { user } = useAuth();
-    const visibleModules = getVisibleExecutionModules(user);
-    if (!canReadMobileExecution(user)) {
+    const { isModuleEnabled } = useModuleAvailability();
+    const executionEnabled = isModuleEnabled("execution");
+    const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+    if (!executionEnabled || !canReadMobileExecution(user)) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
@@ -903,10 +922,12 @@ function MobileMatterSummary({ matter, clientNumber }) {
 export function MobileExecutionTeamPage() {
     const { slug } = useParams();
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
+    const executionEnabled = isModuleEnabled("execution");
     const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-    const visibleModules = getVisibleExecutionModules(user);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+    const canAccess = Boolean(executionEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
     const [clients, setClients] = useState([]);
     const [matters, setMatters] = useState([]);
     const [records, setRecords] = useState([]);
@@ -1167,8 +1188,10 @@ export function MobileExecutionTeamPage() {
 }
 export function MobileTrackingIndexPage() {
     const { user } = useAuth();
-    const visibleModules = getVisibleExecutionModules(user);
-    if (!canReadMobileExecution(user)) {
+    const { isModuleEnabled } = useModuleAvailability();
+    const tasksEnabled = isModuleEnabled("tasks");
+    const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
+    if (!tasksEnabled || !canReadMobileExecution(user)) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Seguimiento", subtitle: "Consulta rapida de tablas del manager de tareas." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/tracking/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Ver tablas" })] }, module.moduleId))) })] }));
@@ -1176,10 +1199,12 @@ export function MobileTrackingIndexPage() {
 export function MobileTrackingModulePage() {
     const { slug } = useParams();
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
+    const tasksEnabled = isModuleEnabled("tasks");
     const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-    const visibleModules = getVisibleExecutionModules(user);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
+    const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
     if (!module || !legacyConfig || !canAccess) {
         return _jsx(Navigate, { to: "/mobile/tracking", replace: true });
     }
@@ -1189,13 +1214,15 @@ export function MobileTrackingTablePage() {
     const { slug, tableId } = useParams();
     const navigate = useNavigate();
     const { user } = useAuth();
+    const { isModuleEnabled } = useModuleAvailability();
+    const tasksEnabled = isModuleEnabled("tasks");
     const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const isTermsTable = tableId === TERMS_TABLE_ID || tableId === RECURRING_TERMS_TABLE_ID;
     const recurrentTermsMode = tableId === RECURRING_TERMS_TABLE_ID;
     const table = legacyConfig?.tables.find((candidate) => candidate.slug === tableId);
-    const visibleModules = getVisibleExecutionModules(user);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
+    const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
     const [records, setRecords] = useState([]);
     const [terms, setTerms] = useState([]);
     const [histories, setHistories] = useState([]);

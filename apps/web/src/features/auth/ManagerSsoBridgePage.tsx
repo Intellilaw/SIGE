@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { apiGet } from "../../api/http-client";
 
-const localManagerUrl = import.meta.env.VITE_MANAGER_DE_ESCRITOS_URL ?? "http://localhost:8000";
+const localManagerUrl = import.meta.env.VITE_MANAGER_DE_ESCRITOS_URL ?? "http://localhost:8080";
 
 interface ManagerSsoResponse {
   redirectUrl: string;

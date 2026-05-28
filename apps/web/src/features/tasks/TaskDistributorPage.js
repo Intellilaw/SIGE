@@ -253,6 +253,7 @@ export function TaskDistributorPage() {
     const [holidayGuideLoading, setHolidayGuideLoading] = useState(false);
     const [holidayGuideError, setHolidayGuideError] = useState(null);
     const [responsibleOptions, setResponsibleOptions] = useState([]);
+    const [dateEditedHistorySortKeys, setDateEditedHistorySortKeys] = useState({});
     const [loading, setLoading] = useState(true);
     async function loadDistributor() {
         if (!moduleConfig) {
@@ -467,6 +468,9 @@ export function TaskDistributorPage() {
             .filter(Boolean)
             .sort((left, right) => left.localeCompare(right))[0] ?? "";
     }
+    function getActiveHistorySortDate(item) {
+        return dateEditedHistorySortKeys[item.id] ?? getEarliestOpenDate(item);
+    }
     function matchesDistributorClientSearch(item, searchWords) {
         return matchesSearchWords([item.clientName, item.clientNumber].join(" "), searchWords);
     }
@@ -533,8 +537,8 @@ export function TaskDistributorPage() {
             .filter((item) => matchesDistributorClientSearch(item, clientSearchWords))
             .filter((item) => matchesDistributorWordSearch(item, getOpenHistoryRecords(item), wordSearchWords))
             .sort((left, right) => {
-            const leftDate = getEarliestOpenDate(left);
-            const rightDate = getEarliestOpenDate(right);
+            const leftDate = getActiveHistorySortDate(left);
+            const rightDate = getActiveHistorySortDate(right);
             if (!leftDate && !rightDate) {
                 return left.createdAt.localeCompare(right.createdAt);
             }
@@ -546,7 +550,7 @@ export function TaskDistributorPage() {
             }
             return leftDate.localeCompare(rightDate) || left.createdAt.localeCompare(right.createdAt);
         });
-    }, [clientSearchWords, managerHistory, moduleConfig, taskNamesByRecordId, trackingById, trackingRecords, wordSearchWords]);
+    }, [clientSearchWords, dateEditedHistorySortKeys, managerHistory, moduleConfig, taskNamesByRecordId, trackingById, trackingRecords, wordSearchWords]);
     const recycleRows = useMemo(() => {
         if (!moduleConfig) {
             return [];
@@ -625,9 +629,23 @@ export function TaskDistributorPage() {
         }
     }
     async function patchRecord(record, patch) {
+        const datePatch = "dueDate" in patch || "termDate" in patch;
+        const currentHistoryItem = datePatch
+            ? activeHistory.find((item) => {
+                const usedIds = new Set();
+                return item.targetTables.some((targetTable, index) => resolveHistoryRecord(item, targetTable, index, usedIds)?.id === record.id);
+            })
+            : undefined;
+        const currentSortDate = currentHistoryItem ? getActiveHistorySortDate(currentHistoryItem) : "";
         const updated = await apiPatch(`/tasks/tracking-records/${record.id}`, patch);
         if (!updated) {
             return;
+        }
+        if (currentHistoryItem) {
+            setDateEditedHistorySortKeys((current) => ({
+                ...current,
+                [currentHistoryItem.id]: current[currentHistoryItem.id] ?? currentSortDate
+            }));
         }
         setTrackingRecords((current) => current.map((candidate) => candidate.id === record.id ? updated : candidate));
         const linkedTerm = getLinkedTerm(terms, record);

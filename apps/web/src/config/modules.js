@@ -1,3 +1,5 @@
+export const MODULE_ENABLEMENT_MODULE_ID = "module-enablement";
+const ALWAYS_ENABLED_MODULE_IDS = new Set(["users", MODULE_ENABLEMENT_MODULE_ID]);
 export const appModules = [
     {
         id: "clients",
@@ -254,6 +256,18 @@ export const appModules = [
         phase: "Operativo",
         available: true,
         coverage: ["Alta de usuarios", "Edicion de nombre corto, equipo y rol especifico", "Permisos y acceso por equipo y perfil"]
+    },
+    {
+        id: MODULE_ENABLEMENT_MODULE_ID,
+        path: "/app/module-enablement",
+        label: "Habilitaci\u00f3n de m\u00f3dulos",
+        shortLabel: "M\u00f3dulos",
+        icon: "\u2611\uFE0F",
+        description: "Control global para ocultar temporalmente modulos que no deben aparecer en el espacio de trabajo.",
+        phase: "Operativo",
+        available: true,
+        access: "emrt-superadmin",
+        coverage: ["Habilitacion global", "Ocultamiento temporal", "Conservacion de datos existentes"]
     }
 ];
 export const navigation = [
@@ -290,13 +304,25 @@ export function canAccessGeneralSupervision(user) {
         emailLocalPart
     ].some(isEmrtIdentity);
 }
-export function getVisibleAppModules(user) {
-    return appModules.filter((module) => module.access !== "emrt-superadmin" || canAccessGeneralSupervision(user));
+export function isAlwaysEnabledModule(moduleId) {
+    return ALWAYS_ENABLED_MODULE_IDS.has(moduleId);
 }
-export function getNavigationForUser(user) {
+export function getToggleableAppModules() {
+    return appModules.filter((module) => !isAlwaysEnabledModule(module.id));
+}
+export function getVisibleAppModules(user, disabledModuleIds = []) {
+    const disabledModules = new Set(disabledModuleIds);
+    return appModules.filter((module) => {
+        if (module.access === "emrt-superadmin" && !canAccessGeneralSupervision(user)) {
+            return false;
+        }
+        return isAlwaysEnabledModule(module.id) || !disabledModules.has(module.id);
+    });
+}
+export function getNavigationForUser(user, disabledModuleIds = []) {
     return [
         { path: "/app", label: "Men\u00fa principal", icon: "\u25EB" },
-        ...getVisibleAppModules(user).map((module) => ({
+        ...getVisibleAppModules(user, disabledModuleIds).map((module) => ({
             path: module.path,
             label: module.label,
             icon: module.icon

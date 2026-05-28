@@ -378,6 +378,7 @@ export function TaskDistributorPage() {
   const [holidayGuideLoading, setHolidayGuideLoading] = useState(false);
   const [holidayGuideError, setHolidayGuideError] = useState<string | null>(null);
   const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
+  const [dateEditedHistorySortKeys, setDateEditedHistorySortKeys] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   async function loadDistributor() {
@@ -645,6 +646,10 @@ export function TaskDistributorPage() {
       .sort((left, right) => left.localeCompare(right))[0] ?? "";
   }
 
+  function getActiveHistorySortDate(item: TaskDistributionHistory) {
+    return dateEditedHistorySortKeys[item.id] ?? getEarliestOpenDate(item);
+  }
+
   function matchesDistributorClientSearch(item: TaskDistributionHistory, searchWords: string[]) {
     return matchesSearchWords([item.clientName, item.clientNumber].join(" "), searchWords);
   }
@@ -733,8 +738,8 @@ export function TaskDistributorPage() {
       .filter((item) => matchesDistributorClientSearch(item, clientSearchWords))
       .filter((item) => matchesDistributorWordSearch(item, getOpenHistoryRecords(item), wordSearchWords))
       .sort((left, right) => {
-        const leftDate = getEarliestOpenDate(left);
-        const rightDate = getEarliestOpenDate(right);
+        const leftDate = getActiveHistorySortDate(left);
+        const rightDate = getActiveHistorySortDate(right);
 
         if (!leftDate && !rightDate) {
           return left.createdAt.localeCompare(right.createdAt);
@@ -748,7 +753,7 @@ export function TaskDistributorPage() {
 
         return leftDate.localeCompare(rightDate) || left.createdAt.localeCompare(right.createdAt);
       });
-  }, [clientSearchWords, managerHistory, moduleConfig, taskNamesByRecordId, trackingById, trackingRecords, wordSearchWords]);
+  }, [clientSearchWords, dateEditedHistorySortKeys, managerHistory, moduleConfig, taskNamesByRecordId, trackingById, trackingRecords, wordSearchWords]);
 
   const recycleRows = useMemo<RecycleTaskRow[]>(() => {
     if (!moduleConfig) {
@@ -843,9 +848,27 @@ export function TaskDistributorPage() {
   }
 
   async function patchRecord(record: TaskTrackingRecord, patch: TrackingRecordPatch) {
+    const datePatch = "dueDate" in patch || "termDate" in patch;
+    const currentHistoryItem = datePatch
+      ? activeHistory.find((item) => {
+          const usedIds = new Set<string>();
+
+          return item.targetTables.some((targetTable, index) =>
+            resolveHistoryRecord(item, targetTable, index, usedIds)?.id === record.id
+          );
+        })
+      : undefined;
+    const currentSortDate = currentHistoryItem ? getActiveHistorySortDate(currentHistoryItem) : "";
     const updated = await apiPatch<TaskTrackingRecord | null>(`/tasks/tracking-records/${record.id}`, patch);
     if (!updated) {
       return;
+    }
+
+    if (currentHistoryItem) {
+      setDateEditedHistorySortKeys((current) => ({
+        ...current,
+        [currentHistoryItem.id]: current[currentHistoryItem.id] ?? currentSortDate
+      }));
     }
 
     setTrackingRecords((current) => current.map((candidate) => candidate.id === record.id ? updated : candidate));

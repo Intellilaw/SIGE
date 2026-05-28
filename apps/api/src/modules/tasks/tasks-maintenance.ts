@@ -2,8 +2,10 @@ import type { PrismaClient } from "@prisma/client";
 
 const BUSINESS_TIME_ZONE = "America/Mexico_City";
 const LITIGATION_MODULE_ID = "litigation";
-const AUDIENCES_TABLE_CODE = "audiencias";
-const AUDIENCES_SOURCE_TABLE = "audiencias_citas_oficiales";
+const EXPIRING_LITIGATION_APPOINTMENT_TABLES = [
+  { tableCode: "audiencias", sourceTable: "audiencias_citas_oficiales" },
+  { tableCode: "citas-actuarios", sourceTable: "citas_actuarios" }
+] as const;
 const ONE_MINUTE_MS = 60 * 1000;
 
 type MaintenanceLogger = {
@@ -30,12 +32,16 @@ function toDatabaseDate(dateInput: string) {
   return new Date(`${dateInput}T00:00:00.000Z`);
 }
 
-export async function moveExpiredLitigationAudienceRecordsToRecycleBin(
+export async function moveExpiredLitigationAppointmentRecordsToRecycleBin(
   prisma: PrismaClient,
   now = new Date()
 ) {
   const today = getBusinessDateInput(now);
   const cutoffDate = toDatabaseDate(today);
+  const tableFilters = EXPIRING_LITIGATION_APPOINTMENT_TABLES.flatMap((table) => [
+    { tableCode: table.tableCode },
+    { sourceTable: table.sourceTable }
+  ]);
   const expiredRecords = await prisma.taskTrackingRecord.findMany({
     select: {
       id: true,
@@ -45,10 +51,7 @@ export async function moveExpiredLitigationAudienceRecordsToRecycleBin(
       moduleId: LITIGATION_MODULE_ID,
       deletedAt: null,
       status: { notIn: ["presentado", "concluida"] },
-      OR: [
-        { tableCode: AUDIENCES_TABLE_CODE },
-        { sourceTable: AUDIENCES_SOURCE_TABLE }
-      ],
+      OR: tableFilters,
       AND: [
         {
           OR: [
@@ -96,6 +99,9 @@ export async function moveExpiredLitigationAudienceRecordsToRecycleBin(
   return { moved: recordIds.length, today };
 }
 
+export const moveExpiredLitigationAudienceRecordsToRecycleBin =
+  moveExpiredLitigationAppointmentRecordsToRecycleBin;
+
 export function startTasksMaintenanceScheduler(prisma: PrismaClient, logger?: MaintenanceLogger) {
   let running = false;
 
@@ -106,11 +112,11 @@ export function startTasksMaintenanceScheduler(prisma: PrismaClient, logger?: Ma
 
     running = true;
     try {
-      const result = await moveExpiredLitigationAudienceRecordsToRecycleBin(prisma);
+      const result = await moveExpiredLitigationAppointmentRecordsToRecycleBin(prisma);
       if (result.moved > 0) {
         logger?.info(
           { moved: result.moved, businessDate: result.today },
-          "Moved expired litigation audience records to the task recycle bin."
+          "Moved expired litigation appointment records to the task recycle bin."
         );
       }
     } catch (error) {
