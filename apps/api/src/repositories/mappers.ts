@@ -21,6 +21,7 @@ import type {
   LaborGlobalVacationDay,
   LaborVacationEvent,
   Lead,
+  ManagedTeam,
   ManagedUser,
   Matter,
   Quote,
@@ -30,6 +31,7 @@ import type {
   TaskDistributionHistory,
   TaskItem,
   TaskModuleDefinition,
+  TaskModuleMember,
   TaskTerm,
   TaskTrackingRecord
 } from "@sige/contracts";
@@ -273,6 +275,29 @@ export function mapManagedUser(record: {
     updatedAt: record.updatedAt.toISOString(),
     lastLoginAt: record.lastLoginAt?.toISOString(),
     emailConfirmedAt: record.emailConfirmedAt?.toISOString()
+  };
+}
+
+export function mapManagedTeam(record: {
+  id: string;
+  key: string;
+  label: string;
+  isActive: boolean;
+  sortOrder: number;
+  deactivatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}, memberCount = 0): ManagedTeam {
+  return {
+    id: record.id,
+    key: record.key,
+    label: record.label,
+    isActive: record.isActive,
+    sortOrder: record.sortOrder,
+    memberCount,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    deactivatedAt: record.deactivatedAt?.toISOString()
   };
 }
 
@@ -1874,6 +1899,7 @@ export function mapTaskModule(record: {
   team: string;
   label: string;
   summary: string;
+  isActive?: boolean;
   tracks: Array<{
     trackCode: string;
     label: string;
@@ -1881,12 +1907,14 @@ export function mapTaskModule(record: {
     recurring: boolean;
     recurrenceRule: Prisma.JsonValue | null;
   }>;
-}): TaskModuleDefinition {
+}, members: TaskModuleMember[] = []): TaskModuleDefinition {
   return {
     id: record.id,
     team: record.team as TaskModuleDefinition["team"],
     label: record.label,
     summary: record.summary,
+    isActive: record.isActive,
+    members,
     tracks: record.tracks.map((track) => ({
       id: track.trackCode,
       label: track.label,

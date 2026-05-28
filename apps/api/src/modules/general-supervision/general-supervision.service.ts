@@ -80,6 +80,7 @@ interface GroupedUserTaskSummary extends SupervisionUserReference {
   total: number;
   today: number;
   overdue: number;
+  monthlyKpiMisses: number;
   dashboardLinks: SupervisionTaskDashboardLink[];
 }
 
@@ -187,6 +188,16 @@ function getWeekStartKey(dateKey: string) {
   const day = date.getUTCDay();
   const offset = day === 0 ? -6 : 1 - day;
   return addDaysKey(dateKey, offset);
+}
+
+function getMonthStartKey(dateKey: string) {
+  return `${dateKey.slice(0, 7)}-01`;
+}
+
+function getMonthEndKey(dateKey: string) {
+  const year = Number(dateKey.slice(0, 4));
+  const month = Number(dateKey.slice(5, 7));
+  return new Date(Date.UTC(year, month, 0, 12)).toISOString().slice(0, 10);
 }
 
 function getDataRecord(value: unknown): Record<string, unknown> {
@@ -436,7 +447,8 @@ function getUserDashboardPath(moduleId: string, user: SupervisionUserReference) 
 function buildTaskOverviewByUser(
   todayKey: string,
   tasks: SupervisionTaskCandidate[],
-  aliasLookup: Map<string, SupervisionUserReference>
+  aliasLookup: Map<string, SupervisionUserReference>,
+  monthlyKpiMissesByUser: Map<string, { user: SupervisionUserReference; total: number }>
 ) {
   const groups = new Map<
     string,
@@ -455,6 +467,7 @@ function buildTaskOverviewByUser(
         total: 0,
         today: 0,
         overdue: 0,
+        monthlyKpiMisses: 0,
         dashboardLinks: [],
         linkLookup: new Map<string, SupervisionTaskDashboardLink>()
       };
@@ -476,16 +489,35 @@ function buildTaskOverviewByUser(
     });
   });
 
+  monthlyKpiMissesByUser.forEach((kpiSummary, userId) => {
+    const group = groups.get(userId) ?? {
+      ...kpiSummary.user,
+      total: 0,
+      today: 0,
+      overdue: 0,
+      monthlyKpiMisses: 0,
+      dashboardLinks: [],
+      linkLookup: new Map<string, SupervisionTaskDashboardLink>()
+    };
+
+    group.monthlyKpiMisses = kpiSummary.total;
+    groups.set(userId, group);
+  });
+
   const users = Array.from(groups.values())
     .map(({ linkLookup, ...user }) => ({
       ...user,
       dashboardLinks: Array.from(linkLookup.values()).sort((left, right) => left.label.localeCompare(right.label))
     }))
-    .sort((left, right) => right.total - left.total || left.displayName.localeCompare(right.displayName));
+    .sort((left, right) =>
+      (right.total + right.monthlyKpiMisses) - (left.total + left.monthlyKpiMisses)
+      || left.displayName.localeCompare(right.displayName)
+    );
 
   return {
     todayTotal: users.reduce((total, user) => total + user.today, 0),
     overdueTotal: users.reduce((total, user) => total + user.overdue, 0),
+    monthlyKpiMissesTotal: users.reduce((total, user) => total + user.monthlyKpiMisses, 0),
     total: users.reduce((total, user) => total + user.total, 0),
     users
   };
@@ -543,6 +575,37 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
     ),
     users: userAlerts
   };
+}
+
+function buildMonthlyKpiMissesByUser(overview: Awaited<ReturnType<KpisRepository["getPeriodOverview"]>>) {
+  const users = new Map<string, { user: SupervisionUserReference; total: number }>();
+
+  overview.teams.forEach((team) => {
+    team.users.forEach((user) => {
+      const total = user.metrics.reduce(
+        (metricTotal, metric) =>
+          metricTotal + metric.dailyBreakdown.filter((day) => day.status === "missed").length,
+        0
+      );
+
+      if (total === 0) {
+        return;
+      }
+
+      users.set(user.userId, {
+        user: {
+          userId: user.userId,
+          displayName: user.displayName,
+          shortName: user.shortName,
+          teamLabel: user.teamLabel,
+          specificRole: user.specificRole
+        },
+        total
+      });
+    });
+  });
+
+  return users;
 }
 
 function buildTaskCandidates(input: {
@@ -717,6 +780,8 @@ export class GeneralSupervisionService {
     const kpiRanges = buildKpiRanges(todayKey);
     const currentWeekStart = getWeekStartKey(todayKey);
     const currentWeekEnd = addDaysKey(currentWeekStart, 6);
+    const currentMonthStart = getMonthStartKey(todayKey);
+    const currentMonthEnd = getMonthEndKey(todayKey);
 
     const [storedModules, trackingRecords, users] = await Promise.all([
       this.repositories.tasks.listModules(),
@@ -749,13 +814,17 @@ export class GeneralSupervisionService {
       legacyRole: "SUPERADMIN",
       permissions: ["*"]
     };
-    const kpiOverviews = await Promise.all(
-      kpiRanges.map((range) =>
-        this.repositories.kpis.getPeriodOverview(range.startDate, range.endDate, kpiAccessScope)
-      )
-    );
+    const [kpiOverviews, currentMonthKpiOverview] = await Promise.all([
+      Promise.all(
+        kpiRanges.map((range) =>
+          this.repositories.kpis.getPeriodOverview(range.startDate, range.endDate, kpiAccessScope)
+        )
+      ),
+      this.repositories.kpis.getPeriodOverview(currentMonthStart, currentMonthEnd, kpiAccessScope)
+    ]);
 
-    const taskOverview = buildTaskOverviewByUser(todayKey, taskCandidates, aliasLookup);
+    const monthlyKpiMissesByUser = buildMonthlyKpiMissesByUser(currentMonthKpiOverview);
+    const taskOverview = buildTaskOverviewByUser(todayKey, taskCandidates, aliasLookup, monthlyKpiMissesByUser);
     const termBuckets = dashboardRanges.map((range) => {
       const teams = groupTermsByTeam(range, termCandidates);
       return {
@@ -771,13 +840,16 @@ export class GeneralSupervisionService {
       today: todayKey,
       currentWeekStart,
       currentWeekEnd,
+      currentMonthStart,
+      currentMonthEnd,
       taskOverview,
       termBuckets,
       kpiPeriods,
       summary: {
         tasks: taskOverview.total,
         terms: termBuckets.reduce((total, bucket) => total + bucket.total, 0),
-        kpiAlerts: kpiPeriods.reduce((total, period) => total + period.totalMetrics, 0)
+        kpiAlerts: kpiPeriods.reduce((total, period) => total + period.totalMetrics, 0),
+        monthlyKpiMisses: taskOverview.monthlyKpiMissesTotal
       }
     };
   }

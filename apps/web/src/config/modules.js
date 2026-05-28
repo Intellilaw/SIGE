@@ -222,6 +222,18 @@ export const appModules = [
         coverage: ["Documentos externos", "Buscador por nombre o archivo", "Apertura y descarga de documentos"]
     },
     {
+        id: "guidelines-manuals",
+        path: "/app/guidelines-manuals",
+        label: "Lineamientos y manuales internos",
+        shortLabel: "Lineamientos",
+        icon: "\u{1F4D8}",
+        description: "Biblioteca de lectura para documentos de organizacion interna.",
+        phase: "Operativo",
+        available: true,
+        access: "all",
+        coverage: ["Documentos de organizacion interna", "Lectura libre para usuarios del sistema", "Apertura y descarga de documentos"]
+    },
+    {
         id: "holidays",
         path: "/app/holidays",
         label: "Días inhábiles",

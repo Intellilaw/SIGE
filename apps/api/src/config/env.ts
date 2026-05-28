@@ -30,7 +30,11 @@ const envSchema = z.object({
   OPENAI_QUOTE_TRANSLATION_MODEL: z.string().min(1).default("gpt-4o-mini"),
   OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
   OPENAI_LABOR_CONTRACT_MODEL: z.string().min(1).default("gpt-4o-mini"),
-  OPENAI_LABOR_CONTRACT_TIMEOUT_MS: z.coerce.number().int().positive().default(60000)
+  OPENAI_LABOR_CONTRACT_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  INTELLILAW_BOT_API_URL: z.string().url().default("http://localhost:8000"),
+  INTELLILAW_BOT_API_KEY: optionalNonEmptyString,
+  TELEGRAM_BOT_TOKEN: optionalNonEmptyString,
+  TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS: z.coerce.number().int().positive().default(5000)
 });
 
 export const env = envSchema.parse(process.env);

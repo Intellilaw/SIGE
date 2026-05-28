@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { SPECIFIC_ROLE_OPTIONS, TEAM_OPTIONS, type ManagedUser } from "@sige/contracts";
+import { SPECIFIC_ROLE_OPTIONS, TEAM_OPTIONS, type ManagedTeam, type ManagedUser } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { SummaryCard } from "../../components/SummaryCard";
@@ -22,6 +22,10 @@ interface UserFormState {
   isActive: boolean;
 }
 
+interface TeamFormState {
+  label: string;
+}
+
 const EMPTY_FORM: UserFormState = {
   displayName: "",
   username: "",
@@ -30,6 +34,10 @@ const EMPTY_FORM: UserFormState = {
   legacyTeam: "",
   specificRole: "",
   isActive: true
+};
+
+const EMPTY_TEAM_FORM: TeamFormState = {
+  label: ""
 };
 
 function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
@@ -91,20 +99,58 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
 
+function normalizeIdentity(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isEduardoRusconiSuperadmin(
+  candidate: {
+    email: string;
+    username: string;
+    displayName: string;
+    role: string;
+    legacyRole: string;
+  } | null | undefined
+) {
+  if (!candidate) {
+    return false;
+  }
+
+  const isSuperadmin = candidate.role === "SUPERADMIN" || candidate.legacyRole === "SUPERADMIN";
+  const isEduardoRusconi = [candidate.username, candidate.displayName, candidate.email]
+    .map(normalizeIdentity)
+    .some((identity) => identity === "eduardo rusconi" || identity.includes("eduardo rusconi"));
+
+  return isSuperadmin && isEduardoRusconi;
+}
+
 export function UsersPage() {
   const { user } = useAuth();
   const [rows, setRows] = useState<ManagedUser[]>([]);
+  const [teams, setTeams] = useState<ManagedTeam[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadingTeams, setLoadingTeams] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [teamActionId, setTeamActionId] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [teamsError, setTeamsError] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState<UserFormState>(EMPTY_FORM);
+  const [teamForm, setTeamForm] = useState<TeamFormState>(EMPTY_TEAM_FORM);
 
   const canManageUsers = Boolean(user?.permissions.includes("*") || user?.permissions.includes("users:manage"));
+  const canManageTeams = canManageUsers && isEduardoRusconiSuperadmin(user);
 
   async function fetchUsers() {
     setLoadingUsers(true);
@@ -120,13 +166,29 @@ export function UsersPage() {
     }
   }
 
+  async function fetchTeams() {
+    setLoadingTeams(true);
+    setTeamsError(null);
+
+    try {
+      const data = await apiGet<ManagedTeam[]>("/users/teams");
+      setTeams(data);
+    } catch (error) {
+      setTeamsError(getErrorMessage(error));
+    } finally {
+      setLoadingTeams(false);
+    }
+  }
+
   useEffect(() => {
     if (!canManageUsers) {
       setLoadingUsers(false);
+      setLoadingTeams(false);
       return;
     }
 
     void fetchUsers();
+    void fetchTeams();
   }, [canManageUsers]);
 
   const metrics = useMemo(
@@ -139,11 +201,32 @@ export function UsersPage() {
     [rows]
   );
 
+  const teamOptionsForUserForm = useMemo(() => {
+    const source = teams.length > 0
+      ? teams
+      : TEAM_OPTIONS.map((team, index) => ({
+          ...team,
+          id: team.key,
+          isActive: true,
+          sortOrder: (index + 1) * 10,
+          memberCount: 0,
+          createdAt: "",
+          updatedAt: ""
+        }));
+
+    return source.filter((team) => team.isActive || team.label === form.legacyTeam);
+  }, [form.legacyTeam, teams]);
+
   function resetForm() {
     setIsEditing(false);
     setEditingUserId(null);
     setShowPassword(false);
     setForm(EMPTY_FORM);
+  }
+
+  function resetTeamForm() {
+    setEditingTeamId(null);
+    setTeamForm(EMPTY_TEAM_FORM);
   }
 
   function handleEditClick(target: ManagedUser) {
@@ -161,6 +244,12 @@ export function UsersPage() {
       isActive: target.isActive
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleTeamEditClick(target: ManagedTeam) {
+    setFlash(null);
+    setEditingTeamId(target.id);
+    setTeamForm({ label: target.label });
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -217,11 +306,82 @@ export function UsersPage() {
       }
 
       resetForm();
-      await fetchUsers();
+      await Promise.all([fetchUsers(), fetchTeams()]);
     } catch (error) {
       setFlash({ tone: "error", text: getErrorMessage(error) });
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleTeamSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFlash(null);
+
+    const label = teamForm.label.trim();
+    if (!label) {
+      setFlash({ tone: "error", text: "El nombre del equipo es obligatorio." });
+      return;
+    }
+
+    setIsSavingTeam(true);
+
+    try {
+      if (editingTeamId) {
+        await apiPatch<ManagedTeam>(`/users/teams/${editingTeamId}`, { label });
+        setFlash({ tone: "success", text: "Equipo actualizado correctamente." });
+      } else {
+        await apiPost<ManagedTeam>("/users/teams", { label });
+        setFlash({ tone: "success", text: `Equipo "${label}" creado correctamente.` });
+      }
+
+      resetTeamForm();
+      await Promise.all([fetchTeams(), fetchUsers()]);
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setIsSavingTeam(false);
+    }
+  }
+
+  async function handleDeactivateTeam(target: ManagedTeam) {
+    setFlash(null);
+
+    const memberWarning = target.memberCount > 0
+      ? ` Tiene ${target.memberCount} usuario(s) activo(s); conservaran el equipo historico, pero ya no aparecera para nuevas asignaciones.`
+      : "";
+    if (!window.confirm(`Seguro que deseas desactivar el equipo ${target.label}?${memberWarning}`)) {
+      return;
+    }
+
+    setTeamActionId(target.id);
+
+    try {
+      await apiDelete(`/users/teams/${target.id}`);
+      setFlash({ tone: "success", text: `Equipo ${target.label} desactivado correctamente.` });
+      if (editingTeamId === target.id) {
+        resetTeamForm();
+      }
+      await fetchTeams();
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setTeamActionId(null);
+    }
+  }
+
+  async function handleReactivateTeam(target: ManagedTeam) {
+    setFlash(null);
+    setTeamActionId(target.id);
+
+    try {
+      await apiPatch<ManagedTeam>(`/users/teams/${target.id}`, { isActive: true });
+      setFlash({ tone: "success", text: `Equipo ${target.label} reactivado correctamente.` });
+      await fetchTeams();
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setTeamActionId(null);
     }
   }
 
@@ -245,7 +405,7 @@ export function UsersPage() {
       if (editingUserId === target.id) {
         resetForm();
       }
-      await fetchUsers();
+      await Promise.all([fetchUsers(), fetchTeams()]);
     } catch (error) {
       setFlash({ tone: "error", text: getErrorMessage(error) });
     } finally {
@@ -387,9 +547,9 @@ export function UsersPage() {
                 onChange={(event) => setForm((current) => ({ ...current, legacyTeam: event.target.value }))}
               >
                 <option value="">-- Seleccionar equipo --</option>
-                {TEAM_OPTIONS.map((team) => (
+                {teamOptionsForUserForm.map((team) => (
                   <option key={team.key} value={team.label}>
-                    {team.label}
+                    {team.isActive ? team.label : `${team.label} (inactivo)`}
                   </option>
                 ))}
               </select>
@@ -428,11 +588,120 @@ export function UsersPage() {
             <button className="primary-button" disabled={isSaving} type="submit">
               {isSaving ? "Procesando..." : isEditing ? "Guardar cambios" : "Crear usuario"}
             </button>
-            <button className="secondary-button" onClick={fetchUsers} type="button">
+            <button className="secondary-button" onClick={() => void Promise.all([fetchUsers(), fetchTeams()])} type="button">
               Refrescar lista
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Administracion de equipos</h2>
+          <span>{teams.length} equipos</span>
+        </div>
+
+        {teamsError ? <div className="message-banner message-error">{teamsError}</div> : null}
+
+        {canManageTeams ? (
+          <form className="users-team-form" onSubmit={handleTeamSave}>
+            <label className="form-field">
+              <span>Nombre del equipo</span>
+              <input
+                value={teamForm.label}
+                onChange={(event) => setTeamForm({ label: event.target.value })}
+                placeholder="Ej. Auditoria"
+                maxLength={80}
+                required
+              />
+            </label>
+            <div className="form-actions users-team-actions">
+              <button className="primary-button" disabled={isSavingTeam} type="submit">
+                {isSavingTeam ? "Procesando..." : editingTeamId ? "Guardar equipo" : "Crear equipo"}
+              </button>
+              {editingTeamId ? (
+                <button className="secondary-button" onClick={resetTeamForm} type="button">
+                  Cancelar edicion
+                </button>
+              ) : null}
+            </div>
+          </form>
+        ) : (
+          <div className="editing-banner">
+            Solo el superadmin Eduardo Rusconi puede crear, editar, reactivar o desactivar equipos.
+          </div>
+        )}
+
+        <div className="table-scroll users-team-table-scroll">
+          <table className="data-table users-team-table">
+            <thead>
+              <tr>
+                <th>Equipo</th>
+                <th>Clave</th>
+                <th>Usuarios activos</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingTeams ? (
+                <tr>
+                  <td colSpan={5}>Cargando equipos...</td>
+                </tr>
+              ) : teams.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>No hay equipos registrados.</td>
+                </tr>
+              ) : (
+                teams.map((team) => (
+                  <tr className={!team.isActive ? "user-row-inactive" : undefined} key={team.id}>
+                    <td>
+                      <strong>{team.label}</strong>
+                    </td>
+                    <td>{team.key}</td>
+                    <td>{team.memberCount}</td>
+                    <td>
+                      <span className={`status-pill ${team.isActive ? "status-live" : "status-warning"}`}>
+                        {team.isActive ? "Activo" : "Inactivo"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="table-actions">
+                        <button
+                          className="secondary-button"
+                          disabled={!canManageTeams || Boolean(teamActionId)}
+                          onClick={() => handleTeamEditClick(team)}
+                          type="button"
+                        >
+                          Editar
+                        </button>
+                        {team.isActive ? (
+                          <button
+                            className="danger-button"
+                            disabled={!canManageTeams || Boolean(teamActionId)}
+                            onClick={() => void handleDeactivateTeam(team)}
+                            type="button"
+                          >
+                            {teamActionId === team.id ? "Procesando..." : "Desactivar"}
+                          </button>
+                        ) : (
+                          <button
+                            className="secondary-button"
+                            disabled={!canManageTeams || Boolean(teamActionId)}
+                            onClick={() => void handleReactivateTeam(team)}
+                            type="button"
+                          >
+                            {teamActionId === team.id ? "Procesando..." : "Reactivar"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="panel">

@@ -24,6 +24,7 @@ import { KpisService } from "./modules/kpis/kpis.service";
 import { LaborFilesService } from "./modules/labor-files/labor-files.service";
 import { LeadsService } from "./modules/leads/leads.service";
 import { MattersService } from "./modules/matters/matters.service";
+import { ModuleSettingsService } from "./modules/module-settings/module-settings.service";
 import { QuotesService } from "./modules/quotes/quotes.service";
 import { startTasksMaintenanceScheduler } from "./modules/tasks/tasks-maintenance.js";
 import { TasksService } from "./modules/tasks/tasks.service";
@@ -46,6 +47,7 @@ import { clientsRoutes } from "./modules/clients/clients.routes";
 import { quotesRoutes } from "./modules/quotes/quotes.routes";
 import { leadsRoutes } from "./modules/leads/leads.routes";
 import { mattersRoutes } from "./modules/matters/matters.routes";
+import { moduleSettingsRoutes } from "./modules/module-settings/module-settings.routes";
 import { tasksRoutes } from "./modules/tasks/tasks.routes";
 import { PrismaAuthRepository } from "./repositories/auth.repository";
 import { PrismaBudgetPlanningRepository } from "./repositories/budget-planning.repository";
@@ -73,6 +75,7 @@ import {
   LocalTasksRepository
 } from "./repositories/local-business.repository";
 import { PrismaMattersRepository } from "./repositories/matters.repository";
+import { PrismaModuleSettingsRepository } from "./repositories/module-settings.repository";
 import { PrismaQuotesRepository } from "./repositories/quotes.repository";
 import { ResilientAuthRepository } from "./repositories/resilient-auth.repository";
 import {
@@ -119,6 +122,7 @@ declare module "fastify" {
       laborFiles: LaborFilesRepository;
       leads: PrismaLeadsRepository;
       matters: MattersRepository;
+      moduleSettings: PrismaModuleSettingsRepository;
       quotes: QuotesRepository;
       tasks: TasksRepository;
       users: PrismaUsersRepository;
@@ -139,6 +143,7 @@ declare module "fastify" {
       LaborFilesService: typeof LaborFilesService;
       LeadsService: typeof LeadsService;
       MattersService: typeof MattersService;
+      ModuleSettingsService: typeof ModuleSettingsService;
       QuotesService: typeof QuotesService;
       TasksService: typeof TasksService;
       UsersService: typeof UsersService;
@@ -147,6 +152,7 @@ declare module "fastify" {
 }
 
 export async function buildApp() {
+  const usePrettyLogger = env.APP_ENV === "development" && process.env.SIGE_DISABLE_PRETTY_LOGS !== "true";
   const configuredWebOrigins = env.WEB_ORIGINS
     ? env.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [env.WEB_ORIGIN];
@@ -170,7 +176,7 @@ export async function buildApp() {
 
   const app = Fastify({
     logger: {
-      transport: env.APP_ENV === "development"
+      transport: usePrettyLogger
         ? {
             target: "pino-pretty"
           }
@@ -223,6 +229,7 @@ export async function buildApp() {
       localBusinessStore ? new LocalMattersRepository(localBusinessStore) : null,
       app.log
     ),
+    moduleSettings: new PrismaModuleSettingsRepository(prisma),
     quotes: new ResilientQuotesRepository(
       new PrismaQuotesRepository(prisma),
       localBusinessStore ? new LocalQuotesRepository(localBusinessStore) : null,
@@ -251,6 +258,7 @@ export async function buildApp() {
     LaborFilesService,
     LeadsService,
     MattersService,
+    ModuleSettingsService,
     QuotesService,
     TasksService,
     UsersService
@@ -302,6 +310,7 @@ export async function buildApp() {
     await api.register(quotesRoutes);
     await api.register(leadsRoutes);
     await api.register(mattersRoutes);
+    await api.register(moduleSettingsRoutes);
     await api.register(tasksRoutes);
   }, { prefix: "/api/v1" });
 

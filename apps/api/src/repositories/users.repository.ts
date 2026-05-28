@@ -1,8 +1,48 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import { buildTaskModuleIdFromTeamKey } from "@sige/contracts";
 
-import { mapManagedUser } from "./mappers";
+import { mapManagedTeam, mapManagedUser } from "./mappers";
 import { buildLaborFileSnapshot, buildLaborFileUserSyncSnapshot, shouldHaveLaborFile } from "./labor-files.repository";
-import type { CreateManagedUserRecord, UpdateManagedUserRecord, UsersRepository } from "./types";
+import type { CreateManagedUserRecord, UpdateManagedUserRecord, UserTeamUpdateRecord, UserTeamWriteRecord, UsersRepository } from "./types";
+
+function buildTeamTaskModuleSummary(label: string) {
+  return `Espacio de tareas de ${label} pendiente de configuracion.`;
+}
+
+async function upsertTeamTaskModule(
+  tx: Prisma.TransactionClient,
+  team: {
+    key: string;
+    label: string;
+    isActive: boolean;
+    deactivatedAt: Date | null;
+  }
+) {
+  const moduleId = buildTaskModuleIdFromTeamKey(team.key);
+  if (!moduleId) {
+    return;
+  }
+
+  await tx.$executeRaw(Prisma.sql`
+    INSERT INTO "TaskModule" ("id", "team", "label", "summary", "isActive", "deactivatedAt", "createdAt", "updatedAt")
+    VALUES (
+      ${moduleId},
+      ${team.key},
+      ${team.label},
+      ${buildTeamTaskModuleSummary(team.label)},
+      ${team.isActive},
+      ${team.deactivatedAt},
+      now(),
+      now()
+    )
+    ON CONFLICT ("id") DO UPDATE SET
+      "team" = EXCLUDED."team",
+      "label" = EXCLUDED."label",
+      "isActive" = EXCLUDED."isActive",
+      "deactivatedAt" = EXCLUDED."deactivatedAt",
+      "updatedAt" = now()
+  `);
+}
 
 export class PrismaUsersRepository implements UsersRepository {
   public constructor(private readonly prisma: PrismaClient) {}
@@ -128,5 +168,129 @@ export class PrismaUsersRepository implements UsersRepository {
 
       await tx.user.delete({ where: { id: userId } });
     });
+  }
+
+  public async listTeams() {
+    const [records, activeUsers] = await this.prisma.$transaction([
+      this.prisma.userTeam.findMany({
+        orderBy: [
+          { sortOrder: "asc" },
+          { label: "asc" }
+        ]
+      }),
+      this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          team: {
+            not: null
+          }
+        },
+        select: {
+          team: true
+        }
+      })
+    ]);
+    const countByTeam = new Map<string, number>();
+    for (const activeUser of activeUsers) {
+      if (activeUser.team) {
+        countByTeam.set(activeUser.team, (countByTeam.get(activeUser.team) ?? 0) + 1);
+      }
+    }
+
+    return records.map((record) => mapManagedTeam(record, countByTeam.get(record.key) ?? 0));
+  }
+
+  public async createTeam(payload: UserTeamWriteRecord) {
+    const maxSortOrder = await this.prisma.userTeam.aggregate({
+      _max: {
+        sortOrder: true
+      }
+    });
+    const record = await this.prisma.$transaction(async (tx) => {
+      const userTeam = await tx.userTeam.create({
+        data: {
+          key: payload.key,
+          label: payload.label,
+          sortOrder: payload.sortOrder ?? (maxSortOrder._max.sortOrder ?? 0) + 10,
+          isActive: true
+        }
+      });
+
+      await upsertTeamTaskModule(tx, {
+        key: userTeam.key,
+        label: userTeam.label,
+        isActive: true,
+        deactivatedAt: null
+      });
+
+      return userTeam;
+    });
+
+    return mapManagedTeam(record, 0);
+  }
+
+  public async updateTeam(teamId: string, payload: UserTeamUpdateRecord) {
+    const record = await this.prisma.$transaction(async (tx) => {
+      const currentTeam = await tx.userTeam.findUnique({
+        where: { id: teamId }
+      });
+      if (!currentTeam) {
+        return null;
+      }
+
+      const nextLabel = payload.label === undefined ? undefined : payload.label;
+      const nextIsActive = payload.isActive;
+      const updatedTeam = await tx.userTeam.update({
+        where: { id: teamId },
+        data: {
+          label: nextLabel,
+          isActive: nextIsActive,
+          deactivatedAt: nextIsActive === undefined
+            ? undefined
+            : nextIsActive
+              ? null
+              : (currentTeam.deactivatedAt ?? new Date())
+        }
+      });
+      const taskModuleId = buildTaskModuleIdFromTeamKey(updatedTeam.key);
+      if (taskModuleId) {
+        await upsertTeamTaskModule(tx, {
+          key: updatedTeam.key,
+          label: updatedTeam.label,
+          isActive: updatedTeam.isActive,
+          deactivatedAt: updatedTeam.deactivatedAt
+        });
+      }
+
+      if (nextLabel !== undefined && nextLabel !== currentTeam.label) {
+        await tx.user.updateMany({
+          where: { team: currentTeam.key },
+          data: { legacyTeam: nextLabel }
+        });
+        await tx.laborFile.updateMany({
+          where: { team: currentTeam.key },
+          data: { legacyTeam: nextLabel }
+        });
+      }
+
+      return updatedTeam;
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    const memberCount = await this.prisma.user.count({
+      where: {
+        isActive: true,
+        team: record.key
+      }
+    });
+
+    return mapManagedTeam(record, memberCount);
+  }
+
+  public async deactivateTeam(teamId: string) {
+    return this.updateTeam(teamId, { isActive: false });
   }
 }

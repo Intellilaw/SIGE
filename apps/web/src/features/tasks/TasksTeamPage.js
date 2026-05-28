@@ -2,9 +2,8 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
+import { buildTaskDashboardMembers, findTaskModuleDescriptorBySlug } from "./task-module-descriptors";
 import { getEffectiveTrackingResponsible, hasValidTrackingResponsible, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_ID } from "./task-legacy-config";
 const TIMEFRAMES = [
@@ -288,28 +287,63 @@ export function TasksTeamPage() {
     const [searchParams] = useSearchParams();
     const focusedMemberId = searchParams.get("member");
     const focusedTimeframe = searchParams.get("timeframe");
-    const { user } = useAuth();
-    const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-    const visibleModules = getVisibleExecutionModules(user);
+    const [taskModules, setTaskModules] = useState([]);
+    const [modulesLoading, setModulesLoading] = useState(true);
+    const [modulesError, setModulesError] = useState(null);
+    const module = useMemo(() => findTaskModuleDescriptorBySlug(taskModules, slug), [slug, taskModules]);
+    const dashboardMembers = useMemo(() => module ? buildTaskDashboardMembers(module.definition) : [], [module]);
     const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const [trackingRecords, setTrackingRecords] = useState([]);
     const [terms, setTerms] = useState([]);
     const [loading, setLoading] = useState(true);
     const [expandedView, setExpandedView] = useState(null);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const canAccess = Boolean(module);
+    useEffect(() => {
+        let active = true;
+        async function loadModules() {
+            setModulesLoading(true);
+            setModulesError(null);
+            try {
+                const loadedModules = await apiGet("/tasks/modules");
+                if (active) {
+                    setTaskModules(loadedModules);
+                }
+            }
+            catch (error) {
+                if (active) {
+                    setModulesError(error instanceof Error ? error.message : "No se pudieron cargar los equipos de tareas.");
+                }
+            }
+            finally {
+                if (active) {
+                    setModulesLoading(false);
+                }
+            }
+        }
+        void loadModules();
+        return () => {
+            active = false;
+        };
+    }, []);
     useEffect(() => {
         const isValidTimeframe = TIMEFRAMES.some((candidate) => candidate.id === focusedTimeframe);
-        if (!dashboardConfig || !focusedMemberId || !isValidTimeframe) {
+        if (!focusedMemberId || !isValidTimeframe) {
             return;
         }
-        const member = dashboardConfig.members.find((candidate) => candidate.id === focusedMemberId);
+        const member = dashboardMembers.find((candidate) => candidate.id === focusedMemberId);
         if (member) {
             setExpandedView({ memberId: member.id, timeframe: focusedTimeframe });
         }
-    }, [dashboardConfig, focusedMemberId, focusedTimeframe]);
+    }, [dashboardMembers, focusedMemberId, focusedTimeframe]);
     useEffect(() => {
         if (!module || !canAccess) {
+            return;
+        }
+        if (!legacyConfig) {
+            setTrackingRecords([]);
+            setTerms([]);
+            setLoading(false);
             return;
         }
         const currentModule = module;
@@ -328,7 +362,7 @@ export function TasksTeamPage() {
             }
         }
         void loadDashboard();
-    }, [canAccess, module]);
+    }, [canAccess, legacyConfig, module]);
     const tableLookup = useMemo(() => buildLegacyTableLookup(legacyConfig?.tables ?? []), [legacyConfig]);
     const managerSourceLookup = useMemo(() => {
         const recordIds = new Set();
@@ -442,17 +476,25 @@ export function TasksTeamPage() {
             ...buildTermVerificationRows(member, timeframe)
         ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
     }
-    if (!module || !canAccess || !legacyConfig) {
+    if (!modulesLoading && modulesError) {
+        return (_jsx("section", { className: "page-stack tasks-team-page", children: _jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: modulesError }) }) }));
+    }
+    if (!modulesLoading && (!module || !canAccess)) {
         return _jsx(Navigate, { to: "/app/tasks", replace: true });
     }
-    return (_jsxs("section", { className: "page-stack tasks-team-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate("/app/tasks"), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: module.label }) })] })] }), _jsx("p", { className: "muted", children: "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales." }), _jsxs("div", { className: "tasks-legacy-toolbar", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`), children: "Manager de tareas" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos`), children: "Terminos" }), legacyConfig.hasRecurringTerms ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`), children: "Terminos recurrentes" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/adicionales`), children: "Tareas adicionales" })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Vista diaria del equipo" }), _jsxs("span", { children: [dashboardConfig?.members.length ?? 0, " integrantes"] })] }), _jsx("p", { className: "muted tasks-team-board-copy", children: "Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, manana y posteriores. El rojo indica faltantes, terminos sin verificacion o fechas vencidas." }), _jsx("div", { className: "tasks-team-member-list", children: (dashboardConfig?.members ?? []).map((member) => {
-                            const isExpanded = expandedView?.memberId === member.id;
-                            const rows = isExpanded && expandedView ? buildRows(member, expandedView.timeframe) : [];
-                            return (_jsxs("article", { className: "tasks-team-member-card", children: [_jsxs("div", { className: "tasks-team-member-head", children: [_jsx("h3", { children: member.name }), _jsx("span", { children: member.id })] }), _jsx("div", { className: "tasks-team-timeframes", children: TIMEFRAMES.map((timeframe) => {
-                                            const isActive = expandedView?.memberId === member.id && expandedView.timeframe === timeframe.id;
-                                            return (_jsx("button", { type: "button", className: `tasks-team-timeframe-button ${timeframe.colorClass} ${isActive ? "is-active" : ""}`, onClick: () => setExpandedView((current) => current?.memberId === member.id && current?.timeframe === timeframe.id
-                                                    ? null
-                                                    : { memberId: member.id, timeframe: timeframe.id }), children: timeframe.label }, timeframe.id));
-                                        }) }), isExpanded && expandedView ? (_jsxs("div", { className: "tasks-team-timeframe-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h3", { children: TIMEFRAMES.find((timeframe) => timeframe.id === expandedView.timeframe)?.label ?? "Detalle" }), _jsxs("span", { children: [rows.length, " tareas"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table tasks-dashboard-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Tabla de Origen" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 9, className: "centered-inline-message", children: "Cargando tareas..." }) })) : rows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 9, className: "centered-inline-message", children: "No hay tareas en esta categoria." }) })) : (rows.map((row) => (_jsxs("tr", { className: row.highlighted ? "tasks-dashboard-row-overdue" : undefined, children: [_jsx("td", { children: row.clientNumber || "-" }), _jsx("td", { children: row.clientName }), _jsx("td", { children: row.subject }), _jsx("td", { children: row.specificProcess }), _jsx("td", { className: row.highlighted ? "tasks-dashboard-title-overdue" : undefined, children: row.taskLabel }), _jsx("td", { children: _jsx("span", { className: `tasks-dashboard-type-pill ${row.typeLabel === "Completada" ? "is-completed" : row.highlighted ? "is-overdue" : "is-pending"}`, children: row.typeLabel }) }), _jsx("td", { children: row.displayDate || "-" }), _jsx("td", { children: row.originLabel }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(row.originPath), children: row.actionLabel }) })] }, row.taskId)))) })] }) })] })) : null] }, member.id));
-                        }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Tablas de seguimiento" }), _jsxs("span", { children: [legacyConfig.tables.length, " tablas"] })] }), _jsx("div", { className: "tasks-table-card-grid", children: legacyConfig.tables.map((table) => (_jsxs("button", { type: "button", className: "tasks-table-card", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/${table.slug}`), children: [_jsx("strong", { children: table.title }), _jsx("span", { children: table.sourceTable })] }, table.slug))) })] })] }));
+    if (modulesLoading || !module) {
+        return (_jsx("section", { className: "page-stack tasks-team-page", children: _jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando equipo..." }) }) }));
+    }
+    return (_jsxs("section", { className: "page-stack tasks-team-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate("/app/tasks"), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: module.label }) })] })] }), _jsx("p", { className: "muted", children: legacyConfig
+                            ? "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales."
+                            : "Espacio de tareas del equipo listo para configuracion posterior." }), legacyConfig ? (_jsxs("div", { className: "tasks-legacy-toolbar", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`), children: "Manager de tareas" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos`), children: "Terminos" }), legacyConfig.hasRecurringTerms ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`), children: "Terminos recurrentes" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/adicionales`), children: "Tareas adicionales" })] })) : null] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Vista diaria del equipo" }), _jsxs("span", { children: [dashboardMembers.length, " integrantes"] })] }), _jsx("p", { className: "muted tasks-team-board-copy", children: "Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, manana y posteriores. El rojo indica faltantes, terminos sin verificacion o fechas vencidas." }), _jsxs("div", { className: "tasks-team-member-list", children: [dashboardMembers.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay integrantes activos asignados a este equipo." })) : null, dashboardMembers.map((member) => {
+                                const isExpanded = expandedView?.memberId === member.id;
+                                const rows = isExpanded && expandedView ? buildRows(member, expandedView.timeframe) : [];
+                                return (_jsxs("article", { className: "tasks-team-member-card", children: [_jsxs("div", { className: "tasks-team-member-head", children: [_jsx("h3", { children: member.name }), _jsx("span", { children: member.id })] }), _jsx("div", { className: "tasks-team-timeframes", children: TIMEFRAMES.map((timeframe) => {
+                                                const isActive = expandedView?.memberId === member.id && expandedView.timeframe === timeframe.id;
+                                                return (_jsx("button", { type: "button", className: `tasks-team-timeframe-button ${timeframe.colorClass} ${isActive ? "is-active" : ""}`, onClick: () => setExpandedView((current) => current?.memberId === member.id && current?.timeframe === timeframe.id
+                                                        ? null
+                                                        : { memberId: member.id, timeframe: timeframe.id }), children: timeframe.label }, timeframe.id));
+                                            }) }), isExpanded && expandedView ? (_jsxs("div", { className: "tasks-team-timeframe-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h3", { children: TIMEFRAMES.find((timeframe) => timeframe.id === expandedView.timeframe)?.label ?? "Detalle" }), _jsxs("span", { children: [rows.length, " tareas"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table tasks-dashboard-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Tabla de Origen" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 9, className: "centered-inline-message", children: "Cargando tareas..." }) })) : rows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 9, className: "centered-inline-message", children: "No hay tareas en esta categoria." }) })) : (rows.map((row) => (_jsxs("tr", { className: row.highlighted ? "tasks-dashboard-row-overdue" : undefined, children: [_jsx("td", { children: row.clientNumber || "-" }), _jsx("td", { children: row.clientName }), _jsx("td", { children: row.subject }), _jsx("td", { children: row.specificProcess }), _jsx("td", { className: row.highlighted ? "tasks-dashboard-title-overdue" : undefined, children: row.taskLabel }), _jsx("td", { children: _jsx("span", { className: `tasks-dashboard-type-pill ${row.typeLabel === "Completada" ? "is-completed" : row.highlighted ? "is-overdue" : "is-pending"}`, children: row.typeLabel }) }), _jsx("td", { children: row.displayDate || "-" }), _jsx("td", { children: row.originLabel }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(row.originPath), children: row.actionLabel }) })] }, row.taskId)))) })] }) })] })) : null] }, member.id));
+                            })] })] }), legacyConfig ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Tablas de seguimiento" }), _jsxs("span", { children: [legacyConfig.tables.length, " tablas"] })] }), _jsx("div", { className: "tasks-table-card-grid", children: legacyConfig.tables.map((table) => (_jsxs("button", { type: "button", className: "tasks-table-card", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/${table.slug}`), children: [_jsx("strong", { children: table.title }), _jsx("span", { children: table.sourceTable })] }, table.slug))) })] })) : (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Submodulos" }), _jsx("span", { children: "0 configurados" })] }), _jsx("div", { className: "centered-inline-message", children: "Sin submodulos configurados." })] }))] }));
 }

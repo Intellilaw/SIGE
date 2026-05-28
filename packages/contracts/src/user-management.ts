@@ -7,6 +7,25 @@ export interface TeamOption {
   label: string;
 }
 
+export interface ManagedTeam extends TeamOption {
+  id: string;
+  isActive: boolean;
+  sortOrder: number;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+  deactivatedAt?: string;
+}
+
+export interface CreateManagedTeamInput {
+  label: string;
+}
+
+export interface UpdateManagedTeamInput {
+  label?: string;
+  isActive?: boolean;
+}
+
 export const TEAM_OPTIONS: TeamOption[] = [
   { key: "LITIGATION", label: "Litigio" },
   { key: "CORPORATE_LABOR", label: "Corporativo y laboral" },
@@ -85,6 +104,17 @@ function normalizeText(value: unknown) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+export function buildTaskModuleIdFromTeamKey(team?: string | null) {
+  return String(team ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function collapseWhitespace(value: string) {
@@ -283,13 +313,23 @@ export function derivePermissions(input: {
 
   const specificRole = normalizeText(input.specificRole ?? "");
   const normalizedTeam = normalizeText(input.legacyTeam ?? getLegacyTeamLabel(input.team) ?? "");
+  const teamKey = input.team;
   const isClientRelationsTeam =
+    teamKey === "CLIENT_RELATIONS" ||
     normalizedTeam === "comunicacion con cliente" || normalizedTeam === "comunicacion con clientes";
-  const isSalesTeam = normalizedTeam === "ventas";
-  const isFinanceTeam = normalizedTeam === "finanzas" || specificRole === "finanzas";
+  const isSalesTeam = teamKey === "SALES" || normalizedTeam === "ventas";
+  const isFinanceTeam = teamKey === "FINANCE" || normalizedTeam === "finanzas" || specificRole === "finanzas";
 
   if (input.legacyRole === "SUPERADMIN" || specificRole === "direccion general") {
     return ["*"];
+  }
+
+  if (teamKey) {
+    const taskModuleId = buildTaskModuleIdFromTeamKey(teamKey);
+    if (taskModuleId) {
+      permissions.add("tasks:read");
+      permissions.add(`tasks:${taskModuleId}`);
+    }
   }
 
   if (isClientRelationsTeam) {
@@ -335,7 +375,7 @@ export function derivePermissions(input: {
     permissions.add("internal-contract-templates:read");
   }
 
-  if (normalizedTeam === "servicios administrativos") {
+  if (teamKey === "ADMIN_OPERATIONS" || normalizedTeam === "servicios administrativos") {
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
     permissions.add("internal-contracts:read");
@@ -346,31 +386,31 @@ export function derivePermissions(input: {
     permissions.add("holidays:write");
   }
 
-  if (normalizedTeam === "litigio") {
+  if (teamKey === "LITIGATION" || normalizedTeam === "litigio") {
     permissions.add("tasks:read");
     permissions.add("tasks:litigation");
     permissions.add("execution:litigation");
   }
 
-  if (normalizedTeam === "corporativo y laboral") {
+  if (teamKey === "CORPORATE_LABOR" || normalizedTeam === "corporativo y laboral") {
     permissions.add("tasks:read");
     permissions.add("tasks:corporate-labor");
     permissions.add("execution:corporate-labor");
   }
 
-  if (normalizedTeam === "convenios") {
+  if (teamKey === "SETTLEMENTS" || normalizedTeam === "convenios") {
     permissions.add("tasks:read");
     permissions.add("tasks:settlements");
     permissions.add("execution:settlements");
   }
 
-  if (normalizedTeam === "der financiero") {
+  if (teamKey === "FINANCIAL_LAW" || normalizedTeam === "der financiero") {
     permissions.add("tasks:read");
     permissions.add("tasks:financial-law");
     permissions.add("execution:financial-law");
   }
 
-  if (normalizedTeam === "compliance fiscal") {
+  if (teamKey === "TAX_COMPLIANCE" || normalizedTeam === "compliance fiscal") {
     permissions.add("tasks:read");
     permissions.add("tasks:tax-compliance");
     permissions.add("execution:tax-compliance");

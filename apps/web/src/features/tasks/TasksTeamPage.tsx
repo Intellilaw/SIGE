@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import type { TaskModuleDefinition, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID, type TaskDashboardMember } from "./task-dashboard-config";
+import {
+  buildTaskDashboardMembers,
+  findTaskModuleDescriptorBySlug
+} from "./task-module-descriptors";
 import {
   getEffectiveTrackingResponsible,
   hasValidTrackingResponsible,
@@ -405,9 +407,17 @@ export function TasksTeamPage() {
   const [searchParams] = useSearchParams();
   const focusedMemberId = searchParams.get("member");
   const focusedTimeframe = searchParams.get("timeframe");
-  const { user } = useAuth();
-  const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const visibleModules = getVisibleExecutionModules(user);
+  const [taskModules, setTaskModules] = useState<TaskModuleDefinition[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(true);
+  const [modulesError, setModulesError] = useState<string | null>(null);
+  const module = useMemo(
+    () => findTaskModuleDescriptorBySlug(taskModules, slug),
+    [slug, taskModules]
+  );
+  const dashboardMembers = useMemo(
+    () => module ? buildTaskDashboardMembers(module.definition) : [],
+    [module]
+  );
   const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
 
@@ -416,23 +426,60 @@ export function TasksTeamPage() {
   const [loading, setLoading] = useState(true);
   const [expandedView, setExpandedView] = useState<{ memberId: string; timeframe: DashboardTimeframe } | null>(null);
 
-  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const canAccess = Boolean(module);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadModules() {
+      setModulesLoading(true);
+      setModulesError(null);
+
+      try {
+        const loadedModules = await apiGet<TaskModuleDefinition[]>("/tasks/modules");
+        if (active) {
+          setTaskModules(loadedModules);
+        }
+      } catch (error) {
+        if (active) {
+          setModulesError(error instanceof Error ? error.message : "No se pudieron cargar los equipos de tareas.");
+        }
+      } finally {
+        if (active) {
+          setModulesLoading(false);
+        }
+      }
+    }
+
+    void loadModules();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const isValidTimeframe = TIMEFRAMES.some((candidate) => candidate.id === focusedTimeframe);
 
-    if (!dashboardConfig || !focusedMemberId || !isValidTimeframe) {
+    if (!focusedMemberId || !isValidTimeframe) {
       return;
     }
 
-    const member = dashboardConfig.members.find((candidate) => candidate.id === focusedMemberId);
+    const member = dashboardMembers.find((candidate) => candidate.id === focusedMemberId);
     if (member) {
       setExpandedView({ memberId: member.id, timeframe: focusedTimeframe as DashboardTimeframe });
     }
-  }, [dashboardConfig, focusedMemberId, focusedTimeframe]);
+  }, [dashboardMembers, focusedMemberId, focusedTimeframe]);
 
   useEffect(() => {
     if (!module || !canAccess) {
+      return;
+    }
+
+    if (!legacyConfig) {
+      setTrackingRecords([]);
+      setTerms([]);
+      setLoading(false);
       return;
     }
 
@@ -455,7 +502,7 @@ export function TasksTeamPage() {
     }
 
     void loadDashboard();
-  }, [canAccess, module]);
+  }, [canAccess, legacyConfig, module]);
 
   const tableLookup = useMemo(
     () => buildLegacyTableLookup(legacyConfig?.tables ?? []),
@@ -595,8 +642,28 @@ export function TasksTeamPage() {
     ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
   }
 
-  if (!module || !canAccess || !legacyConfig) {
+  if (!modulesLoading && modulesError) {
+    return (
+      <section className="page-stack tasks-team-page">
+        <section className="panel">
+          <div className="centered-inline-message">{modulesError}</div>
+        </section>
+      </section>
+    );
+  }
+
+  if (!modulesLoading && (!module || !canAccess)) {
     return <Navigate to="/app/tasks" replace />;
+  }
+
+  if (modulesLoading || !module) {
+    return (
+      <section className="page-stack tasks-team-page">
+        <section className="panel">
+          <div className="centered-inline-message">Cargando equipo...</div>
+        </section>
+      </section>
+    );
   }
 
   return (
@@ -616,30 +683,34 @@ export function TasksTeamPage() {
           </div>
         </div>
         <p className="muted">
-          Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales.
+          {legacyConfig
+            ? "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales."
+            : "Espacio de tareas del equipo listo para configuracion posterior."}
         </p>
-        <div className="tasks-legacy-toolbar">
-          <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`)}>
-            Manager de tareas
-          </button>
-          <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos`)}>
-            Terminos
-          </button>
-          {legacyConfig.hasRecurringTerms ? (
-            <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`)}>
-              Terminos recurrentes
+        {legacyConfig ? (
+          <div className="tasks-legacy-toolbar">
+            <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`)}>
+              Manager de tareas
             </button>
-          ) : null}
-          <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/adicionales`)}>
-            Tareas adicionales
-          </button>
-        </div>
+            <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos`)}>
+              Terminos
+            </button>
+            {legacyConfig.hasRecurringTerms ? (
+              <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`)}>
+                Terminos recurrentes
+              </button>
+            ) : null}
+            <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/adicionales`)}>
+              Tareas adicionales
+            </button>
+          </div>
+        ) : null}
       </header>
 
       <section className="panel">
         <div className="panel-header">
           <h2>Vista diaria del equipo</h2>
-          <span>{dashboardConfig?.members.length ?? 0} integrantes</span>
+          <span>{dashboardMembers.length} integrantes</span>
         </div>
         <p className="muted tasks-team-board-copy">
           Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, manana y posteriores. El rojo indica
@@ -647,7 +718,10 @@ export function TasksTeamPage() {
         </p>
 
         <div className="tasks-team-member-list">
-          {(dashboardConfig?.members ?? []).map((member) => {
+          {dashboardMembers.length === 0 ? (
+            <div className="centered-inline-message">No hay integrantes activos asignados a este equipo.</div>
+          ) : null}
+          {dashboardMembers.map((member) => {
             const isExpanded = expandedView?.memberId === member.id;
             const rows = isExpanded && expandedView ? buildRows(member, expandedView.timeframe) : [];
 
@@ -750,20 +824,30 @@ export function TasksTeamPage() {
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Tablas de seguimiento</h2>
-          <span>{legacyConfig.tables.length} tablas</span>
-        </div>
-        <div className="tasks-table-card-grid">
-          {legacyConfig.tables.map((table) => (
-            <button key={table.slug} type="button" className="tasks-table-card" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/${table.slug}`)}>
-              <strong>{table.title}</strong>
-              <span>{table.sourceTable}</span>
-            </button>
-          ))}
-        </div>
-      </section>
+      {legacyConfig ? (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Tablas de seguimiento</h2>
+            <span>{legacyConfig.tables.length} tablas</span>
+          </div>
+          <div className="tasks-table-card-grid">
+            {legacyConfig.tables.map((table) => (
+              <button key={table.slug} type="button" className="tasks-table-card" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/${table.slug}`)}>
+                <strong>{table.title}</strong>
+                <span>{table.sourceTable}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Submodulos</h2>
+            <span>0 configurados</span>
+          </div>
+          <div className="centered-inline-message">Sin submodulos configurados.</div>
+        </section>
+      )}
     </section>
   );
 }

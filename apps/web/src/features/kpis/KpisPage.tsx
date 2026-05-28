@@ -222,6 +222,9 @@ function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolea
       </div>
 
       <div className="kpis-user-list">
+        {props.team.users.length === 0 ? (
+          <div className="kpis-empty-user">Equipo creado. Sus usuarios y KPI's se mostraran cuando sean asignados.</div>
+        ) : null}
         {props.team.users.map((user) => (
           <article key={user.userId} className={`kpis-user-block ${user.configured ? "" : "is-unconfigured"}`}>
             <header className="kpis-user-head">
@@ -284,6 +287,9 @@ function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: b
       </div>
 
       <div className="kpis-user-list">
+        {props.team.users.length === 0 ? (
+          <div className="kpis-empty-user">No hay usuarios activos asignados a este equipo.</div>
+        ) : null}
         {props.team.users.map((user) => (
           <article key={user.userId} className={`kpis-user-block ${user.configured ? "" : "is-unconfigured"}`}>
             <header className="kpis-user-head">

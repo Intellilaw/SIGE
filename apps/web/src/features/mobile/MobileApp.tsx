@@ -27,6 +27,7 @@ import {
 } from "../execution/execution-task-intelligence";
 import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisionPage";
 import { KpisPage } from "../kpis/KpisPage";
+import { ModuleAvailabilityProvider, useModuleAvailability } from "../modules/ModuleAvailabilityContext";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import type { TaskDashboardMember } from "../tasks/task-dashboard-config";
@@ -612,12 +613,6 @@ function buildDistributionPayload(
 
 export function MobileProtectedLayout() {
   const { user, loading, logout } = useAuth();
-  const showLeads = canReadMobileLeads(user);
-  const showFinances = canReadMobileFinances(user);
-  const showGeneralExpenses = canReadMobileGeneralExpenses(user);
-  const showKpis = canReadMobileKpis(user);
-  const showGeneralSupervision = canReadMobileGeneralSupervision(user);
-  const showExecution = canReadMobileExecution(user);
 
   if (loading) {
     return <div className="mobile-centered">Cargando SIGE...</div>;
@@ -627,6 +622,28 @@ export function MobileProtectedLayout() {
     return <Navigate to="/intranet-login?redirect=/mobile" replace />;
   }
 
+  return (
+    <ModuleAvailabilityProvider>
+      <MobileProtectedShell user={user} logout={logout} />
+    </ModuleAvailabilityProvider>
+  );
+}
+
+function MobileProtectedShell({
+  user,
+  logout
+}: {
+  user: NonNullable<ReturnType<typeof useAuth>["user"]>;
+  logout: ReturnType<typeof useAuth>["logout"];
+}) {
+  const { isModuleEnabled } = useModuleAvailability();
+  const showLeads = isModuleEnabled("lead-tracking") && canReadMobileLeads(user);
+  const showFinances = isModuleEnabled("finances") && canReadMobileFinances(user);
+  const showGeneralExpenses = isModuleEnabled("general-expenses") && canReadMobileGeneralExpenses(user);
+  const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
+  const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
+  const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
+  const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
   const mobileUserName = getMobileUserName(user);
 
   return (
@@ -651,7 +668,7 @@ export function MobileProtectedLayout() {
         {showKpis ? <NavLink to="/mobile/kpis">KPI's</NavLink> : null}
         {showGeneralSupervision ? <NavLink to="/mobile/general-supervision">Supervision</NavLink> : null}
         {showExecution ? <NavLink to="/mobile/execution">Ejecucion</NavLink> : null}
-        {showExecution ? <NavLink to="/mobile/tracking">Seguimiento</NavLink> : null}
+        {showTracking ? <NavLink to="/mobile/tracking">Seguimiento</NavLink> : null}
       </nav>
     </div>
   );
@@ -659,12 +676,14 @@ export function MobileProtectedLayout() {
 
 export function MobileHomePage() {
   const { user } = useAuth();
-  const showLeads = canReadMobileLeads(user);
-  const showFinances = canReadMobileFinances(user);
-  const showGeneralExpenses = canReadMobileGeneralExpenses(user);
-  const showKpis = canReadMobileKpis(user);
-  const showGeneralSupervision = canReadMobileGeneralSupervision(user);
-  const showExecution = canReadMobileExecution(user);
+  const { isModuleEnabled } = useModuleAvailability();
+  const showLeads = isModuleEnabled("lead-tracking") && canReadMobileLeads(user);
+  const showFinances = isModuleEnabled("finances") && canReadMobileFinances(user);
+  const showGeneralExpenses = isModuleEnabled("general-expenses") && canReadMobileGeneralExpenses(user);
+  const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
+  const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
+  const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
+  const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
 
   return (
     <section className="mobile-stack">
@@ -699,7 +718,7 @@ export function MobileHomePage() {
             Crear tarea
           </Link>
         ) : null}
-        {showExecution ? (
+        {showTracking ? (
           <Link className="mobile-home-action" to="/mobile/tracking">
             Ver seguimiento
           </Link>
@@ -711,8 +730,9 @@ export function MobileHomePage() {
 
 export function MobileKpisPage() {
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
 
-  if (!canReadMobileKpis(user)) {
+  if (!isModuleEnabled("kpis") || !canReadMobileKpis(user)) {
     return <Navigate to="/mobile" replace />;
   }
 
@@ -725,8 +745,9 @@ export function MobileKpisPage() {
 
 export function MobileGeneralSupervisionPage() {
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
 
-  if (!canReadMobileGeneralSupervision(user)) {
+  if (!isModuleEnabled("general-supervision") || !canReadMobileGeneralSupervision(user)) {
     return <Navigate to="/mobile" replace />;
   }
 
@@ -739,9 +760,11 @@ export function MobileGeneralSupervisionPage() {
 
 export function MobileDashboardIndexPage() {
   const { user } = useAuth();
-  const visibleModules = getVisibleExecutionModules(user);
+  const { isModuleEnabled } = useModuleAvailability();
+  const executionEnabled = isModuleEnabled("execution");
+  const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
 
-  if (!canReadMobileExecution(user)) {
+  if (!executionEnabled || !canReadMobileExecution(user)) {
     return <Navigate to="/mobile" replace />;
   }
 
@@ -763,11 +786,13 @@ export function MobileDashboardIndexPage() {
 export function MobileDashboardModulePage() {
   const { slug } = useParams();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
+  const executionEnabled = isModuleEnabled("execution");
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
   const dashboardConfig = module ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.moduleId] : undefined;
-  const visibleModules = getVisibleExecutionModules(user);
-  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+  const canAccess = Boolean(executionEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
   const [records, setRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [loading, setLoading] = useState(true);
@@ -868,6 +893,7 @@ export function MobileDashboardModulePage() {
 
 export function MobileLeadsPage() {
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
   const [form, setForm] = useState<MobileLeadForm>(() => initialLeadForm());
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -875,8 +901,8 @@ export function MobileLeadsPage() {
   const [search, setSearch] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const canRead = canReadMobileLeads(user);
-  const canWrite = canWriteModule(user, "lead-tracking");
+  const canRead = isModuleEnabled("lead-tracking") && canReadMobileLeads(user);
+  const canWrite = isModuleEnabled("lead-tracking") && canWriteModule(user, "lead-tracking");
 
   const visibleLeads = useMemo(() => {
     const query = normalizeComparableText(search);
@@ -1125,11 +1151,12 @@ export function MobileLeadsPage() {
 
 export function MobileFinancesPage() {
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
-  const canRead = canReadMobileFinances(user);
-  const canWrite = canWriteMobileFinances(user);
+  const canRead = isModuleEnabled("finances") && canReadMobileFinances(user);
+  const canWrite = isModuleEnabled("finances") && canWriteMobileFinances(user);
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [form, setForm] = useState<MobileFinanceForm>(() => initialFinanceForm());
@@ -1565,11 +1592,12 @@ export function MobileFinancesPage() {
 
 export function MobileGeneralExpensesPage() {
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
-  const canRead = canReadMobileGeneralExpenses(user);
-  const canWrite = canWriteMobileGeneralExpenses(user);
+  const canRead = isModuleEnabled("general-expenses") && canReadMobileGeneralExpenses(user);
+  const canWrite = isModuleEnabled("general-expenses") && canWriteMobileGeneralExpenses(user);
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [form, setForm] = useState<MobileGeneralExpenseForm>(() => initialGeneralExpenseForm());
@@ -1938,9 +1966,11 @@ export function MobileGeneralExpensesPage() {
 
 export function MobileExecutionIndexPage() {
   const { user } = useAuth();
-  const visibleModules = getVisibleExecutionModules(user);
+  const { isModuleEnabled } = useModuleAvailability();
+  const executionEnabled = isModuleEnabled("execution");
+  const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
 
-  if (!canReadMobileExecution(user)) {
+  if (!executionEnabled || !canReadMobileExecution(user)) {
     return <Navigate to="/mobile" replace />;
   }
 
@@ -2018,10 +2048,12 @@ function MobileMatterSummary({
 export function MobileExecutionTeamPage() {
   const { slug } = useParams();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
+  const executionEnabled = isModuleEnabled("execution");
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-  const visibleModules = getVisibleExecutionModules(user);
-  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+  const canAccess = Boolean(executionEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
 
   const [clients, setClients] = useState<Client[]>([]);
   const [matters, setMatters] = useState<Matter[]>([]);
@@ -2558,9 +2590,11 @@ export function MobileExecutionTeamPage() {
 
 export function MobileTrackingIndexPage() {
   const { user } = useAuth();
-  const visibleModules = getVisibleExecutionModules(user);
+  const { isModuleEnabled } = useModuleAvailability();
+  const tasksEnabled = isModuleEnabled("tasks");
+  const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
 
-  if (!canReadMobileExecution(user)) {
+  if (!tasksEnabled || !canReadMobileExecution(user)) {
     return <Navigate to="/mobile" replace />;
   }
 
@@ -2582,10 +2616,12 @@ export function MobileTrackingIndexPage() {
 export function MobileTrackingModulePage() {
   const { slug } = useParams();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
+  const tasksEnabled = isModuleEnabled("tasks");
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-  const visibleModules = getVisibleExecutionModules(user);
-  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
+  const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
 
   if (!module || !legacyConfig || !canAccess) {
     return <Navigate to="/mobile/tracking" replace />;
@@ -2620,13 +2656,15 @@ export function MobileTrackingTablePage() {
   const { slug, tableId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleAvailability();
+  const tasksEnabled = isModuleEnabled("tasks");
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
   const isTermsTable = tableId === TERMS_TABLE_ID || tableId === RECURRING_TERMS_TABLE_ID;
   const recurrentTermsMode = tableId === RECURRING_TERMS_TABLE_ID;
   const table = legacyConfig?.tables.find((candidate) => candidate.slug === tableId);
-  const visibleModules = getVisibleExecutionModules(user);
-  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
+  const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
   const [records, setRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [histories, setHistories] = useState<TaskDistributionHistory[]>([]);

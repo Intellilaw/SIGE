@@ -33,11 +33,13 @@ import type {
   LaborVacationEventInput,
   KpiOverview,
   Lead,
+  ManagedTeam,
   ManagedUser,
   Matter,
   ProfessionalServicesContractFieldValues,
   Quote,
   QuoteTemplate,
+  SystemModuleSetting,
   TaskAdditionalTask,
   TaskDistributionEvent,
   TaskDistributionHistory,
@@ -747,14 +749,42 @@ export interface TaskAdditionalTaskWriteRecord {
   deletedAt?: string | null;
 }
 
+export interface UserTeamWriteRecord {
+  key: string;
+  label: string;
+  sortOrder?: number;
+}
+
+export interface UserTeamUpdateRecord {
+  label?: string;
+  isActive?: boolean;
+}
+
 export interface UsersRepository {
   list(): Promise<ManagedUser[]>;
   findById(userId: string): Promise<ManagedUser | null>;
   create(payload: CreateManagedUserRecord): Promise<ManagedUser>;
   update(userId: string, payload: UpdateManagedUserRecord): Promise<ManagedUser | null>;
   delete(userId: string): Promise<void>;
+  listTeams(): Promise<ManagedTeam[]>;
+  createTeam(payload: UserTeamWriteRecord): Promise<ManagedTeam>;
+  updateTeam(teamId: string, payload: UserTeamUpdateRecord): Promise<ManagedTeam | null>;
+  deactivateTeam(teamId: string): Promise<ManagedTeam | null>;
 }
 
 export interface DashboardRepository {
   getSummary(): Promise<DashboardSummary>;
+}
+
+export interface ModuleSettingsActor {
+  userId: string;
+  displayName?: string;
+  username?: string;
+  email?: string;
+  shortName?: string;
+}
+
+export interface ModuleSettingsRepository {
+  list(): Promise<SystemModuleSetting[]>;
+  setModuleEnabled(moduleId: string, isEnabled: boolean, actor: ModuleSettingsActor): Promise<SystemModuleSetting>;
 }

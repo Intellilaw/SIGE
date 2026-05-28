@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { TaskItem } from "@sige/contracts";
+import type { TaskItem, TaskModuleMember } from "@sige/contracts";
 
 import {
   mapTaskAdditionalTask,
@@ -20,6 +20,14 @@ import type {
   TaskTrackingRecordWriteRecord,
   TasksRepository
 } from "./types";
+
+type TaskModuleListRecord = {
+  id: string;
+  team: string;
+  label: string;
+  summary: string;
+  isActive: boolean;
+};
 
 function normalizeRequiredText(value?: string | null) {
   return typeof value === "string" ? value.trim() : "";
@@ -68,16 +76,83 @@ export class PrismaTasksRepository implements TasksRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async listModules() {
-    const records = await this.prisma.taskModule.findMany({
-      include: {
-        tracks: {
-          orderBy: { createdAt: "asc" }
+    const moduleRecords = await this.prisma.$queryRaw<TaskModuleListRecord[]>(Prisma.sql`
+      SELECT "id", "team", "label", "summary", "isActive"
+      FROM "TaskModule"
+      WHERE "isActive" = true
+      ORDER BY "label" ASC, "id" ASC
+    `);
+    const [tracks, activeUsers] = await this.prisma.$transaction([
+      moduleRecords.length > 0
+        ? this.prisma.taskTrack.findMany({
+            where: {
+              moduleId: {
+                in: moduleRecords.map((record) => record.id)
+              }
+            },
+            orderBy: { createdAt: "asc" }
+          })
+        : this.prisma.taskTrack.findMany({
+            where: {
+              moduleId: {
+                in: []
+              }
+            }
+          }),
+      this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          team: {
+            not: null
+          }
+        },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          shortName: true,
+          team: true,
+          specificRole: true
         }
-      },
-      orderBy: { label: "asc" }
-    });
+      })
+    ]);
+    const tracksByModule = new Map<string, typeof tracks>();
+    for (const track of tracks) {
+      tracksByModule.set(track.moduleId, [...(tracksByModule.get(track.moduleId) ?? []), track]);
+    }
 
-    return records.map(mapTaskModule);
+    const membersByTeam = new Map<string, TaskModuleMember[]>();
+    for (const user of activeUsers) {
+      if (!user.team) {
+        continue;
+      }
+
+      const aliases = Array.from(new Set([
+        user.shortName ?? "",
+        user.displayName,
+        user.username,
+        user.specificRole ?? ""
+      ].map((alias) => alias.trim()).filter(Boolean)));
+      const member: TaskModuleMember = {
+        id: user.shortName?.trim() || user.username || user.id,
+        userId: user.id,
+        name: user.displayName,
+        aliases,
+        shortName: user.shortName ?? undefined,
+        specificRole: user.specificRole ?? undefined
+      };
+
+      membersByTeam.set(user.team, [...(membersByTeam.get(user.team) ?? []), member]);
+    }
+
+    for (const members of membersByTeam.values()) {
+      members.sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    return moduleRecords.map((record) => mapTaskModule({
+      ...record,
+      tracks: tracksByModule.get(record.id) ?? []
+    }, membersByTeam.get(record.team) ?? []));
   }
 
   public async listTasks(moduleId?: string) {

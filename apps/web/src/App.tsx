@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
@@ -7,9 +8,12 @@ import { ManagerSsoBridgePage } from "./features/auth/ManagerSsoBridgePage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
 import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
+import { GuidelinesManualsPage } from "./features/modules/GuidelinesManualsPage";
 import { HolidaysPage } from "./features/modules/HolidaysPage";
 import { InternalContractsPage } from "./features/modules/InternalContractsPage";
 import { LaborFilesPage } from "./features/modules/LaborFilesPage";
+import { ModuleAvailabilityProvider, useModuleAvailability } from "./features/modules/ModuleAvailabilityContext";
+import { ModuleEnablementPage } from "./features/modules/ModuleEnablementPage";
 import { ThirdPartyDocumentsPage } from "./features/modules/ThirdPartyDocumentsPage";
 import { AppShell } from "./features/shell/AppShell";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
@@ -63,7 +67,29 @@ function ProtectedLayout() {
     return <Navigate to="/" replace />;
   }
 
-  return <AppShell />;
+  return (
+    <ModuleAvailabilityProvider>
+      <AppShell />
+    </ModuleAvailabilityProvider>
+  );
+}
+
+function EnabledModuleRoute({ moduleId, children }: { moduleId: string; children: ReactNode }) {
+  const { isModuleEnabled, loading } = useModuleAvailability();
+
+  if (loading) {
+    return <div className="centered-message">Cargando modulos...</div>;
+  }
+
+  if (!isModuleEnabled(moduleId)) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+function withEnabledModule(moduleId: string, element: ReactNode) {
+  return <EnabledModuleRoute moduleId={moduleId}>{element}</EnabledModuleRoute>;
 }
 
 export default function App() {
@@ -93,35 +119,37 @@ export default function App() {
           </Route>
           <Route path="/app" element={<ProtectedLayout />}>
             <Route index element={<DashboardPage />} />
-            <Route path="clients" element={<ClientsPage />} />
-            <Route path="quotes" element={<QuotesPage />} />
-            <Route path="leads" element={<LeadsPage />} />
-            <Route path="matters" element={<MattersPage />} />
-            <Route path="execution" element={<ExecutionPage />} />
-            <Route path="execution/:slug" element={<ExecutionTeamPage />} />
-            <Route path="tasks" element={<TasksPage />} />
-            <Route path="tasks/:slug/distribuidor" element={<TaskDistributorPage />} />
-            <Route path="tasks/:slug/adicionales" element={<TaskAdditionalTasksPage />} />
-            <Route path="tasks/:slug/terminos" element={<TaskTermsPage />} />
-            <Route path="tasks/:slug/terminos-recurrentes" element={<TaskTermsPage />} />
-            <Route path="tasks/:slug/:tableId" element={<TaskLegacyTablePage />} />
-            <Route path="tasks/:slug" element={<TasksTeamPage />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="kpis" element={<KpisPage />} />
-            <Route path="finances" element={<FinancesPage />} />
-            <Route path="budget-planning" element={<BudgetPlanningPage />} />
-            <Route path="general-expenses" element={<GeneralExpensesPage />} />
-            <Route path="commissions" element={<CommissionsPage />} />
-            <Route path="general-supervision" element={<GeneralSupervisionPage />} />
-            <Route path="rusconi-intelligence" element={<RusconiIntelligencePage />} />
-            <Route path="matter-catalog" element={<MatterCatalogPage />} />
-            <Route path="brief-manager" element={<ManagerSsoBridgePage />} />
-            <Route path="internal-contracts" element={<InternalContractsPage />} />
-            <Route path="labor-file" element={<LaborFilesPage />} />
-            <Route path="daily-documents" element={<DailyDocumentsPage />} />
-            <Route path="third-party-documents" element={<ThirdPartyDocumentsPage />} />
-            <Route path="holidays" element={<HolidaysPage />} />
+            <Route path="clients" element={withEnabledModule("clients", <ClientsPage />)} />
+            <Route path="quotes" element={withEnabledModule("quotes", <QuotesPage />)} />
+            <Route path="leads" element={withEnabledModule("lead-tracking", <LeadsPage />)} />
+            <Route path="matters" element={withEnabledModule("active-matters", <MattersPage />)} />
+            <Route path="execution" element={withEnabledModule("execution", <ExecutionPage />)} />
+            <Route path="execution/:slug" element={withEnabledModule("execution", <ExecutionTeamPage />)} />
+            <Route path="tasks" element={withEnabledModule("tasks", <TasksPage />)} />
+            <Route path="tasks/:slug/distribuidor" element={withEnabledModule("tasks", <TaskDistributorPage />)} />
+            <Route path="tasks/:slug/adicionales" element={withEnabledModule("tasks", <TaskAdditionalTasksPage />)} />
+            <Route path="tasks/:slug/terminos" element={withEnabledModule("tasks", <TaskTermsPage />)} />
+            <Route path="tasks/:slug/terminos-recurrentes" element={withEnabledModule("tasks", <TaskTermsPage />)} />
+            <Route path="tasks/:slug/:tableId" element={withEnabledModule("tasks", <TaskLegacyTablePage />)} />
+            <Route path="tasks/:slug" element={withEnabledModule("tasks", <TasksTeamPage />)} />
+            <Route path="sales" element={withEnabledModule("sales", <SalesPage />)} />
+            <Route path="kpis" element={withEnabledModule("kpis", <KpisPage />)} />
+            <Route path="finances" element={withEnabledModule("finances", <FinancesPage />)} />
+            <Route path="budget-planning" element={withEnabledModule("budget-planning", <BudgetPlanningPage />)} />
+            <Route path="general-expenses" element={withEnabledModule("general-expenses", <GeneralExpensesPage />)} />
+            <Route path="commissions" element={withEnabledModule("commissions", <CommissionsPage />)} />
+            <Route path="general-supervision" element={withEnabledModule("general-supervision", <GeneralSupervisionPage />)} />
+            <Route path="rusconi-intelligence" element={withEnabledModule("rusconi-intelligence", <RusconiIntelligencePage />)} />
+            <Route path="matter-catalog" element={withEnabledModule("matter-catalog", <MatterCatalogPage />)} />
+            <Route path="brief-manager" element={withEnabledModule("brief-manager", <ManagerSsoBridgePage />)} />
+            <Route path="internal-contracts" element={withEnabledModule("internal-contracts", <InternalContractsPage />)} />
+            <Route path="labor-file" element={withEnabledModule("labor-file", <LaborFilesPage />)} />
+            <Route path="daily-documents" element={withEnabledModule("daily-documents", <DailyDocumentsPage />)} />
+            <Route path="third-party-documents" element={withEnabledModule("third-party-documents", <ThirdPartyDocumentsPage />)} />
+            <Route path="guidelines-manuals" element={withEnabledModule("guidelines-manuals", <GuidelinesManualsPage />)} />
+            <Route path="holidays" element={withEnabledModule("holidays", <HolidaysPage />)} />
             <Route path="users" element={<UsersPage />} />
+            <Route path="module-enablement" element={<ModuleEnablementPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

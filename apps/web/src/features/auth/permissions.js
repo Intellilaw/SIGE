@@ -50,6 +50,7 @@ const MODULE_ACCESS = {
         read: ["documents-third-party:read", "documents-third-party:write"],
         write: ["documents-third-party:write"]
     },
+    "guidelines-manuals": { read: "all" },
     holidays: { read: ["holidays:read", "holidays:write"], write: ["holidays:write"] },
     users: { read: ["users:read", "users:manage"], write: ["users:manage"] }
 };
@@ -57,6 +58,9 @@ export function hasPermission(user, permission) {
     return Boolean(user?.permissions?.includes("*") || user?.permissions?.includes(permission));
 }
 function hasAnyPermission(user, permissions) {
+    if (permissions === "all") {
+        return Boolean(user);
+    }
     return Boolean(user?.permissions?.includes("*") || permissions.some((permission) => user?.permissions?.includes(permission)));
 }
 export function canReadModule(user, moduleId) {

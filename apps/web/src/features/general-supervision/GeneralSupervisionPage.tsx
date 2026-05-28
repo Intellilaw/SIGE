@@ -39,6 +39,7 @@ interface SupervisionTaskUserSummary {
   total: number;
   today: number;
   overdue: number;
+  monthlyKpiMisses: number;
   dashboardLinks: SupervisionTaskDashboardLink[];
 }
 
@@ -52,6 +53,7 @@ interface SupervisionTeamGroup {
 interface SupervisionTaskOverview {
   todayTotal: number;
   overdueTotal: number;
+  monthlyKpiMissesTotal: number;
   total: number;
   users: SupervisionTaskUserSummary[];
 }
@@ -90,6 +92,8 @@ interface GeneralSupervisionOverview {
   today: string;
   currentWeekStart: string;
   currentWeekEnd: string;
+  currentMonthStart: string;
+  currentMonthEnd: string;
   taskOverview: SupervisionTaskOverview;
   termBuckets: SupervisionTermBucket[];
   kpiPeriods: SupervisionKpiPeriod[];
@@ -97,6 +101,7 @@ interface GeneralSupervisionOverview {
     tasks: number;
     terms: number;
     kpiAlerts: number;
+    monthlyKpiMisses: number;
   };
 }
 
@@ -175,6 +180,10 @@ function TaskOverviewPanel({ overview }: { overview: SupervisionTaskOverview }) 
           <span>Vencidas / sin fecha</span>
           <strong>{overview.overdueTotal}</strong>
         </div>
+        <div className="supervision-task-stat is-kpi-month">
+          <span>KPI's incumplidos este mes</span>
+          <strong>{overview.monthlyKpiMissesTotal}</strong>
+        </div>
       </header>
 
       <div className="supervision-task-user-list">
@@ -188,7 +197,7 @@ function TaskOverviewPanel({ overview }: { overview: SupervisionTaskOverview }) 
                 <span>{user.shortName ?? user.teamLabel}</span>
               </div>
 
-              <div className="supervision-task-counts" aria-label={`${user.displayName}: ${formatTaskCount(user.total)} criticas, ${formatTaskCount(user.today)} para hoy y ${formatTaskCount(user.overdue)} vencidas`}>
+              <div className="supervision-task-counts" aria-label={`${user.displayName}: ${formatTaskCount(user.total)} criticas, ${formatTaskCount(user.today)} para hoy, ${formatTaskCount(user.overdue)} vencidas y ${user.monthlyKpiMisses} KPI's incumplidos este mes`}>
                 <span className="is-total">
                   <strong>{user.total}</strong>
                   Total
@@ -200,6 +209,10 @@ function TaskOverviewPanel({ overview }: { overview: SupervisionTaskOverview }) 
                 <span className="is-overdue">
                   <strong>{user.overdue}</strong>
                   Vencidas
+                </span>
+                <span className="is-kpi-month">
+                  <strong>{user.monthlyKpiMisses}</strong>
+                  KPI mes
                 </span>
               </div>
 
@@ -374,6 +387,7 @@ export function GeneralSupervisionPage() {
     return [
       { label: "Tareas para hoy", value: overview.taskOverview.todayTotal, tone: "tasks" },
       { label: "Vencidas / sin fecha", value: overview.taskOverview.overdueTotal, tone: "overdue" },
+      { label: "KPI's incumplidos este mes", value: overview.taskOverview.monthlyKpiMissesTotal, tone: "kpi-month" },
       { label: "Terminos abiertos", value: overview.summary.terms, tone: "terms" },
       { label: "KPI's fuera de meta", value: overview.summary.kpiAlerts, tone: "kpis" }
     ];
@@ -419,7 +433,7 @@ export function GeneralSupervisionPage() {
             <div className="panel-header">
               <h2>Tareas por usuario</h2>
               <span>
-                {overview.taskOverview.total} criticas: {overview.taskOverview.todayTotal} hoy / {overview.taskOverview.overdueTotal} vencidas o sin fecha
+                {overview.taskOverview.total} criticas: {overview.taskOverview.todayTotal} hoy / {overview.taskOverview.overdueTotal} vencidas o sin fecha / {overview.taskOverview.monthlyKpiMissesTotal} KPI's mes
               </span>
             </div>
             <TaskOverviewPanel overview={overview.taskOverview} />

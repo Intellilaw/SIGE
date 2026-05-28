@@ -1,11 +1,15 @@
 import "dotenv/config";
 
-import { PrismaClient } from "@prisma/client";
-import { COMMISSION_SECTIONS, TASK_MODULES } from "@sige/contracts";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { buildTaskModuleIdFromTeamKey, COMMISSION_SECTIONS, TASK_MODULES, TEAM_OPTIONS } from "@sige/contracts";
 
 import { hashPassword } from "../src/core/auth/passwords";
 
 const prisma = new PrismaClient();
+
+function buildTeamTaskModuleSummary(label: string) {
+  return `Espacio de tareas de ${label} pendiente de configuracion.`;
+}
 
 async function seedTaskModules() {
   for (const module of TASK_MODULES) {
@@ -57,6 +61,54 @@ async function seedTaskModules() {
         }
       });
     }
+  }
+}
+
+async function seedUserTeams() {
+  for (const [index, team] of TEAM_OPTIONS.entries()) {
+    await prisma.userTeam.upsert({
+      where: { key: team.key },
+      update: {
+        label: team.label,
+        sortOrder: (index + 1) * 10
+      },
+      create: {
+        key: team.key,
+        label: team.label,
+        sortOrder: (index + 1) * 10,
+        isActive: true
+      }
+    });
+  }
+}
+
+async function seedUserTeamTaskModules() {
+  const teams = await prisma.userTeam.findMany();
+  for (const team of teams) {
+    const moduleId = buildTaskModuleIdFromTeamKey(team.key);
+    if (!moduleId) {
+      continue;
+    }
+
+    await prisma.$executeRaw(Prisma.sql`
+      INSERT INTO "TaskModule" ("id", "team", "label", "summary", "isActive", "deactivatedAt", "createdAt", "updatedAt")
+      VALUES (
+        ${moduleId},
+        ${team.key},
+        ${team.label},
+        ${buildTeamTaskModuleSummary(team.label)},
+        ${team.isActive},
+        ${team.deactivatedAt},
+        now(),
+        now()
+      )
+      ON CONFLICT ("id") DO UPDATE SET
+        "team" = EXCLUDED."team",
+        "label" = EXCLUDED."label",
+        "isActive" = EXCLUDED."isActive",
+        "deactivatedAt" = EXCLUDED."deactivatedAt",
+        "updatedAt" = now()
+    `);
   }
 }
 
@@ -349,6 +401,8 @@ async function seedOperationalData() {
 
 async function main() {
   await seedTaskModules();
+  await seedUserTeams();
+  await seedUserTeamTaskModules();
   await seedUsers();
   await seedCommissionReceivers();
   await seedOperationalData();

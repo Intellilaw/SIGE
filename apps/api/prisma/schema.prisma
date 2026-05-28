@@ -32,6 +32,31 @@ model User {
   laborFile             LaborFile?
 }
 
+model UserTeam {
+  id            String    @id @default(uuid())
+  key           String    @unique
+  label         String
+  isActive      Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  deactivatedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@index([label])
+}
+
+model SystemModuleSetting {
+  moduleId        String   @id
+  isEnabled       Boolean  @default(true)
+  updatedByUserId String?
+  updatedByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isEnabled])
+}
+
 model LaborFile {
   id                           String                       @id @default(uuid())
   userId                       String?                      @unique
@@ -545,14 +570,18 @@ model CommissionSnapshot {
 }
 
 model TaskModule {
-  id        String      @id
-  team      String
-  label     String
-  summary   String
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  tracks    TaskTrack[]
-  tasks     TaskItem[]
+  id            String      @id
+  team          String
+  label         String
+  summary       String
+  isActive      Boolean     @default(true)
+  deactivatedAt DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  tracks        TaskTrack[]
+  tasks         TaskItem[]
+
+  @@index([isActive, label])
 }
 
 model TaskTrack {

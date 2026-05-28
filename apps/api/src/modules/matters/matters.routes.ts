@@ -3,6 +3,7 @@ import { z } from "zod";
 import { EXECUTION_HOLIDAY_AUTHORITIES, deriveEffectivePermissions } from "@sige/contracts";
 
 import { getSessionUser, requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
+import { enrichMatterTelegramGroupName } from "./telegram-group-name-resolver";
 
 const teamSchema = z.enum([
   "CLIENT_RELATIONS",
@@ -184,6 +185,8 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
     const params = matterIdParamsSchema.parse(request.params);
     const user = getSessionUser(request);
     const permissions = getEffectivePermissionsForRequest(request);
+    const matterRecords = await service.list();
+    const currentMatter = matterRecords.find((matter) => matter.id === params.matterId);
     const canWriteMatters = permissions.includes("*") || permissions.includes("matters:write");
     const canUpdateFinanceDate = permissions.includes("*") || (
       permissions.includes("finances:write") && isFinanceNextPaymentDatePatch(request.body)
@@ -191,14 +194,17 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
     const canUpdateOwnExecutionMatter = isExecutionMatterPatch(request.body) && canAccessOwnExecutionMatter({
       permissions,
       userTeam: user.team,
-      responsibleTeam: (await service.list()).find((matter) => matter.id === params.matterId)?.responsibleTeam
+      responsibleTeam: currentMatter?.responsibleTeam
     });
 
     if (!canWriteMatters && !canUpdateFinanceDate && !canUpdateOwnExecutionMatter) {
       throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
     }
 
-    const payload = matterSchema.parse(request.body);
+    const payload = await enrichMatterTelegramGroupName(matterSchema.parse(request.body), {
+      currentInternalTelegramGroupId: currentMatter?.internalTelegramGroupId,
+      logger: app.log
+    });
     return service.update(params.matterId, payload);
   });
 

@@ -3,6 +3,7 @@ import { APP_VERSION_LABEL, buildDisplayName } from "@sige/contracts";
 
 import { getNavigationForUser } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
+import { useModuleAvailability } from "../modules/ModuleAvailabilityContext";
 import { openBriefManagerWindow, reportBriefManagerOpenError } from "../modules/openBriefManagerWindow";
 
 function looksLikeHandle(value: string) {
@@ -23,9 +24,10 @@ function getSidebarUserName(user: ReturnType<typeof useAuth>["user"]) {
 
 export function AppShell() {
   const { user, logout } = useAuth();
+  const { disabledModuleIds } = useModuleAvailability();
   const navigate = useNavigate();
   const sidebarUserName = getSidebarUserName(user);
-  const navigation = getNavigationForUser(user);
+  const navigation = getNavigationForUser(user, disabledModuleIds);
 
   const handleOpenBriefManager = () => {
     const openingBriefManager = openBriefManagerWindow().catch(reportBriefManagerOpenError);

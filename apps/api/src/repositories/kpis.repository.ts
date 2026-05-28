@@ -79,6 +79,13 @@ interface UserRecord {
   isActive: boolean;
 }
 
+interface UserTeamRecord {
+  key: string;
+  label: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
 interface TrackingRecord {
   id: string;
   moduleId: string;
@@ -462,26 +469,33 @@ function isExcludedFromKpis(user: UserRecord) {
     || user.role === "SUPERADMIN";
 }
 
-function getTeamLabel(user: UserRecord) {
-  return (user.team ? TEAM_LABELS[user.team] : undefined) ?? user.legacyTeam ?? "Sin equipo";
+function getTeamLabel(user: UserRecord, teamLabelByKey: Map<string, string>) {
+  return (user.team ? teamLabelByKey.get(user.team) ?? TEAM_LABELS[user.team] : undefined) ?? user.legacyTeam ?? "Sin equipo";
 }
 
-function getTeamKeyFromLabel(label?: string | null) {
+function getTeamKeyFromLabel(label?: string | null, teamLabelByKey?: Map<string, string>) {
   const normalized = normalizeText(label);
   if (!normalized) {
     return undefined;
+  }
+
+  const matchedCatalog = teamLabelByKey
+    ? Array.from(teamLabelByKey.entries()).find(([, teamLabel]) => normalizeText(teamLabel) === normalized)
+    : undefined;
+  if (matchedCatalog) {
+    return matchedCatalog[0];
   }
 
   const matched = Object.entries(TEAM_LABELS).find(([, teamLabel]) => normalizeText(teamLabel) === normalized);
   return matched?.[0] ?? normalized.toUpperCase().replace(/\s+/g, "_");
 }
 
-function getAccessTeamKey(accessScope: KpiAccessScope) {
-  return accessScope.team ?? getTeamKeyFromLabel(accessScope.legacyTeam);
+function getAccessTeamKey(accessScope: KpiAccessScope, teamLabelByKey: Map<string, string>) {
+  return accessScope.team ?? getTeamKeyFromLabel(accessScope.legacyTeam, teamLabelByKey);
 }
 
-function getUserTeamKey(user: KpiUserSummary) {
-  return user.team ?? getTeamKeyFromLabel(user.teamLabel) ?? "UNASSIGNED";
+function getUserTeamKey(user: KpiUserSummary, teamLabelByKey?: Map<string, string>) {
+  return user.team ?? getTeamKeyFromLabel(user.teamLabel, teamLabelByKey) ?? "UNASSIGNED";
 }
 
 function isGlobalKpiViewer(accessScope: KpiAccessScope) {
@@ -1046,10 +1060,16 @@ export class PrismaKpisRepository implements KpisRepository {
     const todayKey = toDateKey(new Date());
     const cutoffKey = getCutoffKey(startKey, endKey, todayKey);
 
-    const [users, trackingRecords, terms, holidays, vacationEvents, globalVacationDays] = await Promise.all([
+    const [users, userTeams, trackingRecords, terms, holidays, vacationEvents, globalVacationDays] = await Promise.all([
       this.prisma.user.findMany({
         where: { isActive: true },
         orderBy: [{ legacyTeam: "asc" }, { team: "asc" }, { displayName: "asc" }]
+      }),
+      this.prisma.userTeam.findMany({
+        orderBy: [
+          { sortOrder: "asc" },
+          { label: "asc" }
+        ]
       }),
       this.prisma.taskTrackingRecord.findMany({
         where: {
@@ -1107,6 +1127,10 @@ export class PrismaKpisRepository implements KpisRepository {
         }
       })
     ]);
+    const teamCatalog = userTeams as UserTeamRecord[];
+    const activeTeamCatalog = teamCatalog.filter((team) => team.isActive);
+    const activeTeamKeys = new Set(activeTeamCatalog.map((team) => team.key));
+    const teamLabelByKey = new Map(teamCatalog.map((team) => [team.key, team.label]));
 
     const holidayKeys = new Set(holidays.map((holiday) => toDateKey(holiday.date)));
     const vacationKeysByUser = buildVacationKeysByUser(vacationEvents as VacationEventRecord[], startKey, endKey);
@@ -1137,6 +1161,7 @@ export class PrismaKpisRepository implements KpisRepository {
     };
 
     const userSummaries = (users as UserRecord[])
+      .filter((user) => !user.team || activeTeamKeys.has(user.team))
       .filter((user) => !isExcludedFromKpis(user))
       .map<KpiUserSummary>((user) => {
         const config = findConfigForUser(user);
@@ -1162,14 +1187,20 @@ export class PrismaKpisRepository implements KpisRepository {
           displayName: user.displayName,
           shortName: user.shortName ?? undefined,
           team: (user.team ?? undefined) as Team | undefined,
-          teamLabel: getTeamLabel(user),
+          teamLabel: getTeamLabel(user, teamLabelByKey),
           specificRole: user.specificRole ?? undefined,
           configured: Boolean(config),
           metrics
         };
       });
 
-    const visibleUserSummaries = this.filterUsersByAccessScope(userSummaries, accessScope);
+    const visibleTeams = this.filterTeamsByAccessScope(activeTeamCatalog, accessScope, teamLabelByKey);
+    const visibleTeamKeys = new Set(visibleTeams.map((team) => team.key));
+    const visibleUserSummaries = this.filterUsersByAccessScope(userSummaries, accessScope, teamLabelByKey)
+      .filter((user) => {
+        const teamKey = getUserTeamKey(user, teamLabelByKey);
+        return teamKey === "UNASSIGNED" || visibleTeamKeys.has(teamKey);
+      });
 
     return {
       year,
@@ -1179,32 +1210,69 @@ export class PrismaKpisRepository implements KpisRepository {
       businessDaysInPeriod,
       businessDaysElapsed,
       sourceNote: "Los KPI's se alimentan automaticamente desde usuarios, tablas de seguimiento, terminos, dias inhabiles y vacaciones registradas; no reciben captura manual.",
-      teams: this.groupUsersByTeam(visibleUserSummaries)
+      teams: this.groupUsersByTeam(visibleUserSummaries, visibleTeams, teamLabelByKey)
     };
   }
 
-  private filterUsersByAccessScope(users: KpiUserSummary[], accessScope: KpiAccessScope) {
+  private filterTeamsByAccessScope(
+    teams: UserTeamRecord[],
+    accessScope: KpiAccessScope,
+    teamLabelByKey: Map<string, string>
+  ) {
     if (isGlobalKpiViewer(accessScope)) {
-      return users;
+      return teams;
     }
 
-    const teamKey = getAccessTeamKey(accessScope);
+    const teamKey = getAccessTeamKey(accessScope, teamLabelByKey);
     if (!teamKey) {
       return [];
     }
 
-    return users.filter((user) => getUserTeamKey(user) === teamKey);
+    return teams.filter((team) => team.key === teamKey);
   }
 
-  private groupUsersByTeam(users: KpiUserSummary[]): KpiTeamSummary[] {
+  private filterUsersByAccessScope(
+    users: KpiUserSummary[],
+    accessScope: KpiAccessScope,
+    teamLabelByKey: Map<string, string>
+  ) {
+    if (isGlobalKpiViewer(accessScope)) {
+      return users;
+    }
+
+    const teamKey = getAccessTeamKey(accessScope, teamLabelByKey);
+    if (!teamKey) {
+      return [];
+    }
+
+    return users.filter((user) => getUserTeamKey(user, teamLabelByKey) === teamKey);
+  }
+
+  private groupUsersByTeam(
+    users: KpiUserSummary[],
+    teams: UserTeamRecord[],
+    teamLabelByKey: Map<string, string>
+  ): KpiTeamSummary[] {
     const groups = new Map<string, KpiTeamSummary>();
+    const sortOrderByTeam = new Map<string, number>();
+
+    teams.forEach((team) => {
+      sortOrderByTeam.set(team.key, team.sortOrder);
+      groups.set(team.key, {
+        teamKey: team.key,
+        teamLabel: team.label,
+        users: [],
+        configuredMetricsCount: 0,
+        missedMetricsCount: 0
+      });
+    });
 
     users.forEach((user) => {
-      const teamKey = getUserTeamKey(user);
+      const teamKey = getUserTeamKey(user, teamLabelByKey);
       const existing = groups.get(teamKey);
       const targetGroup = existing ?? {
         teamKey,
-        teamLabel: user.teamLabel,
+        teamLabel: teamLabelByKey.get(teamKey) ?? user.teamLabel,
         users: [],
         configuredMetricsCount: 0,
         missedMetricsCount: 0
@@ -1222,12 +1290,14 @@ export class PrismaKpisRepository implements KpisRepository {
         users: group.users.sort((left, right) => left.displayName.localeCompare(right.displayName))
       }))
       .sort((left, right) => {
-        const leftIndex = TEAM_ORDER.indexOf(left.teamKey);
-        const rightIndex = TEAM_ORDER.indexOf(right.teamKey);
-        const normalizedLeftIndex = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
-        const normalizedRightIndex = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+        const leftFallbackIndex = TEAM_ORDER.indexOf(left.teamKey);
+        const rightFallbackIndex = TEAM_ORDER.indexOf(right.teamKey);
+        const leftIndex = sortOrderByTeam.get(left.teamKey)
+          ?? 100_000 + (leftFallbackIndex === -1 ? TEAM_ORDER.length : leftFallbackIndex);
+        const rightIndex = sortOrderByTeam.get(right.teamKey)
+          ?? 100_000 + (rightFallbackIndex === -1 ? TEAM_ORDER.length : rightFallbackIndex);
 
-        return normalizedLeftIndex - normalizedRightIndex || left.teamLabel.localeCompare(right.teamLabel);
+        return leftIndex - rightIndex || left.teamLabel.localeCompare(right.teamLabel);
       });
   }
 }

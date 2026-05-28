@@ -1,4 +1,4 @@
-export type Team =
+export type KnownTeam =
   | "ADMIN"
   | "CLIENT_RELATIONS"
   | "SALES"
@@ -10,6 +10,8 @@ export type Team =
   | "TAX_COMPLIANCE"
   | "AUDIT"
   | "ADMIN_OPERATIONS";
+
+export type Team = KnownTeam | (string & {});
 
 export type SystemRole =
   | "SUPERADMIN"
@@ -1028,12 +1030,23 @@ export interface TaskTrackDefinition {
   recurrenceRule?: RecurrenceRule;
 }
 
+export interface TaskModuleMember {
+  id: string;
+  userId: string;
+  name: string;
+  aliases: string[];
+  shortName?: string;
+  specificRole?: string;
+}
+
 export interface TaskModuleDefinition {
   id: string;
   team: Team;
   label: string;
   summary: string;
   tracks: TaskTrackDefinition[];
+  isActive?: boolean;
+  members?: TaskModuleMember[];
 }
 
 export interface TaskItem {
@@ -1159,4 +1172,17 @@ export interface DashboardSummary {
   leads: number;
   matters: number;
   pendingTasks: number;
+}
+
+export interface SystemModuleSetting {
+  moduleId: string;
+  isEnabled: boolean;
+  updatedByUserId?: string;
+  updatedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SystemModuleSettingsResponse {
+  settings: SystemModuleSetting[];
 }
