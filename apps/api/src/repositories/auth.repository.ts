@@ -7,12 +7,13 @@ import type { AuthRepository, PasswordResetTokenRecord, RefreshTokenRecord } fro
 export class PrismaAuthRepository implements AuthRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
-  public async findStoredUserByIdentifier(identifier: string) {
+  public async findStoredUserByIdentifier(identifier: string, organizationId?: string) {
     const normalizedIdentifier = identifier.trim();
     const normalizedEmail = buildLegacyEmail(normalizedIdentifier);
     const usernameCandidates = buildLegacyUsernameLookupCandidates(normalizedIdentifier);
     const record = await this.prisma.user.findFirst({
       where: {
+        organizationId,
         OR: [
           { email: normalizedEmail },
           ...usernameCandidates.map((username) => ({

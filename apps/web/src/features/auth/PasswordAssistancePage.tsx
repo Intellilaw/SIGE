@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { findOrganizationBySlug, getDefaultOrganization } from "@sige/contracts";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { useAuth, type PasswordResetRequestResponse } from "./AuthContext";
 
@@ -9,6 +10,8 @@ function formatExpiry(value?: string) {
 
 export function PasswordAssistancePage() {
   const { user, requestPasswordReset } = useAuth();
+  const [searchParams] = useSearchParams();
+  const organization = findOrganizationBySlug(searchParams.get("organization")) ?? getDefaultOrganization();
   const [identifier, setIdentifier] = useState("");
   const [result, setResult] = useState<PasswordResetRequestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +28,7 @@ export function PasswordAssistancePage() {
     setIsSubmitting(true);
 
     try {
-      const response = await requestPasswordReset(identifier);
+      const response = await requestPasswordReset(identifier, organization.slug);
       setResult(response);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "No fue posible procesar la solicitud.");
@@ -44,7 +47,7 @@ export function PasswordAssistancePage() {
           seguro definido para el ambiente actual para que recuperes tu acceso.
         </p>
         <p className="login-back-link">
-          <Link to="/intranet-login">Volver al acceso RC</Link>
+          <Link to={`/intranet-login?organization=${organization.slug}`}>Volver al acceso {organization.name}</Link>
         </p>
 
         <form className="login-form" onSubmit={handleSubmit}>

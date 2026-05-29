@@ -1,5 +1,13 @@
 import { Link } from "react-router-dom";
-import { APP_VERSION_TEXT } from "@sige/contracts";
+import {
+  APP_PRODUCT_NAME,
+  APP_PRODUCT_SUBTITLE,
+  APP_VERSION_TEXT,
+  ORGANIZATION_PROFILES_BY_SLUG,
+  ORGANIZATION_SLUGS,
+  getOrganizationAccessLabel,
+  getOrganizationUnavailableTitle
+} from "@sige/contracts";
 
 import { useAuth } from "./AuthContext";
 import intellilawLogo from "../../assets/intellilaw-logo.svg";
@@ -8,7 +16,11 @@ import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 
 export function EntryPage() {
   const { user } = useAuth();
-  const activePath = user ? "/app" : "/intranet-login";
+  const intellilawOrganization = ORGANIZATION_PROFILES_BY_SLUG[ORGANIZATION_SLUGS.INTELLILAW];
+  const legalFlowOrganization = ORGANIZATION_PROFILES_BY_SLUG[ORGANIZATION_SLUGS.LEGALFLOW];
+  const rusconiOrganization = ORGANIZATION_PROFILES_BY_SLUG[ORGANIZATION_SLUGS.RUSCONI_CONSULTING];
+  const getAccessPath = (organizationSlug: string) =>
+    user?.organizationSlug === organizationSlug ? "/app" : `/intranet-login?organization=${organizationSlug}`;
 
   return (
     <main className="entry-page">
@@ -18,52 +30,46 @@ export function EntryPage() {
 
           <div className="entry-brand">
             <div className="entry-brand-logo-shell">
-              <img className="entry-brand-logo" src={intellilawLogo} alt="Logo Intellilaw" />
+              <img className="entry-brand-logo" src={intellilawLogo} alt={`Logo ${intellilawOrganization.name}`} />
             </div>
-            <p className="entry-brand-name">INTELLILAW</p>
+            <p className="entry-brand-name">{intellilawOrganization.name.toUpperCase()}</p>
           </div>
 
-          <h1 className="entry-title">SIGE</h1>
+          <h1 className="entry-title">{APP_PRODUCT_NAME}</h1>
           <p className="entry-version">{APP_VERSION_TEXT}</p>
-          <p className="entry-subtitle">Sistema Integral de Administracion Empresarial</p>
+          <p className="entry-subtitle">{APP_PRODUCT_SUBTITLE}</p>
 
           <div className="entry-actions">
             <div className="entry-option">
               <div className="entry-option-logo-shell">
-                <img className="entry-option-logo" src={intellilawLogo} alt="Intellilaw" />
+                <img className="entry-option-logo" src={intellilawLogo} alt={intellilawOrganization.name} />
+              </div>
+              <Link to={getAccessPath(intellilawOrganization.slug)} className="entry-button entry-button-primary">
+                {getOrganizationAccessLabel(intellilawOrganization)}
+              </Link>
+            </div>
+
+            <div className="entry-option">
+              <div className="entry-option-logo-shell">
+                <img className="entry-option-logo" src={legalFlowLogo} alt={legalFlowOrganization.name} />
               </div>
               <button
                 type="button"
                 className="entry-button entry-button-disabled"
                 disabled
                 aria-disabled="true"
-                title="El acceso de Intellilaw estara disponible proximamente."
+                title={getOrganizationUnavailableTitle(legalFlowOrganization)}
               >
-                Acceso Intellilaw
+                {getOrganizationAccessLabel(legalFlowOrganization)}
               </button>
             </div>
 
             <div className="entry-option">
               <div className="entry-option-logo-shell">
-                <img className="entry-option-logo" src={legalFlowLogo} alt="LegalFlow" />
+                <img className="rusconi-logo entry-option-logo" src={rusconiLogo} alt={rusconiOrganization.name} />
               </div>
-              <button
-                type="button"
-                className="entry-button entry-button-disabled"
-                disabled
-                aria-disabled="true"
-                title="El acceso de LegalFlow estara disponible proximamente."
-              >
-                Acceso LegalFlow
-              </button>
-            </div>
-
-            <div className="entry-option">
-              <div className="entry-option-logo-shell">
-                <img className="rusconi-logo entry-option-logo" src={rusconiLogo} alt="Rusconi Consulting" />
-              </div>
-              <Link to={activePath} className="entry-button entry-button-primary">
-                Acceso Rusconi Consulting
+              <Link to={getAccessPath(rusconiOrganization.slug)} className="entry-button entry-button-primary">
+                {getOrganizationAccessLabel(rusconiOrganization)}
               </Link>
             </div>
           </div>

@@ -1,5 +1,9 @@
 export const APP_NAME = "SIGE_2";
-export const APP_VERSION = "2.33";
+export const APP_PRODUCT_NAME = "SIGE";
+export const APP_PRODUCT_SUBTITLE = "Sistema Integral de Administracion Empresarial";
+export const APP_MOBILE_NAME = "SIGE Mobile";
+export const APP_MOBILE_DEFAULT_URL = "https://www.intellilaw.ai/mobile";
+export const APP_VERSION = "2.34";
 export const APP_VERSION_TEXT = `Version ${APP_VERSION}`;
 export const APP_VERSION_LABEL = APP_VERSION_TEXT;
 export const APP_VERSION_BADGE = `v${APP_VERSION}`;

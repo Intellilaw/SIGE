@@ -7,10 +7,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Organization {
+  id                        String                       @id
+  slug                      String                       @unique
+  name                      String
+  isActive                  Boolean                      @default(true)
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+  users                     User[]
+  clients                   Client[]
+  internalContracts         InternalContract[]
+  internalContractTemplates InternalContractTemplate[]
+  dailyDocumentAssignments  DailyDocumentAssignment[]
+  quotes                    Quote[]
+  quoteTemplates            QuoteTemplate[]
+  leads                     Lead[]
+  matters                   Matter[]
+  generalExpenses           GeneralExpense[]
+  payrollEntries            GeneralExpensePayrollEntry[]
+  budgetPlans               BudgetPlan[]
+  budgetPlanSnapshots       BudgetPlanSnapshot[]
+  commissionReceivers       CommissionReceiver[]
+  commissionExclusions      CommissionExclusion[]
+  financeRecords            FinanceRecord[]
+  financeSnapshots          FinanceSnapshot[]
+  commissionSnapshots       CommissionSnapshot[]
+  taskItems                 TaskItem[]
+  taskTrackingRecords       TaskTrackingRecord[]
+  taskTerms                 TaskTerm[]
+  taskDistributionEvents    TaskDistributionEvent[]
+  taskDistributionHistories TaskDistributionHistory[]
+  taskAdditionalTasks       TaskAdditionalTask[]
+  holidays                  Holiday[]
+  laborFiles                LaborFile[]
+  laborFileDocuments        LaborFileDocument[]
+  laborVacationEvents       LaborVacationEvent[]
+  laborGlobalVacationDays   LaborGlobalVacationDay[]
+  userTeams                 UserTeam[]
+  auditLogs                 AuditLog[]
+
+  @@index([isActive, name])
+}
+
 model User {
   id                    String               @id @default(uuid())
-  email                 String               @unique
-  username              String               @unique
+  organizationId        String               @default("org-rusconi")
+  email                 String
+  username              String
   displayName           String
   shortName             String?
   role                  String
@@ -30,20 +73,28 @@ model User {
   passwordResetTokens   PasswordResetToken[]
   auditLogs             AuditLog[]
   laborFile             LaborFile?
+  organization          Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, email])
+  @@unique([organizationId, username])
+  @@index([organizationId, isActive])
 }
 
 model UserTeam {
   id            String    @id @default(uuid())
-  key           String    @unique
+  organizationId String    @default("org-rusconi")
+  key           String
   label         String
   isActive      Boolean   @default(true)
   sortOrder     Int       @default(0)
   deactivatedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([isActive, sortOrder])
-  @@index([label])
+  @@unique([organizationId, key])
+  @@index([organizationId, isActive, sortOrder])
+  @@index([organizationId, label])
 }
 
 model SystemModuleSetting {
@@ -59,6 +110,7 @@ model SystemModuleSetting {
 
 model LaborFile {
   id                           String                       @id @default(uuid())
+  organizationId               String                       @default("org-rusconi")
   userId                       String?                      @unique
   employeeName                 String
   employeeEmail                String?
@@ -81,67 +133,75 @@ model LaborFile {
   createdAt                    DateTime                     @default(now())
   updatedAt                    DateTime                     @updatedAt
   user                         User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization                 Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   documents                    LaborFileDocument[]
   vacationEvents               LaborVacationEvent[]
   generalExpensePayrollEntries GeneralExpensePayrollEntry[]
 
-  @@index([status, employmentStatus])
+  @@index([organizationId, status, employmentStatus])
   @@index([employeeName])
 }
 
 model LaborFileDocument {
-  id               String    @id @default(uuid())
-  laborFileId      String
-  documentType     String
-  originalFileName String
-  fileMimeType     String?
-  fileSizeBytes    Int?
-  fileContent      Bytes
-  riExtractedDailySalaryMxn        Decimal?  @db.Decimal(12, 2)
-  riExtractedMonthlyGrossSalaryMxn Decimal?  @db.Decimal(12, 2)
+  id                               String       @id @default(uuid())
+  organizationId                   String       @default("org-rusconi")
+  laborFileId                      String
+  documentType                     String
+  originalFileName                 String
+  fileMimeType                     String?
+  fileSizeBytes                    Int?
+  fileContent                      Bytes
+  riExtractedDailySalaryMxn        Decimal?     @db.Decimal(12, 2)
+  riExtractedMonthlyGrossSalaryMxn Decimal?     @db.Decimal(12, 2)
   riSalaryExtractionDetail         String?
-  uploadedAt       DateTime  @default(now())
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  laborFile        LaborFile @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+  uploadedAt                       DateTime     @default(now())
+  createdAt                        DateTime     @default(now())
+  updatedAt                        DateTime     @updatedAt
+  laborFile                        LaborFile    @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+  organization                     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([laborFileId, documentType])
-  @@index([uploadedAt])
+  @@index([organizationId, laborFileId, documentType])
+  @@index([organizationId, uploadedAt])
 }
 
 model LaborVacationEvent {
-  id                         String    @id @default(uuid())
+  id                         String       @id @default(uuid())
+  organizationId             String       @default("org-rusconi")
   laborFileId                String
   globalVacationDayId        String?
   eventType                  String
-  startDate                  DateTime? @db.Date
-  endDate                    DateTime? @db.Date
+  startDate                  DateTime?    @db.Date
+  endDate                    DateTime?    @db.Date
   vacationDates              Json?
-  days                       Decimal   @default(0) @db.Decimal(6, 2)
+  days                       Decimal      @default(0) @db.Decimal(6, 2)
   description                String?
   acceptanceOriginalFileName String?
   acceptanceFileMimeType     String?
   acceptanceFileSizeBytes    Int?
   acceptanceFileContent      Bytes?
-  createdAt                  DateTime  @default(now())
-  updatedAt                  DateTime  @updatedAt
-  laborFile                  LaborFile @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+  laborFile                  LaborFile    @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+  organization               Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([laborFileId, eventType])
-  @@index([globalVacationDayId])
-  @@index([startDate, endDate])
+  @@index([organizationId, laborFileId, eventType])
+  @@index([organizationId, globalVacationDayId])
+  @@index([organizationId, startDate, endDate])
 }
 
 model LaborGlobalVacationDay {
-  id          String   @id @default(uuid())
-  date        DateTime @unique @db.Date
-  days        Decimal  @default(1) @db.Decimal(6, 2)
-  vacationDates Json?
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  date           DateTime     @db.Date
+  days           Decimal      @default(1) @db.Decimal(6, 2)
+  vacationDates  Json?
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([date])
+  @@unique([organizationId, date])
+  @@index([organizationId, date])
 }
 
 model RefreshToken {
@@ -171,7 +231,8 @@ model PasswordResetToken {
 
 model Client {
   id                       String                    @id @default(uuid())
-  clientNumber             String                    @unique
+  organizationId           String                    @default("org-rusconi")
+  clientNumber             String
   name                     String
   deletedAt                DateTime?
   createdAt                DateTime                  @default(now())
@@ -181,23 +242,26 @@ model Client {
   matters                  Matter[]
   internalContracts        InternalContract[]
   dailyDocumentAssignments DailyDocumentAssignment[]
+  organization             Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([deletedAt, clientNumber])
+  @@unique([organizationId, clientNumber])
+  @@index([organizationId, deletedAt, clientNumber])
 }
 
 model InternalContract {
-  id                  String   @id @default(uuid())
-  contractNumber      String   @unique
+  id                  String       @id @default(uuid())
+  organizationId      String       @default("org-rusconi")
+  contractNumber      String
   title               String?
   contractType        String
-  documentKind        String   @default("CONTRACT")
+  documentKind        String       @default("CONTRACT")
   clientId            String?
   clientNumber        String?
   clientName          String?
   collaboratorName    String?
-  sourceMatterId      String?  @unique
+  sourceMatterId      String?
   sourceQuoteId       String?
-  signatureStatus     String   @default("PENDING")
+  signatureStatus     String       @default("PENDING")
   originalFileName    String?
   fileMimeType        String?
   fileSizeBytes       Int?
@@ -206,83 +270,94 @@ model InternalContract {
   pdfFileMimeType     String?
   pdfFileSizeBytes    Int?
   pdfFileContent      Bytes?
-  paymentMilestones   Json     @default("[]")
+  paymentMilestones   Json         @default("[]")
   generatedPayload    Json?
   notes               String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  client              Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  client              Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([contractType, contractNumber])
-  @@index([title])
-  @@index([clientId])
-  @@index([collaboratorName])
-  @@index([sourceQuoteId])
+  @@unique([organizationId, contractNumber])
+  @@unique([organizationId, sourceMatterId])
+  @@index([organizationId, contractType, contractNumber])
+  @@index([organizationId, title])
+  @@index([organizationId, clientId])
+  @@index([organizationId, collaboratorName])
+  @@index([organizationId, sourceQuoteId])
 }
 
 model InternalContractTemplate {
-  id               String   @id @default(uuid())
+  id               String       @id @default(uuid())
+  organizationId   String       @default("org-rusconi")
   title            String
   originalFileName String
   fileMimeType     String?
   fileSizeBytes    Int?
   fileContent      Bytes
   notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([title])
-  @@index([createdAt])
+  @@index([organizationId, title])
+  @@index([organizationId, createdAt])
 }
 
 model DailyDocumentAssignment {
-  id            String   @id @default(uuid())
-  templateId    String
-  templateTitle String
-  title         String
-  clientId      String
-  clientNumber  String
-  clientName    String
-  values        Json     @default("{}")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  client        Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  templateId     String
+  templateTitle  String
+  title          String
+  clientId       String
+  clientNumber   String
+  clientName     String
+  values         Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([clientId, createdAt])
-  @@index([templateId, createdAt])
-  @@index([createdAt])
+  @@index([organizationId, clientId, createdAt])
+  @@index([organizationId, templateId, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 model Quote {
-  id              String   @id @default(uuid())
-  title           String   @default("")
-  quoteNumber     String   @unique
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
+  title           String       @default("")
+  quoteNumber     String
   clientId        String
   clientName      String
   responsibleTeam String?
   subject         String
   status          String
   quoteType       String
-  language        String   @default("es")
-  quoteDate       DateTime @default(now()) @db.Date
+  language        String       @default("es")
+  quoteDate       DateTime     @default(now()) @db.Date
   amountColumns   Json?
   tableRows       Json?
   lineItems       Json
   totalMxn        Decimal
   milestone       String?
   notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  client          Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  client          Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   leads           Lead[]
   matters         Matter[]
 
-  @@index([title])
+  @@unique([organizationId, quoteNumber])
+  @@index([organizationId, title])
 }
 
 model QuoteTemplate {
-  id             String   @id @default(uuid())
-  templateNumber String?  @unique
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  templateNumber String?
   name           String
   team           String
   subject        String
@@ -294,24 +369,27 @@ model QuoteTemplate {
   totalMxn       Decimal
   milestone      String?
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([team, name])
-  @@index([createdAt])
+  @@unique([organizationId, templateNumber])
+  @@index([organizationId, team, name])
+  @@index([organizationId, createdAt])
 }
 
 model Lead {
-  id                   String    @id @default(uuid())
+  id                   String       @id @default(uuid())
+  organizationId       String       @default("org-rusconi")
   clientId             String?
   quoteId              String?
-  clientName           String    @default("")
+  clientName           String       @default("")
   prospectName         String?
   commissionAssignee   String?
   quoteNumber          String?
-  subject              String    @default("")
-  amountMxn            Decimal   @default(0)
-  communicationChannel String    @default("WHATSAPP")
+  subject              String       @default("")
+  amountMxn            Decimal      @default(0)
+  communicationChannel String       @default("WHATSAPP")
   lastInteractionLabel String?
   lastInteraction      DateTime?
   nextInteractionLabel String?
@@ -319,39 +397,41 @@ model Lead {
   notes                String?
   sentToClientAt       DateTime?
   sentToMattersAt      DateTime?
-  hiddenFromTracking   Boolean   @default(false)
-  status               String    @default("ACTIVE")
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  client               Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  quote                Quote?    @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  hiddenFromTracking   Boolean      @default(false)
+  status               String       @default("ACTIVE")
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  client               Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  quote                Quote?       @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([status, hiddenFromTracking, sentToMattersAt])
-  @@index([sentToClientAt])
+  @@index([organizationId, status, hiddenFromTracking, sentToMattersAt])
+  @@index([organizationId, sentToClientAt])
 }
 
 model Matter {
-  id                        String     @id @default(uuid())
-  matterNumber              String     @unique
+  id                        String       @id @default(uuid())
+  organizationId            String       @default("org-rusconi")
+  matterNumber              String
   clientId                  String?
   clientNumber              String?
   quoteId                   String?
-  clientName                String     @default("")
+  clientName                String       @default("")
   quoteNumber               String?
   commissionAssignee        String?
-  matterType                String     @default("ONE_TIME")
-  subject                   String     @default("")
+  matterType                String       @default("ONE_TIME")
+  subject                   String       @default("")
   specificProcess           String?
-  totalFeesMxn              Decimal    @default(0)
+  totalFeesMxn              Decimal      @default(0)
   responsibleTeam           String?
   nextPaymentDate           DateTime?
-  communicationChannel      String     @default("WHATSAPP")
-  r1InternalCreated         Boolean    @default(false)
-  telegramBotLinked         Boolean    @default(false)
-  rdCreated                 Boolean    @default(false)
-  rfCreated                 String     @default("NO")
-  r1ExternalCreated         Boolean    @default(false)
-  billingChatCreated        Boolean    @default(false)
+  communicationChannel      String       @default("WHATSAPP")
+  r1InternalCreated         Boolean      @default(false)
+  telegramBotLinked         Boolean      @default(false)
+  rdCreated                 Boolean      @default(false)
+  rfCreated                 String       @default("NO")
+  r1ExternalCreated         Boolean      @default(false)
+  billingChatCreated        Boolean      @default(false)
   matterIdentifier          String?
   executionLinkedModule     String?
   executionLinkedAt         DateTime?
@@ -363,124 +443,139 @@ model Matter {
   nextActionDueAt           DateTime?
   nextActionSource          String?
   milestone                 String?
-  concluded                 Boolean    @default(false)
-  stage                     String     @default("INTAKE")
-  origin                    String     @default("MANUAL")
+  concluded                 Boolean      @default(false)
+  stage                     String       @default("INTAKE")
+  origin                    String       @default("MANUAL")
   notes                     String?
   deletedAt                 DateTime?
-  createdAt                 DateTime   @default(now())
-  updatedAt                 DateTime   @updatedAt
-  client                    Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  quote                     Quote?     @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  client                    Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  quote                     Quote?       @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tasks                     TaskItem[]
 
-  @@index([deletedAt, createdAt])
-  @@index([matterType, deletedAt])
-  @@index([quoteNumber])
+  @@unique([organizationId, matterNumber])
+  @@index([organizationId, deletedAt, createdAt])
+  @@index([organizationId, matterType, deletedAt])
+  @@index([organizationId, quoteNumber])
 }
 
 model GeneralExpense {
-  id                 String    @id @default(uuid())
+  id                 String       @id @default(uuid())
+  organizationId     String       @default("org-rusconi")
   year               Int
   month              Int
-  detail             String    @default("")
-  amountMxn          Decimal   @default(0)
-  countsTowardLimit  Boolean   @default(false)
-  team               String    @default("Sin equipo")
-  generalExpense     Boolean   @default(false)
-  expenseWithoutTeam Boolean   @default(false)
-  pctLitigation      Decimal   @default(0)
-  pctCorporateLabor  Decimal   @default(0)
-  pctSettlements     Decimal   @default(0)
-  pctFinancialLaw    Decimal   @default(0)
-  pctTaxCompliance   Decimal   @default(0)
-  paymentMethod      String    @default("Transferencia")
+  detail             String       @default("")
+  amountMxn          Decimal      @default(0)
+  countsTowardLimit  Boolean      @default(false)
+  team               String       @default("Sin equipo")
+  generalExpense     Boolean      @default(false)
+  expenseWithoutTeam Boolean      @default(false)
+  pctLitigation      Decimal      @default(0)
+  pctCorporateLabor  Decimal      @default(0)
+  pctSettlements     Decimal      @default(0)
+  pctFinancialLaw    Decimal      @default(0)
+  pctTaxCompliance   Decimal      @default(0)
+  paymentMethod      String       @default("Transferencia")
   bank               String?
-  hasVat             Boolean   @default(true)
-  recurring          Boolean   @default(false)
-  approvedByEmrt     Boolean   @default(false)
-  paidByEmrtAt       DateTime? @db.Date
-  reviewedByJnls     Boolean   @default(false)
-  paid               Boolean   @default(false)
-  paidAt             DateTime? @db.Date
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  hasVat             Boolean      @default(true)
+  recurring          Boolean      @default(false)
+  approvedByEmrt     Boolean      @default(false)
+  paidByEmrtAt       DateTime?    @db.Date
+  reviewedByJnls     Boolean      @default(false)
+  paid               Boolean      @default(false)
+  paidAt             DateTime?    @db.Date
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([year, month, createdAt])
+  @@index([organizationId, year, month, createdAt])
 }
 
 model GeneralExpensePayrollEntry {
-  id                         String     @id @default(uuid())
+  id                         String       @id @default(uuid())
+  organizationId             String       @default("org-rusconi")
   year                       Int
   month                      Int
   half                       Int
   laborFileId                String?
-  employeeName               String     @default("")
-  dailySalaryMxn             Decimal    @default(0)
-  grossSalaryMxn             Decimal    @default(0)
-  punctualityBonusMxn        Decimal    @default(0)
-  attendanceBonusMxn         Decimal    @default(0)
-  absenceDays                Decimal    @default(0)
-  overtimeHours              Decimal    @default(0)
-  overtimeDetail             String     @default("")
-  overtimeApprovedByEmrt     Boolean    @default(false)
-  isrWithholdingMxn          Decimal    @default(0)
-  imssWithholdingMxn         Decimal    @default(0)
-  employmentSubsidyMxn       Decimal    @default(0)
-  infonavitCreditMxn         Decimal    @default(0)
-  payrollStampedByAraceli    Boolean    @default(false)
-  finalPaymentApprovedByEmrt Boolean    @default(false)
-  reviewedByJnls             Boolean    @default(false)
-  createdAt                  DateTime   @default(now())
-  updatedAt                  DateTime   @updatedAt
-  laborFile                  LaborFile? @relation(fields: [laborFileId], references: [id], onDelete: SetNull)
+  employeeName               String       @default("")
+  dailySalaryMxn             Decimal      @default(0)
+  grossSalaryMxn             Decimal      @default(0)
+  punctualityBonusMxn        Decimal      @default(0)
+  attendanceBonusMxn         Decimal      @default(0)
+  absenceDays                Decimal      @default(0)
+  overtimeHours              Decimal      @default(0)
+  overtimeDetail             String       @default("")
+  overtimeApprovedByEmrt     Boolean      @default(false)
+  isrWithholdingMxn          Decimal      @default(0)
+  imssWithholdingMxn         Decimal      @default(0)
+  employmentSubsidyMxn       Decimal      @default(0)
+  infonavitCreditMxn         Decimal      @default(0)
+  payrollStampedByAraceli    Boolean      @default(false)
+  finalPaymentApprovedByEmrt Boolean      @default(false)
+  reviewedByJnls             Boolean      @default(false)
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+  laborFile                  LaborFile?   @relation(fields: [laborFileId], references: [id], onDelete: SetNull)
+  organization               Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([year, month, half, createdAt])
-  @@index([laborFileId])
+  @@index([organizationId, year, month, half, createdAt])
+  @@index([organizationId, laborFileId])
 }
 
 model BudgetPlan {
-  id                 String   @id @default(uuid())
+  id                 String       @id @default(uuid())
+  organizationId     String       @default("org-rusconi")
   year               Int
   month              Int
-  expectedIncomeMxn  Decimal  @default(0)
-  expectedExpenseMxn Decimal  @default(0)
+  expectedIncomeMxn  Decimal      @default(0)
+  expectedExpenseMxn Decimal      @default(0)
   notes              String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@unique([year, month])
-  @@index([year, month])
+  @@unique([organizationId, year, month])
+  @@index([organizationId, year, month])
 }
 
 model BudgetPlanSnapshot {
-  id                  String   @id @default(uuid())
+  id                  String       @id @default(uuid())
+  organizationId      String       @default("org-rusconi")
   year                Int
   month               Int
-  expectedIncomeMxn   Decimal  @default(0)
-  expectedExpenseMxn  Decimal  @default(0)
-  actualIncomeMxn     Decimal  @default(0)
-  actualExpenseMxn    Decimal  @default(0)
-  expectedResultMxn   Decimal  @default(0)
-  actualResultMxn     Decimal  @default(0)
-  financeRecordCount  Int      @default(0)
-  generalExpenseCount Int      @default(0)
+  expectedIncomeMxn   Decimal      @default(0)
+  expectedExpenseMxn  Decimal      @default(0)
+  actualIncomeMxn     Decimal      @default(0)
+  actualExpenseMxn    Decimal      @default(0)
+  expectedResultMxn   Decimal      @default(0)
+  actualResultMxn     Decimal      @default(0)
+  financeRecordCount  Int          @default(0)
+  generalExpenseCount Int          @default(0)
   notes               String?
-  createdAt           DateTime @default(now())
+  createdAt           DateTime     @default(now())
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@unique([year, month])
-  @@index([year, month, createdAt])
+  @@unique([organizationId, year, month])
+  @@index([organizationId, year, month, createdAt])
 }
 
 model CommissionReceiver {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  name           String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, name])
 }
 
 model CommissionExclusion {
-  id              String   @id @default(uuid())
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
   year            Int
   month           Int
   section         String
@@ -488,85 +583,92 @@ model CommissionExclusion {
   financeRecordId String
   createdByUserId String?
   createdByName   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@unique([year, month, section, group, financeRecordId])
-  @@index([year, month, section])
+  @@unique([organizationId, year, month, section, group, financeRecordId])
+  @@index([organizationId, year, month, section])
 }
 
 model FinanceRecord {
-  id                         String    @id @default(uuid())
+  id                         String       @id @default(uuid())
+  organizationId             String       @default("org-rusconi")
   year                       Int
   month                      Int
   clientNumber               String?
-  clientName                 String    @default("")
+  clientName                 String       @default("")
   quoteNumber                String?
-  matterType                 String    @default("ONE_TIME")
-  subject                    String    @default("")
-  contractSignedStatus       String    @default("NO")
+  matterType                 String       @default("ONE_TIME")
+  subject                    String       @default("")
+  contractSignedStatus       String       @default("NO")
   responsibleTeam            String?
-  totalMatterMxn             Decimal   @default(0)
+  totalMatterMxn             Decimal      @default(0)
   workingConcepts            String?
-  conceptFeesMxn             Decimal   @default(0)
-  previousPaymentsMxn        Decimal   @default(0)
+  conceptFeesMxn             Decimal      @default(0)
+  previousPaymentsMxn        Decimal      @default(0)
   nextPaymentDate            DateTime?
   nextPaymentNotes           String?
-  paidThisMonthMxn           Decimal   @default(0)
-  payment2Mxn                Decimal   @default(0)
-  payment3Mxn                Decimal   @default(0)
+  paidThisMonthMxn           Decimal      @default(0)
+  payment2Mxn                Decimal      @default(0)
+  payment3Mxn                Decimal      @default(0)
   paymentDate1               DateTime?
   paymentDate2               DateTime?
   paymentDate3               DateTime?
   expenseNotes1              String?
   expenseNotes2              String?
   expenseNotes3              String?
-  expenseAmount1Mxn          Decimal   @default(0)
-  expenseAmount2Mxn          Decimal   @default(0)
-  expenseAmount3Mxn          Decimal   @default(0)
-  pctLitigation              Int       @default(0)
-  pctCorporateLabor          Int       @default(0)
-  pctSettlements             Int       @default(0)
-  pctFinancialLaw            Int       @default(0)
-  pctTaxCompliance           Int       @default(0)
+  expenseAmount1Mxn          Decimal      @default(0)
+  expenseAmount2Mxn          Decimal      @default(0)
+  expenseAmount3Mxn          Decimal      @default(0)
+  pctLitigation              Int          @default(0)
+  pctCorporateLabor          Int          @default(0)
+  pctSettlements             Int          @default(0)
+  pctFinancialLaw            Int          @default(0)
+  pctTaxCompliance           Int          @default(0)
   clientCommissionRecipient  String?
   closingCommissionRecipient String?
   milestone                  String?
-  concluded                  Boolean   @default(false)
+  concluded                  Boolean      @default(false)
   financeComments            String?
-  createdAt                  DateTime  @default(now())
-  updatedAt                  DateTime  @updatedAt
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+  organization               Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([year, month, createdAt])
-  @@index([year, month, quoteNumber])
-  @@index([year, month, clientName, subject])
+  @@index([organizationId, year, month, createdAt])
+  @@index([organizationId, year, month, quoteNumber])
+  @@index([organizationId, year, month, clientName, subject])
 }
 
 model FinanceSnapshot {
-  id              String   @id @default(uuid())
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
   year            Int
   month           Int
   title           String
-  totalIncomeMxn  Decimal  @default(0)
-  totalExpenseMxn Decimal  @default(0)
-  balanceMxn      Decimal  @default(0)
+  totalIncomeMxn  Decimal      @default(0)
+  totalExpenseMxn Decimal      @default(0)
+  balanceMxn      Decimal      @default(0)
   snapshotData    Json?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime     @default(now())
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([year, month, createdAt])
+  @@index([organizationId, year, month, createdAt])
 }
 
 model CommissionSnapshot {
-  id           String   @id @default(uuid())
-  year         Int
-  month        Int
-  section      String
-  title        String
-  totalNetMxn  Decimal  @default(0)
-  snapshotData Json?
-  createdAt    DateTime @default(now())
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  year           Int
+  month          Int
+  section        String
+  title          String
+  totalNetMxn    Decimal      @default(0)
+  snapshotData   Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([year, month, section, createdAt])
+  @@index([organizationId, year, month, section, createdAt])
 }
 
 model TaskModule {
@@ -600,162 +702,178 @@ model TaskTrack {
 }
 
 model TaskItem {
-  id           String     @id @default(uuid())
-  moduleId     String
-  trackId      String
-  clientName   String
-  matterId     String?
-  matterNumber String?
-  subject      String
-  responsible  String
-  dueDate      DateTime
-  state        String
-  recurring    Boolean    @default(false)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  matter       Matter?    @relation(fields: [matterId], references: [id], onDelete: SetNull)
-  module       TaskModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  moduleId       String
+  trackId        String
+  clientName     String
+  matterId       String?
+  matterNumber   String?
+  subject        String
+  responsible    String
+  dueDate        DateTime
+  state          String
+  recurring      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  matter         Matter?      @relation(fields: [matterId], references: [id], onDelete: SetNull)
+  module         TaskModule   @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([moduleId, trackId, state, dueDate])
+  @@index([organizationId, moduleId, trackId, state, dueDate])
 }
 
 model TaskTrackingRecord {
-  id               String    @id @default(uuid())
+  id               String       @id @default(uuid())
+  organizationId   String       @default("org-rusconi")
   moduleId         String
   tableCode        String
   sourceTable      String
   matterId         String?
   matterNumber     String?
   clientNumber     String?
-  clientName       String    @default("")
-  subject          String    @default("")
+  clientName       String       @default("")
+  subject          String       @default("")
   specificProcess  String?
   matterIdentifier String?
-  taskName         String    @default("")
+  taskName         String       @default("")
   eventName        String?
-  responsible      String    @default("")
-  dueDate          DateTime? @db.Date
-  termDate         DateTime? @db.Date
+  responsible      String       @default("")
+  dueDate          DateTime?    @db.Date
+  termDate         DateTime?    @db.Date
   completedAt      DateTime?
-  status           String    @default("pendiente")
-  workflowStage    Int       @default(1)
+  status           String       @default("pendiente")
+  workflowStage    Int          @default(1)
   reportedMonth    String?
   termId           String?
-  data             Json      @default("{}")
+  data             Json         @default("{}")
   deletedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([moduleId, tableCode, status, dueDate])
-  @@index([sourceTable, status])
-  @@index([matterId])
+  @@index([organizationId, moduleId, tableCode, status, dueDate])
+  @@index([organizationId, sourceTable, status])
+  @@index([organizationId, matterId])
 }
 
 model TaskTerm {
-  id               String    @id @default(uuid())
+  id               String       @id @default(uuid())
+  organizationId   String       @default("org-rusconi")
   moduleId         String
   sourceTable      String?
   sourceRecordId   String?
   matterId         String?
   matterNumber     String?
   clientNumber     String?
-  clientName       String    @default("")
-  subject          String    @default("")
+  clientName       String       @default("")
+  subject          String       @default("")
   specificProcess  String?
   matterIdentifier String?
-  eventName        String    @default("")
+  eventName        String       @default("")
   pendingTaskLabel String?
-  responsible      String    @default("")
-  dueDate          DateTime? @db.Date
-  termDate         DateTime? @db.Date
-  status           String    @default("pendiente")
-  recurring        Boolean   @default(false)
+  responsible      String       @default("")
+  dueDate          DateTime?    @db.Date
+  termDate         DateTime?    @db.Date
+  status           String       @default("pendiente")
+  recurring        Boolean      @default(false)
   reportedMonth    String?
-  verification     Json      @default("{}")
-  data             Json      @default("{}")
+  verification     Json         @default("{}")
+  data             Json         @default("{}")
   deletedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([moduleId, status, termDate])
-  @@index([sourceTable, sourceRecordId])
+  @@index([organizationId, moduleId, status, termDate])
+  @@index([organizationId, sourceTable, sourceRecordId])
 }
 
 model TaskDistributionEvent {
-  id              String   @id @default(uuid())
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
   moduleId        String
   name            String
-  targetTables    Json     @default("[]")
+  targetTables    Json         @default("[]")
   defaultTaskName String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([moduleId, name])
+  @@index([organizationId, moduleId, name])
 }
 
 model TaskDistributionHistory {
-  id                 String   @id @default(uuid())
+  id                 String       @id @default(uuid())
+  organizationId     String       @default("org-rusconi")
   moduleId           String
   matterId           String?
   matterNumber       String?
   clientNumber       String?
-  clientName         String   @default("")
-  subject            String   @default("")
+  clientName         String       @default("")
+  subject            String       @default("")
   specificProcess    String?
   matterIdentifier   String?
-  eventName          String   @default("")
-  targetTables       Json     @default("[]")
-  eventNamesPerTable Json     @default("[]")
-  createdIds         Json     @default("{}")
-  data               Json     @default("{}")
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  eventName          String       @default("")
+  targetTables       Json         @default("[]")
+  eventNamesPerTable Json         @default("[]")
+  createdIds         Json         @default("{}")
+  data               Json         @default("{}")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([moduleId, createdAt])
-  @@index([matterId])
+  @@index([organizationId, moduleId, createdAt])
+  @@index([organizationId, matterId])
 }
 
 model TaskAdditionalTask {
-  id           String    @id @default(uuid())
-  moduleId     String
-  task         String
-  responsible  String
-  responsible2 String?
-  dueDate      DateTime? @db.Date
-  recurring    Boolean   @default(false)
-  status       String    @default("pendiente")
-  deletedAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  moduleId       String
+  task           String
+  responsible    String
+  responsible2   String?
+  dueDate        DateTime?    @db.Date
+  recurring      Boolean      @default(false)
+  status         String       @default("pendiente")
+  deletedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([moduleId, status, dueDate])
+  @@index([organizationId, moduleId, status, dueDate])
 }
 
 model Holiday {
-  id                 String   @id @default(uuid())
-  date               DateTime @db.Date
-  authorityShortName String   @default("PJF")
-  authorityName      String   @default("Poder Judicial de la Federacion")
-  label              String   @default("Dia inhabil")
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                 String       @id @default(uuid())
+  organizationId     String       @default("org-rusconi")
+  date               DateTime     @db.Date
+  authorityShortName String       @default("PJF")
+  authorityName      String       @default("Poder Judicial de la Federacion")
+  label              String       @default("Dia inhabil")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@unique([authorityShortName, date])
-  @@index([date])
-  @@index([authorityShortName, date])
+  @@unique([organizationId, authorityShortName, date])
+  @@index([organizationId, date])
+  @@index([organizationId, authorityShortName, date])
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String?
-  action     String
-  entityType String
-  entityId   String
-  payload    Json?
-  createdAt  DateTime @default(now())
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String
+  payload        Json?
+  createdAt      DateTime     @default(now())
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([entityType, entityId, createdAt])
+  @@index([organizationId, entityType, entityId, createdAt])
 }
 
 model LegacyImportBatch {

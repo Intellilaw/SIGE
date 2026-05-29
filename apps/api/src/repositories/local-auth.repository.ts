@@ -7,6 +7,8 @@ import {
   buildLegacyEmail,
   buildLegacyUsernameLookupCandidates,
   deriveEffectivePermissions,
+  getDefaultOrganization,
+  ORGANIZATIONS,
   type AuthUser
 } from "@sige/contracts";
 
@@ -98,13 +100,18 @@ export class LocalAuthRepository implements AuthRepository {
     return existsSync(this.statePath) || (existsSync(this.exportPath) && existsSync(this.importReportPath));
   }
 
-  public async findStoredUserByIdentifier(identifier: string) {
+  public async findStoredUserByIdentifier(identifier: string, organizationId?: string) {
     const normalizedIdentifier = identifier.trim();
     const normalizedEmail = buildLegacyEmail(normalizedIdentifier);
     const usernameCandidates = buildLegacyUsernameLookupCandidates(normalizedIdentifier).map((candidate) => candidate.toLowerCase());
     const normalizedLookup = normalizeLookupValue(normalizedIdentifier);
 
     const user = this.getState().users.find((candidate) => {
+      const candidateOrganizationId = candidate.organizationId ?? getDefaultOrganization().id;
+      if (organizationId && candidateOrganizationId !== organizationId) {
+        return false;
+      }
+
       if (candidate.email === normalizedEmail) {
         return true;
       }
@@ -263,6 +270,9 @@ export class LocalAuthRepository implements AuthRepository {
 
       return {
         id: exportedUser?.legacyUserId ?? user.email,
+        organizationId: getDefaultOrganization().id,
+        organizationSlug: getDefaultOrganization().slug,
+        organizationName: getDefaultOrganization().name,
         email: user.email,
         username: user.username,
         displayName: exportedUser?.displayName ?? user.username,
@@ -303,8 +313,14 @@ export class LocalAuthRepository implements AuthRepository {
   }
 
   private asAuthUser(user: LocalStateUser): AuthUser {
+    const organization =
+      ORGANIZATIONS.find((entry) => entry.id === user.organizationId) ?? getDefaultOrganization();
+
     return {
       id: user.id,
+      organizationId: organization.id,
+      organizationSlug: organization.slug,
+      organizationName: organization.name,
       email: user.email,
       username: user.username,
       displayName: user.displayName,

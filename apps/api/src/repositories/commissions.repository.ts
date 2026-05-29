@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { COMMISSION_SECTIONS } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import {
   mapCommissionExclusion,
   mapCommissionReceiver,
@@ -159,9 +160,11 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
   }
 
   public async setExclusion(payload: CommissionExclusionWriteRecord) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
     const record = await this.prisma.commissionExclusion.upsert({
       where: {
-        year_month_section_group_financeRecordId: {
+        organizationId_year_month_section_group_financeRecordId: {
+          organizationId,
           year: payload.year,
           month: payload.month,
           section: payload.section,

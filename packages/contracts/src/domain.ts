@@ -22,8 +22,71 @@ export type SystemRole =
 
 export type LegacyAccessRole = "SUPERADMIN" | "INTRANET" | "PUBLIC";
 
+export const ORGANIZATION_SLUGS = {
+  RUSCONI_CONSULTING: "rusconi-consulting",
+  INTELLILAW: "intellilaw",
+  LEGALFLOW: "legalflow"
+} as const;
+
+export type OrganizationSlug = typeof ORGANIZATION_SLUGS[keyof typeof ORGANIZATION_SLUGS];
+
+export interface OrganizationProfile {
+  id: string;
+  slug: OrganizationSlug;
+  name: string;
+  isActive: boolean;
+}
+
+export const ORGANIZATION_PROFILES_BY_SLUG: Record<OrganizationSlug, OrganizationProfile> = {
+  [ORGANIZATION_SLUGS.RUSCONI_CONSULTING]: {
+    id: "org-rusconi",
+    slug: ORGANIZATION_SLUGS.RUSCONI_CONSULTING,
+    name: "Rusconi Consulting",
+    isActive: true
+  },
+  [ORGANIZATION_SLUGS.INTELLILAW]: {
+    id: "org-intellilaw",
+    slug: ORGANIZATION_SLUGS.INTELLILAW,
+    name: "Intellilaw",
+    isActive: true
+  },
+  [ORGANIZATION_SLUGS.LEGALFLOW]: {
+    id: "org-legalflow",
+    slug: ORGANIZATION_SLUGS.LEGALFLOW,
+    name: "LegalFlow",
+    isActive: false
+  }
+};
+
+export const ORGANIZATIONS: OrganizationProfile[] = [
+  ORGANIZATION_PROFILES_BY_SLUG[ORGANIZATION_SLUGS.RUSCONI_CONSULTING],
+  ORGANIZATION_PROFILES_BY_SLUG[ORGANIZATION_SLUGS.INTELLILAW],
+  ORGANIZATION_PROFILES_BY_SLUG[ORGANIZATION_SLUGS.LEGALFLOW]
+];
+
+export const DEFAULT_ORGANIZATION_SLUG: OrganizationSlug = ORGANIZATION_SLUGS.RUSCONI_CONSULTING;
+
+export function findOrganizationBySlug(slug?: string | null) {
+  return ORGANIZATIONS.find((organization) => organization.slug === slug);
+}
+
+export function getDefaultOrganization() {
+  return ORGANIZATIONS.find((organization) => organization.slug === DEFAULT_ORGANIZATION_SLUG) ?? ORGANIZATIONS[0];
+}
+
+export function getOrganizationAccessLabel(organization: OrganizationProfile) {
+  return `Acceso ${organization.name}`;
+}
+
+export function getOrganizationUnavailableTitle(organization: OrganizationProfile) {
+  return `El acceso de ${organization.name} estara disponible proximamente.`;
+}
+
 export interface AuthUser {
   id: string;
+  organizationId: string;
+  organizationSlug: OrganizationSlug;
+  organizationName: string;
   email: string;
   username: string;
   displayName: string;

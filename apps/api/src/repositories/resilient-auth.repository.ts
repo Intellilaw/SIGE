@@ -33,10 +33,10 @@ export class ResilientAuthRepository implements AuthRepository {
     private readonly logger?: { warn: (message: string) => void }
   ) {}
 
-  public findStoredUserByIdentifier(identifier: string) {
+  public findStoredUserByIdentifier(identifier: string, organizationId?: string) {
     return this.withFallback(
-      () => this.primary.findStoredUserByIdentifier(identifier),
-      () => this.fallback?.findStoredUserByIdentifier(identifier) ?? Promise.resolve(null)
+      () => this.primary.findStoredUserByIdentifier(identifier, organizationId),
+      () => this.fallback?.findStoredUserByIdentifier(identifier, organizationId) ?? Promise.resolve(null)
     );
   }
 

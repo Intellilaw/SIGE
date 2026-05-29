@@ -64,6 +64,7 @@ export class PrismaUsersRepository implements UsersRepository {
     const record = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
+          organizationId: payload.organizationId,
           email: payload.email,
           username: payload.username,
           displayName: payload.displayName ?? payload.username,

@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { APP_PRODUCT_NAME, ORGANIZATION_SLUGS, findOrganizationBySlug, getDefaultOrganization } from "@sige/contracts";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "./AuthContext";
+import intellilawLogo from "../../assets/intellilaw-logo.svg";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 
 function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
@@ -32,13 +34,14 @@ function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
 export function LoginPage() {
   const { user, login } = useAuth();
   const [searchParams] = useSearchParams();
+  const organization = findOrganizationBySlug(searchParams.get("organization")) ?? getDefaultOrganization();
   const [identifier, setIdentifier] = useState("Eduardo Rusconi");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const redirectTarget = getSafeRedirectTarget(searchParams.get("redirect"));
 
-  if (user) {
+  if (user?.organizationSlug === organization.slug) {
     return <Navigate to={redirectTarget} replace />;
   }
 
@@ -47,7 +50,7 @@ export function LoginPage() {
     setError(null);
 
     try {
-      await login(identifier.trim(), password);
+      await login(identifier.trim(), password, organization.slug);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to sign in.");
     }
@@ -57,10 +60,14 @@ export function LoginPage() {
     <main className="login-page">
       <section className="login-card">
         <div className="login-brand">
-          <img className="rusconi-logo login-brand-logo" src={rusconiLogo} alt="Rusconi Consulting" />
+          <img
+            className={`${organization.slug === ORGANIZATION_SLUGS.RUSCONI_CONSULTING ? "rusconi-logo " : ""}login-brand-logo`}
+            src={organization.slug === ORGANIZATION_SLUGS.INTELLILAW ? intellilawLogo : rusconiLogo}
+            alt={organization.name}
+          />
         </div>
-        <p className="eyebrow">Rusconi Consulting</p>
-        <h1>SIGE</h1>
+        <p className="eyebrow">{organization.name}</p>
+        <h1>{APP_PRODUCT_NAME}</h1>
         <p className="muted">
           Accede al entorno operativo de SIGE para continuar con clientes, cotizaciones, leads, asuntos y tareas.
         </p>
@@ -68,7 +75,7 @@ export function LoginPage() {
           <Link to="/">Volver a la pantalla de entrada</Link>
         </p>
         <p className="login-support-link">
-          <Link to="/intranet-password-help">Activar cuenta o restablecer contrasena</Link>
+          <Link to={`/intranet-password-help?organization=${organization.slug}`}>Activar cuenta o restablecer contrasena</Link>
         </p>
 
         <form className="login-form" onSubmit={handleSubmit}>

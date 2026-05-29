@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 
+import intellilawLogo from "../../assets/intellilaw-logo.svg";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 import { getVisibleAppModules } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
@@ -10,6 +11,8 @@ export function DashboardPage() {
   const { user } = useAuth();
   const { disabledModuleIds } = useModuleAvailability();
   const visibleModules = getVisibleAppModules(user, disabledModuleIds);
+  const organizationLogo = user?.organizationSlug === "intellilaw" ? intellilawLogo : rusconiLogo;
+  const organizationLogoClassName = `${user?.organizationSlug === "rusconi-consulting" ? "rusconi-logo " : ""}hero-logo-only-mark`;
 
   const handleOpenBriefManager = () => {
     void openBriefManagerWindow().catch(reportBriefManagerOpenError);
@@ -18,7 +21,7 @@ export function DashboardPage() {
   return (
     <section className="page-stack dashboard-page">
       <header className="hero hero-logo-only">
-        <img className="rusconi-logo hero-logo-only-mark" src={rusconiLogo} alt="Rusconi Consulting" />
+        <img className={organizationLogoClassName} src={organizationLogo} alt={user?.organizationName ?? "SIGE"} />
       </header>
 
       <section className="panel">

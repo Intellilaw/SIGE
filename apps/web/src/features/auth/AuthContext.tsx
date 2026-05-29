@@ -13,6 +13,9 @@ import type { AuthStorageChangeDetail } from "../../api/http-client";
 
 interface SessionUser {
   id: string;
+  organizationId: string;
+  organizationSlug: string;
+  organizationName: string;
   email: string;
   username: string;
   displayName: string;
@@ -41,8 +44,8 @@ export interface PasswordResetRequestResponse {
 interface AuthContextValue {
   user: SessionUser | null;
   loading: boolean;
-  login: (identifier: string, password: string) => Promise<void>;
-  requestPasswordReset: (identifier: string) => Promise<PasswordResetRequestResponse>;
+  login: (identifier: string, password: string, organizationSlug?: string) => Promise<void>;
+  requestPasswordReset: (identifier: string, organizationSlug?: string) => Promise<PasswordResetRequestResponse>;
   completePasswordReset: (token: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -101,14 +104,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => window.removeEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
   }, []);
 
-  async function login(identifier: string, password: string) {
-    const response = await apiPost<LoginResponse>("/auth/login", { identifier, password });
+  async function login(identifier: string, password: string, organizationSlug?: string) {
+    const response = await apiPost<LoginResponse>("/auth/login", { identifier, password, organizationSlug });
     persistSession(response);
     setUser(response.user);
   }
 
-  async function requestPasswordReset(identifier: string) {
-    return apiPost<PasswordResetRequestResponse>("/auth/password-resets/request", { identifier });
+  async function requestPasswordReset(identifier: string, organizationSlug?: string) {
+    return apiPost<PasswordResetRequestResponse>("/auth/password-resets/request", { identifier, organizationSlug });
   }
 
   async function completePasswordReset(token: string, password: string) {

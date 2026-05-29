@@ -15,6 +15,9 @@ export async function issueTokenPair(app: FastifyInstance, repository: AuthRepos
   const accessToken = await app.jwt.sign(
     {
       id: user.id,
+      organizationId: user.organizationId,
+      organizationSlug: user.organizationSlug,
+      organizationName: user.organizationName,
       email: user.email,
       username: user.username,
       displayName: user.displayName,

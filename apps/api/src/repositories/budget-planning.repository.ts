@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { AppError } from "../core/errors/app-error";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import { mapBudgetPlan, mapBudgetPlanSnapshot, mapFinanceRecord, mapGeneralExpense } from "./mappers";
 import type { BudgetPlanUpdateRecord, BudgetPlanningRepository } from "./types";
 
@@ -94,6 +95,7 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
 
   public async updatePlan(year: number, month: number, payload: BudgetPlanUpdateRecord) {
     assertMonth(month);
+    const organizationId = getCurrentOrganizationIdOrDefault();
 
     const data: Prisma.BudgetPlanUncheckedUpdateInput = {};
     if (hasOwn(payload, "expectedIncomeMxn")) {
@@ -108,7 +110,8 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
 
     const plan = await this.prisma.budgetPlan.upsert({
       where: {
-        year_month: {
+        organizationId_year_month: {
+          organizationId,
           year,
           month
         }
@@ -182,9 +185,11 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
   }
 
   private async findOrCreatePlan(year: number, month: number) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
     const plan = await this.prisma.budgetPlan.upsert({
       where: {
-        year_month: {
+        organizationId_year_month: {
+          organizationId,
           year,
           month
         }
@@ -203,9 +208,11 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
   }
 
   private async findOrCreateSnapshot(year: number, month: number) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
     const existing = await this.prisma.budgetPlanSnapshot.findUnique({
       where: {
-        year_month: {
+        organizationId_year_month: {
+          organizationId,
           year,
           month
         }
@@ -219,7 +226,8 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
     const [plan, financeRecords, generalExpenses] = await Promise.all([
       this.prisma.budgetPlan.findUnique({
         where: {
-          year_month: {
+          organizationId_year_month: {
+            organizationId,
             year,
             month
           }

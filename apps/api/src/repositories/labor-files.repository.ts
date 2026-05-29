@@ -19,6 +19,7 @@ import {
 } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import { extractLaborSalaryFromDocument, isLaborSalaryDocumentType } from "../modules/labor-files/labor-salary-intelligence";
 import { mapLaborFile, mapLaborFileDocument, mapLaborGlobalVacationDay, mapLaborVacationEvent } from "./mappers";
 import type { LaborFileDocumentUploadRecord, LaborFilesRepository, LaborVacationAcceptanceUploadRecord } from "./types";
@@ -859,6 +860,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
   }
 
   public async createGlobalVacationDay(payload: LaborGlobalVacationDayInput) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
     const vacationDateKeys = getGlobalVacationDateKeys(payload);
     const date = toDate(vacationDateKeys[0] ?? payload.date);
     if (!date) {
@@ -872,7 +874,12 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     }
 
     const record = await this.prisma.laborGlobalVacationDay.upsert({
-      where: { date },
+      where: {
+        organizationId_date: {
+          organizationId,
+          date
+        }
+      },
       update: {
         days: new Prisma.Decimal(days),
         vacationDates: vacationDateKeys,

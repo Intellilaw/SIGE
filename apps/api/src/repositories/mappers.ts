@@ -36,6 +36,7 @@ import type {
   TaskTrackingRecord
 } from "@sige/contracts";
 import { buildQuoteTitle, deriveEffectivePermissions } from "@sige/contracts";
+import { ORGANIZATIONS, getDefaultOrganization } from "@sige/contracts";
 
 import type { RefreshTokenRecord, StoredUser } from "./types";
 
@@ -190,6 +191,7 @@ function asQuoteTemplateRows(value: unknown, lineItems: QuoteTemplate["lineItems
 
 export function mapUser(record: {
   id: string;
+  organizationId?: string | null;
   email: string;
   username: string;
   displayName: string;
@@ -203,8 +205,14 @@ export function mapUser(record: {
   isActive: boolean;
   passwordResetRequired: boolean;
 }): AuthUser {
+  const organization =
+    ORGANIZATIONS.find((entry) => entry.id === record.organizationId) ?? getDefaultOrganization();
+
   return {
     id: record.id,
+    organizationId: organization.id,
+    organizationSlug: organization.slug,
+    organizationName: organization.name,
     email: record.email,
     username: record.username,
     displayName: record.displayName,

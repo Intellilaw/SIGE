@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { Prisma, PrismaClient } from "@prisma/client";
-import { buildTaskModuleIdFromTeamKey, COMMISSION_SECTIONS, TASK_MODULES, TEAM_OPTIONS } from "@sige/contracts";
+import { buildTaskModuleIdFromTeamKey, COMMISSION_SECTIONS, ORGANIZATIONS, TASK_MODULES, TEAM_OPTIONS } from "@sige/contracts";
 
 import { hashPassword } from "../src/core/auth/passwords";
 
@@ -64,15 +64,41 @@ async function seedTaskModules() {
   }
 }
 
+async function seedOrganizations() {
+  for (const organization of ORGANIZATIONS) {
+    await prisma.organization.upsert({
+      where: { id: organization.id },
+      update: {
+        slug: organization.slug,
+        name: organization.name,
+        isActive: organization.isActive
+      },
+      create: {
+        id: organization.id,
+        slug: organization.slug,
+        name: organization.name,
+        isActive: organization.isActive
+      }
+    });
+  }
+}
+
 async function seedUserTeams() {
+  const organizationId = "org-rusconi";
   for (const [index, team] of TEAM_OPTIONS.entries()) {
     await prisma.userTeam.upsert({
-      where: { key: team.key },
+      where: {
+        organizationId_key: {
+          organizationId,
+          key: team.key
+        }
+      },
       update: {
         label: team.label,
         sortOrder: (index + 1) * 10
       },
       create: {
+        organizationId,
         key: team.key,
         label: team.label,
         sortOrder: (index + 1) * 10,
@@ -114,7 +140,12 @@ async function seedUserTeamTaskModules() {
 
 async function seedUsers() {
   await prisma.user.upsert({
-    where: { email: "director@sige.local" },
+    where: {
+      organizationId_email: {
+        organizationId: "org-rusconi",
+        email: "director@sige.local"
+      }
+    },
     update: {
       username: "director",
       displayName: "Direccion General",
@@ -132,6 +163,7 @@ async function seedUsers() {
     },
     create: {
       id: "usr-superadmin",
+      organizationId: "org-rusconi",
       email: "director@sige.local",
       username: "director",
       displayName: "Direccion General",
@@ -150,7 +182,12 @@ async function seedUsers() {
   });
 
   await prisma.user.upsert({
-    where: { email: "clientes@sige.local" },
+    where: {
+      organizationId_email: {
+        organizationId: "org-rusconi",
+        email: "clientes@sige.local"
+      }
+    },
     update: {
       username: "clientes",
       displayName: "Relacion con Clientes",
@@ -168,6 +205,7 @@ async function seedUsers() {
     },
     create: {
       id: "usr-client-relations",
+      organizationId: "org-rusconi",
       email: "clientes@sige.local",
       username: "clientes",
       displayName: "Relacion con Clientes",
@@ -184,15 +222,64 @@ async function seedUsers() {
       passwordHash: hashPassword("ChangeMe123!")
     }
   });
+
+  await prisma.user.upsert({
+    where: {
+      organizationId_email: {
+        organizationId: "org-intellilaw",
+        email: "eduardo.rusconi@intellilaw.ai"
+      }
+    },
+    update: {
+      username: "Eduardo Rusconi",
+      displayName: "Eduardo Rusconi",
+      shortName: "EMRT",
+      role: "SUPERADMIN",
+      legacyRole: "SUPERADMIN",
+      team: "ADMIN",
+      legacyTeam: "Direccion general",
+      specificRole: "Direccion general",
+      permissions: ["*"],
+      isActive: true,
+      passwordResetRequired: false,
+      emailConfirmedAt: new Date(),
+      passwordHash: hashPassword("ChangeMe123!")
+    },
+    create: {
+      id: "usr-intellilaw-superadmin",
+      organizationId: "org-intellilaw",
+      email: "eduardo.rusconi@intellilaw.ai",
+      username: "Eduardo Rusconi",
+      displayName: "Eduardo Rusconi",
+      shortName: "EMRT",
+      role: "SUPERADMIN",
+      legacyRole: "SUPERADMIN",
+      team: "ADMIN",
+      legacyTeam: "Direccion general",
+      specificRole: "Direccion general",
+      permissions: ["*"],
+      isActive: true,
+      passwordResetRequired: false,
+      emailConfirmedAt: new Date(),
+      passwordHash: hashPassword("ChangeMe123!")
+    }
+  });
 }
 
 async function seedCommissionReceivers() {
-  for (const name of COMMISSION_SECTIONS) {
-    await prisma.commissionReceiver.upsert({
-      where: { name },
-      update: { active: true },
-      create: { name, active: true }
-    });
+  for (const organization of ORGANIZATIONS.filter((entry) => entry.isActive)) {
+    for (const name of COMMISSION_SECTIONS) {
+      await prisma.commissionReceiver.upsert({
+        where: {
+          organizationId_name: {
+            organizationId: organization.id,
+            name
+          }
+        },
+        update: { active: true },
+        create: { organizationId: organization.id, name, active: true }
+      });
+    }
   }
 }
 
@@ -400,6 +487,7 @@ async function seedOperationalData() {
 }
 
 async function main() {
+  await seedOrganizations();
   await seedTaskModules();
   await seedUserTeams();
   await seedUserTeamTaskModules();

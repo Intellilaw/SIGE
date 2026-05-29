@@ -8,6 +8,7 @@ import {
 } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import { mapHoliday } from "./mappers";
 import type { HolidayWriteRecord, HolidaysRepository } from "./types";
 
@@ -222,13 +223,15 @@ export class PrismaHolidaysRepository implements HolidaysRepository {
   }
 
   public async create(payload: HolidayWriteRecord) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
     const date = parseDateOnly(payload.date);
     const authority = resolveAuthority(payload.authorityShortName);
     const label = normalizeLabel(payload.label);
 
     const record = await this.prisma.holiday.upsert({
       where: {
-        authorityShortName_date: {
+        organizationId_authorityShortName_date: {
+          organizationId,
           authorityShortName: authority.shortName,
           date
         }

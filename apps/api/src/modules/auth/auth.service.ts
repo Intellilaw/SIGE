@@ -17,8 +17,8 @@ interface PasswordResetPreview {
 export class AuthService {
   public constructor(private readonly repository: AuthRepository) {}
 
-  public async login(identifier: string, password: string) {
-    const user = await this.repository.findStoredUserByIdentifier(identifier);
+  public async login(identifier: string, password: string, organizationId: string) {
+    const user = await this.repository.findStoredUserByIdentifier(identifier, organizationId);
     if (!user || !verifyPassword(password, user.passwordHash)) {
       throw new AppError(401, "INVALID_CREDENTIALS", "Invalid username or password.");
     }
@@ -52,11 +52,12 @@ export class AuthService {
 
   public async requestPasswordReset(
     identifier: string,
+    organizationId: string,
     appOrigin: string,
     ttlMinutes: number,
     options?: { exposePreview?: boolean }
   ) {
-    const user = await this.repository.findStoredUserByIdentifier(identifier);
+    const user = await this.repository.findStoredUserByIdentifier(identifier, organizationId);
 
     if (!user || !user.isActive) {
       return this.buildGenericPasswordResetResponse();

@@ -13,7 +13,7 @@ import type {
   TaskTrackingRecord,
   Team
 } from "@sige/contracts";
-import { APP_VERSION_BADGE, TEAM_OPTIONS, buildDisplayName } from "@sige/contracts";
+import { APP_PRODUCT_NAME, APP_VERSION_BADGE, TEAM_OPTIONS, buildDisplayName } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
@@ -615,7 +615,7 @@ export function MobileProtectedLayout() {
   const { user, loading, logout } = useAuth();
 
   if (loading) {
-    return <div className="mobile-centered">Cargando SIGE...</div>;
+    return <div className="mobile-centered">Cargando {APP_PRODUCT_NAME}...</div>;
   }
 
   if (!user) {
@@ -650,7 +650,7 @@ function MobileProtectedShell({
     <div className="mobile-app-shell">
       <header className="mobile-topbar">
         <div>
-          <strong>SIGE movil <span className="mobile-topbar-version">{APP_VERSION_BADGE}</span></strong>
+          <strong>{APP_PRODUCT_NAME} movil <span className="mobile-topbar-version">{APP_VERSION_BADGE}</span></strong>
           <span>{mobileUserName}</span>
         </div>
         <button type="button" onClick={logout}>Salir</button>

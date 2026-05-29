@@ -301,7 +301,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       throw new AppError(404, "INTERNAL_CONTRACT_CLIENT_NOT_FOUND", "El cliente seleccionado no existe.");
     }
 
-    const existing = await this.prisma.internalContract.findUnique({
+    const existing = await this.prisma.internalContract.findFirst({
       where: { sourceMatterId },
       select: { id: true, contractNumber: true }
     });
@@ -433,7 +433,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       return null;
     }
 
-    const record = await this.prisma.internalContract.findUnique({
+    const record = await this.prisma.internalContract.findFirst({
       where: { sourceMatterId },
       select: {
         id: true,
@@ -657,7 +657,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
         : attempt === 1
           ? `${normalizedBase}-PSP`
           : `${normalizedBase}-PSP-${attempt}`;
-      const existing = await this.prisma.internalContract.findUnique({
+      const existing = await this.prisma.internalContract.findFirst({
         where: { contractNumber: candidate },
         select: { id: true }
       });

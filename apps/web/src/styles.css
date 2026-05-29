@@ -451,6 +451,11 @@ textarea {
   background: rgba(255, 255, 255, 0.7);
 }
 
+.user-card span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .content {
   padding: 28px;
   min-width: 0;

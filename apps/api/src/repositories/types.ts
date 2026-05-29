@@ -76,6 +76,7 @@ export interface StoredUser extends AuthUser {
 }
 
 export interface CreateManagedUserRecord {
+  organizationId?: string;
   email: string;
   username: string;
   displayName?: string;
@@ -106,7 +107,7 @@ export interface UpdateManagedUserRecord {
 }
 
 export interface AuthRepository {
-  findStoredUserByIdentifier(identifier: string): Promise<StoredUser | null>;
+  findStoredUserByIdentifier(identifier: string, organizationId?: string): Promise<StoredUser | null>;
   findUserById(userId: string): Promise<AuthUser | null>;
   updateLastLoginAt(userId: string): Promise<void>;
   updatePassword(userId: string, passwordHash: string, options?: {

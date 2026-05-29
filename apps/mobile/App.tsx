@@ -1,5 +1,6 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
+import { APP_MOBILE_DEFAULT_URL, APP_MOBILE_NAME, APP_VERSION_BADGE } from "@sige/contracts";
 import {
   ActivityIndicator,
   BackHandler,
@@ -13,8 +14,7 @@ import {
 import { WebView } from "react-native-webview";
 import type { WebViewNavigation } from "react-native-webview";
 
-const DEFAULT_SIGE_MOBILE_URL = "https://www.intellilaw.ai/mobile";
-const SIGE_MOBILE_URL = process.env.EXPO_PUBLIC_SIGE_MOBILE_URL?.trim() || DEFAULT_SIGE_MOBILE_URL;
+const SIGE_MOBILE_URL = process.env.EXPO_PUBLIC_SIGE_MOBILE_URL?.trim() || APP_MOBILE_DEFAULT_URL;
 
 function withCacheBuster(url: string, nonce: number) {
   const separator = url.includes("?") ? "&" : "?";
@@ -66,6 +66,10 @@ export default function App() {
     <SafeAreaView style={styles.screen}>
       <ExpoStatusBar style="light" backgroundColor="#0f172a" translucent={false} />
       <View style={styles.header}>
+        <View style={styles.headerTitle}>
+          <Text style={styles.headerTitleText}>{APP_MOBILE_NAME}</Text>
+          <Text style={styles.headerVersionText}>{APP_VERSION_BADGE}</Text>
+        </View>
         <Pressable style={styles.headerButton} onPress={reload}>
           <Text style={styles.headerButtonText}>Recargar</Text>
         </Pressable>
@@ -90,12 +94,12 @@ export default function App() {
         renderLoading={() => (
           <View style={styles.loading}>
             <ActivityIndicator color="#155e75" size="large" />
-            <Text style={styles.loadingText}>Cargando SIGE Mobile...</Text>
+            <Text style={styles.loadingText}>Cargando {APP_MOBILE_NAME}...</Text>
           </View>
         )}
         renderError={(_, __, description) => (
           <View style={styles.errorState}>
-            <Text style={styles.errorTitle}>No se pudo cargar SIGE Mobile</Text>
+            <Text style={styles.errorTitle}>No se pudo cargar {APP_MOBILE_NAME}</Text>
             <Text style={styles.errorDescription}>{description}</Text>
             <Text style={styles.errorUrl}>{SIGE_MOBILE_URL}</Text>
             <Pressable style={styles.errorButton} onPress={reload}>
@@ -119,10 +123,23 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.12)",
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingBottom: 10,
     paddingTop: (NativeStatusBar.currentHeight ?? 0) + 8
+  },
+  headerTitle: {
+    gap: 2
+  },
+  headerTitleText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  headerVersionText: {
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 11,
+    fontWeight: "700"
   },
   headerButton: {
     borderColor: "rgba(255,255,255,0.28)",

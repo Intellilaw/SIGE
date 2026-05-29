@@ -3,10 +3,15 @@ import type { SystemRole, Team } from "@sige/contracts";
 import { deriveEffectivePermissions } from "@sige/contracts";
 
 import { AppError } from "../errors/app-error";
+import { enterTenantContext } from "../tenant/tenant-context";
 import type { SessionUser } from "./types";
 
 export async function requireAuth(request: FastifyRequest, _reply: FastifyReply) {
   await request.jwtVerify();
+  const user = getSessionUser(request);
+  if (user.organizationId) {
+    enterTenantContext(user.organizationId);
+  }
 }
 
 export function getSessionUser(request: FastifyRequest) {

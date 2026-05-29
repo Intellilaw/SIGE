@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getDefaultOrganization } from "@sige/contracts";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiPost } from "../../api/http-client";
@@ -29,6 +30,7 @@ export function PasswordResetPage() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const defaultOrganization = getDefaultOrganization();
 
   useEffect(() => {
     if (!token) {
@@ -83,7 +85,7 @@ export function PasswordResetPage() {
           Este paso define tu nueva contrasena y abre una sesion nueva en SIGE.
         </p>
         <p className="login-back-link">
-          <Link to="/intranet-login">Volver al acceso RC</Link>
+          <Link to={`/intranet-login?organization=${defaultOrganization.slug}`}>Volver al acceso {defaultOrganization.name}</Link>
         </p>
 
         {loading ? <div className="centered-inline-message">Validando enlace seguro...</div> : null}

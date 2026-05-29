@@ -1,22 +1,23 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-function readCentralAppVersion() {
+function readCentralContractString(name) {
   const versionFile = path.resolve(__dirname, "../../packages/contracts/src/app-version.ts");
   const source = fs.readFileSync(versionFile, "utf8");
-  const match = source.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+  const match = source.match(new RegExp(`${name}\\s*=\\s*"([^"]+)"`));
 
   if (!match) {
-    throw new Error(`Could not read APP_VERSION from ${versionFile}`);
+    throw new Error(`Could not read ${name} from ${versionFile}`);
   }
 
   return match[1];
 }
 
-const appVersion = readCentralAppVersion();
+const appVersion = readCentralContractString("APP_VERSION");
+const appName = readCentralContractString("APP_MOBILE_NAME");
 
 module.exports = {
-  name: "SIGE Mobile",
+  name: appName,
   slug: "sige-mobile",
   version: appVersion,
   orientation: "portrait",

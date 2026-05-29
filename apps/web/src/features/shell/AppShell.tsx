@@ -72,6 +72,7 @@ export function AppShell() {
         </div>
         <div className="user-card">
           <strong>{sidebarUserName}</strong>
+          {user?.organizationName ? <span>{user.organizationName}</span> : null}
           <button type="button" onClick={logout}>
             Cerrar sesion
           </button>

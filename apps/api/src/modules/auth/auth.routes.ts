@@ -5,6 +5,7 @@ import { getSessionUser, requireAuth } from "../../core/auth/guards";
 import { PASSWORD_POLICY_MESSAGE } from "../../core/auth/password-policy";
 import { createManagerDeEscritosSsoUrl } from "../../core/auth/sso-ticket";
 import { hashToken, issueTokenPair } from "../../core/auth/token-service";
+import { resolveOrganization, runWithTenantContext } from "../../core/tenant/tenant-context";
 import {
   clearAuthCookies,
   REFRESH_TOKEN_COOKIE_NAME,
@@ -13,11 +14,13 @@ import {
 
 const loginSchema = z.object({
   identifier: z.string().min(1),
-  password: z.string().min(8)
+  password: z.string().min(8),
+  organizationSlug: z.string().optional()
 });
 
 const passwordResetRequestSchema = z.object({
-  identifier: z.string().min(1)
+  identifier: z.string().min(1),
+  organizationSlug: z.string().optional()
 });
 
 const passwordResetTokenSchema = z.object({
@@ -49,13 +52,20 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/auth/login", async (request, reply) => {
     const payload = loginSchema.parse(request.body);
-    const user = await service.login(payload.identifier, payload.password);
-    const tokens = await issueTokenPair(app, app.repositories.auth, user);
-    setAuthCookies(reply, app.config, tokens);
+    const organization = resolveOrganization(payload.organizationSlug);
+    if (!organization.isActive) {
+      throw new app.errors.AppError(403, "ORGANIZATION_DISABLED", "This company access is not enabled.");
+    }
 
-    return {
-      user
-    };
+    return runWithTenantContext(organization.id, async () => {
+      const user = await service.login(payload.identifier, payload.password, organization.id);
+      const tokens = await issueTokenPair(app, app.repositories.auth, user);
+      setAuthCookies(reply, app.config, tokens);
+
+      return {
+        user
+      };
+    });
   });
 
   app.post("/auth/refresh", async (request, reply) => {
@@ -96,8 +106,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/auth/password-resets/request", async (request) => {
     const payload = passwordResetRequestSchema.parse(request.body);
+    const organization = resolveOrganization(payload.organizationSlug);
     return service.requestPasswordReset(
       payload.identifier,
+      organization.id,
       getAppOrigin(request, app.config.WEB_ORIGIN),
       app.config.PASSWORD_RESET_TTL_MINUTES,
       { exposePreview: app.config.PASSWORD_RESET_EXPOSE_PREVIEW }
