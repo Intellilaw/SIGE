@@ -538,6 +538,7 @@ export function GeneralExpensesPage() {
   const [loadingPayrollEmployees, setLoadingPayrollEmployees] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedSummaryDate, setCopiedSummaryDate] = useState("");
+  const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState<string | null>(null);
 
   const canRead = hasPermission(user?.permissions, "general-expenses:read") || hasPermission(user?.permissions, "general-expenses:write");
   const canWrite = hasPermission(user?.permissions, "general-expenses:write");
@@ -884,6 +885,39 @@ export function GeneralExpensesPage() {
     }
   }
 
+  async function handleDeletePayrollEntry(entry: GeneralExpensePayrollEntry) {
+    if (!canWrite || entry.finalPaymentApprovedByEmrt || deletingPayrollEntryId) {
+      return;
+    }
+
+    const employeeLabel = entry.employeeName || "esta fila";
+    if (!window.confirm(`Eliminar la fila de nómina de ${employeeLabel}?`)) {
+      return;
+    }
+
+    setDeletingPayrollEntryId(entry.id);
+
+    try {
+      await apiDelete(`/general-expenses/payroll/${entry.id}`);
+      setPayrollEntries((items) => items.filter((item) => item.id !== entry.id));
+      setPayrollDrafts((current) => {
+        if (!current[entry.id]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+      delete payrollPatchSequenceRef.current[entry.id];
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+      await loadPayrollEntries();
+    } finally {
+      setDeletingPayrollEntryId(null);
+    }
+  }
+
   async function handleCopyToNextMonth() {
     if (!canWrite) {
       return;
@@ -1187,18 +1221,19 @@ export function GeneralExpensesPage() {
                   <th>Confirmo que la nómina está timbrada (Araceli Lozano)</th>
                   <th>Pago autorizado EMRT</th>
                   <th>Aprobado por JNLS</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingPayroll ? (
                   <tr>
-                    <td colSpan={20} className="centered-inline-message">
+                    <td colSpan={21} className="centered-inline-message">
                       Cargando nómina...
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={20} className="centered-inline-message">
+                    <td colSpan={21} className="centered-inline-message">
                       Sin registros de nómina en esta quincena.
                     </td>
                   </tr>
@@ -1315,6 +1350,17 @@ export function GeneralExpensesPage() {
                         onChange={(event) => void persistPayrollPatch(entry.id, { reviewedByJnls: event.target.checked })}
                         disabled={!canReviewJnlsFlag || entry.finalPaymentApprovedByEmrt}
                       />
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="danger-button general-expense-delete-button"
+                        onClick={() => void handleDeletePayrollEntry(entry)}
+                        disabled={!canWrite || entry.finalPaymentApprovedByEmrt || Boolean(deletingPayrollEntryId)}
+                        title={entry.finalPaymentApprovedByEmrt ? "La fila ya fue autorizada por EMRT y no puede borrarse." : "Borrar fila de nómina"}
+                      >
+                        {deletingPayrollEntryId === entry.id ? "Borrando..." : "Borrar"}
+                      </button>
                     </td>
                     </tr>
                   );

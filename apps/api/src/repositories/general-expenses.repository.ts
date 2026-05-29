@@ -635,7 +635,10 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   }
 
   public async deletePayrollEntry(payrollEntryId: string) {
-    await this.findPayrollEntryOrThrow(payrollEntryId);
+    const current = await this.findPayrollEntryOrThrow(payrollEntryId);
+    if (current.finalPaymentApprovedByEmrt) {
+      throw new AppError(400, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_LOCKED", "La fila ya fue autorizada por EMRT y no puede borrarse.");
+    }
 
     await this.prisma.generalExpensePayrollEntry.delete({
       where: { id: payrollEntryId }
