@@ -1751,8 +1751,8 @@ export function GeneralExpensesPage() {
         </>
       ) : activeTab === "payroll" ? (
         <div className="general-expense-payroll-stack">
-          {renderPayrollTable(1, "Primera quincena")}
-          {renderPayrollTable(2, "Segunda quincena")}
+          {renderPayrollTable(1, "Primera quincena (pagada el día 25)")}
+          {renderPayrollTable(2, "Segunda quincena (pagada el día 10 del siguiente mes)")}
         </div>
       ) : (
         <section className="panel">
