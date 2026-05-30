@@ -99,11 +99,38 @@ function formatDate(value) {
     }
     return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("es-MX");
 }
+function formatLongDate(value) {
+    if (!value) {
+        return "-";
+    }
+    return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("es-MX", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+    });
+}
 function formatDateTime(value) {
     if (!value) {
         return "-";
     }
     return new Date(value).toLocaleString("es-MX");
+}
+function parseVacationSummaryLine(line) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex < 0) {
+        return {
+            kind: "heading",
+            label: line.trim(),
+            value: ""
+        };
+    }
+    const label = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    return {
+        kind: "row",
+        label,
+        value: value || "-"
+    };
 }
 function formatMoney(value) {
     if (!value || !Number.isFinite(value)) {
@@ -471,7 +498,7 @@ function formatVacationFormatDatesText(dates) {
 }
 function buildVacationFormatFormDefaults(laborFile) {
     const availableDays = laborFile
-        ? laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays
+        ? getVacationSummaryAvailableDays(laborFile)
         : 0;
     return {
         ...EMPTY_VACATION_FORMAT_FORM,
@@ -501,24 +528,43 @@ function getVacationFormatAccounting(laborFile, selectedDays) {
         hireDate: laborFile.hireDate.slice(0, 10),
         vacationYearStartDate: laborFile.vacationSummary.currentYearStartDate,
         completedYearsLabel: laborFile.vacationSummary.completedYearsLabel,
-        entitlementDays: laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays,
+        entitlementDays: getVacationSummaryAvailableDays(laborFile),
         pendingDays: Math.max(0, laborFile.vacationSummary.remainingDays - selectedDays),
         enjoyedDays: laborFile.vacationSummary.usedDays + selectedDays
     };
 }
-function getCountedPreviousYearPendingEvent(laborFile) {
+function getVacationSummaryAvailableDays(laborFile) {
+    return laborFile.vacationSummary.entitlementDays +
+        laborFile.vacationSummary.previousYearPendingDays +
+        laborFile.vacationSummary.yearBeforeLastPendingDays;
+}
+function getPreviousYearPendingPeriodDates(laborFile, pendingPeriod) {
+    return pendingPeriod === "YEAR_BEFORE_LAST"
+        ? {
+            startDate: laborFile.vacationSummary.yearBeforeLastStartDate,
+            endDate: laborFile.vacationSummary.yearBeforeLastEndDate
+        }
+        : {
+            startDate: laborFile.vacationSummary.previousYearStartDate,
+            endDate: laborFile.vacationSummary.previousYearEndDate
+        };
+}
+function getCountedPreviousYearPendingEvent(laborFile, pendingPeriod) {
     if (!laborFile) {
         return undefined;
     }
+    const periodDates = getPreviousYearPendingPeriodDates(laborFile, pendingPeriod);
     return laborFile.vacationEvents.find((event) => event.eventType === "PREVIOUS_YEAR_PENDING" &&
-        event.startDate === laborFile.vacationSummary.previousYearStartDate &&
-        event.endDate === laborFile.vacationSummary.previousYearEndDate);
+        event.startDate === periodDates.startDate &&
+        event.endDate === periodDates.endDate);
 }
-function buildPreviousYearPendingFormDefaults(laborFile) {
-    const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile);
+function buildPreviousYearPendingFormDefaults(laborFile, pendingPeriod) {
+    const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile, pendingPeriod);
     return {
         ...EMPTY_PREVIOUS_YEAR_PENDING_FORM,
-        days: laborFile?.vacationSummary.previousYearPendingDays ?? 0,
+        days: pendingPeriod === "YEAR_BEFORE_LAST"
+            ? laborFile?.vacationSummary.yearBeforeLastPendingDays ?? 0
+            : laborFile?.vacationSummary.previousYearPendingDays ?? 0,
         description: currentPendingEvent?.description ?? ""
     };
 }
@@ -612,6 +658,7 @@ export function LaborFilesPage() {
     const [vacationFormatSingleDate, setVacationFormatSingleDate] = useState("");
     const [generatingVacationFormat, setGeneratingVacationFormat] = useState(false);
     const [previousYearPendingForm, setPreviousYearPendingForm] = useState(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
+    const [yearBeforeLastPendingForm, setYearBeforeLastPendingForm] = useState(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
     const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
     const [globalVacationDays, setGlobalVacationDays] = useState([]);
     const [globalVacationForm, setGlobalVacationForm] = useState(EMPTY_GLOBAL_VACATION_FORM);
@@ -697,6 +744,7 @@ export function LaborFilesPage() {
             setVacationFormatRange({ startDate: "", endDate: "" });
             setVacationFormatSingleDate("");
             setPreviousYearPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
+            setYearBeforeLastPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
             return;
         }
         setProfileForm({
@@ -717,7 +765,8 @@ export function LaborFilesPage() {
         setVacationFormatFormOpen(false);
         setVacationFormatRange({ startDate: "", endDate: "" });
         setVacationFormatSingleDate("");
-        setPreviousYearPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile));
+        setPreviousYearPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile, "LAST_YEAR"));
+        setYearBeforeLastPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile, "YEAR_BEFORE_LAST"));
         setFlash(null);
     }, [selectedLaborFile?.id]);
     const metrics = useMemo(() => ({
@@ -1084,7 +1133,7 @@ export function LaborFilesPage() {
             setSigningVacationEventId(null);
         }
     }
-    async function handlePreviousYearPendingSubmit(event) {
+    async function handlePreviousYearPendingSubmit(event, pendingPeriod) {
         event.preventDefault();
         if (!selectedLaborFile || !canWrite) {
             return;
@@ -1093,20 +1142,26 @@ export function LaborFilesPage() {
             setFlash({ tone: "error", text: "Solo el superadmin Eduardo Rusconi puede agregar manualmente pendientes del año anterior." });
             return;
         }
-        if (!previousYearPendingForm.manualOverrideConfirmed) {
-            setFlash({ tone: "error", text: "Marca el checkbox para confirmar el ajuste manual del año anterior." });
+        const form = pendingPeriod === "YEAR_BEFORE_LAST" ? yearBeforeLastPendingForm : previousYearPendingForm;
+        const setForm = pendingPeriod === "YEAR_BEFORE_LAST" ? setYearBeforeLastPendingForm : setPreviousYearPendingForm;
+        const periodCopy = pendingPeriod === "YEAR_BEFORE_LAST"
+            ? "del año inmediato anterior al último año"
+            : "del último año";
+        if (!form.manualOverrideConfirmed) {
+            setFlash({ tone: "error", text: `Marca el checkbox para confirmar el ajuste manual ${periodCopy}.` });
             return;
         }
         setSavingPreviousYearPending(true);
         setFlash(null);
         try {
             await apiPost(`/labor-files/${selectedLaborFile.id}/previous-year-pending-vacations`, {
-                days: Number(previousYearPendingForm.days) || 0,
-                description: previousYearPendingForm.description || null,
-                manualOverrideConfirmed: true
+                days: Number(form.days) || 0,
+                description: form.description || null,
+                manualOverrideConfirmed: true,
+                pendingPeriod
             });
-            setPreviousYearPendingForm((current) => ({ ...current, manualOverrideConfirmed: false }));
-            setFlash({ tone: "success", text: "Saldo pendiente del año anterior actualizado." });
+            setForm((current) => ({ ...current, manualOverrideConfirmed: false }));
+            setFlash({ tone: "success", text: `Saldo pendiente ${periodCopy} actualizado.` });
             await loadLaborFiles(selectedLaborFile.id);
         }
         catch (error) {
@@ -1254,20 +1309,34 @@ export function LaborFilesPage() {
                                                                             ? `${latestVacationFormatEvent.days} días / ${formatVacationEventDates(latestVacationFormatEvent)}`
                                                                             : "Abre el formulario, selecciona los días y genera el Word del formato de vacaciones." })] }), _jsx("div", { className: "labor-file-vacation-format-actions", children: _jsx("button", { className: "primary-button", disabled: generatingVacationFormat, onClick: handleVacationFormatFormToggle, type: "button", children: vacationFormatFormOpen ? "Cerrar formulario" : "Abrir formulario" }) })] }), _jsxs("div", { className: "labor-file-vacation-conflict-rule", children: [_jsxs("div", { children: [_jsx("strong", { children: "Regla de equipo" }), _jsx("span", { children: "No se puede generar ni autorizar un formato si otra persona del mismo equipo pidi\u00F3 vacaciones en las mismas fechas." })] }), _jsxs("label", { className: "checkbox-row", children: [_jsx("input", { checked: canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict), disabled: !canOverrideVacationConflicts || generatingVacationFormat, type: "checkbox", onChange: (event) => updateVacationFormatFormField("overrideTeamVacationConflict", event.target.checked) }), _jsx("span", { children: "Override Eduardo Rusconi" })] }), _jsx("small", { children: canOverrideVacationConflicts
                                                                     ? "Este override permite continuar aun cuando existan cruces de fechas en el equipo."
-                                                                    : "Solo Eduardo Rusconi puede marcar este override." })] }), vacationFormatFormOpen ? (_jsxs("form", { className: "labor-file-vacation-format-form", onSubmit: handleVacationFormatGenerate, children: [_jsxs("div", { className: "labor-file-vacation-format-form-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Datos del formato" }), _jsx("span", { children: "Formulario editable para generar el Word en hoja membretada y guardarlo en el expediente." })] }), _jsx("button", { className: "ghost-button", disabled: generatingVacationFormat, onClick: handleVacationFormatFormReset, type: "button", children: "Restaurar datos" })] }), _jsxs("div", { className: "labor-file-vacation-format-stats", children: [_jsxs("div", { children: [_jsx("span", { children: "D\u00EDas solicitados" }), _jsx("strong", { children: vacationFormatSelectedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Quedar\u00EDan pendientes" }), _jsx("strong", { children: vacationFormatProjectedPending })] }), _jsxs("div", { children: [_jsx("span", { children: "Programados y autorizados" }), _jsx("strong", { children: vacationFormatProjectedCommitted })] })] }), _jsxs("div", { className: "labor-file-vacation-format-section", children: [_jsxs("div", { className: "labor-file-vacation-format-section-title", children: [_jsx("h4", { children: "Selecci\u00F3n de d\u00EDas" }), _jsxs("span", { children: [vacationFormatSelectedDays, " d\u00EDas en el formato"] })] }), _jsxs("div", { className: "labor-file-vacation-date-tools", children: [_jsxs("div", { className: "labor-file-vacation-date-group is-range", children: [_jsx("h3", { children: "D\u00EDas continuos" }), _jsxs("div", { className: "labor-file-vacation-date-row", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Inicio" }), _jsx("input", { type: "date", value: vacationFormatRange.startDate, onChange: (event) => setVacationFormatRange((current) => ({ ...current, startDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fin" }), _jsx("input", { type: "date", value: vacationFormatRange.endDate, onChange: (event) => setVacationFormatRange((current) => ({ ...current, endDate: event.target.value })) })] }), _jsx("button", { className: "secondary-button", onClick: handleVacationFormatRangeAdd, type: "button", children: "Agregar rango" })] })] }), _jsxs("div", { className: "labor-file-vacation-date-group is-single", children: [_jsx("h3", { children: "D\u00EDa suelto" }), _jsxs("div", { className: "labor-file-vacation-date-row", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: vacationFormatSingleDate, onChange: (event) => setVacationFormatSingleDate(event.target.value) })] }), _jsx("button", { className: "secondary-button", onClick: handleVacationFormatSingleDateAdd, type: "button", children: "Agregar d\u00EDa" })] })] })] }), _jsx("div", { className: "labor-file-vacation-selected-days", children: vacationFormatForm.vacationDates.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Agrega d\u00EDas continuos o salteados." })) : (_jsx("div", { className: "labor-file-vacation-day-chips", children: vacationFormatForm.vacationDates.map((date) => (_jsxs("button", { onClick: () => handleVacationFormatDateRemove(date), type: "button", children: [formatDate(date), " ", _jsx("span", { children: "Quitar" })] }, date))) })) })] }), _jsxs("div", { className: "labor-file-vacation-format-section", children: [_jsxs("div", { className: "labor-file-vacation-format-section-title", children: [_jsx("h4", { children: "Informaci\u00F3n del documento" }), _jsx("span", { children: "Todos los campos pueden editarse antes de generar" })] }), _jsxs("div", { className: "labor-file-vacation-format-field-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nombre" }), _jsx("input", { required: true, value: vacationFormatForm.employeeName, onChange: (event) => updateVacationFormatFormField("employeeName", event.target.value) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha del formato" }), _jsx("input", { required: true, type: "date", value: vacationFormatForm.requestDate, onChange: (event) => updateVacationFormatFormField("requestDate", event.target.value) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "El interesado" }), _jsx("input", { value: vacationFormatForm.interestedName, onChange: (event) => updateVacationFormatFormField("interestedName", event.target.value) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Autoriza" }), _jsx("input", { value: vacationFormatForm.authorizerName, onChange: (event) => updateVacationFormatFormField("authorizerName", event.target.value) })] }), _jsxs("div", { className: "labor-file-vacation-format-accounting", children: [_jsxs("div", { children: [_jsx("span", { children: "Fecha de ingreso" }), _jsx("strong", { children: formatDate(vacationFormatAccounting.hireDate) })] }), _jsxs("div", { children: [_jsx("span", { children: "Fecha de inicio" }), _jsx("strong", { children: formatDate(vacationFormatAccounting.vacationYearStartDate) })] }), _jsxs("div", { children: [_jsx("span", { children: "A\u00F1os cumplidos" }), _jsx("strong", { children: vacationFormatAccounting.completedYearsLabel || "-" })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas que corresponden" }), _jsx("strong", { children: vacationFormatAccounting.entitlementDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("strong", { children: vacationFormatAccounting.pendingDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas disfrutados" }), _jsx("strong", { children: vacationFormatAccounting.enjoyedDays })] })] }), _jsxs("label", { className: "form-field labor-file-vacation-format-wide-field", children: [_jsx("span", { children: "Descripci\u00F3n" }), _jsx("input", { value: vacationFormatForm.description, onChange: (event) => updateVacationFormatFormField("description", event.target.value) })] })] })] }), _jsxs("div", { className: "form-actions", children: [_jsx("button", { className: "primary-button", disabled: generatingVacationFormat, type: "submit", children: generatingVacationFormat ? "Generando..." : "Generar, guardar y contabilizar" }), latestVacationFormatEvent ? (_jsx("button", { className: "secondary-button", disabled: vacationFileActionId === latestVacationFormatEvent.id, onClick: () => void handleVacationAcceptanceDownload(latestVacationFormatEvent, "download"), type: "button", children: isVacationEventAuthorized(latestVacationFormatEvent) ? "Descargar PDF firmado" : "Descargar formato" })) : null, _jsx("button", { className: "secondary-button", disabled: generatingVacationFormat, onClick: () => setVacationFormatFormOpen(false), type: "button", children: "Cerrar formulario" })] })] })) : null] })) : (_jsx("div", { className: "centered-inline-message", children: "Solo usuarios con permisos de escritura pueden generar formatos de vacaciones." }))] }), _jsxs("section", { className: "panel labor-file-vacations-panel", children: [_jsx("div", { className: "panel-header", children: _jsxs("div", { children: [_jsx("h2", { children: "Contabilizaci\u00F3n de vacaciones" }), _jsxs("span", { children: [selectedLaborFile.vacationSummary.remainingDays, " d\u00EDas disponibles"] })] }) }), _jsx("div", { className: "labor-file-vacation-summary", children: selectedLaborFile.vacationSummary.lines.map((line) => (_jsx("p", { children: line }, line))) }), _jsxs("div", { className: "labor-file-vacation-accounting-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "D\u00EDas ya devengados" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.earnedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas no devengados" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.unearnedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Programados sin PDF firmado" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.scheduledDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Autorizados con PDF firmado" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.authorizedDays })] })] }), _jsxs("form", { className: "labor-file-previous-year-pending", onSubmit: handlePreviousYearPendingSubmit, children: [_jsxs("div", { className: "labor-file-previous-year-pending-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pendientes del a\u00F1o anterior" }), _jsxs("span", { children: ["Solo se suma el saldo del periodo inmediato anterior: ", formatDate(selectedLaborFile.vacationSummary.previousYearStartDate), " al ", formatDate(selectedLaborFile.vacationSummary.previousYearEndDate), ". Los saldos de a\u00F1os anteriores quedan fuera de la contabilidad."] })] }), _jsxs("strong", { children: [selectedLaborFile.vacationSummary.previousYearPendingDays, " d\u00EDas"] })] }), _jsxs("label", { className: `labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`, children: [_jsx("input", { checked: previousYearPendingForm.manualOverrideConfirmed, disabled: !canManagePreviousYearPending || savingPreviousYearPending, type: "checkbox", onChange: (event) => setPreviousYearPendingForm((current) => ({
+                                                                    : "Solo Eduardo Rusconi puede marcar este override." })] }), vacationFormatFormOpen ? (_jsxs("form", { className: "labor-file-vacation-format-form", onSubmit: handleVacationFormatGenerate, children: [_jsxs("div", { className: "labor-file-vacation-format-form-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Datos del formato" }), _jsx("span", { children: "Formulario editable para generar el Word en hoja membretada y guardarlo en el expediente." })] }), _jsx("button", { className: "ghost-button", disabled: generatingVacationFormat, onClick: handleVacationFormatFormReset, type: "button", children: "Restaurar datos" })] }), _jsxs("div", { className: "labor-file-vacation-format-stats", children: [_jsxs("div", { children: [_jsx("span", { children: "D\u00EDas solicitados" }), _jsx("strong", { children: vacationFormatSelectedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Quedar\u00EDan pendientes" }), _jsx("strong", { children: vacationFormatProjectedPending })] }), _jsxs("div", { children: [_jsx("span", { children: "Programados y autorizados" }), _jsx("strong", { children: vacationFormatProjectedCommitted })] })] }), _jsxs("div", { className: "labor-file-vacation-format-section", children: [_jsxs("div", { className: "labor-file-vacation-format-section-title", children: [_jsx("h4", { children: "Selecci\u00F3n de d\u00EDas" }), _jsxs("span", { children: [vacationFormatSelectedDays, " d\u00EDas en el formato"] })] }), _jsxs("div", { className: "labor-file-vacation-date-tools", children: [_jsxs("div", { className: "labor-file-vacation-date-group is-range", children: [_jsx("h3", { children: "D\u00EDas continuos" }), _jsxs("div", { className: "labor-file-vacation-date-row", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Inicio" }), _jsx("input", { type: "date", value: vacationFormatRange.startDate, onChange: (event) => setVacationFormatRange((current) => ({ ...current, startDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fin" }), _jsx("input", { type: "date", value: vacationFormatRange.endDate, onChange: (event) => setVacationFormatRange((current) => ({ ...current, endDate: event.target.value })) })] }), _jsx("button", { className: "secondary-button", onClick: handleVacationFormatRangeAdd, type: "button", children: "Agregar rango" })] })] }), _jsxs("div", { className: "labor-file-vacation-date-group is-single", children: [_jsx("h3", { children: "D\u00EDa suelto" }), _jsxs("div", { className: "labor-file-vacation-date-row", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: vacationFormatSingleDate, onChange: (event) => setVacationFormatSingleDate(event.target.value) })] }), _jsx("button", { className: "secondary-button", onClick: handleVacationFormatSingleDateAdd, type: "button", children: "Agregar d\u00EDa" })] })] })] }), _jsx("div", { className: "labor-file-vacation-selected-days", children: vacationFormatForm.vacationDates.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Agrega d\u00EDas continuos o salteados." })) : (_jsx("div", { className: "labor-file-vacation-day-chips", children: vacationFormatForm.vacationDates.map((date) => (_jsxs("button", { onClick: () => handleVacationFormatDateRemove(date), type: "button", children: [formatDate(date), " ", _jsx("span", { children: "Quitar" })] }, date))) })) })] }), _jsxs("div", { className: "labor-file-vacation-format-section", children: [_jsxs("div", { className: "labor-file-vacation-format-section-title", children: [_jsx("h4", { children: "Informaci\u00F3n del documento" }), _jsx("span", { children: "Todos los campos pueden editarse antes de generar" })] }), _jsxs("div", { className: "labor-file-vacation-format-field-grid", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nombre" }), _jsx("input", { required: true, value: vacationFormatForm.employeeName, onChange: (event) => updateVacationFormatFormField("employeeName", event.target.value) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha del formato" }), _jsx("input", { required: true, type: "date", value: vacationFormatForm.requestDate, onChange: (event) => updateVacationFormatFormField("requestDate", event.target.value) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "El interesado" }), _jsx("input", { value: vacationFormatForm.interestedName, onChange: (event) => updateVacationFormatFormField("interestedName", event.target.value) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Autoriza" }), _jsx("input", { value: vacationFormatForm.authorizerName, onChange: (event) => updateVacationFormatFormField("authorizerName", event.target.value) })] }), _jsxs("div", { className: "labor-file-vacation-format-accounting", children: [_jsxs("div", { children: [_jsx("span", { children: "Fecha de ingreso" }), _jsx("strong", { children: formatDate(vacationFormatAccounting.hireDate) })] }), _jsxs("div", { children: [_jsx("span", { children: "Fecha de inicio" }), _jsx("strong", { children: formatDate(vacationFormatAccounting.vacationYearStartDate) })] }), _jsxs("div", { children: [_jsx("span", { children: "A\u00F1os cumplidos" }), _jsx("strong", { children: vacationFormatAccounting.completedYearsLabel || "-" })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas que corresponden" }), _jsx("strong", { children: vacationFormatAccounting.entitlementDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("strong", { children: vacationFormatAccounting.pendingDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas disfrutados" }), _jsx("strong", { children: vacationFormatAccounting.enjoyedDays })] })] }), _jsxs("label", { className: "form-field labor-file-vacation-format-wide-field", children: [_jsx("span", { children: "Descripci\u00F3n" }), _jsx("input", { value: vacationFormatForm.description, onChange: (event) => updateVacationFormatFormField("description", event.target.value) })] })] })] }), _jsxs("div", { className: "form-actions", children: [_jsx("button", { className: "primary-button", disabled: generatingVacationFormat, type: "submit", children: generatingVacationFormat ? "Generando..." : "Generar, guardar y contabilizar" }), latestVacationFormatEvent ? (_jsx("button", { className: "secondary-button", disabled: vacationFileActionId === latestVacationFormatEvent.id, onClick: () => void handleVacationAcceptanceDownload(latestVacationFormatEvent, "download"), type: "button", children: isVacationEventAuthorized(latestVacationFormatEvent) ? "Descargar PDF firmado" : "Descargar formato" })) : null, _jsx("button", { className: "secondary-button", disabled: generatingVacationFormat, onClick: () => setVacationFormatFormOpen(false), type: "button", children: "Cerrar formulario" })] })] })) : null] })) : (_jsx("div", { className: "centered-inline-message", children: "Solo usuarios con permisos de escritura pueden generar formatos de vacaciones." }))] }), _jsxs("section", { className: "panel labor-file-vacations-panel", children: [_jsx("div", { className: "panel-header", children: _jsxs("div", { children: [_jsx("h2", { children: "Contabilizaci\u00F3n de vacaciones" }), _jsxs("span", { children: [selectedLaborFile.vacationSummary.remainingDays, " d\u00EDas disponibles"] })] }) }), _jsx("div", { className: "labor-file-vacation-summary", children: selectedLaborFile.vacationSummary.lines.map((line) => {
+                                                    const item = parseVacationSummaryLine(line);
+                                                    return item.kind === "heading" ? (_jsx("div", { className: "labor-file-vacation-summary-heading", children: item.label }, line)) : (_jsxs("div", { className: "labor-file-vacation-summary-row", children: [_jsx("span", { children: item.label }), _jsx("strong", { children: item.value })] }, line));
+                                                }) }), _jsxs("div", { className: "labor-file-vacation-accounting-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "D\u00EDas ya devengados" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.earnedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas no devengados" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.unearnedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Programados sin PDF firmado" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.scheduledDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Autorizados con PDF firmado" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.authorizedDays })] })] }), _jsxs("form", { className: "labor-file-previous-year-pending", onSubmit: (event) => void handlePreviousYearPendingSubmit(event, "LAST_YEAR"), children: [_jsxs("div", { className: "labor-file-previous-year-pending-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pendientes del \u00FAltimo a\u00F1o" }), _jsxs("span", { children: ["Saldo del \u00FAltimo a\u00F1o: ", formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate), "."] })] }), _jsxs("strong", { children: [selectedLaborFile.vacationSummary.previousYearPendingDays, " d\u00EDas"] })] }), _jsxs("label", { className: `labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`, children: [_jsx("input", { checked: previousYearPendingForm.manualOverrideConfirmed, disabled: !canManagePreviousYearPending || savingPreviousYearPending, type: "checkbox", onChange: (event) => setPreviousYearPendingForm((current) => ({
                                                                     ...current,
                                                                     manualOverrideConfirmed: event.target.checked
-                                                                })) }), _jsx("span", { children: "Agregar o actualizar manualmente d\u00EDas pendientes del a\u00F1o anterior" })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, min: "0", step: "0.5", type: "number", value: previousYearPendingForm.days, onChange: (event) => setPreviousYearPendingForm((current) => ({
+                                                                })) }), _jsxs("span", { children: ["Agregar o actualizar manualmente d\u00EDas pendientes del \u00FAltimo a\u00F1o (", formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate), ")"] })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, min: "0", step: "0.5", type: "number", value: previousYearPendingForm.days, onChange: (event) => setPreviousYearPendingForm((current) => ({
                                                                             ...current,
                                                                             days: Number(event.target.value)
                                                                         })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nota" }), _jsx("input", { disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, placeholder: "Motivo o referencia del ajuste", value: previousYearPendingForm.description, onChange: (event) => setPreviousYearPendingForm((current) => ({
                                                                             ...current,
                                                                             description: event.target.value
                                                                         })) })] }), _jsx("button", { className: "secondary-button", disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, type: "submit", children: savingPreviousYearPending ? "Guardando..." : "Guardar saldo" })] }), _jsxs("small", { children: [canManagePreviousYearPending
-                                                                ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente anterior de este expediente."
+                                                                ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente del último año de este expediente."
                                                                 : "Solo el superadmin Eduardo Rusconi puede marcar este checkbox y guardar el ajuste.", selectedLaborFile.vacationSummary.ignoredPreviousYearPendingDays > 0
                                                                 ? ` No se contabilizan ${selectedLaborFile.vacationSummary.ignoredPreviousYearPendingDays} días de años más antiguos.`
-                                                                : ""] })] }), _jsx("div", { className: "labor-file-vacation-events", children: selectedLaborFile.vacationEvents.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Sin vacaciones registradas." })) : selectedLaborFile.vacationEvents.map((event) => {
+                                                                : ""] })] }), _jsxs("form", { className: "labor-file-previous-year-pending", onSubmit: (event) => void handlePreviousYearPendingSubmit(event, "YEAR_BEFORE_LAST"), children: [_jsxs("div", { className: "labor-file-previous-year-pending-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pendientes del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o" }), _jsxs("span", { children: ["Saldo del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o: ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate), "."] })] }), _jsxs("strong", { children: [selectedLaborFile.vacationSummary.yearBeforeLastPendingDays, " d\u00EDas"] })] }), _jsxs("label", { className: `labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`, children: [_jsx("input", { checked: yearBeforeLastPendingForm.manualOverrideConfirmed, disabled: !canManagePreviousYearPending || savingPreviousYearPending, type: "checkbox", onChange: (event) => setYearBeforeLastPendingForm((current) => ({
+                                                                    ...current,
+                                                                    manualOverrideConfirmed: event.target.checked
+                                                                })) }), _jsxs("span", { children: ["Agregar o actualizar manualmente d\u00EDas pendientes del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o (", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate), ")"] })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending, min: "0", step: "0.5", type: "number", value: yearBeforeLastPendingForm.days, onChange: (event) => setYearBeforeLastPendingForm((current) => ({
+                                                                            ...current,
+                                                                            days: Number(event.target.value)
+                                                                        })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nota" }), _jsx("input", { disabled: !canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending, placeholder: "Motivo o referencia del ajuste", value: yearBeforeLastPendingForm.description, onChange: (event) => setYearBeforeLastPendingForm((current) => ({
+                                                                            ...current,
+                                                                            description: event.target.value
+                                                                        })) })] }), _jsx("button", { className: "secondary-button", disabled: !canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending, type: "submit", children: savingPreviousYearPending ? "Guardando..." : "Guardar saldo" })] }), _jsx("small", { children: canManagePreviousYearPending
+                                                            ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente del año inmediato anterior al último año de este expediente."
+                                                            : "Solo el superadmin Eduardo Rusconi puede marcar este checkbox y guardar el ajuste." })] }), _jsx("div", { className: "labor-file-vacation-events", children: selectedLaborFile.vacationEvents.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Sin vacaciones registradas." })) : selectedLaborFile.vacationEvents.map((event) => {
                                                     const isAuthorized = isVacationEventAuthorized(event);
                                                     const isVacationRequest = event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION";
                                                     const canDeleteVacationEvent = canDeleteVacationEventForCurrentUser(event);

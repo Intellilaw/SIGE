@@ -71,6 +71,64 @@ export const EXECUTION_MODULES = [
 export const EXECUTION_MODULE_BY_SLUG = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.slug, module]));
 export const EXECUTION_MODULE_BY_ID = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.moduleId, module]));
 export const EXECUTION_MODULE_BY_TEAM = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.team, module]));
+const FALLBACK_COLORS = ["#0f766e", "#7c3aed", "#c2410c", "#0369a1", "#4d7c0f", "#be123c"];
+const FALLBACK_ICONS_BY_TEAM = {
+    ADMIN: "A",
+    ADMIN_OPERATIONS: "O",
+    AUDIT: "V",
+    CLIENT_RELATIONS: "C",
+    FINANCE: "$",
+    SALES: "S"
+};
+function getFallbackColor(moduleId) {
+    const score = Array.from(moduleId).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return FALLBACK_COLORS[score % FALLBACK_COLORS.length];
+}
+function getModuleInitial(label) {
+    return label.trim().charAt(0).toUpperCase() || "T";
+}
+function getFallbackIcon(module) {
+    return FALLBACK_ICONS_BY_TEAM[module.team] ?? getModuleInitial(module.label);
+}
+function getDefaultResponsible(module) {
+    return module.members?.find((member) => member.shortName || member.id)?.shortName
+        ?? module.members?.find((member) => member.shortName || member.id)?.id
+        ?? "";
+}
+export function buildExecutionModuleDescriptor(module) {
+    const legacyModule = EXECUTION_MODULE_BY_ID[module.id];
+    if (legacyModule) {
+        return {
+            ...legacyModule,
+            label: module.label || legacyModule.label,
+            shortLabel: module.label || legacyModule.shortLabel,
+            description: module.summary || legacyModule.description,
+            defaultResponsible: legacyModule.defaultResponsible || getDefaultResponsible(module),
+            definition: module
+        };
+    }
+    return {
+        moduleId: module.id,
+        slug: module.id,
+        team: module.team,
+        label: module.label,
+        shortLabel: module.label,
+        icon: getFallbackIcon(module),
+        color: getFallbackColor(module.id),
+        description: module.summary || "Espacio de tareas pendiente de configuracion.",
+        defaultResponsible: getDefaultResponsible(module),
+        definition: module
+    };
+}
+export function buildExecutionModuleDescriptors(modules) {
+    return modules.map(buildExecutionModuleDescriptor);
+}
+export function findExecutionModuleDescriptorBySlug(modules, slug) {
+    if (!slug) {
+        return undefined;
+    }
+    return buildExecutionModuleDescriptors(modules).find((module) => module.slug === slug || module.moduleId === slug);
+}
 export function canAccessAllExecutionModules(user) {
     return Boolean(user?.permissions?.includes("*") || user?.team === "ADMIN");
 }

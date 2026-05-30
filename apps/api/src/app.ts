@@ -100,6 +100,7 @@ import type {
   TasksRepository
 } from "./repositories/types";
 import { ACCESS_TOKEN_COOKIE_NAME } from "./core/auth/session-cookies";
+import { runWithEmptyTenantContext } from "./core/tenant/tenant-context";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -186,6 +187,10 @@ export async function buildApp() {
 
   app.decorate("config", env);
   app.decorate("errors", { AppError });
+  app.addHook("onRequest", (_request, _reply, done) => {
+    runWithEmptyTenantContext(done);
+  });
+
   const authRepository = new ResilientAuthRepository(
     new PrismaAuthRepository(prisma),
     env.APP_ENV === "development" && LocalAuthRepository.isAvailable()

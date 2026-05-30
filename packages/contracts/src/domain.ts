@@ -369,10 +369,13 @@ export interface LaborVacationSummary {
   currentYearStartDate: string;
   previousYearStartDate: string;
   previousYearEndDate: string;
+  yearBeforeLastStartDate: string;
+  yearBeforeLastEndDate: string;
   completedYears: number;
   completedYearsLabel: string;
   entitlementDays: number;
   previousYearPendingDays: number;
+  yearBeforeLastPendingDays: number;
   ignoredPreviousYearPendingDays: number;
   earnedDays: number;
   unearnedDays: number;
@@ -447,6 +450,7 @@ export interface LaborPreviousYearPendingVacationInput {
   days: number;
   description?: string | null;
   manualOverrideConfirmed?: boolean;
+  pendingPeriod?: "LAST_YEAR" | "YEAR_BEFORE_LAST";
 }
 
 export interface LaborGlobalVacationDayInput {
@@ -1009,6 +1013,7 @@ export interface GeneralExpensePayrollEntry {
   half: GeneralExpensePayrollHalf;
   laborFileId?: string;
   employeeName: string;
+  isPartTime: boolean;
   dailySalaryMxn: number;
   laborFileDailySalaryMxn?: number;
   dailySalaryRiVerified?: boolean;
@@ -1016,10 +1021,15 @@ export interface GeneralExpensePayrollEntry {
   grossSalaryMxn: number;
   punctualityBonusMxn: number;
   attendanceBonusMxn: number;
+  advanceVacationDays: number;
+  advanceVacationPremiumPaymentDate?: string;
+  advanceVacationDaysPaid: boolean;
+  advanceVacationDaysPaymentEligible: boolean;
   vacationDays: number;
   vacationPremiumMxn: number;
   absenceDays: number;
   absenceDiscountMxn: number;
+  netSalaryMxn: number;
   overtimeHourlyRateMxn: number;
   overtimeHours: number;
   overtimeTotalMxn: number;

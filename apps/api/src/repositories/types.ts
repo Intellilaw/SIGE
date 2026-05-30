@@ -446,9 +446,8 @@ export interface GeneralExpenseUpdateRecord {
 
 export interface GeneralExpensePayrollUpdateRecord {
   laborFileId?: string | null;
+  isPartTime?: boolean;
   grossSalaryMxn?: number;
-  punctualityBonusMxn?: number;
-  attendanceBonusMxn?: number;
   absenceDays?: number;
   overtimeHours?: number;
   overtimeDetail?: string;
@@ -456,6 +455,7 @@ export interface GeneralExpensePayrollUpdateRecord {
   imssWithholdingMxn?: number;
   employmentSubsidyMxn?: number;
   infonavitCreditMxn?: number;
+  advanceVacationDaysPaid?: boolean;
   payrollStampedByAraceli?: boolean;
   finalPaymentApprovedByEmrt?: boolean;
   reviewedByJnls?: boolean;
@@ -754,11 +754,13 @@ export interface UserTeamWriteRecord {
   key: string;
   label: string;
   sortOrder?: number;
+  executionSpaceEnabled?: boolean;
 }
 
 export interface UserTeamUpdateRecord {
   label?: string;
   isActive?: boolean;
+  executionSpaceEnabled?: boolean;
 }
 
 export interface UsersRepository {

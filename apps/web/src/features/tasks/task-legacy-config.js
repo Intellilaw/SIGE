@@ -216,6 +216,47 @@ export const LEGACY_TASK_MODULES = [
 ];
 export const LEGACY_TASK_MODULE_BY_SLUG = Object.fromEntries(LEGACY_TASK_MODULES.map((module) => [module.slug, module]));
 export const LEGACY_TASK_MODULE_BY_ID = Object.fromEntries(LEGACY_TASK_MODULES.map((module) => [module.moduleId, module]));
+function getFallbackDefaultResponsible(module) {
+    return module.members?.find((member) => member.shortName || member.id)?.shortName
+        ?? module.members?.find((member) => member.shortName || member.id)?.id
+        ?? "";
+}
+function buildGenericTables(module) {
+    const sourceTracks = module.tracks.length > 0
+        ? module.tracks
+        : [{ id: "tareas", label: "Tareas generales", mode: "STATUS", recurring: false }];
+    return sourceTracks.map((trackConfig) => table({
+        slug: trackConfig.id,
+        sourceTable: trackConfig.id,
+        title: trackConfig.label,
+        mode: trackConfig.mode === "WORKFLOW" ? "workflow" : "status",
+        dateEditable: true
+    }));
+}
+export function buildLegacyTaskModuleConfig(module, slug = module.id) {
+    const legacyConfig = LEGACY_TASK_MODULE_BY_ID[module.id];
+    if (legacyConfig) {
+        return {
+            ...legacyConfig,
+            slug,
+            team: module.team,
+            label: module.label || legacyConfig.label,
+            defaultResponsible: legacyConfig.defaultResponsible || getFallbackDefaultResponsible(module)
+        };
+    }
+    return {
+        slug,
+        moduleId: module.id,
+        team: module.team,
+        label: module.label,
+        defaultResponsible: getFallbackDefaultResponsible(module),
+        termEventLabel: "Tarea",
+        termDateLabel: "Fecha termino",
+        verificationColumns: [],
+        tables: buildGenericTables(module),
+        hasRecurringTerms: module.tracks.some((trackConfig) => trackConfig.recurring)
+    };
+}
 export function getLegacyTaskTable(module, tableSlug) {
     return module.tables.find((tableConfig) => tableConfig.slug === tableSlug);
 }

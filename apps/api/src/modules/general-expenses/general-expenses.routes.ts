@@ -63,9 +63,8 @@ const payrollCreateSchema = z.object({
 
 const payrollUpdateSchema = z.object({
   laborFileId: z.string().nullable().optional(),
+  isPartTime: z.boolean().optional(),
   grossSalaryMxn: z.number().nonnegative().optional(),
-  punctualityBonusMxn: z.number().nonnegative().optional(),
-  attendanceBonusMxn: z.number().nonnegative().optional(),
   absenceDays: z.number().nonnegative().optional(),
   overtimeHours: z.number().nonnegative().optional(),
   overtimeDetail: z.string().optional(),
@@ -73,6 +72,7 @@ const payrollUpdateSchema = z.object({
   imssWithholdingMxn: z.number().nonnegative().optional(),
   employmentSubsidyMxn: z.number().nonnegative().optional(),
   infonavitCreditMxn: z.number().nonnegative().optional(),
+  advanceVacationDaysPaid: z.boolean().optional(),
   payrollStampedByAraceli: z.boolean().optional(),
   finalPaymentApprovedByEmrt: z.boolean().optional(),
   reviewedByJnls: z.boolean().optional()

@@ -10,6 +10,7 @@ import {
   mapTaskTerm,
   mapTaskTrackingRecord
 } from "./mappers";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import type {
   TaskAdditionalTaskWriteRecord,
   TaskDistributionEventWriteRecord,
@@ -76,11 +77,27 @@ export class PrismaTasksRepository implements TasksRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async listModules() {
+    const organizationId = getCurrentOrganizationIdOrDefault();
     const moduleRecords = await this.prisma.$queryRaw<TaskModuleListRecord[]>(Prisma.sql`
-      SELECT "id", "team", "label", "summary", "isActive"
-      FROM "TaskModule"
-      WHERE "isActive" = true
-      ORDER BY "label" ASC, "id" ASC
+      SELECT
+        tm."id",
+        tm."team",
+        ut."label",
+        CASE
+          WHEN tm."summary" LIKE 'Espacio de tareas de % pendiente de configuracion.'
+            OR tm."summary" = 'Espacio de tareas pendiente de configuracion.'
+          THEN 'Espacio de tareas de ' || ut."label" || ' pendiente de configuracion.'
+          ELSE tm."summary"
+        END AS "summary",
+        tm."isActive"
+      FROM "TaskModule" AS tm
+      INNER JOIN "UserTeam" AS ut
+        ON ut."key" = tm."team"
+        AND ut."organizationId" = ${organizationId}
+      WHERE tm."isActive" = true
+        AND ut."isActive" = true
+        AND ut."executionSpaceEnabled" = true
+      ORDER BY ut."sortOrder" ASC, ut."label" ASC, tm."id" ASC
     `);
     const [tracks, activeUsers] = await this.prisma.$transaction([
       moduleRecords.length > 0

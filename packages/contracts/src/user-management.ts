@@ -12,18 +12,22 @@ export interface ManagedTeam extends TeamOption {
   isActive: boolean;
   sortOrder: number;
   memberCount: number;
+  executionSpaceEnabled: boolean;
   createdAt: string;
   updatedAt: string;
   deactivatedAt?: string;
+  executionSpaceDeactivatedAt?: string;
 }
 
 export interface CreateManagedTeamInput {
   label: string;
+  executionSpaceEnabled?: boolean;
 }
 
 export interface UpdateManagedTeamInput {
   label?: string;
   isActive?: boolean;
+  executionSpaceEnabled?: boolean;
 }
 
 export const TEAM_OPTIONS: TeamOption[] = [
@@ -329,6 +333,7 @@ export function derivePermissions(input: {
     if (taskModuleId) {
       permissions.add("tasks:read");
       permissions.add(`tasks:${taskModuleId}`);
+      permissions.add(`execution:${taskModuleId}`);
     }
   }
 
@@ -378,6 +383,8 @@ export function derivePermissions(input: {
   if (teamKey === "ADMIN_OPERATIONS" || normalizedTeam === "servicios administrativos") {
     permissions.add("general-expenses:read");
     permissions.add("general-expenses:write");
+    permissions.add("budget-planning:read");
+    permissions.add("budget-planning:write");
     permissions.add("internal-contracts:read");
     permissions.add("internal-contracts:write");
     permissions.add("internal-contract-templates:read");

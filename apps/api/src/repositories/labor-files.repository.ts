@@ -777,7 +777,9 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       await transaction.laborVacationEvent.deleteMany({
         where: {
           laborFileId,
-          eventType: "PREVIOUS_YEAR_PENDING"
+          eventType: "PREVIOUS_YEAR_PENDING",
+          startDate,
+          endDate
         }
       });
 
@@ -1468,7 +1470,11 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     this.updateState((state) => {
       const laborFile = this.findOrThrowInState(state, laborFileId);
       const now = new Date().toISOString();
-      laborFile.vacationEvents = laborFile.vacationEvents.filter((event) => event.eventType !== "PREVIOUS_YEAR_PENDING");
+      laborFile.vacationEvents = laborFile.vacationEvents.filter((event) =>
+        event.eventType !== "PREVIOUS_YEAR_PENDING" ||
+        event.startDate !== startDate ||
+        event.endDate !== endDate
+      );
 
       if (days > 0) {
         laborFile.vacationEvents.push({

@@ -1,10 +1,11 @@
 import "dotenv/config";
 
-import { spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { watch } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +15,25 @@ const localDataDirectory = path.join(repoRoot, ".local-postgres", "data");
 const localLogPath = path.join(repoRoot, ".local-postgres", "postgres.stderr.log");
 const prismaCliPath = path.join(repoRoot, "node_modules", "prisma", "build", "index.js");
 const generatedPrismaClientPath = path.join(repoRoot, "node_modules", ".prisma", "client", "index.js");
+const execFileAsync = promisify(execFile);
+const SESSION_MANAGER_PLUGIN_BIN = "C:\\Program Files\\Amazon\\SessionManagerPlugin\\bin";
+const DEFAULT_RDS_TUNNEL_LOCAL_HOST = "127.0.0.1";
+const DEFAULT_RDS_TUNNEL_LOCAL_PORT = 15433;
+const DEFAULT_RDS_TUNNEL_REMOTE_PORT = 5432;
+
+type RuntimeSecret = {
+  DATABASE_URL?: string;
+};
+
+type RdsTunnelConfig = {
+  appSecretId: string;
+  region: string;
+  instanceId: string;
+  remoteHost: string;
+  remotePort: number;
+  localHost: string;
+  localPort: number;
+};
 
 const DEFAULT_PG_CTL_PATHS = [
   process.env.POSTGRES_BIN_DIR ? path.join(process.env.POSTGRES_BIN_DIR, "pg_ctl.exe") : null,
@@ -42,6 +62,136 @@ function getLocalDatabaseTarget() {
     host: parsed.hostname,
     port: Number(parsed.port || 5432)
   };
+}
+
+function shouldUseRdsTunnel() {
+  return process.env.SIGE_USE_RDS_TUNNEL === "true";
+}
+
+function requireDevEnv(value: string | undefined, label: string) {
+  if (!value) {
+    throw new Error(`${label} is required when SIGE_USE_RDS_TUNNEL=true.`);
+  }
+
+  return value;
+}
+
+function getRdsTunnelConfig(): RdsTunnelConfig {
+  return {
+    appSecretId: requireDevEnv(process.env.SIGE_AWS_APP_SECRET_ID, "SIGE_AWS_APP_SECRET_ID"),
+    region: process.env.AWS_REGION ?? process.env.SIGE_AWS_REGION ?? "us-east-1",
+    instanceId: requireDevEnv(process.env.SIGE_RDS_TUNNEL_INSTANCE_ID, "SIGE_RDS_TUNNEL_INSTANCE_ID"),
+    remoteHost: requireDevEnv(process.env.SIGE_RDS_TUNNEL_REMOTE_HOST, "SIGE_RDS_TUNNEL_REMOTE_HOST"),
+    remotePort: Number(process.env.SIGE_RDS_TUNNEL_REMOTE_PORT ?? DEFAULT_RDS_TUNNEL_REMOTE_PORT),
+    localHost: process.env.SIGE_RDS_TUNNEL_LOCAL_HOST ?? DEFAULT_RDS_TUNNEL_LOCAL_HOST,
+    localPort: Number(process.env.SIGE_RDS_TUNNEL_LOCAL_PORT ?? DEFAULT_RDS_TUNNEL_LOCAL_PORT)
+  };
+}
+
+function ensureSessionManagerPluginPath() {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  const currentPath = process.env.PATH ?? "";
+  if (currentPath.toLowerCase().includes(SESSION_MANAGER_PLUGIN_BIN.toLowerCase())) {
+    return;
+  }
+
+  process.env.PATH = `${SESSION_MANAGER_PLUGIN_BIN};${currentPath}`;
+}
+
+async function getRuntimeDatabaseUrl(config: RdsTunnelConfig) {
+  const { stdout } = await execFileAsync("aws", [
+    "secretsmanager",
+    "get-secret-value",
+    "--region",
+    config.region,
+    "--secret-id",
+    config.appSecretId,
+    "--query",
+    "SecretString",
+    "--output",
+    "text"
+  ]);
+
+  const secret = JSON.parse(stdout.trim()) as RuntimeSecret;
+  return requireDevEnv(secret.DATABASE_URL, "DATABASE_URL in SIGE_AWS_APP_SECRET_ID");
+}
+
+function toTunnelDatabaseUrl(databaseUrl: string, config: RdsTunnelConfig) {
+  const url = new URL(databaseUrl);
+  url.hostname = config.localHost;
+  url.port = String(config.localPort);
+  url.searchParams.set("sslmode", process.env.SIGE_RDS_TUNNEL_SSLMODE ?? "require");
+  url.searchParams.set("connect_timeout", process.env.SIGE_RDS_TUNNEL_CONNECT_TIMEOUT ?? "30");
+  url.searchParams.set("connection_limit", process.env.SIGE_RDS_TUNNEL_CONNECTION_LIMIT ?? "1");
+  url.searchParams.set("pool_timeout", process.env.SIGE_RDS_TUNNEL_POOL_TIMEOUT ?? "30");
+  return url.toString();
+}
+
+function startSsmRdsTunnel(config: RdsTunnelConfig) {
+  ensureSessionManagerPluginPath();
+
+  const parameters = JSON.stringify({
+    host: [config.remoteHost],
+    portNumber: [String(config.remotePort)],
+    localPortNumber: [String(config.localPort)]
+  });
+
+  return spawn(
+    "aws",
+    [
+      "ssm",
+      "start-session",
+      "--region",
+      config.region,
+      "--target",
+      config.instanceId,
+      "--document-name",
+      "AWS-StartPortForwardingSessionToRemoteHost",
+      "--parameters",
+      parameters
+    ],
+    {
+      stdio: ["ignore", "inherit", "inherit"],
+      shell: false
+    }
+  );
+}
+
+async function ensureRdsTunnel(config: RdsTunnelConfig) {
+  if (await canConnect(config.localHost, config.localPort)) {
+    console.log(`[dev] Reusing existing AWS RDS tunnel on ${config.localHost}:${config.localPort}.`);
+    return null;
+  }
+
+  console.log(`[dev] Starting AWS RDS tunnel on ${config.localHost}:${config.localPort}...`);
+  const tunnel = startSsmRdsTunnel(config);
+  const tunnelState: { exit: { code: number | null; signal: NodeJS.Signals | null } | null } = { exit: null };
+  tunnel.once("exit", (code, signal) => {
+    tunnelState.exit = { code, signal };
+  });
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (await canConnect(config.localHost, config.localPort)) {
+      console.log(`[dev] AWS RDS tunnel is ready on ${config.localHost}:${config.localPort}.`);
+      return tunnel;
+    }
+
+    if (tunnelState.exit) {
+      throw new Error(
+        `AWS RDS tunnel exited before becoming ready (code ${tunnelState.exit.code ?? "unknown"}, signal ${
+          tunnelState.exit.signal ?? "none"
+        }).`
+      );
+    }
+
+    await sleep(500);
+  }
+
+  tunnel.kill();
+  throw new Error(`AWS RDS tunnel did not become ready on ${config.localHost}:${config.localPort}.`);
 }
 
 function canConnect(host: string, port: number) {
@@ -207,6 +357,16 @@ function startApi() {
 }
 
 async function main() {
+  let tunnelProcess: ChildProcess | null = null;
+
+  if (shouldUseRdsTunnel()) {
+    const rdsTunnelConfig = getRdsTunnelConfig();
+    tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
+    process.env.DATABASE_URL = toTunnelDatabaseUrl(await getRuntimeDatabaseUrl(rdsTunnelConfig), rdsTunnelConfig);
+    process.env.SIGE_SKIP_LOCAL_POSTGRES = "true";
+    console.log("[dev] API database points to AWS RDS through the local SSM tunnel.");
+  }
+
   const target = getLocalDatabaseTarget();
   const pgCtlPath = target ? await findPgCtl() : null;
 
@@ -235,6 +395,7 @@ async function main() {
   const stop = () => {
     stopPrismaGuard();
     api.kill();
+    tunnelProcess?.kill();
   };
 
   process.once("SIGINT", stop);

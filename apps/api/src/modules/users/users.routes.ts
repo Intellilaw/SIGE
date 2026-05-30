@@ -36,34 +36,27 @@ const teamIdParamsSchema = z.object({
 });
 
 const createTeamSchema = z.object({
-  label: z.string().min(1).max(80)
+  label: z.string().min(1).max(80),
+  executionSpaceEnabled: z.boolean().optional()
 });
 
 const updateTeamSchema = z.object({
   label: z.string().min(1).max(80).optional(),
-  isActive: z.boolean().optional()
-}).refine((payload) => payload.label !== undefined || payload.isActive !== undefined, {
+  isActive: z.boolean().optional(),
+  executionSpaceEnabled: z.boolean().optional()
+}).refine((payload) =>
+  payload.label !== undefined ||
+  payload.isActive !== undefined ||
+  payload.executionSpaceEnabled !== undefined, {
   message: "At least one field is required."
 });
 
-function normalizeIdentity(value?: string | null) {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function requireEduardoRusconiSuperadmin(request: FastifyRequest) {
+async function requireSuperadmin(request: FastifyRequest) {
   const user = getSessionUser(request);
   const isSuperadmin = user.role === "SUPERADMIN" || user.legacyRole === "SUPERADMIN";
-  const isEduardoRusconi = [user.username, user.displayName, user.email]
-    .map(normalizeIdentity)
-    .some((identity) => identity === "eduardo rusconi" || identity.includes("eduardo rusconi"));
 
-  if (!isSuperadmin || !isEduardoRusconi) {
-    throw new AppError(403, "FORBIDDEN", "Solo el superadmin Eduardo Rusconi puede administrar equipos.");
+  if (!isSuperadmin) {
+    throw new AppError(403, "FORBIDDEN", "Solo un superadmin puede administrar equipos.");
   }
 }
 
@@ -71,7 +64,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.UsersService(app.repositories.users);
   const authService = new app.services.AuthService(app.repositories.auth);
   const adminGuards = [requireAuth, requireAnyPermissions(["users:manage"])];
-  const teamManageGuards = [requireAuth, requireEduardoRusconiSuperadmin];
+  const teamManageGuards = [requireAuth, requireSuperadmin];
 
   app.get("/users/team-short-names", { preHandler: [requireAuth] }, async (request) => {
     const query = z.object({ team: teamSchema }).parse(request.query);

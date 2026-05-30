@@ -13,6 +13,7 @@ import { z } from "zod";
 import { LEGACY_EXECUTION_MODULES } from "./legacy-business-config";
 
 const prisma = new PrismaClient();
+const RUSCONI_ORGANIZATION_ID = "org-rusconi";
 
 const ExportPayloadSchema = z.object({
   source: z.string(),
@@ -555,26 +556,26 @@ async function seedTaskModules() {
 async function clearImportedDomain() {
   await prisma.legacyImportArchive.deleteMany();
   await prisma.legacyImportBatch.deleteMany();
-  await prisma.dailyDocumentAssignment.deleteMany();
-  await prisma.internalContract.deleteMany();
-  await prisma.budgetPlanSnapshot.deleteMany();
-  await prisma.budgetPlan.deleteMany();
-  await prisma.taskDistributionHistory.deleteMany();
-  await prisma.taskDistributionEvent.deleteMany();
-  await prisma.taskAdditionalTask.deleteMany();
-  await prisma.taskTrackingRecord.deleteMany();
-  await prisma.taskTerm.deleteMany();
-  await prisma.financeSnapshot.deleteMany();
-  await prisma.commissionSnapshot.deleteMany();
-  await prisma.financeRecord.deleteMany();
-  await prisma.generalExpense.deleteMany();
-  await prisma.matter.deleteMany();
-  await prisma.lead.deleteMany();
-  await prisma.quoteTemplate.deleteMany();
-  await prisma.quote.deleteMany();
-  await prisma.holiday.deleteMany();
-  await prisma.client.deleteMany();
-  await prisma.commissionReceiver.deleteMany();
+  await prisma.dailyDocumentAssignment.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.internalContract.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.budgetPlanSnapshot.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.budgetPlan.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.taskDistributionHistory.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.taskDistributionEvent.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.taskAdditionalTask.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.taskTrackingRecord.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.taskTerm.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.financeSnapshot.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.commissionSnapshot.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.financeRecord.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.generalExpense.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.matter.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.lead.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.quoteTemplate.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.quote.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.holiday.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.client.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
+  await prisma.commissionReceiver.deleteMany({ where: { organizationId: RUSCONI_ORGANIZATION_ID } });
 }
 
 async function archiveRows(batchId: string, tables: Record<string, LegacyRow[]>) {
@@ -656,7 +657,12 @@ async function main() {
     createdAt?: Date;
   }) {
     const existingByNumber = await prisma.client.findUnique({
-      where: { clientNumber: input.clientNumber }
+      where: {
+        organizationId_clientNumber: {
+          organizationId: RUSCONI_ORGANIZATION_ID,
+          clientNumber: input.clientNumber
+        }
+      }
     });
     if (existingByNumber) {
       const updated = await prisma.client.update({
@@ -686,6 +692,7 @@ async function main() {
 
     const created = await prisma.client.create({
       data: {
+        organizationId: RUSCONI_ORGANIZATION_ID,
         id: input.legacyId,
         clientNumber: input.clientNumber,
         name: input.name,
@@ -1412,11 +1419,17 @@ async function main() {
   for (const row of parsed.tables.commission_receivers ?? []) {
     const name = normalizeText(pickFirst(row, ["name", "nombre"])) || "Comision legacy";
     await prisma.commissionReceiver.upsert({
-      where: { name },
+      where: {
+        organizationId_name: {
+          organizationId: RUSCONI_ORGANIZATION_ID,
+          name
+        }
+      },
       update: {
         active: !normalizeBoolean(row.deleted_at)
       },
       create: {
+        organizationId: RUSCONI_ORGANIZATION_ID,
         name,
         active: !normalizeBoolean(row.deleted_at),
         createdAt: normalizeDate(pickFirst(row, ["created_at"])) ?? new Date()
@@ -1483,7 +1496,8 @@ async function main() {
 
     await prisma.holiday.upsert({
       where: {
-        authorityShortName_date: {
+        organizationId_authorityShortName_date: {
+          organizationId: RUSCONI_ORGANIZATION_ID,
           authorityShortName: authority.shortName,
           date
         }
@@ -1493,6 +1507,7 @@ async function main() {
         label
       },
       create: {
+        organizationId: RUSCONI_ORGANIZATION_ID,
         date,
         authorityShortName: authority.shortName,
         authorityName: authority.name,

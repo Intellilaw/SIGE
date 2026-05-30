@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { TASK_MODULES, buildQuoteTitle, type Client, type Matter, type Quote } from "@sige/contracts";
+import { TASK_MODULES, buildQuoteTitle, getDefaultOrganization, type Client, type Matter, type Quote } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getCurrentOrganizationId } from "../core/tenant/tenant-context";
 import type {
   ClientsRepository,
   MattersRepository,
@@ -313,7 +314,7 @@ export class LocalBusinessStore {
   }
 
   public async listModules() {
-    return TASK_MODULES;
+    return this.canUseFallbackForCurrentTenant() ? TASK_MODULES : [];
   }
 
   public async listTasks(_moduleId?: string) {
@@ -653,11 +654,24 @@ export class LocalBusinessStore {
   }
 
   private rows(tableName: string) {
+    if (!this.canUseFallbackForCurrentTenant()) {
+      return [];
+    }
+
     return this.loadData().tables[tableName] ?? [];
   }
 
   private modules() {
+    if (!this.canUseFallbackForCurrentTenant()) {
+      return [];
+    }
+
     return this.loadData().modules;
+  }
+
+  private canUseFallbackForCurrentTenant() {
+    const organizationId = getCurrentOrganizationId();
+    return !organizationId || organizationId === getDefaultOrganization().id;
   }
 
   private module(moduleId: string) {

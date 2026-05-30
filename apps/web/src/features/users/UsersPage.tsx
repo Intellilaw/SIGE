@@ -24,6 +24,7 @@ interface UserFormState {
 
 interface TeamFormState {
   label: string;
+  executionSpaceEnabled: boolean;
 }
 
 const EMPTY_FORM: UserFormState = {
@@ -37,7 +38,8 @@ const EMPTY_FORM: UserFormState = {
 };
 
 const EMPTY_TEAM_FORM: TeamFormState = {
-  label: ""
+  label: "",
+  executionSpaceEnabled: false
 };
 
 function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
@@ -99,34 +101,13 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
 
-function normalizeIdentity(value?: string | null) {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isEduardoRusconiSuperadmin(
+function isSuperadmin(
   candidate: {
-    email: string;
-    username: string;
-    displayName: string;
     role: string;
     legacyRole: string;
   } | null | undefined
 ) {
-  if (!candidate) {
-    return false;
-  }
-
-  const isSuperadmin = candidate.role === "SUPERADMIN" || candidate.legacyRole === "SUPERADMIN";
-  const isEduardoRusconi = [candidate.username, candidate.displayName, candidate.email]
-    .map(normalizeIdentity)
-    .some((identity) => identity === "eduardo rusconi" || identity.includes("eduardo rusconi"));
-
-  return isSuperadmin && isEduardoRusconi;
+  return Boolean(candidate && (candidate.role === "SUPERADMIN" || candidate.legacyRole === "SUPERADMIN"));
 }
 
 export function UsersPage() {
@@ -150,7 +131,7 @@ export function UsersPage() {
   const [teamForm, setTeamForm] = useState<TeamFormState>(EMPTY_TEAM_FORM);
 
   const canManageUsers = Boolean(user?.permissions.includes("*") || user?.permissions.includes("users:manage"));
-  const canManageTeams = canManageUsers && isEduardoRusconiSuperadmin(user);
+  const canManageTeams = canManageUsers && isSuperadmin(user);
 
   async function fetchUsers() {
     setLoadingUsers(true);
@@ -210,6 +191,7 @@ export function UsersPage() {
           isActive: true,
           sortOrder: (index + 1) * 10,
           memberCount: 0,
+          executionSpaceEnabled: false,
           createdAt: "",
           updatedAt: ""
         }));
@@ -249,7 +231,10 @@ export function UsersPage() {
   function handleTeamEditClick(target: ManagedTeam) {
     setFlash(null);
     setEditingTeamId(target.id);
-    setTeamForm({ label: target.label });
+    setTeamForm({
+      label: target.label,
+      executionSpaceEnabled: target.executionSpaceEnabled
+    });
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -327,11 +312,16 @@ export function UsersPage() {
     setIsSavingTeam(true);
 
     try {
+      const payload = {
+        label,
+        executionSpaceEnabled: teamForm.executionSpaceEnabled
+      };
+
       if (editingTeamId) {
-        await apiPatch<ManagedTeam>(`/users/teams/${editingTeamId}`, { label });
+        await apiPatch<ManagedTeam>(`/users/teams/${editingTeamId}`, payload);
         setFlash({ tone: "success", text: "Equipo actualizado correctamente." });
       } else {
-        await apiPost<ManagedTeam>("/users/teams", { label });
+        await apiPost<ManagedTeam>("/users/teams", payload);
         setFlash({ tone: "success", text: `Equipo "${label}" creado correctamente.` });
       }
 
@@ -609,12 +599,27 @@ export function UsersPage() {
               <span>Nombre del equipo</span>
               <input
                 value={teamForm.label}
-                onChange={(event) => setTeamForm({ label: event.target.value })}
+                onChange={(event) => setTeamForm((current) => ({ ...current, label: event.target.value }))}
                 placeholder="Ej. Auditoria"
                 maxLength={80}
                 required
               />
             </label>
+            <div className="form-field checkbox-field users-team-execution-field">
+              <span>Espacio de Ejecucion</span>
+              <label className="checkbox-row" htmlFor="users-team-execution-space-enabled">
+                <input
+                  id="users-team-execution-space-enabled"
+                  checked={teamForm.executionSpaceEnabled}
+                  onChange={(event) =>
+                    setTeamForm((current) => ({ ...current, executionSpaceEnabled: event.target.checked }))
+                  }
+                  type="checkbox"
+                />
+                <span>{teamForm.executionSpaceEnabled ? "Crear o mostrar espacio" : "No crear / ocultar espacio"}</span>
+              </label>
+              <small>Al ocultarlo se conserva toda la informacion capturada.</small>
+            </div>
             <div className="form-actions users-team-actions">
               <button className="primary-button" disabled={isSavingTeam} type="submit">
                 {isSavingTeam ? "Procesando..." : editingTeamId ? "Guardar equipo" : "Crear equipo"}
@@ -628,7 +633,7 @@ export function UsersPage() {
           </form>
         ) : (
           <div className="editing-banner">
-            Solo el superadmin Eduardo Rusconi puede crear, editar, reactivar o desactivar equipos.
+            Solo un superadmin puede crear, editar, reactivar o desactivar equipos y espacios de Ejecucion.
           </div>
         )}
 
@@ -639,6 +644,7 @@ export function UsersPage() {
                 <th>Equipo</th>
                 <th>Clave</th>
                 <th>Usuarios activos</th>
+                <th>Ejecucion</th>
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
@@ -646,11 +652,11 @@ export function UsersPage() {
             <tbody>
               {loadingTeams ? (
                 <tr>
-                  <td colSpan={5}>Cargando equipos...</td>
+                  <td colSpan={6}>Cargando equipos...</td>
                 </tr>
               ) : teams.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No hay equipos registrados.</td>
+                  <td colSpan={6}>No hay equipos registrados.</td>
                 </tr>
               ) : (
                 teams.map((team) => (
@@ -660,6 +666,11 @@ export function UsersPage() {
                     </td>
                     <td>{team.key}</td>
                     <td>{team.memberCount}</td>
+                    <td>
+                      <span className={`status-pill ${team.executionSpaceEnabled ? "status-live" : "status-migration"}`}>
+                        {team.executionSpaceEnabled ? "Visible" : "Oculto"}
+                      </span>
+                    </td>
                     <td>
                       <span className={`status-pill ${team.isActive ? "status-live" : "status-warning"}`}>
                         {team.isActive ? "Activo" : "Inactivo"}

@@ -3,7 +3,13 @@ import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpens
 
 import { AppError } from "../core/errors/app-error";
 import { getLaborDailySalaryRiStatus } from "../modules/labor-files/labor-salary-intelligence";
-import { mapGeneralExpense, mapGeneralExpensePayrollEntry } from "./mappers";
+import {
+  buildVacationSummary,
+  mapGeneralExpense,
+  mapGeneralExpensePayrollEntry,
+  mapLaborGlobalVacationDay,
+  mapLaborVacationEvent
+} from "./mappers";
 import type {
   GeneralExpenseActor,
   GeneralExpenseCreateRecord,
@@ -19,6 +25,7 @@ const DEFAULT_BANK: NonNullable<GeneralExpense["bank"]> = "Banamex";
 const DEFAULT_HAS_VAT = true;
 const DEFAULT_MONTH_RANGE = { min: 1, max: 12 };
 const PAYROLL_VACATION_PREMIUM_RATE = 0.25;
+const PAYROLL_BONUS_RATE = 0.1;
 const LOCKED_AFTER_APPROVAL_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "detail",
   "amountMxn",
@@ -59,22 +66,33 @@ const PAYROLL_ENTRY_INCLUDE = {
   laborFile: {
     select: {
       employeeName: true,
+      hireDate: true,
       dailySalaryMxn: true,
+      advanceVacationDaysPaidBalance: true,
+      advanceVacationDaysPaidCutoffDate: true,
+      employmentEndedAt: true,
       documents: {
         where: { documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] } },
         select: PAYROLL_LABOR_SALARY_DOCUMENT_SELECT,
         orderBy: [{ uploadedAt: "asc" as const }]
       },
       vacationEvents: {
-        where: { eventType: { in: ["VACATION", "GLOBAL_VACATION"] } },
+        orderBy: [{ startDate: "asc" as const }, { createdAt: "asc" as const }],
         select: {
+          id: true,
+          laborFileId: true,
+          globalVacationDayId: true,
           eventType: true,
           startDate: true,
           endDate: true,
           vacationDates: true,
           days: true,
+          description: true,
           acceptanceOriginalFileName: true,
-          acceptanceFileMimeType: true
+          acceptanceFileMimeType: true,
+          acceptanceFileSizeBytes: true,
+          createdAt: true,
+          updatedAt: true
         }
       }
     }
@@ -82,6 +100,18 @@ const PAYROLL_ENTRY_INCLUDE = {
 } satisfies Prisma.GeneralExpensePayrollEntryInclude;
 type StoredGeneralExpensePayrollEntry = Prisma.GeneralExpensePayrollEntryGetPayload<{ include: typeof PAYROLL_ENTRY_INCLUDE }>;
 type PayrollVacationEventRecord = NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>["vacationEvents"][number];
+const PAYROLL_GLOBAL_VACATION_DAY_SELECT = {
+  id: true,
+  date: true,
+  days: true,
+  vacationDates: true,
+  description: true,
+  createdAt: true,
+  updatedAt: true
+} satisfies Prisma.LaborGlobalVacationDaySelect;
+type PayrollGlobalVacationDayRecord = Prisma.LaborGlobalVacationDayGetPayload<{
+  select: typeof PAYROLL_GLOBAL_VACATION_DAY_SELECT;
+}>;
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
@@ -145,6 +175,30 @@ function addDateKey(value: string, days: number) {
 function getMonthLastDateKey(year: number, month: number) {
   const date = new Date(Date.UTC(year, month, 0));
   return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function addYearsToDateKey(value: string, years: number) {
+  const date = dateKeyToUtcDate(value);
+  const year = date.getUTCFullYear() + years;
+  const month = date.getUTCMonth() + 1;
+  const day = Math.min(date.getUTCDate(), getDaysInMonth(year, month));
+  return `${year}-${padDatePart(month)}-${padDatePart(day)}`;
+}
+
+function getMexicoCityDateKey(value = new Date()) {
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Mexico_City",
+    year: "numeric"
+  }).formatToParts(value);
+  const parts = Object.fromEntries(dateParts.map((part) => [part.type, part.value]));
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function getPayrollPeriodDateRange(year: number, month: number, half: GeneralExpensePayrollEntry["half"]) {
@@ -244,6 +298,61 @@ function normalizeHours(value?: number | null) {
 
 function roundPayrollNumber(value: number) {
   return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+function getPayrollGrossSalaryMxn(dailySalaryMxn: number) {
+  return dailySalaryMxn * 15;
+}
+
+function getPayrollBonusMxn(netSalaryMxn: number) {
+  return roundPayrollNumber(Math.max(0, netSalaryMxn * PAYROLL_BONUS_RATE));
+}
+
+function getPayrollEmployeeBonusKey(entry: Pick<GeneralExpensePayrollEntry, "id" | "laborFileId" | "employeeName">) {
+  if (entry.laborFileId) {
+    return `labor:${entry.laborFileId}`;
+  }
+
+  const normalizedName = normalizeComparableText(entry.employeeName);
+  return normalizedName ? `name:${normalizedName}` : `entry:${entry.id}`;
+}
+
+function getPayrollNetDepositMxn(
+  entry: GeneralExpensePayrollEntry,
+  punctualityBonusMxn: number,
+  attendanceBonusMxn: number
+) {
+  const payrollWithholdingsMxn = entry.isrWithholdingMxn + entry.imssWithholdingMxn + entry.infonavitCreditMxn;
+  return (
+    entry.netSalaryMxn +
+    punctualityBonusMxn +
+    attendanceBonusMxn +
+    entry.vacationPremiumMxn +
+    entry.overtimeTotalMxn +
+    entry.employmentSubsidyMxn -
+    payrollWithholdingsMxn
+  );
+}
+
+function applyPayrollMonthlyBonusCalculations(entries: GeneralExpensePayrollEntry[]) {
+  const monthlyNetSalaryByEmployee = new Map<string, number>();
+
+  entries.forEach((entry) => {
+    const key = getPayrollEmployeeBonusKey(entry);
+    monthlyNetSalaryByEmployee.set(key, (monthlyNetSalaryByEmployee.get(key) ?? 0) + entry.netSalaryMxn);
+  });
+
+  return entries.map((entry) => {
+    const monthlyNetSalaryMxn = monthlyNetSalaryByEmployee.get(getPayrollEmployeeBonusKey(entry)) ?? 0;
+    const monthlyBonusMxn = entry.half === 2 ? getPayrollBonusMxn(monthlyNetSalaryMxn) : 0;
+
+    return {
+      ...entry,
+      punctualityBonusMxn: monthlyBonusMxn,
+      attendanceBonusMxn: monthlyBonusMxn,
+      netDepositMxn: getPayrollNetDepositMxn(entry, monthlyBonusMxn, monthlyBonusMxn)
+    };
+  });
 }
 
 function isApprovedVacationEvent(event: PayrollVacationEventRecord) {
@@ -347,10 +456,69 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     };
   }
 
-  private async mapPayrollEntryWithSalaryRi(record: StoredGeneralExpensePayrollEntry) {
+  private getPayrollAdvanceVacationData(
+    record: StoredGeneralExpensePayrollEntry,
+    globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
+  ) {
+    const laborFile = record.laborFile;
+    if (!laborFile) {
+      return {
+        rawAdvanceVacationDays: 0,
+        advanceVacationDays: 0,
+        advanceVacationPremiumPaymentDate: undefined,
+        advanceVacationDaysPaid: false,
+        advanceVacationDaysPaymentEligible: false
+      };
+    }
+
+    const hireDate = toDateInput(laborFile.hireDate);
+    const employmentEndedAt = toDateInput(laborFile.employmentEndedAt) || undefined;
+    const vacationSummary = buildVacationSummary(
+      hireDate,
+      employmentEndedAt,
+      laborFile.vacationEvents.map(mapLaborVacationEvent),
+      globalVacationDayRecords.map(mapLaborGlobalVacationDay)
+    );
+    const rawAdvanceVacationDays = roundPayrollNumber(Math.max(0, -vacationSummary.remainingDays));
+    const advanceVacationPremiumPaymentDate = rawAdvanceVacationDays > 0
+      ? addYearsToDateKey(vacationSummary.currentYearStartDate, 1)
+      : undefined;
+    const paidCutoffDate = toDateInput(laborFile.advanceVacationDaysPaidCutoffDate);
+    const paidBalance = paidCutoffDate && paidCutoffDate === advanceVacationPremiumPaymentDate
+      ? roundPayrollNumber(Number(laborFile.advanceVacationDaysPaidBalance ?? 0))
+      : 0;
+    const advanceVacationDays = roundPayrollNumber(Math.max(0, rawAdvanceVacationDays - paidBalance));
+    const advanceVacationDaysPaymentEligible = Boolean(
+      advanceVacationPremiumPaymentDate &&
+      getMexicoCityDateKey() >= advanceVacationPremiumPaymentDate &&
+      rawAdvanceVacationDays > 0
+    );
+    const advanceVacationDaysPaid = rawAdvanceVacationDays > 0 && paidBalance >= rawAdvanceVacationDays;
+
+    return {
+      rawAdvanceVacationDays,
+      advanceVacationDays,
+      advanceVacationPremiumPaymentDate,
+      advanceVacationDaysPaid,
+      advanceVacationDaysPaymentEligible
+    };
+  }
+
+  private async listPayrollGlobalVacationDayRecords() {
+    return this.prisma.laborGlobalVacationDay.findMany({
+      select: PAYROLL_GLOBAL_VACATION_DAY_SELECT,
+      orderBy: [{ date: "asc" }]
+    });
+  }
+
+  private async mapPayrollEntryWithSalaryRi(
+    record: StoredGeneralExpensePayrollEntry,
+    globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
+  ) {
     const mapped = mapGeneralExpensePayrollEntry({
       ...record,
-      ...this.getPayrollVacationTotals(record)
+      ...this.getPayrollVacationTotals(record),
+      ...this.getPayrollAdvanceVacationData(record, globalVacationDayRecords)
     });
     const riStatus = await getLaborDailySalaryRiStatus(record.laborFile);
 
@@ -359,6 +527,31 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       dailySalaryRiVerified: riStatus.verified,
       dailySalaryRiVerificationDetail: riStatus.detail
     } satisfies GeneralExpensePayrollEntry;
+  }
+
+  private async mapPayrollEntriesWithMonthlyBonuses(
+    records: StoredGeneralExpensePayrollEntry[],
+    globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
+  ) {
+    const mapped = await Promise.all(records.map((record) =>
+      this.mapPayrollEntryWithSalaryRi(record, globalVacationDayRecords)
+    ));
+    return applyPayrollMonthlyBonusCalculations(mapped);
+  }
+
+  private async mapPayrollEntryWithMonthlyBonuses(record: StoredGeneralExpensePayrollEntry) {
+    const [records, globalVacationDayRecords] = await Promise.all([
+      this.prisma.generalExpensePayrollEntry.findMany({
+        where: { year: record.year, month: record.month },
+        include: PAYROLL_ENTRY_INCLUDE,
+        orderBy: [{ half: "asc" }, { createdAt: "asc" }]
+      }),
+      this.listPayrollGlobalVacationDayRecords()
+    ]);
+    const mapped = await this.mapPayrollEntriesWithMonthlyBonuses(records, globalVacationDayRecords);
+    return mapped.find((entry) => entry.id === record.id) ?? applyPayrollMonthlyBonusCalculations([
+      await this.mapPayrollEntryWithSalaryRi(record, globalVacationDayRecords)
+    ])[0];
   }
 
   public async list(year: number, month: number) {
@@ -513,13 +706,16 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   public async listPayrollEntries(year: number, month: number) {
     assertMonth(month);
 
-    const records = await this.prisma.generalExpensePayrollEntry.findMany({
-      where: { year, month },
-      include: PAYROLL_ENTRY_INCLUDE,
-      orderBy: [{ half: "asc" }, { createdAt: "asc" }]
-    });
+    const [records, globalVacationDayRecords] = await Promise.all([
+      this.prisma.generalExpensePayrollEntry.findMany({
+        where: { year, month },
+        include: PAYROLL_ENTRY_INCLUDE,
+        orderBy: [{ half: "asc" }, { createdAt: "asc" }]
+      }),
+      this.listPayrollGlobalVacationDayRecords()
+    ]);
 
-    return Promise.all(records.map((record) => this.mapPayrollEntryWithSalaryRi(record)));
+    return this.mapPayrollEntriesWithMonthlyBonuses(records, globalVacationDayRecords);
   }
 
   public async copyPayrollToNextMonth(year: number, month: number) {
@@ -549,27 +745,33 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     }
 
     const result = await this.prisma.generalExpensePayrollEntry.createMany({
-      data: sourceRows.map((row) => ({
-        year: targetYear,
-        month: targetMonth,
-        half: row.half,
-        laborFileId: row.laborFileId,
-        employeeName: row.employeeName,
-        dailySalaryMxn: row.dailySalaryMxn,
-        grossSalaryMxn: row.grossSalaryMxn,
-        punctualityBonusMxn: row.punctualityBonusMxn,
-        attendanceBonusMxn: row.attendanceBonusMxn,
-        absenceDays: new Prisma.Decimal(0),
-        overtimeHours: new Prisma.Decimal(0),
-        overtimeDetail: "",
-        isrWithholdingMxn: row.isrWithholdingMxn,
-        imssWithholdingMxn: row.imssWithholdingMxn,
-        employmentSubsidyMxn: row.employmentSubsidyMxn,
-        infonavitCreditMxn: row.infonavitCreditMxn,
-        payrollStampedByAraceli: false,
-        finalPaymentApprovedByEmrt: false,
-        reviewedByJnls: false
-      }))
+      data: sourceRows.map((row) => {
+        const dailySalaryMxn = Number(row.dailySalaryMxn ?? 0);
+        const bonusMxn = 0;
+
+        return {
+          year: targetYear,
+          month: targetMonth,
+          half: row.half,
+          laborFileId: row.laborFileId,
+          employeeName: row.employeeName,
+          isPartTime: row.isPartTime,
+          dailySalaryMxn: row.dailySalaryMxn,
+          grossSalaryMxn: normalizeMoney(getPayrollGrossSalaryMxn(dailySalaryMxn)),
+          punctualityBonusMxn: normalizeMoney(bonusMxn),
+          attendanceBonusMxn: normalizeMoney(bonusMxn),
+          absenceDays: new Prisma.Decimal(0),
+          overtimeHours: new Prisma.Decimal(0),
+          overtimeDetail: "",
+          isrWithholdingMxn: row.isrWithholdingMxn,
+          imssWithholdingMxn: row.imssWithholdingMxn,
+          employmentSubsidyMxn: row.employmentSubsidyMxn,
+          infonavitCreditMxn: row.infonavitCreditMxn,
+          payrollStampedByAraceli: false,
+          finalPaymentApprovedByEmrt: false,
+          reviewedByJnls: false
+        };
+      })
     });
 
     return {
@@ -587,6 +789,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     assertMonth(month);
     assertPayrollHalf(half);
     const laborFile = payload.laborFileId ? await this.findPayrollLaborFileOrThrow(payload.laborFileId) : null;
+    const dailySalaryMxn = Number(laborFile?.dailySalaryMxn ?? 0);
+    const bonusMxn = 0;
 
     const record = await this.prisma.generalExpensePayrollEntry.create({
       data: {
@@ -595,10 +799,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         half,
         ...(laborFile ? { laborFile: { connect: { id: laborFile.id } } } : {}),
         employeeName: laborFile?.employeeName ?? "",
-        dailySalaryMxn: normalizeMoney(Number(laborFile?.dailySalaryMxn ?? 0)),
-        grossSalaryMxn: new Prisma.Decimal(0),
-        punctualityBonusMxn: new Prisma.Decimal(0),
-        attendanceBonusMxn: new Prisma.Decimal(0),
+        isPartTime: false,
+        dailySalaryMxn: normalizeMoney(dailySalaryMxn),
+        grossSalaryMxn: normalizeMoney(getPayrollGrossSalaryMxn(dailySalaryMxn)),
+        punctualityBonusMxn: normalizeMoney(bonusMxn),
+        attendanceBonusMxn: normalizeMoney(bonusMxn),
         absenceDays: new Prisma.Decimal(0),
         overtimeHours: new Prisma.Decimal(0),
         overtimeDetail: "",
@@ -613,7 +818,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       include: PAYROLL_ENTRY_INCLUDE
     });
 
-    return this.mapPayrollEntryWithSalaryRi(record);
+    return this.mapPayrollEntryWithMonthlyBonuses(record);
   }
 
   public async updatePayrollEntry(
@@ -631,7 +836,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       include: PAYROLL_ENTRY_INCLUDE
     });
 
-    return this.mapPayrollEntryWithSalaryRi(record);
+    return this.mapPayrollEntryWithMonthlyBonuses(record);
   }
 
   public async deletePayrollEntry(payrollEntryId: string) {
@@ -885,6 +1090,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     payload: GeneralExpensePayrollUpdateRecord
   ): Promise<Prisma.GeneralExpensePayrollEntryUpdateInput> {
     const data: Prisma.GeneralExpensePayrollEntryUpdateInput = {};
+    let nextDailySalaryMxn = Number(current.laborFile?.dailySalaryMxn ?? current.dailySalaryMxn ?? 0);
+    let shouldRefreshCalculatedBonuses = false;
 
     if (hasOwn(payload, "laborFileId")) {
       const laborFile = payload.laborFileId ? await this.findPayrollLaborFileOrThrow(payload.laborFileId) : null;
@@ -894,23 +1101,34 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         data.laborFile = { disconnect: true };
       }
       data.employeeName = laborFile?.employeeName ?? "";
-      data.dailySalaryMxn = normalizeMoney(Number(laborFile?.dailySalaryMxn ?? 0));
+      nextDailySalaryMxn = Number(laborFile?.dailySalaryMxn ?? 0);
+      data.dailySalaryMxn = normalizeMoney(nextDailySalaryMxn);
+      data.grossSalaryMxn = normalizeMoney(getPayrollGrossSalaryMxn(nextDailySalaryMxn));
+      shouldRefreshCalculatedBonuses = true;
+    }
+
+    const nextIsPartTime = hasOwn(payload, "isPartTime") ? Boolean(payload.isPartTime) : current.isPartTime;
+
+    if (hasOwn(payload, "isPartTime")) {
+      data.isPartTime = nextIsPartTime;
+      if (!nextIsPartTime) {
+        data.overtimeDetail = "";
+      }
     }
 
     if (hasOwn(payload, "grossSalaryMxn")) {
       data.grossSalaryMxn = normalizeMoney(payload.grossSalaryMxn);
     }
 
-    if (hasOwn(payload, "punctualityBonusMxn")) {
-      data.punctualityBonusMxn = normalizeMoney(payload.punctualityBonusMxn);
-    }
-
-    if (hasOwn(payload, "attendanceBonusMxn")) {
-      data.attendanceBonusMxn = normalizeMoney(payload.attendanceBonusMxn);
-    }
-
     if (hasOwn(payload, "absenceDays")) {
       data.absenceDays = normalizeHours(payload.absenceDays);
+      shouldRefreshCalculatedBonuses = true;
+    }
+
+    if (shouldRefreshCalculatedBonuses) {
+      const bonusMxn = 0;
+      data.punctualityBonusMxn = normalizeMoney(bonusMxn);
+      data.attendanceBonusMxn = normalizeMoney(bonusMxn);
     }
 
     if (hasOwn(payload, "overtimeHours")) {
@@ -918,7 +1136,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     }
 
     if (hasOwn(payload, "overtimeDetail")) {
-      data.overtimeDetail = payload.overtimeDetail ?? "";
+      data.overtimeDetail = nextIsPartTime ? payload.overtimeDetail ?? "" : "";
     }
 
     if (hasOwn(payload, "isrWithholdingMxn")) {
@@ -935,6 +1153,53 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "infonavitCreditMxn")) {
       data.infonavitCreditMxn = normalizeMoney(payload.infonavitCreditMxn);
+    }
+
+    if (hasOwn(payload, "advanceVacationDaysPaid")) {
+      if (!current.laborFile) {
+        throw new AppError(
+          400,
+          "GENERAL_EXPENSE_PAYROLL_ADVANCE_VACATION_WITHOUT_LABOR_FILE",
+          "La fila debe estar vinculada a un expediente laboral para marcar estos dÃ­as como pagados."
+        );
+      }
+
+      if (hasOwn(payload, "laborFileId")) {
+        throw new AppError(
+          400,
+          "GENERAL_EXPENSE_PAYROLL_ADVANCE_VACATION_PATCH_CONFLICT",
+          "Actualiza primero el colaborador y luego marca los dÃ­as disfrutados por adelantado como pagados."
+        );
+      }
+
+      const advanceVacationData = this.getPayrollAdvanceVacationData(
+        current,
+        await this.listPayrollGlobalVacationDayRecords()
+      );
+
+      if (payload.advanceVacationDaysPaid) {
+        if (!advanceVacationData.advanceVacationDaysPaymentEligible || advanceVacationData.rawAdvanceVacationDays <= 0) {
+          throw new AppError(
+            400,
+            "GENERAL_EXPENSE_PAYROLL_ADVANCE_VACATION_PAYMENT_NOT_ALLOWED",
+            "Los dÃ­as disfrutados por adelantado solo pueden pagarse cuando llegue la fecha de corte correspondiente."
+          );
+        }
+
+        data.laborFile = {
+          update: {
+            advanceVacationDaysPaidBalance: normalizeHours(advanceVacationData.rawAdvanceVacationDays),
+            advanceVacationDaysPaidCutoffDate: parseDateOnly(advanceVacationData.advanceVacationPremiumPaymentDate)
+          }
+        };
+      } else {
+        data.laborFile = {
+          update: {
+            advanceVacationDaysPaidBalance: normalizeHours(0),
+            advanceVacationDaysPaidCutoffDate: null
+          }
+        };
+      }
     }
 
     if (hasOwn(payload, "payrollStampedByAraceli")) {

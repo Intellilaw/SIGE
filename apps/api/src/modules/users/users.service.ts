@@ -172,7 +172,8 @@ export class UsersService {
 
     return this.repository.createTeam({
       key: this.buildUniqueTeamKey(label, teams),
-      label
+      label,
+      executionSpaceEnabled: payload.executionSpaceEnabled ?? false
     });
   }
 
@@ -190,7 +191,8 @@ export class UsersService {
 
     const updatedTeam = await this.repository.updateTeam(teamId, {
       label,
-      isActive: payload.isActive
+      isActive: payload.isActive,
+      executionSpaceEnabled: payload.executionSpaceEnabled
     });
     if (!updatedTeam) {
       throw new AppError(404, "TEAM_NOT_FOUND", "El equipo no fue encontrado.");

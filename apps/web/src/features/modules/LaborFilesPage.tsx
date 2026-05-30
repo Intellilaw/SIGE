@@ -42,6 +42,8 @@ type PreviousYearPendingVacationForm = LaborPreviousYearPendingVacationInput & {
   manualOverrideConfirmed: boolean;
 };
 
+type PreviousYearPendingPeriod = "LAST_YEAR" | "YEAR_BEFORE_LAST";
+
 type ContractSalaryReference = {
   kind: "salary";
   dailySalaryMxn: number;
@@ -159,12 +161,44 @@ function formatDate(value?: string) {
   return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("es-MX");
 }
 
+function formatLongDate(value?: string) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("es-MX", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+}
+
 function formatDateTime(value?: string) {
   if (!value) {
     return "-";
   }
 
   return new Date(value).toLocaleString("es-MX");
+}
+
+function parseVacationSummaryLine(line: string) {
+  const separatorIndex = line.indexOf(":");
+  if (separatorIndex < 0) {
+    return {
+      kind: "heading" as const,
+      label: line.trim(),
+      value: ""
+    };
+  }
+
+  const label = line.slice(0, separatorIndex).trim();
+  const value = line.slice(separatorIndex + 1).trim();
+
+  return {
+    kind: "row" as const,
+    label,
+    value: value || "-"
+  };
 }
 
 function formatMoney(value?: number) {
@@ -627,7 +661,7 @@ function formatVacationFormatDatesText(dates: string[]) {
 
 function buildVacationFormatFormDefaults(laborFile?: LaborFile): LaborVacationFormatFieldValues {
   const availableDays = laborFile
-    ? laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays
+    ? getVacationSummaryAvailableDays(laborFile)
     : 0;
 
   return {
@@ -660,29 +694,53 @@ function getVacationFormatAccounting(laborFile: LaborFile | undefined, selectedD
     hireDate: laborFile.hireDate.slice(0, 10),
     vacationYearStartDate: laborFile.vacationSummary.currentYearStartDate,
     completedYearsLabel: laborFile.vacationSummary.completedYearsLabel,
-    entitlementDays: laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays,
+    entitlementDays: getVacationSummaryAvailableDays(laborFile),
     pendingDays: Math.max(0, laborFile.vacationSummary.remainingDays - selectedDays),
     enjoyedDays: laborFile.vacationSummary.usedDays + selectedDays
   };
 }
 
-function getCountedPreviousYearPendingEvent(laborFile?: LaborFile) {
+function getVacationSummaryAvailableDays(laborFile: LaborFile) {
+  return laborFile.vacationSummary.entitlementDays +
+    laborFile.vacationSummary.previousYearPendingDays +
+    laborFile.vacationSummary.yearBeforeLastPendingDays;
+}
+
+function getPreviousYearPendingPeriodDates(laborFile: LaborFile, pendingPeriod: PreviousYearPendingPeriod) {
+  return pendingPeriod === "YEAR_BEFORE_LAST"
+    ? {
+        startDate: laborFile.vacationSummary.yearBeforeLastStartDate,
+        endDate: laborFile.vacationSummary.yearBeforeLastEndDate
+      }
+    : {
+        startDate: laborFile.vacationSummary.previousYearStartDate,
+        endDate: laborFile.vacationSummary.previousYearEndDate
+      };
+}
+
+function getCountedPreviousYearPendingEvent(laborFile: LaborFile | undefined, pendingPeriod: PreviousYearPendingPeriod) {
   if (!laborFile) {
     return undefined;
   }
 
+  const periodDates = getPreviousYearPendingPeriodDates(laborFile, pendingPeriod);
   return laborFile.vacationEvents.find((event) =>
     event.eventType === "PREVIOUS_YEAR_PENDING" &&
-    event.startDate === laborFile.vacationSummary.previousYearStartDate &&
-    event.endDate === laborFile.vacationSummary.previousYearEndDate
+    event.startDate === periodDates.startDate &&
+    event.endDate === periodDates.endDate
   );
 }
 
-function buildPreviousYearPendingFormDefaults(laborFile?: LaborFile): PreviousYearPendingVacationForm {
-  const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile);
+function buildPreviousYearPendingFormDefaults(
+  laborFile: LaborFile | undefined,
+  pendingPeriod: PreviousYearPendingPeriod
+): PreviousYearPendingVacationForm {
+  const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile, pendingPeriod);
   return {
     ...EMPTY_PREVIOUS_YEAR_PENDING_FORM,
-    days: laborFile?.vacationSummary.previousYearPendingDays ?? 0,
+    days: pendingPeriod === "YEAR_BEFORE_LAST"
+      ? laborFile?.vacationSummary.yearBeforeLastPendingDays ?? 0
+      : laborFile?.vacationSummary.previousYearPendingDays ?? 0,
     description: currentPendingEvent?.description ?? ""
   };
 }
@@ -797,6 +855,7 @@ export function LaborFilesPage() {
   const [vacationFormatSingleDate, setVacationFormatSingleDate] = useState("");
   const [generatingVacationFormat, setGeneratingVacationFormat] = useState(false);
   const [previousYearPendingForm, setPreviousYearPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
+  const [yearBeforeLastPendingForm, setYearBeforeLastPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
   const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
   const [globalVacationDays, setGlobalVacationDays] = useState<LaborGlobalVacationDay[]>([]);
   const [globalVacationForm, setGlobalVacationForm] = useState<LaborGlobalVacationDayInput>(EMPTY_GLOBAL_VACATION_FORM);
@@ -888,6 +947,7 @@ export function LaborFilesPage() {
       setVacationFormatRange({ startDate: "", endDate: "" });
       setVacationFormatSingleDate("");
       setPreviousYearPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
+      setYearBeforeLastPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
       return;
     }
 
@@ -909,7 +969,8 @@ export function LaborFilesPage() {
     setVacationFormatFormOpen(false);
     setVacationFormatRange({ startDate: "", endDate: "" });
     setVacationFormatSingleDate("");
-    setPreviousYearPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile));
+    setPreviousYearPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile, "LAST_YEAR"));
+    setYearBeforeLastPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile, "YEAR_BEFORE_LAST"));
     setFlash(null);
   }, [selectedLaborFile?.id]);
 
@@ -1330,7 +1391,7 @@ export function LaborFilesPage() {
     }
   }
 
-  async function handlePreviousYearPendingSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handlePreviousYearPendingSubmit(event: FormEvent<HTMLFormElement>, pendingPeriod: PreviousYearPendingPeriod) {
     event.preventDefault();
     if (!selectedLaborFile || !canWrite) {
       return;
@@ -1341,8 +1402,14 @@ export function LaborFilesPage() {
       return;
     }
 
-    if (!previousYearPendingForm.manualOverrideConfirmed) {
-      setFlash({ tone: "error", text: "Marca el checkbox para confirmar el ajuste manual del año anterior." });
+    const form = pendingPeriod === "YEAR_BEFORE_LAST" ? yearBeforeLastPendingForm : previousYearPendingForm;
+    const setForm = pendingPeriod === "YEAR_BEFORE_LAST" ? setYearBeforeLastPendingForm : setPreviousYearPendingForm;
+    const periodCopy = pendingPeriod === "YEAR_BEFORE_LAST"
+      ? "del año inmediato anterior al último año"
+      : "del último año";
+
+    if (!form.manualOverrideConfirmed) {
+      setFlash({ tone: "error", text: `Marca el checkbox para confirmar el ajuste manual ${periodCopy}.` });
       return;
     }
 
@@ -1351,12 +1418,13 @@ export function LaborFilesPage() {
 
     try {
       await apiPost<LaborFile>(`/labor-files/${selectedLaborFile.id}/previous-year-pending-vacations`, {
-        days: Number(previousYearPendingForm.days) || 0,
-        description: previousYearPendingForm.description || null,
-        manualOverrideConfirmed: true
+        days: Number(form.days) || 0,
+        description: form.description || null,
+        manualOverrideConfirmed: true,
+        pendingPeriod
       });
-      setPreviousYearPendingForm((current) => ({ ...current, manualOverrideConfirmed: false }));
-      setFlash({ tone: "success", text: "Saldo pendiente del año anterior actualizado." });
+      setForm((current) => ({ ...current, manualOverrideConfirmed: false }));
+      setFlash({ tone: "success", text: `Saldo pendiente ${periodCopy} actualizado.` });
       await loadLaborFiles(selectedLaborFile.id);
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
@@ -2493,9 +2561,19 @@ export function LaborFilesPage() {
                 </div>
 
                 <div className="labor-file-vacation-summary">
-                  {selectedLaborFile.vacationSummary.lines.map((line) => (
-                    <p key={line}>{line}</p>
-                  ))}
+                  {selectedLaborFile.vacationSummary.lines.map((line) => {
+                    const item = parseVacationSummaryLine(line);
+                    return item.kind === "heading" ? (
+                      <div className="labor-file-vacation-summary-heading" key={line}>
+                        {item.label}
+                      </div>
+                    ) : (
+                      <div className="labor-file-vacation-summary-row" key={line}>
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="labor-file-vacation-accounting-grid">
@@ -2517,13 +2595,12 @@ export function LaborFilesPage() {
                   </div>
                 </div>
 
-                <form className="labor-file-previous-year-pending" onSubmit={handlePreviousYearPendingSubmit}>
+                <form className="labor-file-previous-year-pending" onSubmit={(event) => void handlePreviousYearPendingSubmit(event, "LAST_YEAR")}>
                   <div className="labor-file-previous-year-pending-head">
                     <div>
-                      <h3>Pendientes del año anterior</h3>
+                      <h3>Pendientes del último año</h3>
                       <span>
-                        Solo se suma el saldo del periodo inmediato anterior: {formatDate(selectedLaborFile.vacationSummary.previousYearStartDate)} al {formatDate(selectedLaborFile.vacationSummary.previousYearEndDate)}.
-                        Los saldos de años anteriores quedan fuera de la contabilidad.
+                        Saldo del último año: {formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate)} al {formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate)}.
                       </span>
                     </div>
                     <strong>{selectedLaborFile.vacationSummary.previousYearPendingDays} días</strong>
@@ -2541,7 +2618,9 @@ export function LaborFilesPage() {
                         }))
                       }
                     />
-                    <span>Agregar o actualizar manualmente días pendientes del año anterior</span>
+                    <span>
+                      Agregar o actualizar manualmente días pendientes del último año ({formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate)} al {formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate)})
+                    </span>
                   </label>
 
                   <div className="labor-file-previous-year-pending-fields">
@@ -2586,11 +2665,86 @@ export function LaborFilesPage() {
 
                   <small>
                     {canManagePreviousYearPending
-                      ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente anterior de este expediente."
+                      ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente del último año de este expediente."
                       : "Solo el superadmin Eduardo Rusconi puede marcar este checkbox y guardar el ajuste."}
                     {selectedLaborFile.vacationSummary.ignoredPreviousYearPendingDays > 0
                       ? ` No se contabilizan ${selectedLaborFile.vacationSummary.ignoredPreviousYearPendingDays} días de años más antiguos.`
                       : ""}
+                  </small>
+                </form>
+
+                <form className="labor-file-previous-year-pending" onSubmit={(event) => void handlePreviousYearPendingSubmit(event, "YEAR_BEFORE_LAST")}>
+                  <div className="labor-file-previous-year-pending-head">
+                    <div>
+                      <h3>Pendientes del año inmediato anterior al último año</h3>
+                      <span>
+                        Saldo del año inmediato anterior al último año: {formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate)} al {formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate)}.
+                      </span>
+                    </div>
+                    <strong>{selectedLaborFile.vacationSummary.yearBeforeLastPendingDays} días</strong>
+                  </div>
+
+                  <label className={`labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`}>
+                    <input
+                      checked={yearBeforeLastPendingForm.manualOverrideConfirmed}
+                      disabled={!canManagePreviousYearPending || savingPreviousYearPending}
+                      type="checkbox"
+                      onChange={(event) =>
+                        setYearBeforeLastPendingForm((current) => ({
+                          ...current,
+                          manualOverrideConfirmed: event.target.checked
+                        }))
+                      }
+                    />
+                    <span>
+                      Agregar o actualizar manualmente días pendientes del año inmediato anterior al último año ({formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate)} al {formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate)})
+                    </span>
+                  </label>
+
+                  <div className="labor-file-previous-year-pending-fields">
+                    <label className="form-field">
+                      <span>Días pendientes</span>
+                      <input
+                        disabled={!canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
+                        min="0"
+                        step="0.5"
+                        type="number"
+                        value={yearBeforeLastPendingForm.days}
+                        onChange={(event) =>
+                          setYearBeforeLastPendingForm((current) => ({
+                            ...current,
+                            days: Number(event.target.value)
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Nota</span>
+                      <input
+                        disabled={!canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
+                        placeholder="Motivo o referencia del ajuste"
+                        value={yearBeforeLastPendingForm.description}
+                        onChange={(event) =>
+                          setYearBeforeLastPendingForm((current) => ({
+                            ...current,
+                            description: event.target.value
+                          }))
+                        }
+                      />
+                    </label>
+                    <button
+                      className="secondary-button"
+                      disabled={!canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
+                      type="submit"
+                    >
+                      {savingPreviousYearPending ? "Guardando..." : "Guardar saldo"}
+                    </button>
+                  </div>
+
+                  <small>
+                    {canManagePreviousYearPending
+                      ? "Marcar el checkbox habilita el ajuste manual y reemplaza el saldo pendiente del año inmediato anterior al último año de este expediente."
+                      : "Solo el superadmin Eduardo Rusconi puede marcar este checkbox y guardar el ajuste."}
                   </small>
                 </form>
 

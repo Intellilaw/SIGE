@@ -40,6 +40,12 @@ import { ORGANIZATIONS, getDefaultOrganization } from "@sige/contracts";
 
 import type { RefreshTokenRecord, StoredUser } from "./types";
 
+const PAYROLL_BONUS_RATE = 0.1;
+
+function roundMoney(value: number) {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -293,6 +299,8 @@ export function mapManagedTeam(record: {
   isActive: boolean;
   sortOrder: number;
   deactivatedAt: Date | null;
+  executionSpaceEnabled: boolean;
+  executionSpaceDeactivatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }, memberCount = 0): ManagedTeam {
@@ -303,9 +311,11 @@ export function mapManagedTeam(record: {
     isActive: record.isActive,
     sortOrder: record.sortOrder,
     memberCount,
+    executionSpaceEnabled: record.executionSpaceEnabled,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
-    deactivatedAt: record.deactivatedAt?.toISOString()
+    deactivatedAt: record.deactivatedAt?.toISOString(),
+    executionSpaceDeactivatedAt: record.executionSpaceDeactivatedAt?.toISOString()
   };
 }
 
@@ -699,7 +709,7 @@ function isAuthorizedVacationEvent(event: LaborVacationEvent) {
     (mimeType === "application/pdf" || filename.endsWith(".pdf"));
 }
 
-function buildVacationSummary(
+export function buildVacationSummary(
   hireDateKey: string,
   employmentEndedAtKey: string | undefined,
   vacationEvents: LaborVacationEvent[],
@@ -707,6 +717,10 @@ function buildVacationSummary(
 ): LaborFile["vacationSummary"] {
   const currentYearStartDate = getCurrentVacationYearStartKey(hireDateKey);
   const { previousYearStartDate, previousYearEndDate } = getPreviousVacationYearRange(currentYearStartDate);
+  const {
+    previousYearStartDate: yearBeforeLastStartDate,
+    previousYearEndDate: yearBeforeLastEndDate
+  } = getPreviousVacationYearRange(previousYearStartDate);
   const completedYears = getCompletedYears(hireDateKey, currentYearStartDate);
   const entitlementDays = getVacationEntitlementDays(completedYears);
   const applicableGlobalVacationDays = globalVacationDays.filter((day) =>
@@ -720,9 +734,16 @@ function buildVacationSummary(
   const previousYearPendingCountedEvents = previousYearPendingEvents.filter((event) =>
     event.startDate === previousYearStartDate && event.endDate === previousYearEndDate
   );
+  const yearBeforeLastPendingCountedEvents = previousYearPendingEvents.filter((event) =>
+    event.startDate === yearBeforeLastStartDate && event.endDate === yearBeforeLastEndDate
+  );
   const previousYearPendingDays = previousYearPendingCountedEvents.reduce((total, event) => total + event.days, 0);
+  const yearBeforeLastPendingDays = yearBeforeLastPendingCountedEvents.reduce((total, event) => total + event.days, 0);
   const ignoredPreviousYearPendingDays = previousYearPendingEvents
-    .filter((event) => !previousYearPendingCountedEvents.includes(event))
+    .filter((event) =>
+      !previousYearPendingCountedEvents.includes(event) &&
+      !yearBeforeLastPendingCountedEvents.includes(event)
+    )
     .reduce((total, event) => total + event.days, 0);
   const previousYearDeductionDays = vacationEvents
     .filter((event) => event.eventType === "PREVIOUS_YEAR_DEDUCTION")
@@ -738,7 +759,7 @@ function buildVacationSummary(
   const scheduledDays = vacationRequests
     .filter((event) => !isAuthorizedVacationEvent(event))
     .reduce((total, event) => total + event.days, 0);
-  const availableDays = entitlementDays + previousYearPendingDays;
+  const availableDays = entitlementDays + previousYearPendingDays + yearBeforeLastPendingDays;
   const usedDays = authorizedDays + scheduledDays + previousYearDeductionDays + globalVacationUsedDays;
   const remainingDays = availableDays - usedDays;
   const unearnedDays = Math.max(0, usedDays - availableDays);
@@ -752,12 +773,15 @@ function buildVacationSummary(
 
     if (event.eventType === "PREVIOUS_YEAR_PENDING") {
       const dateRange = formatVacationRange(event.startDate, event.endDate);
-      const isCounted = previousYearPendingCountedEvents.includes(event);
+      const isLastYearPending = previousYearPendingCountedEvents.includes(event);
+      const isYearBeforeLastPending = yearBeforeLastPendingCountedEvents.includes(event);
       return {
         dateKey: event.startDate ?? "0000-00-00",
-        line: isCounted
-          ? `Saldo pendiente del año inmediato anterior: agrega ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
-          : `Saldo pendiente de un año anterior no contabilizado: ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+        line: isLastYearPending
+          ? `Saldo pendiente del último año: agrega ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+          : isYearBeforeLastPending
+            ? `Saldo pendiente del año inmediato anterior al último año: agrega ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+            : `Saldo pendiente de un año anterior no contabilizado: ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
       };
     }
 
@@ -783,16 +807,22 @@ function buildVacationSummary(
   const sortedEventLines = [...eventLines, ...globalVacationLines]
     .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
     .map((event) => event.line);
+  const detailLine = sortedEventLines.length > 0
+    ? `Detalle: ${sortedEventLines.join(" ")}`
+    : "Detalle: Sin periodos disfrutados, programados o descontados.";
 
   return {
     hireDate: hireDateKey,
     currentYearStartDate,
     previousYearStartDate,
     previousYearEndDate,
+    yearBeforeLastStartDate,
+    yearBeforeLastEndDate,
     completedYears,
     completedYearsLabel: formatCompletedYearsLabel(completedYears).toUpperCase(),
     entitlementDays,
     previousYearPendingDays,
+    yearBeforeLastPendingDays,
     ignoredPreviousYearPendingDays,
     earnedDays: entitlementDays,
     unearnedDays,
@@ -801,19 +831,17 @@ function buildVacationSummary(
     usedDays,
     remainingDays,
     lines: [
-      "Contabilización de vacaciones",
+      "CONTABILIZACIÓN DE VACACIONES",
       `Fecha de ingreso: ${formatLongDateKey(hireDateKey)}`,
-      `Fecha de inicio del año corriente: ${formatLongDateKey(currentYearStartDate)}`,
-      `${formatCompletedYearsLabel(completedYears).toUpperCase()} AÑOS CUMPLIDOS`,
-      `Días ya devengados: ${entitlementDays}.`,
-      `Pendientes del año inmediato anterior (${formatLongDateKey(previousYearStartDate)} al ${formatLongDateKey(previousYearEndDate)}): ${previousYearPendingDays}.`,
-      `Pendientes de años anteriores al inmediato anterior no contabilizados: ${ignoredPreviousYearPendingDays}.`,
-      `Días no devengados: ${unearnedDays}.`,
+      `Fecha de inicio del año corriente: ${formatLongDateKey(currentYearStartDate)}. ${formatCompletedYearsLabel(completedYears).toUpperCase()} AÑOS CUMPLIDOS`,
+      `Días a los que tiene derecho por el último año (${formatLongDateKey(previousYearStartDate)} al ${formatLongDateKey(previousYearEndDate)}): ${entitlementDays + previousYearPendingDays}`,
+      `Días a los que tiene derecho por el año inmediato anterior al último año (${formatLongDateKey(yearBeforeLastStartDate)} al ${formatLongDateKey(yearBeforeLastEndDate)}): ${yearBeforeLastPendingDays}`,
+      `TOTAL DE DÍAS A LOS QUE TIENE DERECHO: ${availableDays}`,
+      `Días ya disfrutados: ${usedDays}`,
+      detailLine,
+      `TOTAL DE DÍAS PENDIENTES DE SER DISFRUTADOS: ${remainingDays}`,
       `Días ya programados pendientes de PDF firmado: ${scheduledDays}.`,
-      `Días ya autorizados con PDF firmado: ${authorizedDays}.`,
-      "Periodos disfrutados, programados y descuentos:",
-      ...sortedEventLines,
-      `Después de considerar los días anteriormente señalados, le quedan ${remainingDays} por disfrutar.`
+      `Días ya autorizados con PDF firmado: ${authorizedDays}.`
     ]
   };
 }
@@ -1459,6 +1487,7 @@ export function mapGeneralExpensePayrollEntry(record: {
   half: number;
   laborFileId: string | null;
   employeeName: string;
+  isPartTime: boolean;
   dailySalaryMxn: Prisma.Decimal;
   laborFile?: {
     employeeName: string;
@@ -1470,6 +1499,10 @@ export function mapGeneralExpensePayrollEntry(record: {
   grossSalaryMxn: Prisma.Decimal;
   punctualityBonusMxn: Prisma.Decimal;
   attendanceBonusMxn: Prisma.Decimal;
+  advanceVacationDays?: number;
+  advanceVacationPremiumPaymentDate?: string | null;
+  advanceVacationDaysPaid?: boolean;
+  advanceVacationDaysPaymentEligible?: boolean;
   vacationDays?: number;
   vacationPremiumMxn?: number;
   absenceDays: Prisma.Decimal;
@@ -1488,20 +1521,23 @@ export function mapGeneralExpensePayrollEntry(record: {
   const employeeName = record.laborFile?.employeeName ?? record.employeeName;
   const dailySalaryMxn = Number(record.laborFile?.dailySalaryMxn ?? record.dailySalaryMxn);
   const dailySalaryRiStatus = getPayrollDailySalaryRiStatus(record.laborFile);
-  const grossSalaryMxn = Number(record.grossSalaryMxn);
-  const punctualityBonusMxn = Number(record.punctualityBonusMxn);
-  const attendanceBonusMxn = Number(record.attendanceBonusMxn);
+  const grossSalaryMxn = dailySalaryMxn * 15;
   const vacationDays = Number(record.vacationDays ?? 0);
   const vacationPremiumMxn = Number(record.vacationPremiumMxn ?? 0);
   const absenceDays = Number(record.absenceDays);
   const absenceDiscountMxn = dailySalaryMxn * absenceDays;
+  const netSalaryMxn = grossSalaryMxn - absenceDiscountMxn;
+  const bonusBaseMxn = record.half === 2 ? netSalaryMxn : 0;
+  const punctualityBonusMxn = roundMoney(Math.max(0, bonusBaseMxn * PAYROLL_BONUS_RATE));
+  const attendanceBonusMxn = roundMoney(Math.max(0, bonusBaseMxn * PAYROLL_BONUS_RATE));
   const overtimeHours = Number(record.overtimeHours);
   const isrWithholdingMxn = Number(record.isrWithholdingMxn);
   const imssWithholdingMxn = Number(record.imssWithholdingMxn);
   const employmentSubsidyMxn = Number(record.employmentSubsidyMxn);
   const infonavitCreditMxn = Number(record.infonavitCreditMxn);
-  const overtimeHourlyRateMxn = dailySalaryMxn / 8;
+  const overtimeHourlyRateMxn = (dailySalaryMxn / 8) * 2;
   const overtimeTotalMxn = overtimeHourlyRateMxn * overtimeHours;
+  const payrollWithholdingsMxn = isrWithholdingMxn + imssWithholdingMxn + infonavitCreditMxn;
 
   return {
     id: record.id,
@@ -1510,6 +1546,7 @@ export function mapGeneralExpensePayrollEntry(record: {
     half: (record.half === 2 ? 2 : 1) as GeneralExpensePayrollEntry["half"],
     laborFileId: record.laborFileId ?? undefined,
     employeeName,
+    isPartTime: record.isPartTime,
     dailySalaryMxn,
     laborFileDailySalaryMxn: record.laborFile ? Number(record.laborFile.dailySalaryMxn ?? 0) : undefined,
     dailySalaryRiVerified: dailySalaryRiStatus.verified,
@@ -1517,10 +1554,15 @@ export function mapGeneralExpensePayrollEntry(record: {
     grossSalaryMxn,
     punctualityBonusMxn,
     attendanceBonusMxn,
+    advanceVacationDays: Number(record.advanceVacationDays ?? 0),
+    advanceVacationPremiumPaymentDate: record.advanceVacationPremiumPaymentDate ?? undefined,
+    advanceVacationDaysPaid: Boolean(record.advanceVacationDaysPaid),
+    advanceVacationDaysPaymentEligible: Boolean(record.advanceVacationDaysPaymentEligible),
     vacationDays,
     vacationPremiumMxn,
     absenceDays,
     absenceDiscountMxn,
+    netSalaryMxn,
     overtimeHourlyRateMxn,
     overtimeHours,
     overtimeTotalMxn,
@@ -1529,7 +1571,7 @@ export function mapGeneralExpensePayrollEntry(record: {
     imssWithholdingMxn,
     employmentSubsidyMxn,
     infonavitCreditMxn,
-    netDepositMxn: grossSalaryMxn + punctualityBonusMxn + attendanceBonusMxn + vacationPremiumMxn + overtimeTotalMxn + employmentSubsidyMxn - isrWithholdingMxn - imssWithholdingMxn - absenceDiscountMxn - infonavitCreditMxn,
+    netDepositMxn: netSalaryMxn + punctualityBonusMxn + attendanceBonusMxn + vacationPremiumMxn + overtimeTotalMxn + employmentSubsidyMxn - payrollWithholdingsMxn,
     payrollStampedByAraceli: record.payrollStampedByAraceli,
     finalPaymentApprovedByEmrt: record.finalPaymentApprovedByEmrt,
     reviewedByJnls: record.reviewedByJnls,

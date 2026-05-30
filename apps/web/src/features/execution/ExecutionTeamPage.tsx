@@ -6,6 +6,7 @@ import {
   type ExecutionHolidayAuthorityShortName,
   type Holiday,
   type Matter,
+  type TaskModuleDefinition,
   type TaskDistributionEvent,
   type TaskDistributionHistory,
   type TaskState,
@@ -15,10 +16,9 @@ import {
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
-import { useAuth } from "../auth/AuthContext";
-import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
+import { buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "./execution-config";
+import { findExecutionModuleDescriptorBySlug } from "./execution-config";
 
 type MatterPatchPayload = {
   executionPrompt?: string | null;
@@ -654,11 +654,9 @@ export function ExecutionTeamWorkspace({
 }: ExecutionTeamWorkspaceProps) {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const visibleModules = getVisibleExecutionModules(user);
-  const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
 
+  const [taskModules, setTaskModules] = useState<TaskModuleDefinition[]>([]);
+  const [loadingModules, setLoadingModules] = useState(true);
   const [activeMatters, setActiveMatters] = useState<Matter[]>([]);
   const [deletedMatters, setDeletedMatters] = useState<Matter[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -674,10 +672,48 @@ export function ExecutionTeamWorkspace({
   const [panelMatter, setPanelMatter] = useState<Matter | null>(null);
   const [panelMode, setPanelMode] = useState<"create" | "history" | null>(null);
 
-  const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const module = useMemo(
+    () => findExecutionModuleDescriptorBySlug(taskModules, slug),
+    [slug, taskModules]
+  );
+  const legacyConfig = useMemo(
+    () => module ? buildLegacyTaskModuleConfig(module.definition, module.slug) : undefined,
+    [module]
+  );
+  const canAccess = Boolean(module);
 
   useEffect(() => {
-    if (!module || !canAccess) {
+    let active = true;
+
+    async function loadModules() {
+      setLoadingModules(true);
+      setErrorMessage(null);
+
+      try {
+        const loadedModules = await apiGet<TaskModuleDefinition[]>("/tasks/modules");
+        if (active) {
+          setTaskModules(loadedModules);
+        }
+      } catch (error) {
+        if (active) {
+          setErrorMessage(toErrorMessage(error));
+        }
+      } finally {
+        if (active) {
+          setLoadingModules(false);
+        }
+      }
+    }
+
+    void loadModules();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loadingModules || !module || !canAccess) {
       return;
     }
 
@@ -724,7 +760,7 @@ export function ExecutionTeamWorkspace({
     }
 
     void loadBoard();
-  }, [module?.moduleId, module?.team, canAccess]);
+  }, [loadingModules, module?.moduleId, module?.team, canAccess]);
 
   const trackLabels = useMemo(
     () => new Map(module?.definition.tracks.map((track) => [track.id, track.label]) ?? []),
@@ -824,7 +860,19 @@ export function ExecutionTeamWorkspace({
     [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]
   );
 
+  if (loadingModules) {
+    return <div className="centered-message">Cargando ejecucion...</div>;
+  }
+
   if (!module || !canAccess || !legacyConfig) {
+    if (errorMessage) {
+      return (
+        <section className="page-stack">
+          <div className="message-banner message-error">{errorMessage}</div>
+        </section>
+      );
+    }
+
     return <Navigate to={fallbackPath} replace />;
   }
 

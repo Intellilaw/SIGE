@@ -41,13 +41,13 @@ export function AuthProvider({ children }) {
         window.addEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
         return () => window.removeEventListener(AUTH_STORAGE_EVENT, handleAuthStorageChange);
     }, []);
-    async function login(identifier, password) {
-        const response = await apiPost("/auth/login", { identifier, password });
+    async function login(identifier, password, organizationSlug) {
+        const response = await apiPost("/auth/login", { identifier, password, organizationSlug });
         persistSession(response);
         setUser(response.user);
     }
-    async function requestPasswordReset(identifier) {
-        return apiPost("/auth/password-resets/request", { identifier });
+    async function requestPasswordReset(identifier, organizationSlug) {
+        return apiPost("/auth/password-resets/request", { identifier, organizationSlug });
     }
     async function completePasswordReset(token, password) {
         const response = await apiPost("/auth/password-resets/complete", { token, password });

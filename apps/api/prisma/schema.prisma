@@ -81,19 +81,22 @@ model User {
 }
 
 model UserTeam {
-  id            String    @id @default(uuid())
-  organizationId String    @default("org-rusconi")
-  key           String
-  label         String
-  isActive      Boolean   @default(true)
-  sortOrder     Int       @default(0)
-  deactivatedAt DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                          String       @id @default(uuid())
+  organizationId              String       @default("org-rusconi")
+  key                         String
+  label                       String
+  isActive                    Boolean      @default(true)
+  sortOrder                   Int          @default(0)
+  deactivatedAt               DateTime?
+  executionSpaceEnabled       Boolean      @default(false)
+  executionSpaceDeactivatedAt DateTime?
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
+  organization                Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, key])
   @@index([organizationId, isActive, sortOrder])
+  @@index([organizationId, executionSpaceEnabled])
   @@index([organizationId, label])
 }
 
@@ -128,6 +131,8 @@ model LaborFile {
   employmentStatus             String                       @default("ACTIVE")
   hireDate                     DateTime                     @db.Date
   dailySalaryMxn               Decimal                      @default(0)
+  advanceVacationDaysPaidBalance Decimal                    @default(0) @db.Decimal(6, 2)
+  advanceVacationDaysPaidCutoffDate DateTime?               @db.Date
   employmentEndedAt            DateTime?                    @db.Date
   notes                        String?
   createdAt                    DateTime                     @default(now())
@@ -501,6 +506,7 @@ model GeneralExpensePayrollEntry {
   half                       Int
   laborFileId                String?
   employeeName               String       @default("")
+  isPartTime                 Boolean      @default(false)
   dailySalaryMxn             Decimal      @default(0)
   grossSalaryMxn             Decimal      @default(0)
   punctualityBonusMxn        Decimal      @default(0)

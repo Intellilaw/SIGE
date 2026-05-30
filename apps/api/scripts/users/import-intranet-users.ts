@@ -21,6 +21,8 @@ import { z } from "zod";
 
 import { hashPassword } from "../../src/core/auth/passwords";
 
+const RUSCONI_ORGANIZATION_ID = "org-rusconi";
+
 const rawUserMetaSchema = z.record(z.string(), z.unknown()).optional();
 
 const exportedUserSchema = z.object({
@@ -283,6 +285,9 @@ async function main() {
   try {
     const importableEmails = new Set(importableUsers.map((entry) => entry.email));
     const existingUsers = await prisma.user.findMany({
+      where: {
+        organizationId: RUSCONI_ORGANIZATION_ID
+      },
       select: {
         email: true,
         username: true
@@ -317,7 +322,12 @@ async function main() {
 
     for (const user of importableUsers.map((entry) => plannedUsersByEmail.get(entry.email) ?? entry)) {
       const existing = await prisma.user.findUnique({
-        where: { email: user.email },
+        where: {
+          organizationId_email: {
+            organizationId: RUSCONI_ORGANIZATION_ID,
+            email: user.email
+          }
+        },
         select: { email: true }
       });
       const operation = existing ? "update" : "create";
@@ -339,10 +349,16 @@ async function main() {
 
       if (apply) {
         await prisma.user.upsert({
-          where: { email: user.email },
+          where: {
+            organizationId_email: {
+              organizationId: RUSCONI_ORGANIZATION_ID,
+              email: user.email
+            }
+          },
           update: commonData,
           create: {
             ...commonData,
+            organizationId: RUSCONI_ORGANIZATION_ID,
             passwordResetRequired: true,
             email: user.email,
             passwordHash: passwordHash ?? hashPassword(randomBytes(32).toString("hex")),

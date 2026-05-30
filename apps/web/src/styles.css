@@ -2102,10 +2102,16 @@ textarea {
 
 .users-team-form {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 0.7fr) auto;
   gap: 16px;
   align-items: end;
   margin-bottom: 16px;
+}
+
+.users-team-execution-field small {
+  color: #7b8794;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .users-team-actions {
@@ -3222,7 +3228,7 @@ textarea {
 }
 
 .general-expense-payroll-table {
-  min-width: 3290px;
+  min-width: 4100px;
 }
 
 .general-expense-input {
@@ -3295,9 +3301,23 @@ textarea {
   font-weight: 800;
 }
 
+.general-expense-readonly-cell.is-payroll-net-salary {
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
 .general-expense-payroll-days-cell {
   justify-content: center;
   min-width: 120px;
+}
+
+.general-expense-payroll-advance-cell {
+  min-width: 150px;
+}
+
+.general-expense-payroll-date-cell {
+  justify-content: center;
+  min-width: 190px;
 }
 
 .general-expense-payroll-ri-salary {
@@ -3500,6 +3520,17 @@ textarea {
 
 .general-expense-totals-row .is-total {
   color: #0f766e;
+}
+
+.general-expense-payroll-total-row td {
+  background: rgba(15, 118, 110, 0.08);
+  border-top: 2px solid rgba(15, 118, 110, 0.18);
+  font-weight: 800;
+}
+
+.general-expense-payroll-total-row td:first-child {
+  text-align: right;
+  color: #334155;
 }
 
 .general-expense-emrt-total-card {
@@ -9565,18 +9596,51 @@ textarea {
   border: 1px solid rgba(31, 41, 51, 0.07);
   border-radius: 8px;
   display: grid;
-  gap: 6px;
+  gap: 0;
   max-width: 100%;
   min-width: 0;
-  padding: 14px;
+  overflow: hidden;
+  padding: 0;
   width: 100%;
 }
 
-.labor-file-vacation-summary p {
+.labor-file-vacation-summary-heading {
+  background: rgba(238, 244, 251, 0.82);
   color: #243447;
+  font-size: 0.95rem;
   font-weight: 700;
-  margin: 0;
+  padding: 14px 16px;
+  text-transform: uppercase;
+}
+
+.labor-file-vacation-summary-row {
+  align-items: start;
+  border-top: 1px solid rgba(31, 41, 51, 0.07);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(260px, 1.08fr) minmax(220px, 0.92fr);
+  min-width: 0;
+  padding: 13px 16px;
+}
+
+.labor-file-vacation-summary-row span {
+  color: #52657a;
+  font-weight: 800;
+  line-height: 1.35;
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.labor-file-vacation-summary-row strong {
+  color: #102a43;
+  font-weight: 850;
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.labor-file-vacation-summary-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.64);
 }
 
 .labor-file-vacation-accounting-grid {
@@ -9960,6 +10024,7 @@ textarea {
   .labor-file-vacation-format-stats,
   .labor-file-vacation-format-field-grid,
   .labor-file-vacation-format-accounting,
+  .labor-file-vacation-summary-row,
   .labor-file-vacation-accounting-grid,
   .labor-file-previous-year-pending-fields,
   .labor-file-global-vacation-form,

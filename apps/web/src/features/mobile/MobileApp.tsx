@@ -7,6 +7,7 @@ import type {
   GeneralExpense,
   Lead,
   Matter,
+  TaskModuleDefinition,
   TaskDistributionEvent,
   TaskDistributionHistory,
   TaskTerm,
@@ -19,7 +20,12 @@ import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
+import {
+  EXECUTION_MODULE_BY_SLUG,
+  buildExecutionModuleDescriptors,
+  findExecutionModuleDescriptorBySlug,
+  getVisibleExecutionModules
+} from "../execution/execution-config";
 import type { ExecutionModuleDescriptor } from "../execution/execution-config";
 import {
   CREATE_TASKS_RI_CONNECTION_ID,
@@ -41,7 +47,7 @@ import {
   resolveTrackingTaskName,
   usesPresentationAndTermDates
 } from "../tasks/task-display-utils";
-import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
+import { LEGACY_TASK_MODULE_BY_ID, buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import type { LegacyTaskModuleConfig, LegacyTaskTableConfig } from "../tasks/task-legacy-config";
 
 type MobileTaskTarget = {
@@ -756,6 +762,56 @@ export function MobileGeneralSupervisionPage() {
       <GeneralSupervisionPage />
     </section>
   );
+}
+
+function useMobileExecutionModules(shouldLoad: boolean) {
+  const [taskModules, setTaskModules] = useState<TaskModuleDefinition[]>([]);
+  const [loadingModules, setLoadingModules] = useState(shouldLoad);
+  const [moduleErrorMessage, setModuleErrorMessage] = useState<string | null>(null);
+  const visibleModules = useMemo(() => buildExecutionModuleDescriptors(taskModules), [taskModules]);
+
+  useEffect(() => {
+    if (!shouldLoad) {
+      setTaskModules([]);
+      setLoadingModules(false);
+      return;
+    }
+
+    let active = true;
+
+    async function loadModules() {
+      setLoadingModules(true);
+      setModuleErrorMessage(null);
+
+      try {
+        const loadedModules = await apiGet<TaskModuleDefinition[]>("/tasks/modules");
+        if (active) {
+          setTaskModules(loadedModules);
+        }
+      } catch (error) {
+        if (active) {
+          setModuleErrorMessage(toErrorMessage(error));
+        }
+      } finally {
+        if (active) {
+          setLoadingModules(false);
+        }
+      }
+    }
+
+    void loadModules();
+
+    return () => {
+      active = false;
+    };
+  }, [shouldLoad]);
+
+  return {
+    taskModules,
+    visibleModules,
+    loadingModules,
+    moduleErrorMessage
+  };
 }
 
 export function MobileDashboardIndexPage() {
@@ -1968,21 +2024,26 @@ export function MobileExecutionIndexPage() {
   const { user } = useAuth();
   const { isModuleEnabled } = useModuleAvailability();
   const executionEnabled = isModuleEnabled("execution");
-  const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
+  const canReadExecution = canReadMobileExecution(user);
+  const { visibleModules, loadingModules, moduleErrorMessage } = useMobileExecutionModules(executionEnabled && canReadExecution);
+  const canViewIndex = Boolean(user?.permissions?.includes("*") || user?.team === "CLIENT_RELATIONS" || user?.team === "ADMIN" || user?.role === "SUPERADMIN");
 
-  if (!executionEnabled || !canReadMobileExecution(user)) {
+  if (!executionEnabled || !canReadExecution) {
     return <Navigate to="/mobile" replace />;
   }
 
-  if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
+  if (!loadingModules && visibleModules.length === 1 && !canViewIndex) {
     return <Navigate to={`/mobile/execution/${visibleModules[0].slug}`} replace />;
   }
 
   return (
     <section className="mobile-stack">
       <MobilePageTitle title="Ejecucion" subtitle="Selecciona el equipo para crear tareas desde asuntos activos." />
+      {moduleErrorMessage ? <div className="message-banner message-error">{moduleErrorMessage}</div> : null}
       <div className="mobile-card-list">
-        {visibleModules.map((module) => (
+        {loadingModules ? (
+          <div className="mobile-empty">Cargando equipos...</div>
+        ) : visibleModules.map((module) => (
           <Link key={module.moduleId} className="mobile-module-card" to={`/mobile/execution/${module.slug}`}>
             <strong>{module.label}</strong>
             <span>{module.shortLabel}</span>
@@ -2050,10 +2111,17 @@ export function MobileExecutionTeamPage() {
   const { user } = useAuth();
   const { isModuleEnabled } = useModuleAvailability();
   const executionEnabled = isModuleEnabled("execution");
-  const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-  const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
-  const canAccess = Boolean(executionEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const canReadExecution = canReadMobileExecution(user);
+  const { taskModules, loadingModules, moduleErrorMessage } = useMobileExecutionModules(executionEnabled && canReadExecution);
+  const module = useMemo(
+    () => findExecutionModuleDescriptorBySlug(taskModules, slug),
+    [slug, taskModules]
+  );
+  const legacyConfig = useMemo(
+    () => module ? buildLegacyTaskModuleConfig(module.definition, module.slug) : undefined,
+    [module]
+  );
+  const canAccess = Boolean(executionEnabled && canReadExecution && module);
 
   const [clients, setClients] = useState<Client[]>([]);
   const [matters, setMatters] = useState<Matter[]>([]);
@@ -2227,6 +2295,18 @@ export function MobileExecutionTeamPage() {
   }, [eventSearchOpen]);
 
   if (!module || !legacyConfig || !canAccess) {
+    if (loadingModules) {
+      return <div className="mobile-empty">Cargando ejecucion...</div>;
+    }
+
+    if (moduleErrorMessage) {
+      return (
+        <section className="mobile-stack">
+          <div className="message-banner message-error">{moduleErrorMessage}</div>
+        </section>
+      );
+    }
+
     return <Navigate to="/mobile/execution" replace />;
   }
 

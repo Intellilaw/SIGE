@@ -3,44 +3,51 @@ import { buildTaskModuleIdFromTeamKey } from "@sige/contracts";
 
 import { mapManagedTeam, mapManagedUser } from "./mappers";
 import { buildLaborFileSnapshot, buildLaborFileUserSyncSnapshot, shouldHaveLaborFile } from "./labor-files.repository";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import type { CreateManagedUserRecord, UpdateManagedUserRecord, UserTeamUpdateRecord, UserTeamWriteRecord, UsersRepository } from "./types";
 
 function buildTeamTaskModuleSummary(label: string) {
   return `Espacio de tareas de ${label} pendiente de configuracion.`;
 }
 
-async function upsertTeamTaskModule(
+async function syncTeamTaskModuleDefinition(
   tx: Prisma.TransactionClient,
   team: {
     key: string;
     label: string;
-    isActive: boolean;
-    deactivatedAt: Date | null;
-  }
+  },
+  options: { createIfMissing: boolean }
 ) {
   const moduleId = buildTaskModuleIdFromTeamKey(team.key);
   if (!moduleId) {
     return;
   }
 
+  const summary = buildTeamTaskModuleSummary(team.label);
+
+  if (options.createIfMissing) {
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO "TaskModule" ("id", "team", "label", "summary", "isActive", "deactivatedAt", "createdAt", "updatedAt")
+      VALUES (${moduleId}, ${team.key}, ${team.label}, ${summary}, true, null, now(), now())
+      ON CONFLICT ("id") DO UPDATE SET
+        "team" = EXCLUDED."team",
+        "label" = EXCLUDED."label",
+        "summary" = EXCLUDED."summary",
+        "isActive" = true,
+        "deactivatedAt" = null,
+        "updatedAt" = now()
+    `);
+    return;
+  }
+
   await tx.$executeRaw(Prisma.sql`
-    INSERT INTO "TaskModule" ("id", "team", "label", "summary", "isActive", "deactivatedAt", "createdAt", "updatedAt")
-    VALUES (
-      ${moduleId},
-      ${team.key},
-      ${team.label},
-      ${buildTeamTaskModuleSummary(team.label)},
-      ${team.isActive},
-      ${team.deactivatedAt},
-      now(),
-      now()
-    )
-    ON CONFLICT ("id") DO UPDATE SET
-      "team" = EXCLUDED."team",
-      "label" = EXCLUDED."label",
-      "isActive" = EXCLUDED."isActive",
-      "deactivatedAt" = EXCLUDED."deactivatedAt",
+    UPDATE "TaskModule"
+    SET
+      "team" = ${team.key},
+      "label" = ${team.label},
+      "summary" = ${summary},
       "updatedAt" = now()
+    WHERE "id" = ${moduleId}
   `);
 }
 
@@ -172,6 +179,23 @@ export class PrismaUsersRepository implements UsersRepository {
   }
 
   public async listTeams() {
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE "UserTeam" AS ut
+      SET
+        "executionSpaceEnabled" = true,
+        "executionSpaceDeactivatedAt" = null
+      WHERE ut."organizationId" = ${organizationId}
+        AND ut."executionSpaceEnabled" = false
+        AND ut."executionSpaceDeactivatedAt" IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM "TaskModule" AS tm
+          WHERE tm."team" = ut."key"
+            AND tm."isActive" = true
+        )
+    `);
+
     const [records, activeUsers] = await this.prisma.$transaction([
       this.prisma.userTeam.findMany({
         orderBy: [
@@ -207,22 +231,22 @@ export class PrismaUsersRepository implements UsersRepository {
         sortOrder: true
       }
     });
+    const executionSpaceEnabled = payload.executionSpaceEnabled ?? false;
     const record = await this.prisma.$transaction(async (tx) => {
       const userTeam = await tx.userTeam.create({
         data: {
           key: payload.key,
           label: payload.label,
           sortOrder: payload.sortOrder ?? (maxSortOrder._max.sortOrder ?? 0) + 10,
-          isActive: true
+          isActive: true,
+          executionSpaceEnabled,
+          executionSpaceDeactivatedAt: null
         }
       });
 
-      await upsertTeamTaskModule(tx, {
-        key: userTeam.key,
-        label: userTeam.label,
-        isActive: true,
-        deactivatedAt: null
-      });
+      if (executionSpaceEnabled) {
+        await syncTeamTaskModuleDefinition(tx, userTeam, { createIfMissing: true });
+      }
 
       return userTeam;
     });
@@ -241,6 +265,7 @@ export class PrismaUsersRepository implements UsersRepository {
 
       const nextLabel = payload.label === undefined ? undefined : payload.label;
       const nextIsActive = payload.isActive;
+      const nextExecutionSpaceEnabled = payload.executionSpaceEnabled;
       const updatedTeam = await tx.userTeam.update({
         where: { id: teamId },
         data: {
@@ -250,17 +275,28 @@ export class PrismaUsersRepository implements UsersRepository {
             ? undefined
             : nextIsActive
               ? null
-              : (currentTeam.deactivatedAt ?? new Date())
+              : (currentTeam.deactivatedAt ?? new Date()),
+          executionSpaceEnabled: nextExecutionSpaceEnabled,
+          executionSpaceDeactivatedAt: nextExecutionSpaceEnabled === undefined
+            ? undefined
+            : nextExecutionSpaceEnabled
+              ? null
+              : (currentTeam.executionSpaceEnabled
+                ? new Date()
+                : currentTeam.executionSpaceDeactivatedAt)
         }
       });
       const taskModuleId = buildTaskModuleIdFromTeamKey(updatedTeam.key);
       if (taskModuleId) {
-        await upsertTeamTaskModule(tx, {
-          key: updatedTeam.key,
-          label: updatedTeam.label,
-          isActive: updatedTeam.isActive,
-          deactivatedAt: updatedTeam.deactivatedAt
-        });
+        const shouldEnsureModule = updatedTeam.executionSpaceEnabled
+          && (nextExecutionSpaceEnabled === true || nextLabel !== undefined || nextIsActive === true);
+        const shouldSyncExistingModule = nextLabel !== undefined;
+
+        if (shouldEnsureModule) {
+          await syncTeamTaskModuleDefinition(tx, updatedTeam, { createIfMissing: true });
+        } else if (shouldSyncExistingModule) {
+          await syncTeamTaskModuleDefinition(tx, updatedTeam, { createIfMissing: false });
+        }
       }
 
       if (nextLabel !== undefined && nextLabel !== currentTeam.label) {

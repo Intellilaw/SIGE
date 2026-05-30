@@ -91,7 +91,8 @@ const signedVacationFormatSchema = z.object({
 const previousYearPendingVacationSchema = z.object({
   days: z.number().min(0),
   description: z.string().nullable().optional(),
-  manualOverrideConfirmed: z.literal(true)
+  manualOverrideConfirmed: z.literal(true),
+  pendingPeriod: z.enum(["LAST_YEAR", "YEAR_BEFORE_LAST"]).optional().default("LAST_YEAR")
 });
 
 const globalVacationDaySchema = z.object({
@@ -371,7 +372,9 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
         hireDate: laborFile.hireDate.slice(0, 10),
         vacationYearStartDate: laborFile.vacationSummary.currentYearStartDate,
         completedYearsLabel: laborFile.vacationSummary.completedYearsLabel,
-        entitlementDays: laborFile.vacationSummary.entitlementDays,
+        entitlementDays: laborFile.vacationSummary.entitlementDays +
+          laborFile.vacationSummary.previousYearPendingDays +
+          laborFile.vacationSummary.yearBeforeLastPendingDays,
         pendingDays: Math.max(0, laborFile.vacationSummary.remainingDays - vacationDays),
         enjoyedDays: laborFile.vacationSummary.usedDays + vacationDays,
         description: payload.description || "Vacación general"
@@ -615,12 +618,22 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
       throw new app.errors.AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
     }
 
+    const pendingPeriodDates = payload.pendingPeriod === "YEAR_BEFORE_LAST"
+      ? {
+          previousYearStartDate: laborFile.vacationSummary.yearBeforeLastStartDate,
+          previousYearEndDate: laborFile.vacationSummary.yearBeforeLastEndDate
+        }
+      : {
+          previousYearStartDate: laborFile.vacationSummary.previousYearStartDate,
+          previousYearEndDate: laborFile.vacationSummary.previousYearEndDate
+        };
+
     return service.setPreviousYearPendingVacationDays(params.laborFileId, {
       days: payload.days,
       description: payload.description || null,
       manualOverrideConfirmed: payload.manualOverrideConfirmed,
-      previousYearStartDate: laborFile.vacationSummary.previousYearStartDate,
-      previousYearEndDate: laborFile.vacationSummary.previousYearEndDate
+      pendingPeriod: payload.pendingPeriod,
+      ...pendingPeriodDates
     });
   });
 

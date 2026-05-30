@@ -35,15 +35,13 @@ const PCT_DRAFT_FIELDS = [
 const PAYMENT_METHOD_OPTIONS = ["Transferencia", "Efectivo"];
 const BANK_OPTIONS = ["Banamex", "HSBC"];
 const PAYROLL_MONEY_FIELDS = [
-    "grossSalaryMxn",
-    "punctualityBonusMxn",
-    "attendanceBonusMxn",
     "isrWithholdingMxn",
     "imssWithholdingMxn",
     "employmentSubsidyMxn",
     "infonavitCreditMxn"
 ];
 const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
+const PAYROLL_BONUS_RATE = 0.1;
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
         return error.message;
@@ -89,6 +87,41 @@ function formatPayrollDays(value) {
 }
 function formatEditableNumber(value) {
     return Number.isFinite(value) ? String(value) : "0";
+}
+function formatEditableMoney(value) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) {
+        return "0";
+    }
+    return new Intl.NumberFormat("es-MX", {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: Number.isInteger(numeric) ? 0 : 2
+    }).format(numeric);
+}
+function formatMoneyDraftValue(value) {
+    const normalized = value.replace(/,/g, "").replace(/[^\d.]/g, "");
+    const hasDecimalPoint = normalized.includes(".");
+    const [rawInteger = "", ...rawDecimalParts] = normalized.split(".");
+    const integerDigits = rawInteger.replace(/^0+(?=\d)/, "");
+    const decimalDigits = rawDecimalParts.join("").slice(0, 2);
+    const formattedInteger = integerDigits
+        ? new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(Number(integerDigits))
+        : "";
+    if (!formattedInteger && hasDecimalPoint) {
+        return `0.${decimalDigits}`;
+    }
+    if (!formattedInteger) {
+        return "";
+    }
+    return hasDecimalPoint ? `${formattedInteger}.${decimalDigits}` : formattedInteger;
+}
+function parseMoneyInput(value) {
+    const normalized = value.replace(/,/g, "").replace(/[^\d.]/g, "");
+    const numeric = Number(normalized || 0);
+    return Number.isFinite(numeric) ? numeric : 0;
+}
+function isPayrollMoneyField(field) {
+    return PAYROLL_MONEY_FIELDS.includes(field);
 }
 function getPayrollDailySalaryRiValidation(entry, employeeOption) {
     if (!entry.laborFileId) {
@@ -313,30 +346,66 @@ function replaceExpense(items, updated) {
     return items.map((item) => (item.id === updated.id ? updated : item));
 }
 function replacePayrollEntry(items, updated) {
-    return items.map((item) => (item.id === updated.id ? updated : item));
+    return applyPayrollCalculationsToEntries(items.map((item) => (item.id === updated.id ? updated : item)));
 }
-function applyPayrollCalculations(entry) {
-    const overtimeHourlyRateMxn = Number(entry.dailySalaryMxn || 0) / 8;
+function getPayrollGrossSalaryMxn(entry) {
+    return Number(entry.dailySalaryMxn || 0) * 15;
+}
+function getPayrollAbsenceDiscountMxn(entry) {
+    return Number(entry.dailySalaryMxn || 0) * Number(entry.absenceDays || 0);
+}
+function getPayrollBonusMxn(netSalaryMxn) {
+    return Math.round(Math.max(0, (Number.isFinite(netSalaryMxn) ? netSalaryMxn : 0) * PAYROLL_BONUS_RATE) * 100) / 100;
+}
+function getPayrollEmployeeBonusKey(entry) {
+    if (entry.laborFileId) {
+        return `labor:${entry.laborFileId}`;
+    }
+    const normalizedName = normalizeComparableText(entry.employeeName);
+    return normalizedName ? `name:${normalizedName}` : `entry:${entry.id}`;
+}
+function applyPayrollCalculations(entry, monthlyNetSalaryMxn = entry.half === 2 ? Number(entry.netSalaryMxn || 0) : 0) {
+    const grossSalaryMxn = getPayrollGrossSalaryMxn(entry);
+    const overtimeHourlyRateMxn = (Number(entry.dailySalaryMxn || 0) / 8) * 2;
     const overtimeTotalMxn = overtimeHourlyRateMxn * Number(entry.overtimeHours || 0);
     const vacationPremiumMxn = Number(entry.vacationPremiumMxn || 0);
-    const absenceDiscountMxn = Number(entry.dailySalaryMxn || 0) * Number(entry.absenceDays || 0);
-    const netDepositMxn = (Number(entry.grossSalaryMxn || 0) +
-        Number(entry.punctualityBonusMxn || 0) +
-        Number(entry.attendanceBonusMxn || 0) +
-        vacationPremiumMxn +
-        overtimeTotalMxn -
-        Number(entry.isrWithholdingMxn || 0) -
+    const absenceDiscountMxn = getPayrollAbsenceDiscountMxn(entry);
+    const netSalaryMxn = grossSalaryMxn - absenceDiscountMxn;
+    const monthlyBonusMxn = entry.half === 2 ? getPayrollBonusMxn(monthlyNetSalaryMxn) : 0;
+    const punctualityBonusMxn = monthlyBonusMxn;
+    const attendanceBonusMxn = monthlyBonusMxn;
+    const payrollWithholdingsMxn = (Number(entry.isrWithholdingMxn || 0) +
         Number(entry.imssWithholdingMxn || 0) +
+        Number(entry.infonavitCreditMxn || 0));
+    const netDepositMxn = (netSalaryMxn +
+        punctualityBonusMxn +
+        attendanceBonusMxn +
+        vacationPremiumMxn +
+        overtimeTotalMxn +
         Number(entry.employmentSubsidyMxn || 0) -
-        Number(entry.infonavitCreditMxn || 0) -
-        absenceDiscountMxn);
+        payrollWithholdingsMxn);
     return {
         ...entry,
+        grossSalaryMxn,
+        punctualityBonusMxn,
+        attendanceBonusMxn,
         absenceDiscountMxn,
+        netSalaryMxn,
         overtimeHourlyRateMxn,
         overtimeTotalMxn,
         netDepositMxn
     };
+}
+function applyPayrollCalculationsToEntries(entries) {
+    const monthlyNetSalaryByEmployee = new Map();
+    entries.forEach((entry) => {
+        const grossSalaryMxn = getPayrollGrossSalaryMxn(entry);
+        const absenceDiscountMxn = getPayrollAbsenceDiscountMxn(entry);
+        const netSalaryMxn = grossSalaryMxn - absenceDiscountMxn;
+        const key = getPayrollEmployeeBonusKey(entry);
+        monthlyNetSalaryByEmployee.set(key, (monthlyNetSalaryByEmployee.get(key) ?? 0) + netSalaryMxn);
+    });
+    return entries.map((entry) => applyPayrollCalculations(entry, monthlyNetSalaryByEmployee.get(getPayrollEmployeeBonusKey(entry)) ?? 0));
 }
 function applyLocalPatch(expense, patch) {
     const next = {
@@ -434,7 +503,7 @@ export function GeneralExpensesPage() {
         setErrorMessage(null);
         try {
             const response = await apiGet(`/general-expenses/payroll?year=${selectedYear}&month=${selectedMonth}`);
-            setPayrollEntries(response);
+            setPayrollEntries(applyPayrollCalculationsToEntries(response));
             setPayrollDrafts({});
         }
         catch (error) {
@@ -532,7 +601,7 @@ export function GeneralExpensesPage() {
         setRecords((items) => items.map((item) => (item.id === expenseId ? applyLocalPatch(item, patch) : item)));
     }
     function updatePayrollEntryLocal(entryId, patch) {
-        setPayrollEntries((items) => items.map((item) => (item.id === entryId ? applyPayrollLocalPatch(item, patch) : item)));
+        setPayrollEntries((items) => applyPayrollCalculationsToEntries(items.map((item) => (item.id === entryId ? applyPayrollLocalPatch(item, patch) : item))));
     }
     async function persistExpensePatch(expenseId, payload, localPatch = payload) {
         const canApplyPrivilegedPatch = ((Object.prototype.hasOwnProperty.call(payload, "approvedByEmrt") && canApprove) ||
@@ -571,7 +640,7 @@ export function GeneralExpensesPage() {
             return;
         }
         const numericValue = field === "amountMxn"
-            ? Math.max(0, Number(rawValue || 0))
+            ? Math.max(0, parseMoneyInput(rawValue))
             : clampPercentage(Number(rawValue || 0));
         await persistExpensePatch(expenseId, { [field]: numericValue }, { [field]: numericValue });
     }
@@ -616,7 +685,7 @@ export function GeneralExpensesPage() {
             await persistPayrollPatch(entryId, { [field]: rawValue }, { [field]: rawValue });
             return;
         }
-        const numericValue = Math.max(0, Number(rawValue || 0));
+        const numericValue = Math.max(0, isPayrollMoneyField(field) ? parseMoneyInput(rawValue) : Number(rawValue || 0));
         await persistPayrollPatch(entryId, { [field]: numericValue }, { [field]: numericValue });
     }
     async function handleAddRow() {
@@ -644,7 +713,7 @@ export function GeneralExpensesPage() {
                 month: selectedMonth,
                 half
             });
-            setPayrollEntries((items) => [...items, created]);
+            setPayrollEntries((items) => applyPayrollCalculationsToEntries([...items, created]));
         }
         catch (error) {
             setErrorMessage(toErrorMessage(error));
@@ -676,7 +745,7 @@ export function GeneralExpensesPage() {
         setDeletingPayrollEntryId(entry.id);
         try {
             await apiDelete(`/general-expenses/payroll/${entry.id}`);
-            setPayrollEntries((items) => items.filter((item) => item.id !== entry.id));
+            setPayrollEntries((items) => applyPayrollCalculationsToEntries(items.filter((item) => item.id !== entry.id)));
             setPayrollDrafts((current) => {
                 if (!current[entry.id]) {
                     return current;
@@ -878,19 +947,40 @@ export function GeneralExpensesPage() {
             };
         void persistPayrollPatch(entry.id, { laborFileId: selectedEmployee ? laborFileId : null }, localPatch);
     }
+    function handlePayrollPartTimeChange(entry, isPartTime) {
+        if (!isPartTime) {
+            clearPayrollDraft(entry.id, "overtimeDetail");
+        }
+        void persistPayrollPatch(entry.id, isPartTime ? { isPartTime } : { isPartTime, overtimeDetail: "" }, isPartTime ? { isPartTime } : { isPartTime, overtimeDetail: "" });
+    }
     function renderPayrollMoneyInput(entry, field) {
-        return (_jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "number", min: "0", step: "0.01", value: payrollDrafts[entry.id]?.[field] ?? formatEditableNumber(Number(entry[field] || 0)), onChange: (event) => setPayrollDraft(entry.id, field, event.target.value), onBlur: () => void flushPayrollDraftField(entry.id, field), disabled: !canWrite || entry.finalPaymentApprovedByEmrt })] }));
+        return (_jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "text", inputMode: "decimal", value: payrollDrafts[entry.id]?.[field] ?? formatEditableMoney(Number(entry[field] || 0)), onChange: (event) => setPayrollDraft(entry.id, field, formatMoneyDraftValue(event.target.value)), onBlur: () => void flushPayrollDraftField(entry.id, field), disabled: !canWrite || entry.finalPaymentApprovedByEmrt })] }));
     }
     function renderPayrollNumberInput(entry, field) {
         return (_jsx("input", { className: "general-expense-input general-expense-number-input", type: "number", min: "0", step: "0.01", value: payrollDrafts[entry.id]?.[field] ?? formatEditableNumber(Number(entry[field] || 0)), onChange: (event) => setPayrollDraft(entry.id, field, event.target.value), onBlur: () => void flushPayrollDraftField(entry.id, field), disabled: !canWrite || entry.finalPaymentApprovedByEmrt }));
     }
     function renderPayrollTable(half, title) {
         const rows = payrollEntriesByHalf[half];
-        return (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: title }), _jsx("button", { type: "button", className: "primary-button", onClick: () => void handleAddPayrollEntry(half), disabled: !canWrite, children: "+ Agregar fila" })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper general-expense-payroll-table-wrapper", children: _jsxs("table", { className: "lead-table general-expense-payroll-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Nombre de empleado" }), _jsx("th", { children: "Salario diario" }), _jsx("th", { children: "Salario bruto" }), _jsx("th", { children: "Dias vacaciones" }), _jsx("th", { children: "Prima vacacional" }), _jsx("th", { children: "Bono de puntualidad" }), _jsx("th", { children: "Bono de asistencia" }), _jsx("th", { children: "Faltas" }), _jsx("th", { children: "Horas extras (valor)" }), _jsx("th", { children: "N\u00FAmero de horas extras" }), _jsx("th", { children: "Total horas extras" }), _jsx("th", { children: "Detalle de horas extras" }), _jsx("th", { children: "Retenciones ISR" }), _jsx("th", { children: "Retenciones IMSS" }), _jsx("th", { children: "Subsidio al empleo" }), _jsx("th", { children: "Credito Infonavit" }), _jsx("th", { children: "Dep\u00F3sito neto" }), _jsx("th", { children: "Confirmo que la n\u00F3mina est\u00E1 timbrada (Araceli Lozano)" }), _jsx("th", { children: "Pago autorizado EMRT" }), _jsx("th", { children: "Aprobado por JNLS" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: loadingPayroll ? (_jsx("tr", { children: _jsx("td", { colSpan: 21, className: "centered-inline-message", children: "Cargando n\u00F3mina..." }) })) : rows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 21, className: "centered-inline-message", children: "Sin registros de n\u00F3mina en esta quincena." }) })) : rows.map((entry) => {
-                                        const employeeOption = entry.laborFileId ? payrollEmployeeOptionsById.get(entry.laborFileId) : undefined;
-                                        const dailySalaryValidation = getPayrollDailySalaryRiValidation(entry, employeeOption);
-                                        return (_jsxs("tr", { children: [_jsx("td", { children: _jsxs("select", { className: "general-expense-input general-expense-payroll-employee-input", value: entry.laborFileId ?? "", onChange: (event) => handlePayrollEmployeeChange(entry, event.target.value), disabled: !canWrite || loadingPayrollEmployees || entry.finalPaymentApprovedByEmrt, children: [_jsx("option", { value: "", children: entry.laborFileId || !entry.employeeName ? "Seleccionar empleado" : `${entry.employeeName} (sin expediente)` }), entry.laborFileId && !payrollEmployeeOptionsById.has(entry.laborFileId) ? (_jsx("option", { value: entry.laborFileId, children: entry.employeeName || "Empleado seleccionado" })) : null, payrollEmployeeOptions.map((option) => (_jsx("option", { value: option.laborFileId, children: option.employeeName }, option.laborFileId)))] }) }), _jsx("td", { children: _jsxs("div", { className: `general-expense-readonly-cell general-expense-payroll-ri-salary is-${dailySalaryValidation.status}`, children: [_jsxs("span", { className: "general-expense-payroll-ri-salary-main", children: [_jsx(RusconiIntelligenceBadge, { connectionId: PAYROLL_DAILY_SALARY_RI_CONNECTION_ID, label: "Gastos generales / Nomina / Salario diario" }), _jsx("span", { children: formatCurrency(entry.dailySalaryMxn) })] }), _jsx("span", { "aria-label": dailySalaryValidation.label, className: `general-expense-payroll-ri-icon is-${dailySalaryValidation.status}`, role: "img", title: dailySalaryValidation.detail })] }) }), _jsx("td", { children: renderPayrollMoneyInput(entry, "grossSalaryMxn") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell general-expense-payroll-days-cell", title: "Dias de vacaciones aprobadas con PDF firmado en esta quincena.", children: formatPayrollDays(entry.vacationDays) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", title: "Prima calculada desde vacaciones aprobadas del expediente laboral.", children: formatCurrency(entry.vacationPremiumMxn) }) }), _jsx("td", { children: renderPayrollMoneyInput(entry, "punctualityBonusMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "attendanceBonusMxn") }), _jsx("td", { children: renderPayrollNumberInput(entry, "absenceDays") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", children: formatCurrency(entry.overtimeHourlyRateMxn) }) }), _jsx("td", { children: renderPayrollNumberInput(entry, "overtimeHours") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", children: formatCurrency(entry.overtimeTotalMxn) }) }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-payroll-detail-input", value: payrollDrafts[entry.id]?.overtimeDetail ?? entry.overtimeDetail, onChange: (event) => setPayrollDraft(entry.id, "overtimeDetail", event.target.value), onBlur: () => void flushPayrollDraftField(entry.id, "overtimeDetail"), rows: 2, disabled: !canWrite || entry.finalPaymentApprovedByEmrt }) }), _jsx("td", { children: renderPayrollMoneyInput(entry, "isrWithholdingMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "imssWithholdingMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "employmentSubsidyMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "infonavitCreditMxn") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell is-payroll-total", children: formatCurrency(entry.netDepositMxn) }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.payrollStampedByAraceli, onChange: (event) => void persistPayrollPatch(entry.id, { payrollStampedByAraceli: event.target.checked }), disabled: !canStampPayroll || entry.finalPaymentApprovedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.finalPaymentApprovedByEmrt, onChange: (event) => void persistPayrollPatch(entry.id, { finalPaymentApprovedByEmrt: event.target.checked }), disabled: !canApprove }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.reviewedByJnls, onChange: (event) => void persistPayrollPatch(entry.id, { reviewedByJnls: event.target.checked }), disabled: !canReviewJnlsFlag || entry.finalPaymentApprovedByEmrt }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "danger-button general-expense-delete-button", onClick: () => void handleDeletePayrollEntry(entry), disabled: !canWrite || entry.finalPaymentApprovedByEmrt || Boolean(deletingPayrollEntryId), title: entry.finalPaymentApprovedByEmrt ? "La fila ya fue autorizada por EMRT y no puede borrarse." : "Borrar fila de nómina", children: deletingPayrollEntryId === entry.id ? "Borrando..." : "Borrar" }) })] }, entry.id));
-                                    }) })] }) }) })] }));
+        const netDepositTotalMxn = rows.reduce((total, entry) => total + Number(entry.netDepositMxn || 0), 0);
+        return (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: title }), _jsx("button", { type: "button", className: "primary-button", onClick: () => void handleAddPayrollEntry(half), disabled: !canWrite, children: "+ Agregar fila" })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper general-expense-payroll-table-wrapper", children: _jsxs("table", { className: "lead-table general-expense-payroll-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Nombre del colaborador" }), _jsx("th", { children: "Medio tiempo" }), _jsx("th", { children: "Salario diario" }), _jsx("th", { children: "Salario bruto" }), _jsx("th", { children: "Faltas" }), _jsx("th", { children: "Salario neto" }), _jsx("th", { children: "D\u00EDas disfrutados por adelantado" }), _jsx("th", { children: "Fecha en la que se pagar\u00E1 la prima vacacional" }), _jsx("th", { children: "D\u00EDas pagados" }), _jsx("th", { children: "D\u00EDas de vacaciones cuya prima vacacional es pagada esta quincena" }), _jsx("th", { children: "Prima vacacional" }), _jsx("th", { children: "Bono de puntualidad" }), _jsx("th", { children: "Bono de asistencia" }), _jsx("th", { children: "Horas extras (valor)" }), _jsx("th", { children: "N\u00FAmero de horas extras" }), _jsx("th", { children: "Total horas extras" }), _jsx("th", { children: "Detalle de horas extras" }), _jsx("th", { children: "Retenciones ISR" }), _jsx("th", { children: "Retenciones IMSS" }), _jsx("th", { children: "Subsidio al empleo" }), _jsx("th", { children: "Credito Infonavit" }), _jsx("th", { children: "Dep\u00F3sito neto" }), _jsx("th", { children: "Confirmo que la n\u00F3mina est\u00E1 timbrada (ALE)" }), _jsx("th", { children: "Pago autorizado EMRT" }), _jsx("th", { children: "Aprobado por JNLS" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: loadingPayroll ? (_jsx("tr", { children: _jsx("td", { colSpan: 26, className: "centered-inline-message", children: "Cargando n\u00F3mina..." }) })) : rows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 26, className: "centered-inline-message", children: "Sin registros de n\u00F3mina en esta quincena." }) })) : (_jsxs(_Fragment, { children: [rows.map((entry) => {
+                                                const employeeOption = entry.laborFileId ? payrollEmployeeOptionsById.get(entry.laborFileId) : undefined;
+                                                const dailySalaryValidation = getPayrollDailySalaryRiValidation(entry, employeeOption);
+                                                const advanceVacationPaymentDate = formatDateDisplay(entry.advanceVacationPremiumPaymentDate);
+                                                const hasAdvanceVacationDays = Number(entry.advanceVacationDays || 0) > 0 || entry.advanceVacationDaysPaid;
+                                                const canToggleAdvanceVacationPaid = canWrite &&
+                                                    hasAdvanceVacationDays &&
+                                                    entry.advanceVacationDaysPaymentEligible &&
+                                                    !entry.finalPaymentApprovedByEmrt;
+                                                const advanceVacationPaidTitle = !entry.advanceVacationPremiumPaymentDate
+                                                    ? "Sin días disfrutados por adelantado."
+                                                    : entry.advanceVacationDaysPaymentEligible
+                                                        ? "Marcar cuando estos días ya fueron pagados."
+                                                        : `Se habilita el ${advanceVacationPaymentDate}.`;
+                                                return (_jsxs("tr", { children: [_jsx("td", { children: _jsxs("select", { className: "general-expense-input general-expense-payroll-employee-input", value: entry.laborFileId ?? "", onChange: (event) => handlePayrollEmployeeChange(entry, event.target.value), disabled: !canWrite || loadingPayrollEmployees || entry.finalPaymentApprovedByEmrt, children: [_jsx("option", { value: "", children: entry.laborFileId || !entry.employeeName ? "Seleccionar empleado" : `${entry.employeeName} (sin expediente)` }), entry.laborFileId && !payrollEmployeeOptionsById.has(entry.laborFileId) ? (_jsx("option", { value: entry.laborFileId, children: entry.employeeName || "Empleado seleccionado" })) : null, payrollEmployeeOptions.map((option) => (_jsx("option", { value: option.laborFileId, children: option.employeeName }, option.laborFileId)))] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.isPartTime, onChange: (event) => handlePayrollPartTimeChange(entry, event.target.checked), disabled: !canWrite || entry.finalPaymentApprovedByEmrt, title: "Marcar si el empleado es de medio tiempo." }) }), _jsx("td", { children: _jsxs("div", { className: `general-expense-readonly-cell general-expense-payroll-ri-salary is-${dailySalaryValidation.status}`, children: [_jsxs("span", { className: "general-expense-payroll-ri-salary-main", children: [_jsx(RusconiIntelligenceBadge, { connectionId: PAYROLL_DAILY_SALARY_RI_CONNECTION_ID, label: "Gastos generales / Nomina / Salario diario" }), _jsx("span", { children: formatCurrency(entry.dailySalaryMxn) })] }), _jsx("span", { "aria-label": dailySalaryValidation.label, className: `general-expense-payroll-ri-icon is-${dailySalaryValidation.status}`, role: "img", title: dailySalaryValidation.detail })] }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", children: formatCurrency(entry.grossSalaryMxn) }) }), _jsx("td", { children: renderPayrollNumberInput(entry, "absenceDays") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell is-payroll-net-salary", title: `Salario bruto menos faltas: ${formatCurrency(entry.grossSalaryMxn)} - ${formatCurrency(entry.absenceDiscountMxn)}`, children: formatCurrency(entry.netSalaryMxn) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell general-expense-payroll-days-cell general-expense-payroll-advance-cell", title: "D\u00EDas disfrutados por adelantado calculados desde el saldo negativo del expediente laboral.", children: formatPayrollDays(entry.advanceVacationDays) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell general-expense-payroll-date-cell", title: "Fecha de corte en la que se adquiere el derecho para pagar la prima vacacional de estos d\u00EDas.", children: advanceVacationPaymentDate }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.advanceVacationDaysPaid, onChange: (event) => void persistPayrollPatch(entry.id, { advanceVacationDaysPaid: event.target.checked }, {
+                                                                    advanceVacationDaysPaid: event.target.checked,
+                                                                    advanceVacationDays: event.target.checked ? 0 : entry.advanceVacationDays
+                                                                }), disabled: !canToggleAdvanceVacationPaid, title: advanceVacationPaidTitle }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell general-expense-payroll-days-cell", title: "D\u00EDas de vacaciones aprobadas con PDF firmado en esta quincena.", children: formatPayrollDays(entry.vacationDays) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", title: "Prima calculada desde vacaciones aprobadas del expediente laboral.", children: formatCurrency(entry.vacationPremiumMxn) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", title: "Se paga al 100% en la segunda quincena; cada bono es 10% del salario neto mensual.", children: formatCurrency(entry.punctualityBonusMxn) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", title: "Se paga al 100% en la segunda quincena; cada bono es 10% del salario neto mensual.", children: formatCurrency(entry.attendanceBonusMxn) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", children: formatCurrency(entry.overtimeHourlyRateMxn) }) }), _jsx("td", { children: renderPayrollNumberInput(entry, "overtimeHours") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", children: formatCurrency(entry.overtimeTotalMxn) }) }), _jsx("td", { children: entry.isPartTime ? (_jsx("textarea", { className: "general-expense-input general-expense-payroll-detail-input", value: payrollDrafts[entry.id]?.overtimeDetail ?? entry.overtimeDetail, onChange: (event) => setPayrollDraft(entry.id, "overtimeDetail", event.target.value), onBlur: () => void flushPayrollDraftField(entry.id, "overtimeDetail"), rows: 2, disabled: !canWrite || entry.finalPaymentApprovedByEmrt })) : null }), _jsx("td", { children: renderPayrollMoneyInput(entry, "isrWithholdingMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "imssWithholdingMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "employmentSubsidyMxn") }), _jsx("td", { children: renderPayrollMoneyInput(entry, "infonavitCreditMxn") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell is-payroll-total", children: formatCurrency(entry.netDepositMxn) }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.payrollStampedByAraceli, onChange: (event) => void persistPayrollPatch(entry.id, { payrollStampedByAraceli: event.target.checked }), disabled: !canStampPayroll || entry.finalPaymentApprovedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.finalPaymentApprovedByEmrt, onChange: (event) => void persistPayrollPatch(entry.id, { finalPaymentApprovedByEmrt: event.target.checked }), disabled: !canApprove }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.reviewedByJnls, onChange: (event) => void persistPayrollPatch(entry.id, { reviewedByJnls: event.target.checked }), disabled: !canReviewJnlsFlag || entry.finalPaymentApprovedByEmrt }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "danger-button general-expense-delete-button", onClick: () => void handleDeletePayrollEntry(entry), disabled: !canWrite || entry.finalPaymentApprovedByEmrt || Boolean(deletingPayrollEntryId), title: entry.finalPaymentApprovedByEmrt ? "La fila ya fue autorizada por EMRT y no puede borrarse." : "Borrar fila de nómina", children: deletingPayrollEntryId === entry.id ? "Borrando..." : "Borrar" }) })] }, entry.id));
+                                            }), _jsxs("tr", { className: "general-expense-payroll-total-row", children: [_jsx("td", { colSpan: 21, children: "Total pago neto de la quincena" }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell is-payroll-total", children: formatCurrency(netDepositTotalMxn) }) }), _jsx("td", { colSpan: 4 })] })] })) })] }) }) })] }));
     }
     return (_jsxs("section", { className: "page-stack general-expenses-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Gastos" }), _jsx("div", { children: _jsx("h2", { children: "Gastos generales" }) })] }), _jsx("p", { className: "muted", children: "Registro mensual de gastos, distribucion por equipo, bloqueo por aprobaciones y resumen diario de gastos pagados por EMRT." })] }), _jsx("section", { className: "panel", children: _jsxs("div", { className: "leads-tabs", role: "tablist", "aria-label": "Vistas de gastos generales", children: [_jsx("button", { type: "button", className: `lead-tab ${activeTab === "registro" ? "is-active" : ""}`, onClick: () => setActiveTab("registro"), children: "1. Registro" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "payroll" ? "is-active" : ""}`, onClick: () => setActiveTab("payroll"), children: "2. N\u00F3mina" }), _jsx("button", { type: "button", className: `lead-tab ${activeTab === "emrt" ? "is-active" : ""}`, onClick: () => setActiveTab("emrt"), children: "3. Pagado por EMRT" })] }) }), errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel general-expenses-toolbar", children: [_jsxs("div", { className: "general-expenses-filters", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "A\u00F1o" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: YEAR_OPTIONS.map((year) => (_jsx("option", { value: year, children: year }, year))) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: MONTH_NAMES.map((monthName, index) => (_jsx("option", { value: index + 1, children: monthName }, monthName))) })] })] }), _jsxs("div", { className: "general-expenses-actions", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => activeTab === "payroll" ? void loadPayrollEntries() : void loadRecords(), children: "Refrescar" }), activeTab === "registro" ? (_jsxs(_Fragment, { children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => void handleCopyToNextMonth(), disabled: !canWrite, children: "Copiar a mes siguiente" }), _jsx("button", { type: "button", className: "primary-button", onClick: () => void handleAddRow(), disabled: !canWrite, children: "+ Agregar Gasto" })] })) : activeTab === "payroll" ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => void handleCopyPayrollToNextMonth(), disabled: !canWrite, children: "Copiar n\u00F3mina al mes siguiente" })) : null] })] }), activeTab === "registro" ? (_jsxs(_Fragment, { children: [_jsx("section", { className: "panel", children: _jsxs("div", { className: "general-expense-summary-grid", children: [_jsxs("article", { className: "general-expense-summary-card is-total", children: [_jsx("span", { children: "Total gastos registrados" }), _jsx("strong", { children: formatCurrency(totals.totalAmount) })] }), _jsxs("article", { className: "general-expense-summary-card is-limit", children: [_jsx("span", { children: "Total l\u00EDmite" }), _jsx("strong", { children: formatCurrency(totals.totalLimit) })] }), _jsxs("article", { className: "general-expense-summary-card is-paid", children: [_jsx("span", { children: "Total pagado" }), _jsx("strong", { children: formatCurrency(totals.totalPaid) })] }), _jsxs("article", { className: "general-expense-summary-card is-pending", children: [_jsx("span", { children: "Pendiente de pago" }), _jsx("strong", { children: formatCurrency(totals.totalAmount - totals.totalPaid) })] })] }) }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Registro mensual" }), _jsxs("span", { children: [records.length, " registros"] })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper general-expense-table-wrapper", children: _jsxs("table", { className: "lead-table general-expense-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No." }), _jsx("th", { children: "Detalle de Gasto" }), _jsx("th", { children: "Monto" }), _jsx("th", { children: "IVA" }), _jsx("th", { children: "\u00BFCuenta para l\u00EDmite?" }), _jsx("th", { children: "Suma L\u00EDmite" }), _jsx("th", { children: "Gasto general" }), _jsx("th", { children: "Gasto sin equipo" }), DISTRIBUTION_FIELDS.map((field) => (_jsx("th", { children: field.label }, field.key))), _jsx("th", { children: "SUM %" }), _jsx("th", { children: "M\u00E9todo" }), _jsx("th", { children: "Banco" }), _jsx("th", { children: "Gasto Recurrente" }), _jsx("th", { children: "Aprobado EMRT" }), _jsx("th", { children: "Fecha pagado por EMRT" }), _jsx("th", { children: "Aprobado por JNLS" }), _jsx("th", { children: "\u00BFPagado a receptor final?" }), _jsx("th", { children: "Fecha Pago" }), _jsx("th", { children: "Sin equipo" }), _jsx("th", { children: "Litigio" }), _jsx("th", { children: "Corporativo" }), _jsx("th", { children: "Convenios" }), _jsx("th", { children: "Financiero" }), _jsx("th", { children: "Fiscal" }), _jsx("th", { children: "Total Pagado" }), _jsx("th", {})] }) }), _jsxs("tbody", { children: [loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 30, className: "centered-inline-message", children: "Cargando gastos..." }) })) : records.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 30, className: "centered-inline-message", children: "No hay gastos registrados en este mes." }) })) : ((() => {
                                                         let runningLimit = 0;
@@ -904,8 +994,8 @@ export function GeneralExpensesPage() {
                                                             const pctDisabled = !canWrite || expense.approvedByEmrt || expense.generalExpense || expense.expenseWithoutTeam;
                                                             const vatCheckboxDisabled = !canWrite || expense.approvedByEmrt || expense.paymentMethod !== "Transferencia";
                                                             const rowIncomplete = isRowIncomplete(expense);
-                                                            const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableNumber(Number(expense.amountMxn || 0));
-                                                            return (_jsxs("tr", { className: rowIncomplete ? "general-expense-row-danger" : undefined, children: [_jsx("td", { className: "general-expense-row-index", children: index + 1 }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-textarea", value: drafts[expense.id]?.detail ?? expense.detail ?? "", onChange: (event) => setDraft(expense.id, "detail", event.target.value), onBlur: () => void flushDraftField(expense.id, "detail"), rows: 2, disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "number", min: "0", step: "0.01", value: draftAmount, onChange: (event) => setDraft(expense.id, "amountMxn", event.target.value), onBlur: () => void flushDraftField(expense.id, "amountMxn"), disabled: !canWrite || expense.approvedByEmrt })] }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-vat-stack", children: [_jsx("div", { className: `general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`, children: ivaAmount !== null ? formatCurrency(ivaAmount) : "-" }), expense.paymentMethod === "Transferencia" ? (_jsxs("label", { className: `general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`, children: [_jsx("input", { type: "checkbox", checked: expense.hasVat, onChange: (event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked }), disabled: vatCheckboxDisabled }), _jsx("span", { children: "Con IVA" })] })) : null] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.countsTowardLimit, onChange: (event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked }), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: `general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`, children: expense.countsTowardLimit ? formatCurrency(runningLimit) : "-" }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.generalExpense, onChange: (event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.expenseWithoutTeam, onChange: (event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), DISTRIBUTION_FIELDS.map((field) => (_jsx("td", { children: _jsxs("div", { className: "general-expense-percent-field", children: [_jsx("input", { className: "general-expense-input general-expense-percent-input", type: "number", min: "0", max: "100", step: "0.01", value: drafts[expense.id]?.[field.key] ?? formatEditableNumber(Number(expense[field.key] || 0)), onChange: (event) => setDraft(expense.id, field.key, event.target.value), onBlur: () => void flushDraftField(expense.id, field.key), disabled: pctDisabled }), _jsx("span", { children: "%" })] }) }, `${expense.id}-${field.key}`))), _jsx("td", { className: `general-expense-percent-sum ${sum === 100 ? "is-valid" : "is-invalid"}`, children: expense.expenseWithoutTeam ? "" : `${sum}%` }), _jsx("td", { children: _jsx("select", { className: "general-expense-input", value: expense.paymentMethod, onChange: (event) => {
+                                                            const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableMoney(Number(expense.amountMxn || 0));
+                                                            return (_jsxs("tr", { className: rowIncomplete ? "general-expense-row-danger" : undefined, children: [_jsx("td", { className: "general-expense-row-index", children: index + 1 }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-textarea", value: drafts[expense.id]?.detail ?? expense.detail ?? "", onChange: (event) => setDraft(expense.id, "detail", event.target.value), onBlur: () => void flushDraftField(expense.id, "detail"), rows: 2, disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "text", inputMode: "decimal", value: draftAmount, onChange: (event) => setDraft(expense.id, "amountMxn", formatMoneyDraftValue(event.target.value)), onBlur: () => void flushDraftField(expense.id, "amountMxn"), disabled: !canWrite || expense.approvedByEmrt })] }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-vat-stack", children: [_jsx("div", { className: `general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`, children: ivaAmount !== null ? formatCurrency(ivaAmount) : "-" }), expense.paymentMethod === "Transferencia" ? (_jsxs("label", { className: `general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`, children: [_jsx("input", { type: "checkbox", checked: expense.hasVat, onChange: (event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked }), disabled: vatCheckboxDisabled }), _jsx("span", { children: "Con IVA" })] })) : null] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.countsTowardLimit, onChange: (event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked }), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: `general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`, children: expense.countsTowardLimit ? formatCurrency(runningLimit) : "-" }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.generalExpense, onChange: (event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.expenseWithoutTeam, onChange: (event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), DISTRIBUTION_FIELDS.map((field) => (_jsx("td", { children: _jsxs("div", { className: "general-expense-percent-field", children: [_jsx("input", { className: "general-expense-input general-expense-percent-input", type: "number", min: "0", max: "100", step: "0.01", value: drafts[expense.id]?.[field.key] ?? formatEditableNumber(Number(expense[field.key] || 0)), onChange: (event) => setDraft(expense.id, field.key, event.target.value), onBlur: () => void flushDraftField(expense.id, field.key), disabled: pctDisabled }), _jsx("span", { children: "%" })] }) }, `${expense.id}-${field.key}`))), _jsx("td", { className: `general-expense-percent-sum ${sum === 100 ? "is-valid" : "is-invalid"}`, children: expense.expenseWithoutTeam ? "" : `${sum}%` }), _jsx("td", { children: _jsx("select", { className: "general-expense-input", value: expense.paymentMethod, onChange: (event) => {
                                                                                 const nextMethod = event.target.value;
                                                                                 const localPatch = nextMethod === "Efectivo"
                                                                                     ? { paymentMethod: nextMethod, bank: null, hasVat: false }

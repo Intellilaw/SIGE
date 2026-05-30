@@ -1,0 +1,2 @@
+ALTER TABLE "GeneralExpensePayrollEntry"
+  ADD COLUMN IF NOT EXISTS "isPartTime" BOOLEAN NOT NULL DEFAULT false;

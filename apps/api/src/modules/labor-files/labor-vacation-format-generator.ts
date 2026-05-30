@@ -140,7 +140,9 @@ function normalizeFields(laborFile: LaborFile, payload: LaborVacationFormatField
   const vacationDates = Array.from(new Set(payload.vacationDates.filter((date) => parseDateKey(date)))).sort();
   const vacationDays = vacationDates.length || 1;
   const enjoymentText = normalizeText(payload.enjoymentText) || formatVacationDatesText(vacationDates);
-  const availableDays = laborFile.vacationSummary.entitlementDays + laborFile.vacationSummary.previousYearPendingDays;
+  const availableDays = laborFile.vacationSummary.entitlementDays +
+    laborFile.vacationSummary.previousYearPendingDays +
+    laborFile.vacationSummary.yearBeforeLastPendingDays;
 
   return {
     employeeName: normalizeText(payload.employeeName) || laborFile.employeeName,
@@ -382,7 +384,9 @@ export function buildLaborVacationFormatDefaultFields(laborFile: LaborFile): Lab
     hireDate: laborFile.hireDate.slice(0, 10),
     vacationYearStartDate: laborFile.vacationSummary.currentYearStartDate,
     completedYearsLabel: laborFile.vacationSummary.completedYearsLabel,
-    entitlementDays: laborFile.vacationSummary.entitlementDays,
+    entitlementDays: laborFile.vacationSummary.entitlementDays +
+      laborFile.vacationSummary.previousYearPendingDays +
+      laborFile.vacationSummary.yearBeforeLastPendingDays,
     pendingDays: laborFile.vacationSummary.remainingDays,
     enjoyedDays: laborFile.vacationSummary.usedDays,
     description: "",

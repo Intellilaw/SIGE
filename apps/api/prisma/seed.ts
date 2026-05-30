@@ -139,6 +139,8 @@ async function seedUserTeamTaskModules() {
 }
 
 async function seedUsers() {
+  const intellilawSuperadminName = "Eduardo Miguel Rusconi Trujillo";
+
   await prisma.user.upsert({
     where: {
       organizationId_email: {
@@ -231,8 +233,8 @@ async function seedUsers() {
       }
     },
     update: {
-      username: "Eduardo Rusconi",
-      displayName: "Eduardo Rusconi",
+      username: intellilawSuperadminName,
+      displayName: intellilawSuperadminName,
       shortName: "EMRT",
       role: "SUPERADMIN",
       legacyRole: "SUPERADMIN",
@@ -249,8 +251,8 @@ async function seedUsers() {
       id: "usr-intellilaw-superadmin",
       organizationId: "org-intellilaw",
       email: "eduardo.rusconi@intellilaw.ai",
-      username: "Eduardo Rusconi",
-      displayName: "Eduardo Rusconi",
+      username: intellilawSuperadminName,
+      displayName: intellilawSuperadminName,
       shortName: "EMRT",
       role: "SUPERADMIN",
       legacyRole: "SUPERADMIN",
@@ -267,19 +269,18 @@ async function seedUsers() {
 }
 
 async function seedCommissionReceivers() {
-  for (const organization of ORGANIZATIONS.filter((entry) => entry.isActive)) {
-    for (const name of COMMISSION_SECTIONS) {
-      await prisma.commissionReceiver.upsert({
-        where: {
-          organizationId_name: {
-            organizationId: organization.id,
-            name
-          }
-        },
-        update: { active: true },
-        create: { organizationId: organization.id, name, active: true }
-      });
-    }
+  const organizationId = "org-rusconi";
+  for (const name of COMMISSION_SECTIONS) {
+    await prisma.commissionReceiver.upsert({
+      where: {
+        organizationId_name: {
+          organizationId,
+          name
+        }
+      },
+      update: { active: true },
+      create: { organizationId, name, active: true }
+    });
   }
 }
 

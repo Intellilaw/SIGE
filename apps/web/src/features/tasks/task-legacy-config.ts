@@ -283,7 +283,53 @@ export const LEGACY_TASK_MODULE_BY_SLUG = Object.fromEntries(
 
 export const LEGACY_TASK_MODULE_BY_ID = Object.fromEntries(
   LEGACY_TASK_MODULES.map((module) => [module.moduleId, module])
-) as Record<TaskModuleDefinition["id"], LegacyTaskModuleConfig>;
+) as Partial<Record<string, LegacyTaskModuleConfig>>;
+
+function getFallbackDefaultResponsible(module: TaskModuleDefinition) {
+  return module.members?.find((member) => member.shortName || member.id)?.shortName
+    ?? module.members?.find((member) => member.shortName || member.id)?.id
+    ?? "";
+}
+
+function buildGenericTables(module: TaskModuleDefinition): LegacyTaskTableConfig[] {
+  const sourceTracks = module.tracks.length > 0
+    ? module.tracks
+    : [{ id: "tareas", label: "Tareas generales", mode: "STATUS" as const, recurring: false }];
+
+  return sourceTracks.map((trackConfig) => table({
+    slug: trackConfig.id,
+    sourceTable: trackConfig.id,
+    title: trackConfig.label,
+    mode: trackConfig.mode === "WORKFLOW" ? "workflow" : "status",
+    dateEditable: true
+  }));
+}
+
+export function buildLegacyTaskModuleConfig(module: TaskModuleDefinition, slug = module.id): LegacyTaskModuleConfig {
+  const legacyConfig = LEGACY_TASK_MODULE_BY_ID[module.id];
+  if (legacyConfig) {
+    return {
+      ...legacyConfig,
+      slug,
+      team: module.team,
+      label: module.label || legacyConfig.label,
+      defaultResponsible: legacyConfig.defaultResponsible || getFallbackDefaultResponsible(module)
+    };
+  }
+
+  return {
+    slug,
+    moduleId: module.id,
+    team: module.team,
+    label: module.label,
+    defaultResponsible: getFallbackDefaultResponsible(module),
+    termEventLabel: "Tarea",
+    termDateLabel: "Fecha termino",
+    verificationColumns: [],
+    tables: buildGenericTables(module),
+    hasRecurringTerms: module.tracks.some((trackConfig) => trackConfig.recurring)
+  };
+}
 
 export function getLegacyTaskTable(module: LegacyTaskModuleConfig, tableSlug?: string) {
   return module.tables.find((tableConfig) => tableConfig.slug === tableSlug);

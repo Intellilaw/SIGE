@@ -4,10 +4,9 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { EXECUTION_HOLIDAY_AUTHORITIES } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
-import { useAuth } from "../auth/AuthContext";
-import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
+import { buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "./execution-config";
+import { findExecutionModuleDescriptorBySlug } from "./execution-config";
 const CHANNEL_LABELS = {
     WHATSAPP: "WhatsApp",
     TELEGRAM: "Telegram",
@@ -458,10 +457,8 @@ function evaluateMatterRow(matter, clientNumber, tasks, holidayDateKeysByAuthori
 export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPath = "/app/execution", titlePrefix = "", description = "Tablero operativo asunto por asunto, con siguientes tareas, resaltado rojo por faltantes o vencimientos y separacion completa por equipo.", showHero = true }) {
     const { slug } = useParams();
     const navigate = useNavigate();
-    const { user } = useAuth();
-    const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-    const visibleModules = getVisibleExecutionModules(user);
-    const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
+    const [taskModules, setTaskModules] = useState([]);
+    const [loadingModules, setLoadingModules] = useState(true);
     const [activeMatters, setActiveMatters] = useState([]);
     const [deletedMatters, setDeletedMatters] = useState([]);
     const [clients, setClients] = useState([]);
@@ -476,9 +473,38 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const [clientSearch, setClientSearch] = useState("");
     const [panelMatter, setPanelMatter] = useState(null);
     const [panelMode, setPanelMode] = useState(null);
-    const canAccess = Boolean(module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const module = useMemo(() => findExecutionModuleDescriptorBySlug(taskModules, slug), [slug, taskModules]);
+    const legacyConfig = useMemo(() => module ? buildLegacyTaskModuleConfig(module.definition, module.slug) : undefined, [module]);
+    const canAccess = Boolean(module);
     useEffect(() => {
-        if (!module || !canAccess) {
+        let active = true;
+        async function loadModules() {
+            setLoadingModules(true);
+            setErrorMessage(null);
+            try {
+                const loadedModules = await apiGet("/tasks/modules");
+                if (active) {
+                    setTaskModules(loadedModules);
+                }
+            }
+            catch (error) {
+                if (active) {
+                    setErrorMessage(toErrorMessage(error));
+                }
+            }
+            finally {
+                if (active) {
+                    setLoadingModules(false);
+                }
+            }
+        }
+        void loadModules();
+        return () => {
+            active = false;
+        };
+    }, []);
+    useEffect(() => {
+        if (loadingModules || !module || !canAccess) {
             return;
         }
         const currentModule = module;
@@ -513,7 +539,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             }
         }
         void loadBoard();
-    }, [module?.moduleId, module?.team, canAccess]);
+    }, [loadingModules, module?.moduleId, module?.team, canAccess]);
     const trackLabels = useMemo(() => new Map(module?.definition.tracks.map((track) => [track.id, track.label]) ?? []), [module]);
     const sourcePrefix = module?.shortLabel ?? "Ejecucion";
     const taskNamesByRecordId = useMemo(() => buildDistributionHistoryTaskNameMap(distributionHistory), [distributionHistory]);
@@ -564,7 +590,13 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
         return (matchesClientSearch(matter, clientSearchWords) &&
             matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority));
     }), [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]);
+    if (loadingModules) {
+        return _jsx("div", { className: "centered-message", children: "Cargando ejecucion..." });
+    }
     if (!module || !canAccess || !legacyConfig) {
+        if (errorMessage) {
+            return (_jsx("section", { className: "page-stack", children: _jsx("div", { className: "message-banner message-error", children: errorMessage }) }));
+        }
         return _jsx(Navigate, { to: fallbackPath, replace: true });
     }
     function updateMatterLocal(matterId, updater) {

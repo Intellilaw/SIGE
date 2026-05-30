@@ -1,12 +1,12 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { APP_VERSION_BADGE, TEAM_OPTIONS, buildDisplayName } from "@sige/contracts";
+import { APP_PRODUCT_NAME, APP_VERSION_BADGE, TEAM_OPTIONS, buildDisplayName } from "@sige/contracts";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
+import { EXECUTION_MODULE_BY_SLUG, buildExecutionModuleDescriptors, findExecutionModuleDescriptorBySlug, getVisibleExecutionModules } from "../execution/execution-config";
 import { CREATE_TASKS_RI_CONNECTION_ID, findDuplicateTaskMatch } from "../execution/execution-task-intelligence";
 import { GeneralSupervisionPage } from "../general-supervision/GeneralSupervisionPage";
 import { KpisPage } from "../kpis/KpisPage";
@@ -15,7 +15,7 @@ import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelli
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "../tasks/task-dashboard-config";
 import { findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName } from "../tasks/task-distribution-utils";
 import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, hasMeaningfulTaskLabel, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "../tasks/task-display-utils";
-import { LEGACY_TASK_MODULE_BY_ID } from "../tasks/task-legacy-config";
+import { LEGACY_TASK_MODULE_BY_ID, buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 const MOBILE_LEAD_CHANNELS = [
     { value: "WHATSAPP", label: "WhatsApp" },
     { value: "TELEGRAM", label: "Telegram" },
@@ -417,7 +417,7 @@ function buildDistributionPayload(module, legacyConfig, matter, clients, eventNa
 export function MobileProtectedLayout() {
     const { user, loading, logout } = useAuth();
     if (loading) {
-        return _jsx("div", { className: "mobile-centered", children: "Cargando SIGE..." });
+        return _jsxs("div", { className: "mobile-centered", children: ["Cargando ", APP_PRODUCT_NAME, "..."] });
     }
     if (!user) {
         return _jsx(Navigate, { to: "/intranet-login?redirect=/mobile", replace: true });
@@ -434,7 +434,7 @@ function MobileProtectedShell({ user, logout }) {
     const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
     const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
     const mobileUserName = getMobileUserName(user);
-    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["SIGE movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: mobileUserName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showTracking ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
+    return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: [APP_PRODUCT_NAME, " movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: mobileUserName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showTracking ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
 }
 export function MobileHomePage() {
     const { user } = useAuth();
@@ -463,6 +463,50 @@ export function MobileGeneralSupervisionPage() {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     return (_jsx("section", { className: "mobile-embedded-module", children: _jsx(GeneralSupervisionPage, {}) }));
+}
+function useMobileExecutionModules(shouldLoad) {
+    const [taskModules, setTaskModules] = useState([]);
+    const [loadingModules, setLoadingModules] = useState(shouldLoad);
+    const [moduleErrorMessage, setModuleErrorMessage] = useState(null);
+    const visibleModules = useMemo(() => buildExecutionModuleDescriptors(taskModules), [taskModules]);
+    useEffect(() => {
+        if (!shouldLoad) {
+            setTaskModules([]);
+            setLoadingModules(false);
+            return;
+        }
+        let active = true;
+        async function loadModules() {
+            setLoadingModules(true);
+            setModuleErrorMessage(null);
+            try {
+                const loadedModules = await apiGet("/tasks/modules");
+                if (active) {
+                    setTaskModules(loadedModules);
+                }
+            }
+            catch (error) {
+                if (active) {
+                    setModuleErrorMessage(toErrorMessage(error));
+                }
+            }
+            finally {
+                if (active) {
+                    setLoadingModules(false);
+                }
+            }
+        }
+        void loadModules();
+        return () => {
+            active = false;
+        };
+    }, [shouldLoad]);
+    return {
+        taskModules,
+        visibleModules,
+        loadingModules,
+        moduleErrorMessage
+    };
 }
 export function MobileDashboardIndexPage() {
     const { user } = useAuth();
@@ -904,14 +948,16 @@ export function MobileExecutionIndexPage() {
     const { user } = useAuth();
     const { isModuleEnabled } = useModuleAvailability();
     const executionEnabled = isModuleEnabled("execution");
-    const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
-    if (!executionEnabled || !canReadMobileExecution(user)) {
+    const canReadExecution = canReadMobileExecution(user);
+    const { visibleModules, loadingModules, moduleErrorMessage } = useMobileExecutionModules(executionEnabled && canReadExecution);
+    const canViewIndex = Boolean(user?.permissions?.includes("*") || user?.team === "CLIENT_RELATIONS" || user?.team === "ADMIN" || user?.role === "SUPERADMIN");
+    if (!executionEnabled || !canReadExecution) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
-    if (visibleModules.length === 1 && user?.team !== "CLIENT_RELATIONS" && user?.team !== "ADMIN" && user?.role !== "SUPERADMIN") {
+    if (!loadingModules && visibleModules.length === 1 && !canViewIndex) {
         return _jsx(Navigate, { to: `/mobile/execution/${visibleModules[0].slug}`, replace: true });
     }
-    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Ejecucion", subtitle: "Selecciona el equipo para crear tareas desde asuntos activos." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/execution/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: module.shortLabel })] }, module.moduleId))) })] }));
+    return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Ejecucion", subtitle: "Selecciona el equipo para crear tareas desde asuntos activos." }), moduleErrorMessage ? _jsx("div", { className: "message-banner message-error", children: moduleErrorMessage }) : null, _jsx("div", { className: "mobile-card-list", children: loadingModules ? (_jsx("div", { className: "mobile-empty", children: "Cargando equipos..." })) : visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/execution/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: module.shortLabel })] }, module.moduleId))) })] }));
 }
 function MobilePageTitle({ title, subtitle }) {
     return (_jsxs("header", { className: "mobile-page-title", children: [_jsx("h1", { children: title }), subtitle ? _jsx("p", { children: subtitle }) : null] }));
@@ -924,10 +970,11 @@ export function MobileExecutionTeamPage() {
     const { user } = useAuth();
     const { isModuleEnabled } = useModuleAvailability();
     const executionEnabled = isModuleEnabled("execution");
-    const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-    const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-    const visibleModules = executionEnabled ? getVisibleExecutionModules(user) : [];
-    const canAccess = Boolean(executionEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const canReadExecution = canReadMobileExecution(user);
+    const { taskModules, loadingModules, moduleErrorMessage } = useMobileExecutionModules(executionEnabled && canReadExecution);
+    const module = useMemo(() => findExecutionModuleDescriptorBySlug(taskModules, slug), [slug, taskModules]);
+    const legacyConfig = useMemo(() => module ? buildLegacyTaskModuleConfig(module.definition, module.slug) : undefined, [module]);
+    const canAccess = Boolean(executionEnabled && canReadExecution && module);
     const [clients, setClients] = useState([]);
     const [matters, setMatters] = useState([]);
     const [records, setRecords] = useState([]);
@@ -1064,6 +1111,12 @@ export function MobileExecutionTeamPage() {
         };
     }, [eventSearchOpen]);
     if (!module || !legacyConfig || !canAccess) {
+        if (loadingModules) {
+            return _jsx("div", { className: "mobile-empty", children: "Cargando ejecucion..." });
+        }
+        if (moduleErrorMessage) {
+            return (_jsx("section", { className: "mobile-stack", children: _jsx("div", { className: "message-banner message-error", children: moduleErrorMessage }) }));
+        }
         return _jsx(Navigate, { to: "/mobile/execution", replace: true });
     }
     const currentModule = module;
