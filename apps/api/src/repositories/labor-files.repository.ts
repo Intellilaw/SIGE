@@ -1038,7 +1038,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
 
     return this.prisma.laborFile.create({
       data: {
-        user: { connect: { id: user.id } },
+        userId: user.id,
         ...buildLaborFileSnapshot(user),
         status: "INCOMPLETE"
       }

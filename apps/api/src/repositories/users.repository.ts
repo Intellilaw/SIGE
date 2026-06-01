@@ -4,11 +4,26 @@ import { buildTaskModuleIdFromTeamKey } from "@sige/contracts";
 import { mapManagedTeam, mapManagedUser } from "./mappers";
 import { buildLaborFileSnapshot, buildLaborFileUserSyncSnapshot, shouldHaveLaborFile } from "./labor-files.repository";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
+import { AppError } from "../core/errors/app-error";
 import type { CreateManagedUserRecord, UpdateManagedUserRecord, UserTeamUpdateRecord, UserTeamWriteRecord, UsersRepository } from "./types";
 
 function buildTeamTaskModuleSummary(label: string) {
   return `Espacio de tareas de ${label} pendiente de configuracion.`;
 }
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function throwUserDuplicateError(error: unknown): never {
+  if (isUniqueConstraintError(error)) {
+    throw new AppError(409, "USER_ALREADY_EXISTS", "Ya existe un usuario con ese nombre de usuario o email.");
+  }
+
+  throw error;
+}
+
+type LaborFileSyncUser = Parameters<typeof buildLaborFileSnapshot>[0];
 
 async function syncTeamTaskModuleDefinition(
   tx: Prisma.TransactionClient,
@@ -54,6 +69,30 @@ async function syncTeamTaskModuleDefinition(
 export class PrismaUsersRepository implements UsersRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
+  private async syncLaborFileForUser(user: LaborFileSyncUser) {
+    if (!shouldHaveLaborFile(user)) {
+      return;
+    }
+
+    try {
+      await this.prisma.laborFile.upsert({
+        where: { userId: user.id },
+        create: {
+          userId: user.id,
+          ...buildLaborFileSnapshot(user),
+          status: "INCOMPLETE"
+        },
+        update: buildLaborFileUserSyncSnapshot(user)
+      });
+    } catch (error) {
+      const errorSummary = error instanceof Error ? error.message : String(error);
+      console.warn("Unable to sync labor file for managed user", {
+        userId: user.id,
+        error: errorSummary
+      });
+    }
+  }
+
   public async list() {
     const records = await this.prisma.user.findMany({
       where: { isActive: true },
@@ -68,8 +107,8 @@ export class PrismaUsersRepository implements UsersRepository {
   }
 
   public async create(payload: CreateManagedUserRecord) {
-    const record = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
+    try {
+      const record = await this.prisma.user.create({
         data: {
           organizationId: payload.organizationId,
           email: payload.email,
@@ -88,29 +127,20 @@ export class PrismaUsersRepository implements UsersRepository {
           emailConfirmedAt: new Date()
         }
       });
+      await this.syncLaborFileForUser(record);
 
-      if (shouldHaveLaborFile(user)) {
-        await tx.laborFile.create({
-          data: {
-            user: { connect: { id: user.id } },
-            ...buildLaborFileSnapshot(user),
-            status: "INCOMPLETE"
-          }
-        });
-      }
-
-      return user;
-    });
-
-    return mapManagedUser(record);
+      return mapManagedUser(record);
+    } catch (error) {
+      throwUserDuplicateError(error);
+    }
   }
 
   public async update(
     userId: string,
     payload: UpdateManagedUserRecord
   ) {
-    const record = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.update({
+    try {
+      const record = await this.prisma.user.update({
         where: { id: userId },
         data: {
           username: payload.username,
@@ -132,23 +162,12 @@ export class PrismaUsersRepository implements UsersRepository {
               : null
         }
       });
+      await this.syncLaborFileForUser(record);
 
-      if (shouldHaveLaborFile(user)) {
-        await tx.laborFile.upsert({
-          where: { userId: user.id },
-          create: {
-            user: { connect: { id: user.id } },
-            ...buildLaborFileSnapshot(user),
-            status: "INCOMPLETE"
-          },
-          update: buildLaborFileUserSyncSnapshot(user)
-        });
-      }
-
-      return user;
-    });
-
-    return mapManagedUser(record);
+      return mapManagedUser(record);
+    } catch (error) {
+      throwUserDuplicateError(error);
+    }
   }
 
   public async delete(userId: string) {

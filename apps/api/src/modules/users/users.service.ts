@@ -3,7 +3,6 @@ import {
   buildLegacyEmail,
   derivePermissions,
   deriveSystemRole,
-  findTeamOptionByLabel,
   normalizeLegacyUsername,
   normalizeShortName,
   type CreateManagedTeamInput,
@@ -71,7 +70,7 @@ export class UsersService {
       : undefined;
     const legacyTeam = managedTeam?.label ?? requestedLegacyTeam;
     const specificRole = payload.specificRole?.trim() || undefined;
-    const team = managedTeam?.key ?? findTeamOptionByLabel(legacyTeam)?.key;
+    const team = managedTeam?.key;
     const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole });
     const permissions = derivePermissions({ legacyRole, team, legacyTeam, specificRole });
     assertStrongPassword(payload.password);
@@ -116,7 +115,7 @@ export class UsersService {
       : normalizeEditableUsername(payload.displayName);
     const team = payload.legacyTeam === undefined
       ? currentUser.team
-      : managedTeam?.key ?? findTeamOptionByLabel(legacyTeam)?.key;
+      : managedTeam?.key;
     const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole });
     const permissions = derivePermissions({ legacyRole, team, legacyTeam, specificRole });
     const nextPassword = payload.password?.trim();

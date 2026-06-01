@@ -572,6 +572,14 @@ textarea {
   margin-bottom: 16px;
 }
 
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -2106,6 +2114,11 @@ textarea {
   gap: 16px;
   align-items: end;
   margin-bottom: 16px;
+  scroll-margin-top: 24px;
+}
+
+.users-team-admin-panel {
+  scroll-margin-top: 24px;
 }
 
 .users-team-execution-field small {
