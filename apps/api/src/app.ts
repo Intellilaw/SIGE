@@ -15,6 +15,7 @@ import { ClientsService } from "./modules/clients/clients.service";
 import { CommissionsService } from "./modules/commissions/commissions.service";
 import { DailyDocumentsService } from "./modules/daily-documents/daily-documents.service";
 import { DashboardService } from "./modules/dashboard/dashboard.service";
+import { startExternalContractInpcScheduler } from "./modules/external-contracts/external-contract-inpc-scheduler.js";
 import { ExternalContractsService } from "./modules/external-contracts/external-contracts.service";
 import { FinancesService } from "./modules/finances/finances.service";
 import { GeneralExpensesService } from "./modules/general-expenses/general-expenses.service";
@@ -330,8 +331,10 @@ export async function buildApp() {
 
   if (env.APP_ENV !== "test") {
     const stopTasksMaintenance = startTasksMaintenanceScheduler(prisma, app.log);
+    const stopExternalContractInpcSync = startExternalContractInpcScheduler(prisma, app.log);
     app.addHook("onClose", async () => {
       stopTasksMaintenance();
+      stopExternalContractInpcSync();
     });
   }
 

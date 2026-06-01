@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
 
 import type {
   InternalContractPaymentMilestone,
@@ -22,11 +23,16 @@ import {
   WidthType,
   convertInchesToTwip
 } from "docx";
+import JSZip from "jszip";
 import PDFDocument from "pdfkit";
 import { z } from "zod";
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PDF_MIME_TYPE = "application/pdf";
+const PSP_CONTRACT_TEMPLATE_URLS = {
+  ES: new URL("../../../templates/contrato-psp-rc-base.docx", import.meta.url),
+  EN: new URL("../../../templates/professional-services-agreement-rc-base.docx", import.meta.url)
+} as const;
 const IVA_RATE = 0.16;
 const RC_COMPANY_NAME = "Rusconi Legal and Tax Technology S.A. de C.V.";
 const RC_REPRESENTATIVE = "Eduardo Miguel Rusconi Trujillo";
@@ -84,6 +90,7 @@ const BODY_COPY = {
 };
 
 export const professionalServicesContractFieldValuesSchema = z.object({
+  language: z.enum(["ES", "EN"]).default("ES"),
   clientKind: z.enum(["PERSONA_FISICA", "PERSONA_MORAL"]).default("PERSONA_MORAL"),
   clientRfc: z.string().max(30).default(""),
   legalRepresentative: z.string().max(250).default(""),
@@ -95,17 +102,15 @@ export const professionalServicesContractFieldValuesSchema = z.object({
   signingDate: z.string().max(30).default("")
 });
 
+type GeneratedContractFile = {
+  buffer: Buffer;
+  filename: string;
+  contentType: string;
+};
+
 type GeneratedContractFiles = {
-  docx: {
-    buffer: Buffer;
-    filename: string;
-    contentType: string;
-  };
-  pdf: {
-    buffer: Buffer;
-    filename: string;
-    contentType: string;
-  };
+  docx: GeneratedContractFile;
+  pdf?: GeneratedContractFile | null;
 };
 
 type ContractRenderInput = {
@@ -156,6 +161,26 @@ function formatLongDate(value?: string | null, fallback = "__ de ______ de 20__"
   });
 }
 
+function formatContractDate(
+  value: string | null | undefined,
+  language: ProfessionalServicesContractFieldValues["language"],
+  fallback?: string
+) {
+  const parsed = parseDateKey(value);
+  const emptyFallback = fallback ?? (language === "EN" ? "________ __, 20__" : "__ de ______ de 20__");
+
+  if (!parsed) {
+    return normalizeText(value) || emptyFallback;
+  }
+
+  return parsed.toLocaleDateString(language === "EN" ? "en-US" : "es-MX", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-MX", {
     style: "currency",
@@ -192,18 +217,27 @@ function textOrFallback(value?: string | null, fallback = "No Aplica") {
   return normalizeText(value) || fallback;
 }
 
-function sanitizeFilenamePart(value: string) {
-  return normalizeText(value)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "cliente";
+function sanitizeDownloadFilenameSegment(value: string, fallback: string) {
+  return (normalizeText(value) || fallback)
+    .normalize("NFC")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 90)
+    .trim() || fallback;
+}
+
+function buildProfessionalServicesContractFilename(input: ContractRenderInput, extension: "docx" | "pdf") {
+  const contractNumber = sanitizeDownloadFilenameSegment(input.coverContractNumber, "Sin numero");
+  const clientName = sanitizeDownloadFilenameSegment(input.clientName, "Cliente");
+  const title = sanitizeDownloadFilenameSegment(input.title, "Sin titulo");
+
+  return `Contrato (${contractNumber}) (${clientName}) (${title}).${extension}`;
 }
 
 function normalizeFieldValues(fields: ProfessionalServicesContractFieldValues): ProfessionalServicesContractFieldValues {
   return {
+    language: fields.language === "EN" ? "EN" : "ES",
     clientKind: fields.clientKind,
     clientRfc: normalizeText(fields.clientRfc),
     legalRepresentative: normalizeText(fields.legalRepresentative),
@@ -237,6 +271,7 @@ function guessClientKind(clientName: string): ProfessionalServicesContractFieldV
 
 function buildDefaultFieldValues(quote: Quote): ProfessionalServicesContractFieldValues {
   return {
+    language: "ES",
     clientKind: guessClientKind(quote.clientName),
     clientRfc: "",
     legalRepresentative: "",
@@ -562,7 +597,381 @@ function createSignatureTable(clientName: string, fields: ProfessionalServicesCo
   });
 }
 
-async function renderProfessionalServicesContractDocx(input: ContractRenderInput) {
+type XmlMatch = {
+  value: string;
+  index: number;
+};
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function collectXmlMatches(xml: string, pattern: RegExp): XmlMatch[] {
+  return Array.from(xml.matchAll(pattern)).map((match) => ({
+    value: match[0],
+    index: match.index ?? 0
+  }));
+}
+
+function createTemplateParagraphXml(
+  text: string,
+  options: {
+    align?: "center" | "left" | "right";
+    bold?: boolean;
+  } = {}
+) {
+  const paragraphProperties = options.align
+    ? `<w:pPr><w:jc w:val="${options.align}"/></w:pPr>`
+    : "";
+  const runProperties = [
+    '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>',
+    options.bold ? "<w:b/>" : "",
+    '<w:sz w:val="24"/>',
+    '<w:szCs w:val="24"/>'
+  ].filter(Boolean).join("");
+
+  return `<w:p>${paragraphProperties}<w:r><w:rPr>${runProperties}</w:rPr><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+}
+
+function replaceTemplateCellContent(
+  cellXml: string,
+  lines: string | string[],
+  options: {
+    align?: "center" | "left" | "right";
+    bold?: boolean;
+  } = {}
+) {
+  const cellProperties = cellXml.match(/<w:tcPr\b[\s\S]*?<\/w:tcPr>/)?.[0] ?? "";
+  const paragraphs = (Array.isArray(lines) ? lines : [lines])
+    .map((line) => createTemplateParagraphXml(line, options))
+    .join("");
+
+  return `<w:tc>${cellProperties}${paragraphs}</w:tc>`;
+}
+
+function replaceTemplateRowCell(
+  rowXml: string,
+  cellIndex: number,
+  lines: string | string[],
+  options: {
+    align?: "center" | "left" | "right";
+    bold?: boolean;
+  } = {}
+) {
+  let index = 0;
+
+  return rowXml.replace(/<w:tc\b[\s\S]*?<\/w:tc>/g, (cellXml) => {
+    if (index === cellIndex) {
+      index += 1;
+      return replaceTemplateCellContent(cellXml, lines, options);
+    }
+
+    index += 1;
+    return cellXml;
+  });
+}
+
+function replaceTemplateTableRowCell(
+  tableXml: string,
+  rowIndex: number,
+  cellIndex: number,
+  lines: string | string[],
+  options: {
+    align?: "center" | "left" | "right";
+    bold?: boolean;
+  } = {}
+) {
+  let index = 0;
+
+  return tableXml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (rowXml) => {
+    if (index === rowIndex) {
+      index += 1;
+      return replaceTemplateRowCell(rowXml, cellIndex, lines, options);
+    }
+
+    index += 1;
+    return rowXml;
+  });
+}
+
+function replaceTemplateTable(
+  documentXml: string,
+  tableIndex: number,
+  transform: (tableXml: string) => string
+) {
+  let index = 0;
+
+  return documentXml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (tableXml) => {
+    if (index === tableIndex) {
+      index += 1;
+      return transform(tableXml);
+    }
+
+    index += 1;
+    return tableXml;
+  });
+}
+
+function replaceTemplateRows(
+  tableXml: string,
+  startRowIndex: number,
+  deleteCount: number,
+  newRows: string[]
+) {
+  const rows = collectXmlMatches(tableXml, /<w:tr\b[\s\S]*?<\/w:tr>/g);
+  const first = rows[startRowIndex];
+  const last = rows[startRowIndex + deleteCount - 1];
+
+  if (!first || !last) {
+    return tableXml;
+  }
+
+  return [
+    tableXml.slice(0, first.index),
+    newRows.join(""),
+    tableXml.slice(last.index + last.value.length)
+  ].join("");
+}
+
+function buildTemplateServicesTable(
+  tableXml: string,
+  lines: ProfessionalServicesContractServiceLine[],
+  totalMxn: number
+) {
+  const rows = collectXmlMatches(tableXml, /<w:tr\b[\s\S]*?<\/w:tr>/g);
+  const serviceRowTemplate = rows[1]?.value;
+  const totalRowTemplate = rows[2]?.value;
+
+  if (!serviceRowTemplate || !totalRowTemplate) {
+    return tableXml;
+  }
+
+  const normalizedLines = lines.length > 0
+    ? lines
+    : [{ id: "psp-empty", service: "N/A", fees: "-", observations: "-", paymentMoment: "" }];
+
+  const serviceRows = normalizedLines.map((line) => {
+    return [
+      [0, line.service],
+      [1, line.fees],
+      [2, line.observations]
+    ].reduce(
+      (rowXml, [cellIndex, value]) => replaceTemplateRowCell(rowXml, Number(cellIndex), String(value || "-")),
+      serviceRowTemplate
+    );
+  });
+
+  const totalRow = replaceTemplateRowCell(
+    replaceTemplateRowCell(totalRowTemplate, 0, "TOTAL:", { bold: true }),
+    1,
+    `${formatCurrency(totalMxn)} M.N.`,
+    { align: "center", bold: true }
+  );
+
+  return replaceTemplateRows(tableXml, 1, 2, [...serviceRows, totalRow]);
+}
+
+function fillSpanishProfessionalServicesTemplateXml(documentXml: string, input: ContractRenderInput) {
+  const fields = normalizeFieldValues(input.fields);
+  const signerName = fields.clientKind === "PERSONA_MORAL"
+    ? textOrFallback(fields.legalRepresentative, input.clientName)
+    : input.clientName;
+  const signerTitle = fields.clientKind === "PERSONA_MORAL"
+    ? `Representante legal de ${input.clientName}`
+    : "Cliente";
+  const paymentMomentLines = input.paymentMilestones.length > 0
+    ? input.paymentMilestones.map((milestone) => `- ${milestone.label}`)
+    : ["- Sin momento de pago especificado en la cotizacion."];
+
+  let nextXml = documentXml;
+
+  nextXml = replaceTemplateTable(nextXml, 0, (tableXml) =>
+    replaceTemplateTableRowCell(tableXml, 0, 1, input.coverContractNumber, { align: "center" })
+  );
+
+  nextXml = replaceTemplateTable(nextXml, 1, (tableXml) => {
+    const moralRows = [
+      fields.clientKind === "PERSONA_MORAL" ? input.clientName : "No Aplica",
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientRfc) : "No Aplica",
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.legalRepresentative) : "No Aplica",
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientAddress) : "No Aplica",
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientPhone) : "No Aplica",
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientEmail) : "No Aplica"
+    ];
+
+    return moralRows.reduce(
+      (currentXml, value, index) => replaceTemplateTableRowCell(currentXml, index + 1, 1, value),
+      tableXml
+    );
+  });
+
+  nextXml = replaceTemplateTable(nextXml, 2, (tableXml) => {
+    const physicalRows = [
+      fields.clientKind === "PERSONA_FISICA" ? input.clientName : "No Aplica",
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientRfc) : "No Aplica",
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientAddress) : "No Aplica",
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientPhone) : "No Aplica",
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientEmail) : "No Aplica"
+    ];
+
+    return physicalRows.reduce(
+      (currentXml, value, index) => replaceTemplateTableRowCell(currentXml, index + 1, 1, value),
+      tableXml
+    );
+  });
+
+  nextXml = replaceTemplateTable(nextXml, 3, (tableXml) =>
+    buildTemplateServicesTable(tableXml, input.serviceLines, input.totalMxn)
+  );
+
+  nextXml = replaceTemplateTable(nextXml, 4, (tableXml) =>
+    replaceTemplateTableRowCell(tableXml, 1, 0, paymentMomentLines)
+  );
+
+  nextXml = replaceTemplateTable(nextXml, 6, (tableXml) => {
+    const dateRows = [
+      formatLongDate(fields.startDate),
+      normalizeText(fields.endDate) ? formatLongDate(fields.endDate) : "Indeterminada",
+      formatLongDate(fields.signingDate)
+    ];
+
+    return dateRows.reduce(
+      (currentXml, value, index) => replaceTemplateTableRowCell(currentXml, index + 1, 1, value),
+      tableXml
+    );
+  });
+
+  nextXml = replaceTemplateTable(nextXml, 7, (tableXml) =>
+    replaceTemplateTableRowCell(tableXml, 0, 1, [
+      "____________________________________",
+      signerName.toUpperCase(),
+      signerTitle
+    ], { align: "center" })
+  );
+
+  return nextXml;
+}
+
+function fillEnglishProfessionalServicesTemplateXml(documentXml: string, input: ContractRenderInput) {
+  const fields = normalizeFieldValues(input.fields);
+  const doesNotApply = "Does not apply";
+  const signerName = fields.clientKind === "PERSONA_MORAL"
+    ? textOrFallback(fields.legalRepresentative, input.clientName)
+    : input.clientName;
+  const signerTitle = fields.clientKind === "PERSONA_MORAL"
+    ? `Legal representative of ${input.clientName}`
+    : "Client";
+  const paymentMomentLines = input.paymentMilestones.length > 0
+    ? input.paymentMilestones.map((milestone) => `- ${milestone.label}`)
+    : ["- No payment time specified in the quotation."];
+
+  let nextXml = documentXml;
+
+  nextXml = replaceTemplateTable(nextXml, 0, (tableXml) =>
+    replaceTemplateTableRowCell(tableXml, 0, 1, input.coverContractNumber, { align: "center" })
+  );
+
+  nextXml = replaceTemplateTable(nextXml, 1, (tableXml) => {
+    const legalPersonRows = [
+      fields.clientKind === "PERSONA_MORAL" ? input.clientName : doesNotApply,
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientAddress, doesNotApply) : doesNotApply,
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientRfc, doesNotApply) : doesNotApply,
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.legalRepresentative, doesNotApply) : doesNotApply,
+      doesNotApply,
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientPhone, doesNotApply) : doesNotApply,
+      fields.clientKind === "PERSONA_MORAL" ? textOrFallback(fields.clientEmail, doesNotApply) : doesNotApply
+    ];
+
+    return legalPersonRows.reduce(
+      (currentXml, value, index) => replaceTemplateTableRowCell(currentXml, index + 1, 1, value),
+      tableXml
+    );
+  });
+
+  nextXml = replaceTemplateTable(nextXml, 2, (tableXml) => {
+    const naturalPersonRows = [
+      fields.clientKind === "PERSONA_FISICA" ? input.clientName : doesNotApply,
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientAddress, doesNotApply) : doesNotApply,
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientRfc, doesNotApply) : doesNotApply,
+      doesNotApply,
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientPhone, doesNotApply) : doesNotApply,
+      fields.clientKind === "PERSONA_FISICA" ? textOrFallback(fields.clientEmail, doesNotApply) : doesNotApply
+    ];
+
+    return naturalPersonRows.reduce(
+      (currentXml, value, index) => replaceTemplateTableRowCell(currentXml, index + 1, 1, value),
+      tableXml
+    );
+  });
+
+  nextXml = replaceTemplateTable(nextXml, 3, (tableXml) =>
+    buildTemplateServicesTable(tableXml, input.serviceLines, input.totalMxn)
+  );
+
+  nextXml = replaceTemplateTable(nextXml, 4, (tableXml) =>
+    replaceTemplateTableRowCell(tableXml, 1, 0, paymentMomentLines)
+  );
+
+  nextXml = replaceTemplateTable(nextXml, 6, (tableXml) => {
+    const dateRows = [
+      formatContractDate(fields.startDate, "EN"),
+      normalizeText(fields.endDate) ? formatContractDate(fields.endDate, "EN") : "Indeterminate",
+      formatContractDate(fields.signingDate, "EN")
+    ];
+
+    return dateRows.reduce(
+      (currentXml, value, index) => replaceTemplateTableRowCell(currentXml, index + 1, 1, value),
+      tableXml
+    );
+  });
+
+  nextXml = replaceTemplateTable(nextXml, 7, (tableXml) =>
+    replaceTemplateTableRowCell(tableXml, 0, 1, [
+      "____________________________________",
+      signerName.toUpperCase(),
+      signerTitle
+    ], { align: "center" })
+  );
+
+  return nextXml;
+}
+
+function fillProfessionalServicesTemplateXml(documentXml: string, input: ContractRenderInput) {
+  const fields = normalizeFieldValues(input.fields);
+
+  return fields.language === "EN"
+    ? fillEnglishProfessionalServicesTemplateXml(documentXml, input)
+    : fillSpanishProfessionalServicesTemplateXml(documentXml, input);
+}
+
+async function renderProfessionalServicesContractTemplateDocx(input: ContractRenderInput) {
+  const fields = normalizeFieldValues(input.fields);
+  const template = await readFile(PSP_CONTRACT_TEMPLATE_URLS[fields.language]);
+  const zip = await JSZip.loadAsync(template);
+  const documentFile = zip.file("word/document.xml");
+
+  if (!documentFile) {
+    throw new Error("La plantilla de contrato PSP no contiene word/document.xml.");
+  }
+
+  const documentXml = await documentFile.async("string");
+  zip.file("word/document.xml", fillProfessionalServicesTemplateXml(documentXml, input));
+  const buffer = await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE"
+  });
+  return {
+    buffer: Buffer.from(buffer),
+    filename: buildProfessionalServicesContractFilename(input, "docx"),
+    contentType: DOCX_MIME_TYPE
+  };
+}
+
+async function renderLegacyProfessionalServicesContractDocx(input: ContractRenderInput) {
   const fields = normalizeFieldValues(input.fields);
   const startDate = formatLongDate(fields.startDate);
   const endDate = normalizeText(fields.endDate) ? formatLongDate(fields.endDate) : "Indeterminada";
@@ -702,13 +1111,15 @@ async function renderProfessionalServicesContractDocx(input: ContractRenderInput
   });
 
   const buffer = await Packer.toBuffer(doc);
-  const baseName = `contrato-psp-${sanitizeFilenamePart(input.clientName)}-${sanitizeFilenamePart(input.coverContractNumber)}-${currentDateKey()}`;
-
   return {
     buffer: Buffer.from(buffer),
-    filename: `${baseName}.docx`,
+    filename: buildProfessionalServicesContractFilename(input, "docx"),
     contentType: DOCX_MIME_TYPE
   };
+}
+
+async function renderProfessionalServicesContractDocx(input: ContractRenderInput) {
+  return renderProfessionalServicesContractTemplateDocx(input);
 }
 
 function drawPdfSectionTitle(doc: PDFKit.PDFDocument, text: string) {
@@ -916,10 +1327,9 @@ function renderProfessionalServicesContractPdf(input: ContractRenderInput) {
 
   return new Promise<{ buffer: Buffer; filename: string; contentType: string }>((resolve, reject) => {
     doc.on("end", () => {
-      const baseName = `contrato-psp-${sanitizeFilenamePart(input.clientName)}-${sanitizeFilenamePart(input.coverContractNumber)}-${currentDateKey()}`;
       resolve({
         buffer: Buffer.concat(chunks),
-        filename: `${baseName}.pdf`,
+        filename: buildProfessionalServicesContractFilename(input, "pdf"),
         contentType: PDF_MIME_TYPE
       });
     });
@@ -928,10 +1338,6 @@ function renderProfessionalServicesContractPdf(input: ContractRenderInput) {
 }
 
 export async function renderProfessionalServicesContractFiles(input: ContractRenderInput): Promise<GeneratedContractFiles> {
-  const [docx, pdf] = await Promise.all([
-    renderProfessionalServicesContractDocx(input),
-    renderProfessionalServicesContractPdf(input)
-  ]);
-
-  return { docx, pdf };
+  const docx = await renderProfessionalServicesContractDocx(input);
+  return { docx, pdf: null };
 }

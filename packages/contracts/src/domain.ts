@@ -113,6 +113,7 @@ export type InternalContractDocumentKind = "CONTRACT" | "ADDENDUM";
 export type InternalContractDownloadFormat = "docx" | "pdf";
 export type InternalContractSignatureStatus = "PENDING" | "SIGNED";
 export type ProfessionalServicesContractClientKind = "PERSONA_FISICA" | "PERSONA_MORAL";
+export type ProfessionalServicesContractLanguage = "ES" | "EN";
 
 export interface InternalContractPaymentMilestone {
   id: string;
@@ -123,6 +124,7 @@ export interface InternalContractPaymentMilestone {
 }
 
 export interface ProfessionalServicesContractFieldValues {
+  language: ProfessionalServicesContractLanguage;
   clientKind: ProfessionalServicesContractClientKind;
   clientRfc: string;
   legalRepresentative: string;
@@ -208,6 +210,45 @@ export type ExternalContractType = "LEASE";
 export type ExternalContractStatus = "ACTIVE" | "ARCHIVED";
 export type ExternalContractDownloadFormat = "docx" | "pdf";
 
+export interface ExternalContractRenewal {
+  id: string;
+  sequence: number;
+  renewalDate?: string;
+  leaseStartDate?: string;
+  leaseEndDate?: string;
+  monthlyRentMxn?: number;
+  rentIncreasePct?: number;
+  inpcBasePeriod?: string;
+  inpcTargetPeriod?: string;
+  documents: ExternalContractRenewalDocument[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalContractRenewalDocument {
+  id: string;
+  renewalId: string;
+  documentType: string;
+  originalFileName: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalContractGeneratedDocument {
+  id: string;
+  renewalId?: string;
+  templateId: string;
+  templateTitle: string;
+  originalFileName: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ExternalContract {
   id: string;
   contractNumber: string;
@@ -230,9 +271,66 @@ export interface ExternalContract {
   fileMimeType?: string;
   fileSizeBytes?: number;
   availableFormats: ExternalContractDownloadFormat[];
+  renewals: ExternalContractRenewal[];
+  generatedDocuments: ExternalContractGeneratedDocument[];
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ExternalContractPrefillFields {
+  title: string;
+  propertyAddress: string;
+  landlordName: string;
+  tenantName: string;
+  leaseStartDate: string;
+  leaseEndDate: string;
+  renewalDate: string;
+  rentIncreaseDate: string;
+  monthlyRentMxn: string;
+  rentIncreasePct: string;
+}
+
+export interface ExternalContractPrefillResult {
+  fields: ExternalContractPrefillFields;
+  notes: string[];
+}
+
+export interface ExternalContractInpc {
+  id: string;
+  periodYear: number;
+  periodMonth: number;
+  periodDate: string;
+  value: number;
+  source: string;
+  sourceSeries: string;
+  importedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalContractInpcSyncWarning {
+  period: string;
+  message: string;
+}
+
+export interface ExternalContractInpcSyncResult {
+  imported: number;
+  updated: number;
+  skipped: number;
+  total: number;
+  latest?: ExternalContractInpc;
+  warnings: ExternalContractInpcSyncWarning[];
+}
+
+export interface ExternalContractRentIncreaseCalculation {
+  basePeriod: string;
+  targetPeriod: string;
+  originalRentMxn: number;
+  updatedRentMxn: number;
+  increaseMxn: number;
+  increasePct: number;
+  factor: number;
 }
 
 export type LaborFileStatus = "INCOMPLETE" | "COMPLETE";
@@ -1279,6 +1377,7 @@ export interface DashboardSummary {
 }
 
 export interface SystemModuleSetting {
+  organizationId: string;
   moduleId: string;
   isEnabled: boolean;
   updatedByUserId?: string;

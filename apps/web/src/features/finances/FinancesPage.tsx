@@ -129,6 +129,7 @@ const ACTIVE_COLUMN_WIDTHS = [
 ] as const;
 
 const EMPTY_PROFESSIONAL_SERVICES_FIELDS: ProfessionalServicesContractFieldValues = {
+  language: "ES",
   clientKind: "PERSONA_MORAL",
   clientRfc: "",
   legalRepresentative: "",
@@ -1797,6 +1798,23 @@ export function FinancesPage() {
                 </div>
 
                 {contractFlash ? <div className="message-banner message-success">{contractFlash}</div> : null}
+
+                <div className="finance-contract-form-section">
+                  <div className="panel-header finance-contract-section-head">
+                    <h4>Idioma del contrato</h4>
+                    <span>Selecciona la plantilla que se usara al generar el archivo.</span>
+                  </div>
+
+                  <div className="finance-contract-field-grid">
+                    <label className="form-field">
+                      <span>Idioma</span>
+                      <select value={contractForm.language} onChange={(event) => updateContractFormField("language", event.target.value as ProfessionalServicesContractFieldValues["language"])}>
+                        <option value="ES">Espanol</option>
+                        <option value="EN">Ingles</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
 
                 <div className="finance-contract-form-section">
                   <div className="panel-header finance-contract-section-head">

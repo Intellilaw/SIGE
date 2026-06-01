@@ -8669,6 +8669,14 @@ textarea {
   max-width: 72ch;
 }
 
+.external-contracts-page .internal-contracts-list-panel {
+  order: 2;
+}
+
+.external-contracts-page .internal-contracts-form-panel {
+  order: 1;
+}
+
 .external-contract-deadlines {
   display: grid;
   gap: 12px;
@@ -8712,6 +8720,52 @@ textarea {
   border-color: rgba(22, 163, 74, 0.16);
 }
 
+.external-contract-generated-documents {
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.external-contract-generated-documents > span {
+  color: #52657a;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.external-contract-generated-document {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.external-contract-generated-document div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.external-contract-generated-document strong,
+.external-contract-generated-document small {
+  overflow-wrap: anywhere;
+}
+
+.external-contract-generated-document strong {
+  color: #1f354f;
+}
+
+.external-contract-generated-document small {
+  color: #52657a;
+  font-weight: 700;
+}
+
 .external-contracts-format-panel {
   border-top: 1px solid rgba(31, 41, 51, 0.08);
   display: grid;
@@ -8723,6 +8777,214 @@ textarea {
   display: grid;
   gap: 14px;
   grid-template-columns: 1fr;
+}
+
+.external-contracts-management-panel,
+.external-contracts-selected-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.external-contracts-management-toolbar {
+  grid-template-columns: 1fr;
+}
+
+.external-contract-renewals-editor {
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.external-contract-renewals-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.external-contract-renewals-head h3 {
+  color: #102a43;
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+
+.external-contract-renewals-head span {
+  color: #52657a;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.external-contract-renewal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.external-contract-renewal-tab {
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.1);
+  border-radius: 999px;
+  color: #334e68;
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.external-contract-renewal-tab.is-active {
+  background: #e7f6f3;
+  border-color: rgba(15, 118, 110, 0.24);
+  color: #0f766e;
+}
+
+.external-contract-renewal-fields {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.external-contract-renewal-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
+.external-contract-renewal-documents {
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.external-contract-renewal-documents-head,
+.external-contract-renewal-document-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.external-contract-renewal-documents-head > div,
+.external-contract-renewal-document-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.external-contract-renewal-documents strong,
+.external-contract-renewal-document-row strong {
+  color: #1f354f;
+  overflow-wrap: anywhere;
+}
+
+.external-contract-renewal-documents span,
+.external-contract-renewal-documents small {
+  color: #52657a;
+  font-weight: 800;
+}
+
+.external-contract-renewal-document-upload {
+  cursor: pointer;
+  min-height: 40px;
+  overflow: hidden;
+  position: relative;
+}
+
+.external-contract-renewal-document-upload input {
+  bottom: 0;
+  cursor: pointer;
+  font-size: 999px;
+  left: 0;
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.external-contract-renewal-document-upload.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.external-contract-renewal-document-upload.is-disabled input {
+  cursor: not-allowed;
+}
+
+.external-contract-renewal-document-list {
+  display: grid;
+  gap: 10px;
+}
+
+.external-contract-renewal-document-row {
+  background: #ffffff;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.external-contracts-inpc-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.external-contracts-inpc-summary-panel,
+.external-contracts-inpc-calculator-panel,
+.external-contracts-inpc-table-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.external-contracts-inpc-metrics,
+.external-contracts-inpc-calculation {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.external-contracts-inpc-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.external-contracts-inpc-metrics div,
+.external-contracts-inpc-calculation div {
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.external-contracts-inpc-metrics span,
+.external-contracts-inpc-metrics small,
+.external-contracts-inpc-calculation span {
+  color: #52657a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.external-contracts-inpc-metrics strong,
+.external-contracts-inpc-calculation strong {
+  color: #1f354f;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.external-contracts-inpc-calculator-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(180px, 0.8fr) repeat(2, minmax(220px, 1fr));
+}
+
+.external-contracts-inpc-table {
+  min-width: 760px;
 }
 
 .holidays-panel {
@@ -10100,6 +10362,10 @@ textarea {
   .internal-contracts-form-grid,
   .internal-contract-meta-grid,
   .external-contract-deadlines,
+  .external-contract-renewal-fields,
+  .external-contracts-inpc-metrics,
+  .external-contracts-inpc-calculator-grid,
+  .external-contracts-inpc-calculation,
   .finance-contract-field-grid,
   .labor-files-layout,
   .labor-file-profile-grid,
@@ -10126,6 +10392,22 @@ textarea {
   }
 
   .internal-contract-card-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .external-contract-renewals-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .external-contract-renewal-documents-head,
+  .external-contract-renewal-document-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .external-contract-generated-document {
     align-items: stretch;
     flex-direction: column;
   }

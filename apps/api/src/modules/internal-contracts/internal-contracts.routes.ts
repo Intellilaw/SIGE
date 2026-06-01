@@ -203,10 +203,10 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
       docxFileMimeType: files.docx.contentType,
       docxFileSizeBytes: files.docx.buffer.byteLength,
       docxFileContent: files.docx.buffer,
-      pdfOriginalFileName: files.pdf.filename,
-      pdfFileMimeType: files.pdf.contentType,
-      pdfFileSizeBytes: files.pdf.buffer.byteLength,
-      pdfFileContent: files.pdf.buffer
+      pdfOriginalFileName: files.pdf?.filename ?? null,
+      pdfFileMimeType: files.pdf?.contentType ?? null,
+      pdfFileSizeBytes: files.pdf?.buffer.byteLength ?? null,
+      pdfFileContent: files.pdf?.buffer ?? null
     });
   });
 

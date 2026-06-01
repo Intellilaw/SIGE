@@ -4,9 +4,23 @@ import { z } from "zod";
 
 import { getSessionUser, requireAnyPermissions, requireAuth } from "../../core/auth/guards";
 import { AppError } from "../../core/errors/app-error";
+import { prefillExternalContractFields } from "./external-contract-prefill";
+import { RENT_UPDATE_TEMPLATE_ID, resolveRentUpdateDownloadFilename } from "./external-contract-rent-update-format";
+
+const contractRenewalSchema = z.object({
+  id: z.string().nullable().optional(),
+  renewalDate: z.string().nullable().optional(),
+  leaseStartDate: z.string().nullable().optional(),
+  leaseEndDate: z.string().nullable().optional(),
+  monthlyRentMxn: z.number().nullable().optional(),
+  rentIncreasePct: z.number().nullable().optional(),
+  inpcBasePeriod: z.string().nullable().optional(),
+  inpcTargetPeriod: z.string().nullable().optional(),
+  notes: z.string().nullable().optional()
+});
 
 const contractBaseSchema = z.object({
-  contractNumber: z.string().trim().min(1),
+  contractNumber: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1),
   contractType: z.enum(["LEASE"]).default("LEASE"),
   status: z.enum(["ACTIVE", "ARCHIVED"]).default("ACTIVE"),
@@ -23,7 +37,8 @@ const contractBaseSchema = z.object({
   notes: z.string().nullable().optional(),
   originalFileName: z.string().nullable().optional(),
   fileMimeType: z.string().nullable().optional(),
-  fileBase64: z.string().nullable().optional()
+  fileBase64: z.string().nullable().optional(),
+  renewals: z.array(contractRenewalSchema).optional()
 });
 
 const createContractSchema = contractBaseSchema;
@@ -31,8 +46,38 @@ const updateContractSchema = contractBaseSchema.partial().extend({
   contractType: z.enum(["LEASE"]).optional()
 });
 
+const prefillContractSchema = z.object({
+  originalFileName: z.string().trim().min(1),
+  fileMimeType: z.string().nullable().optional(),
+  fileBase64: z.string().trim().min(1)
+});
+
 const paramsSchema = z.object({
   contractId: z.string().min(1)
+});
+
+const generatedDocumentParamsSchema = paramsSchema.extend({
+  documentId: z.string().min(1)
+});
+
+const renewalParamsSchema = paramsSchema.extend({
+  renewalId: z.string().min(1)
+});
+
+const renewalDocumentParamsSchema = renewalParamsSchema.extend({
+  documentId: z.string().min(1)
+});
+
+const renewalDocumentUploadSchema = z.object({
+  documentType: z.string().nullable().optional(),
+  originalFileName: z.string().trim().min(1),
+  fileMimeType: z.string().nullable().optional(),
+  fileBase64: z.string().trim().min(1)
+});
+
+const rentUpdateFormatSchema = z.object({
+  renewalId: z.string().nullable().optional(),
+  documentDate: z.string().nullable().optional()
 });
 
 function decodeFileBase64(value?: string | null) {
@@ -45,7 +90,14 @@ function decodeFileBase64(value?: string | null) {
 }
 
 function encodeDispositionFilename(filename: string) {
-  return `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  const fallbackFilename = filename
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]+/g, "")
+    .replace(/["\\;]/g, "")
+    .trim() || "download";
+
+  return `attachment; filename="${fallbackFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 function normalizeAccessText(value?: string | null) {
@@ -80,6 +132,24 @@ export const externalContractsRoutes: FastifyPluginAsync = async (app) => {
   const writeGuards = [requireAuth, requireSettlementsTeam, requireAnyPermissions(["external-contracts:write"])];
 
   app.get("/external-contracts", { preHandler: readGuards }, async () => service.list());
+  app.get("/external-contracts/inpc", { preHandler: readGuards }, async () => service.listInpc());
+
+  app.post("/external-contracts/inpc/sync", { preHandler: writeGuards }, async () => service.syncInpc());
+
+  app.post("/external-contracts/prefill", { bodyLimit: 25 * 1024 * 1024, preHandler: writeGuards }, async (request) => {
+    const payload = prefillContractSchema.parse(request.body ?? {});
+    const fileContent = decodeFileBase64(payload.fileBase64);
+
+    if (!fileContent) {
+      throw new AppError(400, "EXTERNAL_CONTRACT_PREFILL_FILE_REQUIRED", "Selecciona un archivo para leerlo con IA.");
+    }
+
+    return prefillExternalContractFields({
+      originalFileName: payload.originalFileName,
+      fileMimeType: payload.fileMimeType,
+      fileContent
+    });
+  });
 
   app.post("/external-contracts", { bodyLimit: 25 * 1024 * 1024, preHandler: writeGuards }, async (request) => {
     const payload = createContractSchema.parse(request.body ?? {});
@@ -104,7 +174,8 @@ export const externalContractsRoutes: FastifyPluginAsync = async (app) => {
       originalFileName: payload.originalFileName,
       fileMimeType: payload.fileMimeType,
       fileSizeBytes: fileContent?.byteLength ?? null,
-      fileContent
+      fileContent,
+      renewals: payload.renewals
     });
   });
 
@@ -131,8 +202,68 @@ export const externalContractsRoutes: FastifyPluginAsync = async (app) => {
       originalFileName: fileContent ? payload.originalFileName : undefined,
       fileMimeType: fileContent ? payload.fileMimeType : undefined,
       fileSizeBytes: fileContent?.byteLength ?? undefined,
+      fileContent,
+      renewals: payload.renewals
+    });
+  });
+
+  app.post("/external-contracts/:contractId/formats/rent-increase", { preHandler: writeGuards }, async (request) => {
+    const params = paramsSchema.parse(request.params);
+    const payload = rentUpdateFormatSchema.parse(request.body ?? {});
+
+    return service.generateRentUpdateFormat(params.contractId, payload);
+  });
+
+  app.get("/external-contracts/:contractId/generated-documents/:documentId", { preHandler: readGuards }, async (request, reply) => {
+    const params = generatedDocumentParamsSchema.parse(request.params);
+    const document = await service.findGeneratedDocument(params.contractId, params.documentId);
+
+    if (!document) {
+      throw new app.errors.AppError(404, "EXTERNAL_CONTRACT_GENERATED_DOCUMENT_NOT_FOUND", "El formato generado no existe.");
+    }
+
+    const downloadFilename = document.templateId === RENT_UPDATE_TEMPLATE_ID
+      ? resolveRentUpdateDownloadFilename({
+          clientName: document.clientName,
+          documentDate: document.createdAt,
+          fileMimeType: document.fileMimeType,
+          originalFileName: document.originalFileName
+        })
+      : document.originalFileName;
+
+    reply.header("Content-Type", document.fileMimeType || "application/octet-stream");
+    reply.header("Content-Disposition", encodeDispositionFilename(downloadFilename));
+    return reply.send(document.fileContent);
+  });
+
+  app.post("/external-contracts/:contractId/renewals/:renewalId/documents", { bodyLimit: 25 * 1024 * 1024, preHandler: writeGuards }, async (request) => {
+    const params = renewalParamsSchema.parse(request.params);
+    const payload = renewalDocumentUploadSchema.parse(request.body ?? {});
+    const fileContent = decodeFileBase64(payload.fileBase64);
+
+    if (!fileContent) {
+      throw new AppError(400, "EXTERNAL_CONTRACT_RENEWAL_DOCUMENT_FILE_REQUIRED", "Selecciona un archivo para cargar en la renovacion.");
+    }
+
+    return service.uploadRenewalDocument(params.contractId, params.renewalId, {
+      documentType: payload.documentType,
+      originalFileName: payload.originalFileName,
+      fileMimeType: payload.fileMimeType,
       fileContent
     });
+  });
+
+  app.get("/external-contracts/:contractId/renewals/:renewalId/documents/:documentId", { preHandler: readGuards }, async (request, reply) => {
+    const params = renewalDocumentParamsSchema.parse(request.params);
+    const document = await service.findRenewalDocument(params.contractId, params.renewalId, params.documentId);
+
+    if (!document) {
+      throw new app.errors.AppError(404, "EXTERNAL_CONTRACT_RENEWAL_DOCUMENT_NOT_FOUND", "El documento de renovacion no existe.");
+    }
+
+    reply.header("Content-Type", document.fileMimeType || "application/octet-stream");
+    reply.header("Content-Disposition", encodeDispositionFilename(document.originalFileName));
+    return reply.send(document.fileContent);
   });
 
   app.get("/external-contracts/:contractId/document", { preHandler: readGuards }, async (request, reply) => {

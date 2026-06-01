@@ -23,6 +23,39 @@ function normalizeText(value?: string | null) {
   return (value ?? "").trim();
 }
 
+function sanitizeDownloadFilenameSegment(value: string | null | undefined, fallback: string) {
+  return (normalizeText(value) || fallback)
+    .normalize("NFC")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 90)
+    .trim() || fallback;
+}
+
+function buildGeneratedProfessionalServicesDownloadFilename(record: {
+  contractNumber: string;
+  title: string | null;
+  contractType: string;
+  clientName: string | null;
+  sourceMatterId: string | null;
+  generatedPayload: Prisma.JsonValue;
+}, format: InternalContractDownloadFormat) {
+  if (
+    record.contractType !== "PROFESSIONAL_SERVICES"
+    || !record.sourceMatterId
+    || !record.generatedPayload
+  ) {
+    return null;
+  }
+
+  const contractNumber = sanitizeDownloadFilenameSegment(record.contractNumber, "Sin numero");
+  const clientName = sanitizeDownloadFilenameSegment(record.clientName, "Cliente");
+  const title = sanitizeDownloadFilenameSegment(record.title, "Sin titulo");
+
+  return `Contrato (${contractNumber}) (${clientName}) (${title}).${format}`;
+}
+
 function validateContractType(value: InternalContract["contractType"]) {
   if (value !== "PROFESSIONAL_SERVICES" && value !== "LABOR") {
     throw new AppError(400, "INVALID_INTERNAL_CONTRACT_TYPE", "Tipo de contrato interno invalido.");
@@ -95,6 +128,7 @@ function inferInternalContractFormat(originalFileName?: string | null, fileMimeT
 
 function normalizeProfessionalServicesFields(fields: ProfessionalServicesContractFieldValues): ProfessionalServicesContractFieldValues {
   return {
+    language: fields.language === "EN" ? "EN" : "ES",
     clientKind: fields.clientKind,
     clientRfc: normalizeText(fields.clientRfc),
     legalRepresentative: normalizeText(fields.legalRepresentative),
@@ -119,6 +153,7 @@ function parseGeneratedProfessionalServicesFields(value: Prisma.JsonValue): Prof
   }
 
   return normalizeProfessionalServicesFields({
+    language: candidate.language === "EN" ? "EN" : "ES",
     clientKind,
     clientRfc: typeof candidate.clientRfc === "string" ? candidate.clientRfc : "",
     legalRepresentative: typeof candidate.legalRepresentative === "string" ? candidate.legalRepresentative : "",
@@ -312,6 +347,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
     const notes = normalizeText(payload.notes) || null;
     const signatureStatus = payload.signatureStatus === "SIGNED" ? "SIGNED" : "PENDING";
     const paymentMilestones = normalizeMilestones(payload.paymentMilestones);
+    const pdfFileContent = payload.pdfFileContent ?? null;
     const documentData = {
       contractNumber,
       title,
@@ -328,10 +364,10 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       fileMimeType: normalizeText(payload.docxFileMimeType) || DOCX_MIME_TYPE,
       fileSizeBytes: payload.docxFileSizeBytes ?? payload.docxFileContent.byteLength,
       fileContent: toPrismaBytes(payload.docxFileContent) ?? new Uint8Array(),
-      pdfOriginalFileName: normalizeText(payload.pdfOriginalFileName),
-      pdfFileMimeType: normalizeText(payload.pdfFileMimeType) || "application/pdf",
-      pdfFileSizeBytes: payload.pdfFileSizeBytes ?? payload.pdfFileContent.byteLength,
-      pdfFileContent: toPrismaBytes(payload.pdfFileContent) ?? new Uint8Array(),
+      pdfOriginalFileName: pdfFileContent ? normalizeText(payload.pdfOriginalFileName) : null,
+      pdfFileMimeType: pdfFileContent ? normalizeText(payload.pdfFileMimeType) || "application/pdf" : null,
+      pdfFileSizeBytes: pdfFileContent ? payload.pdfFileSizeBytes ?? pdfFileContent.byteLength : null,
+      pdfFileContent: toPrismaBytes(pdfFileContent),
       paymentMilestones,
       generatedPayload: normalizedFields as unknown as Prisma.InputJsonValue,
       notes
@@ -372,6 +408,11 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       where: { id: contractId },
       select: {
         contractNumber: true,
+        title: true,
+        contractType: true,
+        clientName: true,
+        sourceMatterId: true,
+        generatedPayload: true,
         originalFileName: true,
         fileMimeType: true,
         fileContent: true,
@@ -386,11 +427,12 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
     }
 
     const requestedFormat = format ?? inferInternalContractFormat(record.originalFileName, record.fileMimeType) ?? "docx";
+    const generatedDownloadFilename = buildGeneratedProfessionalServicesDownloadFilename(record, requestedFormat);
     if (requestedFormat === "pdf") {
       if (record.pdfFileContent && record.pdfOriginalFileName) {
         return {
           contractNumber: record.contractNumber,
-          originalFileName: record.pdfOriginalFileName,
+          originalFileName: generatedDownloadFilename ?? record.pdfOriginalFileName,
           fileMimeType: record.pdfFileMimeType ?? "application/pdf",
           format: "pdf",
           fileContent: Buffer.from(record.pdfFileContent)
@@ -404,7 +446,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       ) {
         return {
           contractNumber: record.contractNumber,
-          originalFileName: record.originalFileName,
+          originalFileName: generatedDownloadFilename ?? record.originalFileName,
           fileMimeType: record.fileMimeType,
           format: "pdf",
           fileContent: Buffer.from(record.fileContent)
@@ -420,7 +462,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
 
     return {
       contractNumber: record.contractNumber,
-      originalFileName: record.originalFileName,
+      originalFileName: generatedDownloadFilename ?? record.originalFileName,
       fileMimeType: record.fileMimeType,
       format: inferInternalContractFormat(record.originalFileName, record.fileMimeType) ?? "docx",
       fileContent: Buffer.from(record.fileContent)

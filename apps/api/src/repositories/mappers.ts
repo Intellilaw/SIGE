@@ -9,6 +9,10 @@ import type {
   CommissionSnapshot,
   DailyDocumentAssignment,
   ExternalContract,
+  ExternalContractGeneratedDocument,
+  ExternalContractInpc,
+  ExternalContractRenewal,
+  ExternalContractRenewalDocument,
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
@@ -537,6 +541,41 @@ export function mapExternalContract(record: {
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;
+  renewals?: Array<{
+    id: string;
+    sequence: number;
+    renewalDate: Date | null;
+    leaseStartDate: Date | null;
+    leaseEndDate: Date | null;
+    monthlyRentMxn: Prisma.Decimal | null;
+    rentIncreasePct: Prisma.Decimal | null;
+    inpcBasePeriod: string | null;
+    inpcTargetPeriod: string | null;
+    notes: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    documents?: Array<{
+      id: string;
+      renewalId: string;
+      documentType: string;
+      originalFileName: string;
+      fileMimeType: string | null;
+      fileSizeBytes: number | null;
+      createdAt: Date;
+      updatedAt: Date;
+    }>;
+  }>;
+  generatedDocuments?: Array<{
+    id: string;
+    renewalId: string | null;
+    templateId: string;
+    templateTitle: string;
+    originalFileName: string;
+    fileMimeType: string | null;
+    fileSizeBytes: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
 }): ExternalContract {
   const format = inferExternalContractFormat(record.originalFileName, record.fileMimeType);
 
@@ -562,7 +601,122 @@ export function mapExternalContract(record: {
     fileMimeType: record.fileMimeType ?? undefined,
     fileSizeBytes: record.fileSizeBytes ?? undefined,
     availableFormats: format ? [format] : [],
+    renewals: (record.renewals ?? []).map(mapExternalContractRenewal),
+    generatedDocuments: (record.generatedDocuments ?? []).map(mapExternalContractGeneratedDocument),
     notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapExternalContractGeneratedDocument(record: {
+  id: string;
+  renewalId: string | null;
+  templateId: string;
+  templateTitle: string;
+  originalFileName: string;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExternalContractGeneratedDocument {
+  return {
+    id: record.id,
+    renewalId: record.renewalId ?? undefined,
+    templateId: record.templateId,
+    templateTitle: record.templateTitle,
+    originalFileName: record.originalFileName,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapExternalContractRenewal(record: {
+  id: string;
+  sequence: number;
+  renewalDate: Date | null;
+  leaseStartDate: Date | null;
+  leaseEndDate: Date | null;
+  monthlyRentMxn: Prisma.Decimal | null;
+  rentIncreasePct: Prisma.Decimal | null;
+  inpcBasePeriod: string | null;
+  inpcTargetPeriod: string | null;
+  documents?: Array<{
+    id: string;
+    renewalId: string;
+    documentType: string;
+    originalFileName: string;
+    fileMimeType: string | null;
+    fileSizeBytes: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExternalContractRenewal {
+  return {
+    id: record.id,
+    sequence: record.sequence,
+    renewalDate: toDateOnly(record.renewalDate),
+    leaseStartDate: toDateOnly(record.leaseStartDate),
+    leaseEndDate: toDateOnly(record.leaseEndDate),
+    monthlyRentMxn: record.monthlyRentMxn ? Number(record.monthlyRentMxn) : undefined,
+    rentIncreasePct: record.rentIncreasePct ? Number(record.rentIncreasePct) : undefined,
+    inpcBasePeriod: record.inpcBasePeriod ?? undefined,
+    inpcTargetPeriod: record.inpcTargetPeriod ?? undefined,
+    documents: (record.documents ?? []).map(mapExternalContractRenewalDocument),
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapExternalContractRenewalDocument(record: {
+  id: string;
+  renewalId: string;
+  documentType: string;
+  originalFileName: string;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExternalContractRenewalDocument {
+  return {
+    id: record.id,
+    renewalId: record.renewalId,
+    documentType: record.documentType,
+    originalFileName: record.originalFileName,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapExternalContractInpc(record: {
+  id: string;
+  periodYear: number;
+  periodMonth: number;
+  periodDate: Date;
+  value: Prisma.Decimal;
+  source: string;
+  sourceSeries: string;
+  importedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExternalContractInpc {
+  return {
+    id: record.id,
+    periodYear: record.periodYear,
+    periodMonth: record.periodMonth,
+    periodDate: toDateOnly(record.periodDate) ?? record.periodDate.toISOString().slice(0, 10),
+    value: Number(record.value),
+    source: record.source,
+    sourceSeries: record.sourceSeries,
+    importedAt: record.importedAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };
