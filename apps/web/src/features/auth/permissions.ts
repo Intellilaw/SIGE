@@ -55,6 +55,10 @@ const MODULE_ACCESS: Record<string, AccessRule> = {
     read: ["internal-contracts:read", "internal-contracts:write"],
     write: ["internal-contracts:write"]
   },
+  "external-contracts": {
+    read: ["external-contracts:read", "external-contracts:write"],
+    write: ["external-contracts:write"]
+  },
   "labor-file": { read: ["labor-file:read", "labor-file:write"], write: ["labor-file:write"] },
   "daily-documents": {
     read: ["daily-documents:read", "daily-documents:write"],
@@ -81,9 +85,38 @@ function hasAnyPermission(user: PermissionUser | null | undefined, permissions: 
   return Boolean(user?.permissions?.includes("*") || permissions.some((permission) => user?.permissions?.includes(permission)));
 }
 
+function normalizeAccessText(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isSettlementsTeamUser(user: PermissionUser | null | undefined) {
+  if (!user) {
+    return false;
+  }
+
+  const normalizedTeam = normalizeAccessText(user.legacyTeam);
+  const normalizedRole = normalizeAccessText(user.specificRole);
+  const hasAdministrativeAccess =
+    user.role === "SUPERADMIN"
+    || user.legacyRole === "SUPERADMIN"
+    || normalizedRole === "direccion general"
+    || Boolean(user.permissions?.includes("*"));
+
+  return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+}
+
 export function canReadModule(user: PermissionUser | null | undefined, moduleId: string) {
   const rule = MODULE_ACCESS[moduleId];
   if (!rule) {
+    return false;
+  }
+
+  if (moduleId === "external-contracts" && !isSettlementsTeamUser(user)) {
     return false;
   }
 
@@ -93,6 +126,10 @@ export function canReadModule(user: PermissionUser | null | undefined, moduleId:
 export function canWriteModule(user: PermissionUser | null | undefined, moduleId: string) {
   const rule = MODULE_ACCESS[moduleId];
   if (!rule?.write) {
+    return false;
+  }
+
+  if (moduleId === "external-contracts" && !isSettlementsTeamUser(user)) {
     return false;
   }
 

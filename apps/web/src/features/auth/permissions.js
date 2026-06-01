@@ -41,6 +41,10 @@ const MODULE_ACCESS = {
         read: ["internal-contracts:read", "internal-contracts:write"],
         write: ["internal-contracts:write"]
     },
+    "external-contracts": {
+        read: ["external-contracts:read", "external-contracts:write"],
+        write: ["external-contracts:write"]
+    },
     "labor-file": { read: ["labor-file:read", "labor-file:write"], write: ["labor-file:write"] },
     "daily-documents": {
         read: ["daily-documents:read", "daily-documents:write"],
@@ -63,9 +67,32 @@ function hasAnyPermission(user, permissions) {
     }
     return Boolean(user?.permissions?.includes("*") || permissions.some((permission) => user?.permissions?.includes(permission)));
 }
+function normalizeAccessText(value) {
+    return (value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+function isSettlementsTeamUser(user) {
+    if (!user) {
+        return false;
+    }
+    const normalizedTeam = normalizeAccessText(user.legacyTeam);
+    const normalizedRole = normalizeAccessText(user.specificRole);
+    const hasAdministrativeAccess = user.role === "SUPERADMIN"
+        || user.legacyRole === "SUPERADMIN"
+        || normalizedRole === "direccion general"
+        || Boolean(user.permissions?.includes("*"));
+    return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+}
 export function canReadModule(user, moduleId) {
     const rule = MODULE_ACCESS[moduleId];
     if (!rule) {
+        return false;
+    }
+    if (moduleId === "external-contracts" && !isSettlementsTeamUser(user)) {
         return false;
     }
     return hasAnyPermission(user, rule.read);
@@ -73,6 +100,9 @@ export function canReadModule(user, moduleId) {
 export function canWriteModule(user, moduleId) {
     const rule = MODULE_ACCESS[moduleId];
     if (!rule?.write) {
+        return false;
+    }
+    if (moduleId === "external-contracts" && !isSettlementsTeamUser(user)) {
         return false;
     }
     return hasAnyPermission(user, rule.write);

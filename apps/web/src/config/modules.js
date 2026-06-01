@@ -180,6 +180,18 @@ export const appModules = [
         coverage: ["Acceso directo con sesion SIGE", "Seguimiento de escritos", "Control documental operativo"]
     },
     {
+        id: "external-contracts",
+        path: "/app/external-contracts",
+        label: "Administraci\u00f3n de contratos externos",
+        shortLabel: "Contratos ext.",
+        icon: "\u{1F3E2}",
+        description: "Carga, control por cliente y fechas clave de contratos externos de clientes.",
+        phase: "Operativo",
+        available: true,
+        access: "settlements-team",
+        coverage: ["Contratos de arrendamiento por cliente", "Carga Word y PDF", "Renovacion y aumento de renta", "Formatos operativos"]
+    },
+    {
         id: "internal-contracts",
         path: "/app/internal-contracts",
         label: "Administraci\u00f3n de contratos internos",
@@ -304,6 +316,18 @@ export function canAccessGeneralSupervision(user) {
         emailLocalPart
     ].some(isEmrtIdentity);
 }
+export function canAccessExternalContracts(user) {
+    if (!user) {
+        return false;
+    }
+    const normalizedTeam = normalizeIdentity(user.legacyTeam);
+    const normalizedRole = normalizeIdentity(user.specificRole);
+    const hasAdministrativeAccess = user.role === "SUPERADMIN"
+        || user.legacyRole === "SUPERADMIN"
+        || normalizedRole === "direccion general"
+        || Boolean(user.permissions?.includes("*"));
+    return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+}
 export function isAlwaysEnabledModule(moduleId) {
     return ALWAYS_ENABLED_MODULE_IDS.has(moduleId);
 }
@@ -314,6 +338,9 @@ export function getVisibleAppModules(user, disabledModuleIds = []) {
     const disabledModules = new Set(disabledModuleIds);
     return appModules.filter((module) => {
         if (module.access === "emrt-superadmin" && !canAccessGeneralSupervision(user)) {
+            return false;
+        }
+        if (module.access === "settlements-team" && !canAccessExternalContracts(user)) {
             return false;
         }
         return isAlwaysEnabledModule(module.id) || !disabledModules.has(module.id);

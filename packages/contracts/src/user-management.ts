@@ -409,6 +409,8 @@ export function derivePermissions(input: {
     permissions.add("tasks:read");
     permissions.add("tasks:settlements");
     permissions.add("execution:settlements");
+    permissions.add("external-contracts:read");
+    permissions.add("external-contracts:write");
   }
 
   if (teamKey === "FINANCIAL_LAW" || normalizedTeam === "der financiero") {

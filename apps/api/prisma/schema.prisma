@@ -18,6 +18,7 @@ model Organization {
   clients                   Client[]
   internalContracts         InternalContract[]
   internalContractTemplates InternalContractTemplate[]
+  externalContracts         ExternalContract[]
   dailyDocumentAssignments  DailyDocumentAssignment[]
   quotes                    Quote[]
   quoteTemplates            QuoteTemplate[]
@@ -246,6 +247,7 @@ model Client {
   leads                    Lead[]
   matters                  Matter[]
   internalContracts        InternalContract[]
+  externalContracts        ExternalContract[]
   dailyDocumentAssignments DailyDocumentAssignment[]
   organization             Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
@@ -307,6 +309,42 @@ model InternalContractTemplate {
 
   @@index([organizationId, title])
   @@index([organizationId, createdAt])
+}
+
+model ExternalContract {
+  id                  String       @id @default(uuid())
+  organizationId      String       @default("org-rusconi")
+  contractNumber      String
+  title               String       @default("")
+  contractType        String       @default("LEASE")
+  status              String       @default("ACTIVE")
+  clientId            String
+  clientNumber        String
+  clientName          String
+  propertyAddress     String?
+  landlordName        String?
+  tenantName          String?
+  leaseStartDate      DateTime?    @db.Date
+  leaseEndDate        DateTime?    @db.Date
+  renewalDate         DateTime?    @db.Date
+  rentIncreaseDate    DateTime?    @db.Date
+  monthlyRentMxn      Decimal?     @db.Decimal(12, 2)
+  rentIncreasePct     Decimal?     @db.Decimal(5, 2)
+  originalFileName    String?
+  fileMimeType        String?
+  fileSizeBytes       Int?
+  fileContent         Bytes?
+  notes               String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  client              Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, contractNumber])
+  @@index([organizationId, clientId, status])
+  @@index([organizationId, contractType, renewalDate])
+  @@index([organizationId, rentIncreaseDate])
+  @@index([organizationId, clientName])
 }
 
 model DailyDocumentAssignment {

@@ -13,6 +13,7 @@ const tenantScopedModels = new Set([
   "CommissionReceiver",
   "CommissionSnapshot",
   "DailyDocumentAssignment",
+  "ExternalContract",
   "FinanceRecord",
   "FinanceSnapshot",
   "GeneralExpense",

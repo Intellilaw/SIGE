@@ -204,6 +204,37 @@ export interface InternalContractCollaborator {
   team?: Team;
 }
 
+export type ExternalContractType = "LEASE";
+export type ExternalContractStatus = "ACTIVE" | "ARCHIVED";
+export type ExternalContractDownloadFormat = "docx" | "pdf";
+
+export interface ExternalContract {
+  id: string;
+  contractNumber: string;
+  title: string;
+  contractType: ExternalContractType;
+  status: ExternalContractStatus;
+  clientId: string;
+  clientNumber: string;
+  clientName: string;
+  propertyAddress?: string;
+  landlordName?: string;
+  tenantName?: string;
+  leaseStartDate?: string;
+  leaseEndDate?: string;
+  renewalDate?: string;
+  rentIncreaseDate?: string;
+  monthlyRentMxn?: number;
+  rentIncreasePct?: number;
+  originalFileName?: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  availableFormats: ExternalContractDownloadFormat[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type LaborFileStatus = "INCOMPLETE" | "COMPLETE";
 export type LaborEmploymentStatus = "ACTIVE" | "FORMER";
 

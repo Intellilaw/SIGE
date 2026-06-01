@@ -8,6 +8,7 @@ import { ManagerSsoBridgePage } from "./features/auth/ManagerSsoBridgePage";
 import { PasswordAssistancePage } from "./features/auth/PasswordAssistancePage";
 import { PasswordResetPage } from "./features/auth/PasswordResetPage";
 import { DailyDocumentsPage } from "./features/modules/DailyDocumentsPage";
+import { ExternalContractsPage } from "./features/modules/ExternalContractsPage";
 import { GuidelinesManualsPage } from "./features/modules/GuidelinesManualsPage";
 import { HolidaysPage } from "./features/modules/HolidaysPage";
 import { InternalContractsPage } from "./features/modules/InternalContractsPage";
@@ -142,6 +143,7 @@ export default function App() {
             <Route path="rusconi-intelligence" element={withEnabledModule("rusconi-intelligence", <RusconiIntelligencePage />)} />
             <Route path="matter-catalog" element={withEnabledModule("matter-catalog", <MatterCatalogPage />)} />
             <Route path="brief-manager" element={withEnabledModule("brief-manager", <ManagerSsoBridgePage />)} />
+            <Route path="external-contracts" element={withEnabledModule("external-contracts", <ExternalContractsPage />)} />
             <Route path="internal-contracts" element={withEnabledModule("internal-contracts", <InternalContractsPage />)} />
             <Route path="labor-file" element={withEnabledModule("labor-file", <LaborFilesPage />)} />
             <Route path="daily-documents" element={withEnabledModule("daily-documents", <DailyDocumentsPage />)} />

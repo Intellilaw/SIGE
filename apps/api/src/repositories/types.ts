@@ -10,6 +10,8 @@ import type {
   DailyDocumentAssignment,
   DailyDocumentTemplateId,
   DashboardSummary,
+  ExternalContract,
+  ExternalContractDownloadFormat,
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
@@ -50,7 +52,7 @@ import type {
   UpdateManagedUserInput
 } from "@sige/contracts";
 
-export type { InternalContractDownloadFormat };
+export type { ExternalContractDownloadFormat, InternalContractDownloadFormat };
 
 export interface RefreshTokenRecord {
   id: string;
@@ -209,6 +211,65 @@ export interface InternalContractsRepository {
   createTemplate(payload: InternalContractTemplateWriteRecord): Promise<InternalContractTemplate>;
   deleteTemplate(templateId: string): Promise<void>;
   findTemplateDocument(templateId: string): Promise<InternalContractTemplateDocumentRecord | null>;
+}
+
+export interface ExternalContractWriteRecord {
+  contractNumber: string;
+  title: string;
+  contractType: ExternalContract["contractType"];
+  status?: ExternalContract["status"];
+  clientId: string;
+  propertyAddress?: string | null;
+  landlordName?: string | null;
+  tenantName?: string | null;
+  leaseStartDate?: string | null;
+  leaseEndDate?: string | null;
+  renewalDate?: string | null;
+  rentIncreaseDate?: string | null;
+  monthlyRentMxn?: number | null;
+  rentIncreasePct?: number | null;
+  notes?: string | null;
+  originalFileName?: string | null;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  fileContent?: Buffer | null;
+}
+
+export interface ExternalContractUpdateRecord {
+  contractNumber?: string;
+  title?: string;
+  status?: ExternalContract["status"];
+  clientId?: string;
+  propertyAddress?: string | null;
+  landlordName?: string | null;
+  tenantName?: string | null;
+  leaseStartDate?: string | null;
+  leaseEndDate?: string | null;
+  renewalDate?: string | null;
+  rentIncreaseDate?: string | null;
+  monthlyRentMxn?: number | null;
+  rentIncreasePct?: number | null;
+  notes?: string | null;
+  originalFileName?: string | null;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  fileContent?: Buffer | null;
+}
+
+export interface ExternalContractDocumentRecord {
+  contractNumber: string;
+  originalFileName: string;
+  fileMimeType?: string | null;
+  format: ExternalContractDownloadFormat;
+  fileContent: Buffer;
+}
+
+export interface ExternalContractsRepository {
+  list(): Promise<ExternalContract[]>;
+  create(payload: ExternalContractWriteRecord): Promise<ExternalContract>;
+  update(contractId: string, payload: ExternalContractUpdateRecord): Promise<ExternalContract>;
+  delete(contractId: string): Promise<void>;
+  findDocument(contractId: string): Promise<ExternalContractDocumentRecord | null>;
 }
 
 export interface LaborFileDocumentRecord {

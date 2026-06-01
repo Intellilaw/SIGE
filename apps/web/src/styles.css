@@ -8651,6 +8651,80 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.external-contracts-summary-pill {
+  align-items: center;
+  align-self: center;
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 999px;
+  color: #334e68;
+  display: inline-flex;
+  font-size: 0.86rem;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.external-contract-card .internal-contract-title {
+  max-width: 72ch;
+}
+
+.external-contract-deadlines {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.external-contract-deadline {
+  background: #f8fafc;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.external-contract-deadline span,
+.external-contract-deadline small {
+  color: #52657a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.external-contract-deadline strong {
+  color: #1f354f;
+  overflow-wrap: anywhere;
+}
+
+.external-contract-deadline.is-soon {
+  background: #fffbeb;
+  border-color: rgba(217, 180, 74, 0.34);
+}
+
+.external-contract-deadline.is-overdue {
+  background: #fff1f2;
+  border-color: rgba(190, 18, 60, 0.22);
+}
+
+.external-contract-deadline.is-ok {
+  background: #ecfdf3;
+  border-color: rgba(22, 163, 74, 0.16);
+}
+
+.external-contracts-format-panel {
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+  display: grid;
+  gap: 18px;
+  padding-top: 18px;
+}
+
+.external-contracts-format-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+
 .holidays-panel {
   display: grid;
   gap: 18px;
@@ -10025,6 +10099,7 @@ textarea {
   .internal-contracts-layout,
   .internal-contracts-form-grid,
   .internal-contract-meta-grid,
+  .external-contract-deadlines,
   .finance-contract-field-grid,
   .labor-files-layout,
   .labor-file-profile-grid,

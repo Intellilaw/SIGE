@@ -8,6 +8,7 @@ import type {
   CommissionReceiver,
   CommissionSnapshot,
   DailyDocumentAssignment,
+  ExternalContract,
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
@@ -482,6 +483,85 @@ export function mapInternalContractTemplate(record: {
     originalFileName: record.originalFileName,
     fileMimeType: record.fileMimeType ?? undefined,
     fileSizeBytes: record.fileSizeBytes ?? undefined,
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+function inferExternalContractFormat(originalFileName?: string | null, fileMimeType?: string | null): ExternalContract["availableFormats"][number] | null {
+  const normalizedMimeType = (fileMimeType ?? "").toLowerCase();
+  const normalizedFileName = (originalFileName ?? "").toLowerCase();
+
+  if (normalizedMimeType.includes("pdf") || normalizedFileName.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (
+    normalizedMimeType.includes("wordprocessingml.document")
+    || normalizedMimeType.includes("msword")
+    || normalizedFileName.endsWith(".docx")
+    || normalizedFileName.endsWith(".doc")
+  ) {
+    return "docx";
+  }
+
+  return null;
+}
+
+function toDateOnly(value?: Date | null) {
+  return value?.toISOString().slice(0, 10);
+}
+
+export function mapExternalContract(record: {
+  id: string;
+  contractNumber: string;
+  title: string;
+  contractType: string;
+  status: string;
+  clientId: string;
+  clientNumber: string;
+  clientName: string;
+  propertyAddress: string | null;
+  landlordName: string | null;
+  tenantName: string | null;
+  leaseStartDate: Date | null;
+  leaseEndDate: Date | null;
+  renewalDate: Date | null;
+  rentIncreaseDate: Date | null;
+  monthlyRentMxn: Prisma.Decimal | null;
+  rentIncreasePct: Prisma.Decimal | null;
+  originalFileName: string | null;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExternalContract {
+  const format = inferExternalContractFormat(record.originalFileName, record.fileMimeType);
+
+  return {
+    id: record.id,
+    contractNumber: record.contractNumber,
+    title: record.title,
+    contractType: "LEASE",
+    status: record.status === "ARCHIVED" ? "ARCHIVED" : "ACTIVE",
+    clientId: record.clientId,
+    clientNumber: record.clientNumber,
+    clientName: record.clientName,
+    propertyAddress: record.propertyAddress ?? undefined,
+    landlordName: record.landlordName ?? undefined,
+    tenantName: record.tenantName ?? undefined,
+    leaseStartDate: toDateOnly(record.leaseStartDate),
+    leaseEndDate: toDateOnly(record.leaseEndDate),
+    renewalDate: toDateOnly(record.renewalDate),
+    rentIncreaseDate: toDateOnly(record.rentIncreaseDate),
+    monthlyRentMxn: record.monthlyRentMxn ? Number(record.monthlyRentMxn) : undefined,
+    rentIncreasePct: record.rentIncreasePct ? Number(record.rentIncreasePct) : undefined,
+    originalFileName: record.originalFileName ?? undefined,
+    fileMimeType: record.fileMimeType ?? undefined,
+    fileSizeBytes: record.fileSizeBytes ?? undefined,
+    availableFormats: format ? [format] : [],
     notes: record.notes ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
