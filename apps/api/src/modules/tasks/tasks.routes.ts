@@ -129,6 +129,7 @@ const additionalTaskPatchSchema = additionalTaskSchema.partial();
 
 export const tasksRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.TasksService(app.repositories.tasks);
+  const EXECUTION_ALL_PERMISSION = "execution:all";
 
   function getEffectivePermissions(request: FastifyRequest) {
     const user = getSessionUser(request);
@@ -146,7 +147,13 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
       return false;
     }
 
-    return permissions.includes("*") || permissions.includes("tasks:write") || permissions.includes(`tasks:${moduleId}`);
+    return (
+      permissions.includes("*") ||
+      permissions.includes("tasks:write") ||
+      permissions.includes(`tasks:${moduleId}`) ||
+      permissions.includes(EXECUTION_ALL_PERMISSION) ||
+      permissions.includes(`execution:${moduleId}`)
+    );
   }
 
   async function getAllowedTaskModules(request: FastifyRequest) {

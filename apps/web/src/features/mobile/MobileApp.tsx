@@ -320,6 +320,10 @@ function canReadMobileExecution(user?: MobileAuthUser | null) {
   return canReadModule(user, "execution");
 }
 
+function canReadMobileTasks(user?: MobileAuthUser | null) {
+  return canReadModule(user, "tasks");
+}
+
 function parseMoneyInput(value: string) {
   const parsed = Number(value.replace(/,/g, "").trim());
   return Number.isFinite(parsed) ? parsed : 0;
@@ -649,7 +653,7 @@ function MobileProtectedShell({
   const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
   const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
   const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
-  const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
+  const showTracking = isModuleEnabled("tasks") && canReadMobileTasks(user);
   const mobileUserName = getMobileUserName(user);
 
   return (
@@ -689,7 +693,7 @@ export function MobileHomePage() {
   const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
   const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
   const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
-  const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
+  const showTracking = isModuleEnabled("tasks") && canReadMobileTasks(user);
 
   return (
     <section className="mobile-stack">
@@ -2672,9 +2676,10 @@ export function MobileTrackingIndexPage() {
   const { user } = useAuth();
   const { isModuleEnabled } = useModuleAvailability();
   const tasksEnabled = isModuleEnabled("tasks");
-  const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
+  const canReadTasks = canReadMobileTasks(user);
+  const visibleModules = tasksEnabled && canReadTasks ? getVisibleExecutionModules(user) : [];
 
-  if (!tasksEnabled || !canReadMobileExecution(user)) {
+  if (!tasksEnabled || !canReadTasks) {
     return <Navigate to="/mobile" replace />;
   }
 
@@ -2698,10 +2703,13 @@ export function MobileTrackingModulePage() {
   const { user } = useAuth();
   const { isModuleEnabled } = useModuleAvailability();
   const tasksEnabled = isModuleEnabled("tasks");
+  const canReadTasks = canReadMobileTasks(user);
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-  const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
-  const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const visibleModules = tasksEnabled && canReadTasks ? getVisibleExecutionModules(user) : [];
+  const canAccess = Boolean(
+    tasksEnabled && canReadTasks && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId)
+  );
 
   if (!module || !legacyConfig || !canAccess) {
     return <Navigate to="/mobile/tracking" replace />;
@@ -2738,13 +2746,16 @@ export function MobileTrackingTablePage() {
   const { user } = useAuth();
   const { isModuleEnabled } = useModuleAvailability();
   const tasksEnabled = isModuleEnabled("tasks");
+  const canReadTasks = canReadMobileTasks(user);
   const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
   const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
   const isTermsTable = tableId === TERMS_TABLE_ID || tableId === RECURRING_TERMS_TABLE_ID;
   const recurrentTermsMode = tableId === RECURRING_TERMS_TABLE_ID;
   const table = legacyConfig?.tables.find((candidate) => candidate.slug === tableId);
-  const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
-  const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+  const visibleModules = tasksEnabled && canReadTasks ? getVisibleExecutionModules(user) : [];
+  const canAccess = Boolean(
+    tasksEnabled && canReadTasks && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId)
+  );
   const [records, setRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [histories, setHistories] = useState<TaskDistributionHistory[]>([]);

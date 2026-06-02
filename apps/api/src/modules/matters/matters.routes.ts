@@ -74,6 +74,7 @@ const executionPermissionByTeam = {
 } as const;
 
 type ExecutionTeam = keyof typeof executionPermissionByTeam;
+const EXECUTION_ALL_PERMISSION = "execution:all";
 
 function isFinanceNextPaymentDatePatch(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -100,16 +101,24 @@ function isExecutionMatterPatch(value: unknown) {
   return keys.length > 0 && keys.every((key) => allowedKeys.has(key));
 }
 
-function canAccessOwnExecutionMatter(params: {
-  permissions: string[];
-  userTeam?: string;
-  responsibleTeam?: string | null;
-}) {
-  if (!params.responsibleTeam || params.userTeam !== params.responsibleTeam) {
+function isExecutionTeam(value?: string | null): value is ExecutionTeam {
+  return Boolean(value && value in executionPermissionByTeam);
+}
+
+function hasAllExecutionAccess(permissions: string[]) {
+  return permissions.includes("*") || permissions.includes(EXECUTION_ALL_PERMISSION);
+}
+
+function canAccessExecutionMatter(params: { permissions: string[]; responsibleTeam?: string | null }) {
+  if (!isExecutionTeam(params.responsibleTeam)) {
     return false;
   }
 
-  const permission = executionPermissionByTeam[params.responsibleTeam as keyof typeof executionPermissionByTeam];
+  if (hasAllExecutionAccess(params.permissions)) {
+    return true;
+  }
+
+  const permission = executionPermissionByTeam[params.responsibleTeam];
   return Boolean(permission && (params.permissions.includes("*") || params.permissions.includes(permission)));
 }
 
@@ -124,12 +133,16 @@ function getEffectivePermissionsForRequest(request: FastifyRequest) {
   });
 }
 
-function getExecutionReadableTeam(request: FastifyRequest, permissions: string[]) {
+function getExecutionReadableTeams(request: FastifyRequest, permissions: string[]) {
+  if (permissions.includes(EXECUTION_ALL_PERMISSION)) {
+    return Object.keys(executionPermissionByTeam) as ExecutionTeam[];
+  }
+
   const user = getSessionUser(request);
   const team = user.team as ExecutionTeam | undefined;
   const permission = team ? executionPermissionByTeam[team] : undefined;
 
-  return permission && permissions.includes(permission) ? team : undefined;
+  return permission && permissions.includes(permission) ? [team] : [];
 }
 
 function canReadAllMatters(permissions: string[]) {
@@ -150,9 +163,10 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
       return records;
     }
 
-    const executionTeam = getExecutionReadableTeam(request, permissions);
-    if (executionTeam) {
-      return records.filter((matter) => matter.responsibleTeam === executionTeam);
+    const executionTeams = getExecutionReadableTeams(request, permissions);
+    if (executionTeams.length > 0) {
+      const readableTeams = new Set(executionTeams);
+      return records.filter((matter) => isExecutionTeam(matter.responsibleTeam) && readableTeams.has(matter.responsibleTeam));
     }
 
     throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
@@ -166,9 +180,10 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
       return records;
     }
 
-    const executionTeam = getExecutionReadableTeam(request, permissions);
-    if (executionTeam) {
-      return records.filter((matter) => matter.responsibleTeam === executionTeam);
+    const executionTeams = getExecutionReadableTeams(request, permissions);
+    if (executionTeams.length > 0) {
+      const readableTeams = new Set(executionTeams);
+      return records.filter((matter) => isExecutionTeam(matter.responsibleTeam) && readableTeams.has(matter.responsibleTeam));
     }
 
     throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
@@ -183,7 +198,6 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch("/matters/:matterId", { preHandler: [requireAuth] }, async (request) => {
     const params = matterIdParamsSchema.parse(request.params);
-    const user = getSessionUser(request);
     const permissions = getEffectivePermissionsForRequest(request);
     const matterRecords = await service.list();
     const currentMatter = matterRecords.find((matter) => matter.id === params.matterId);
@@ -191,13 +205,12 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
     const canUpdateFinanceDate = permissions.includes("*") || (
       permissions.includes("finances:write") && isFinanceNextPaymentDatePatch(request.body)
     );
-    const canUpdateOwnExecutionMatter = isExecutionMatterPatch(request.body) && canAccessOwnExecutionMatter({
+    const canUpdateExecutionMatter = isExecutionMatterPatch(request.body) && canAccessExecutionMatter({
       permissions,
-      userTeam: user.team,
       responsibleTeam: currentMatter?.responsibleTeam
     });
 
-    if (!canWriteMatters && !canUpdateFinanceDate && !canUpdateOwnExecutionMatter) {
+    if (!canWriteMatters && !canUpdateFinanceDate && !canUpdateExecutionMatter) {
       throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
     }
 
@@ -229,14 +242,12 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/matters/:matterId/restore", { preHandler: [requireAuth] }, async (request) => {
     const params = matterIdParamsSchema.parse(request.params);
-    const user = getSessionUser(request);
     const permissions = getEffectivePermissionsForRequest(request);
 
     if (!permissions.includes("*") && !permissions.includes("matters:write")) {
       const deletedMatter = (await service.listDeleted()).find((matter) => matter.id === params.matterId);
-      if (!canAccessOwnExecutionMatter({
+      if (!canAccessExecutionMatter({
         permissions,
-        userTeam: user.team,
         responsibleTeam: deletedMatter?.responsibleTeam
       })) {
         throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");

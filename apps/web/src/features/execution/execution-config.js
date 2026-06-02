@@ -130,11 +130,17 @@ export function findExecutionModuleDescriptorBySlug(modules, slug) {
     return buildExecutionModuleDescriptors(modules).find((module) => module.slug === slug || module.moduleId === slug);
 }
 export function canAccessAllExecutionModules(user) {
-    return Boolean(user?.permissions?.includes("*") || user?.team === "ADMIN");
+    const permissions = user?.permissions ?? [];
+    return Boolean(permissions.includes("*") || permissions.includes("execution:all") || user?.team === "ADMIN");
 }
 export function getVisibleExecutionModules(user) {
     if (canAccessAllExecutionModules(user)) {
         return EXECUTION_MODULES;
+    }
+    const permissions = new Set(user?.permissions ?? []);
+    const permittedModules = EXECUTION_MODULES.filter((module) => permissions.has(`execution:${module.moduleId}`));
+    if (permittedModules.length > 0) {
+        return permittedModules;
     }
     if (!user?.team) {
         return [];

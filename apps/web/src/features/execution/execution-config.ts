@@ -170,7 +170,8 @@ export function canAccessAllExecutionModules(user?: {
   team?: string;
   permissions?: string[];
 } | null) {
-  return Boolean(user?.permissions?.includes("*") || user?.team === "ADMIN");
+  const permissions = user?.permissions ?? [];
+  return Boolean(permissions.includes("*") || permissions.includes("execution:all") || user?.team === "ADMIN");
 }
 
 export function getVisibleExecutionModules(user?: {
@@ -180,6 +181,12 @@ export function getVisibleExecutionModules(user?: {
 } | null) {
   if (canAccessAllExecutionModules(user)) {
     return EXECUTION_MODULES;
+  }
+
+  const permissions = new Set(user?.permissions ?? []);
+  const permittedModules = EXECUTION_MODULES.filter((module) => permissions.has(`execution:${module.moduleId}`));
+  if (permittedModules.length > 0) {
+    return permittedModules;
   }
 
   if (!user?.team) {

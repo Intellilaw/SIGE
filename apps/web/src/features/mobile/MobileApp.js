@@ -181,6 +181,9 @@ function canWriteMobileGeneralExpenses(user) {
 function canReadMobileExecution(user) {
     return canReadModule(user, "execution");
 }
+function canReadMobileTasks(user) {
+    return canReadModule(user, "tasks");
+}
 function parseMoneyInput(value) {
     const parsed = Number(value.replace(/,/g, "").trim());
     return Number.isFinite(parsed) ? parsed : 0;
@@ -432,7 +435,7 @@ function MobileProtectedShell({ user, logout }) {
     const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
     const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
     const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
-    const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
+    const showTracking = isModuleEnabled("tasks") && canReadMobileTasks(user);
     const mobileUserName = getMobileUserName(user);
     return (_jsxs("div", { className: "mobile-app-shell", children: [_jsxs("header", { className: "mobile-topbar", children: [_jsxs("div", { children: [_jsxs("strong", { children: [APP_PRODUCT_NAME, " movil ", _jsx("span", { className: "mobile-topbar-version", children: APP_VERSION_BADGE })] }), _jsx("span", { children: mobileUserName })] }), _jsx("button", { type: "button", onClick: logout, children: "Salir" })] }), _jsx("main", { className: "mobile-content", children: _jsx(Outlet, {}) }), _jsxs("nav", { className: "mobile-tabbar", "aria-label": "Navegacion movil", children: [_jsx(NavLink, { to: "/mobile", end: true, children: "Inicio" }), showLeads ? _jsx(NavLink, { to: "/mobile/leads", children: "Leads" }) : null, showFinances ? _jsx(NavLink, { to: "/mobile/finances", children: "Finanzas" }) : null, showGeneralExpenses ? _jsx(NavLink, { to: "/mobile/general-expenses", children: "Gastos" }) : null, showKpis ? _jsx(NavLink, { to: "/mobile/kpis", children: "KPI's" }) : null, showGeneralSupervision ? _jsx(NavLink, { to: "/mobile/general-supervision", children: "Supervision" }) : null, showExecution ? _jsx(NavLink, { to: "/mobile/execution", children: "Ejecucion" }) : null, showTracking ? _jsx(NavLink, { to: "/mobile/tracking", children: "Seguimiento" }) : null] })] }));
 }
@@ -445,7 +448,7 @@ export function MobileHomePage() {
     const showKpis = isModuleEnabled("kpis") && canReadMobileKpis(user);
     const showGeneralSupervision = isModuleEnabled("general-supervision") && canReadMobileGeneralSupervision(user);
     const showExecution = isModuleEnabled("execution") && canReadMobileExecution(user);
-    const showTracking = isModuleEnabled("tasks") && canReadMobileExecution(user);
+    const showTracking = isModuleEnabled("tasks") && canReadMobileTasks(user);
     return (_jsx("section", { className: "mobile-stack", children: _jsxs("div", { className: "mobile-action-grid", children: [showLeads ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/leads", children: "Leads" })) : null, showFinances ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/finances", children: "Finanzas" })) : null, showGeneralExpenses ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-expenses", children: "Gastos generales" })) : null, showKpis ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/kpis", children: "KPI's" })) : null, showGeneralSupervision ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/general-supervision", children: "Supervision general" })) : null, showExecution ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/execution", children: "Crear tarea" })) : null, showTracking ? (_jsx(Link, { className: "mobile-home-action", to: "/mobile/tracking", children: "Ver seguimiento" })) : null] }) }));
 }
 export function MobileKpisPage() {
@@ -1243,8 +1246,9 @@ export function MobileTrackingIndexPage() {
     const { user } = useAuth();
     const { isModuleEnabled } = useModuleAvailability();
     const tasksEnabled = isModuleEnabled("tasks");
-    const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
-    if (!tasksEnabled || !canReadMobileExecution(user)) {
+    const canReadTasks = canReadMobileTasks(user);
+    const visibleModules = tasksEnabled && canReadTasks ? getVisibleExecutionModules(user) : [];
+    if (!tasksEnabled || !canReadTasks) {
         return _jsx(Navigate, { to: "/mobile", replace: true });
     }
     return (_jsxs("section", { className: "mobile-stack", children: [_jsx(MobilePageTitle, { title: "Seguimiento", subtitle: "Consulta rapida de tablas del manager de tareas." }), _jsx("div", { className: "mobile-card-list", children: visibleModules.map((module) => (_jsxs(Link, { className: "mobile-module-card", to: `/mobile/tracking/${module.slug}`, children: [_jsx("strong", { children: module.label }), _jsx("span", { children: "Ver tablas" })] }, module.moduleId))) })] }));
@@ -1254,10 +1258,11 @@ export function MobileTrackingModulePage() {
     const { user } = useAuth();
     const { isModuleEnabled } = useModuleAvailability();
     const tasksEnabled = isModuleEnabled("tasks");
+    const canReadTasks = canReadMobileTasks(user);
     const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
-    const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
-    const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const visibleModules = tasksEnabled && canReadTasks ? getVisibleExecutionModules(user) : [];
+    const canAccess = Boolean(tasksEnabled && canReadTasks && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
     if (!module || !legacyConfig || !canAccess) {
         return _jsx(Navigate, { to: "/mobile/tracking", replace: true });
     }
@@ -1269,13 +1274,14 @@ export function MobileTrackingTablePage() {
     const { user } = useAuth();
     const { isModuleEnabled } = useModuleAvailability();
     const tasksEnabled = isModuleEnabled("tasks");
+    const canReadTasks = canReadMobileTasks(user);
     const module = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const isTermsTable = tableId === TERMS_TABLE_ID || tableId === RECURRING_TERMS_TABLE_ID;
     const recurrentTermsMode = tableId === RECURRING_TERMS_TABLE_ID;
     const table = legacyConfig?.tables.find((candidate) => candidate.slug === tableId);
-    const visibleModules = tasksEnabled ? getVisibleExecutionModules(user) : [];
-    const canAccess = Boolean(tasksEnabled && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
+    const visibleModules = tasksEnabled && canReadTasks ? getVisibleExecutionModules(user) : [];
+    const canAccess = Boolean(tasksEnabled && canReadTasks && module && visibleModules.some((candidate) => candidate.moduleId === module.moduleId));
     const [records, setRecords] = useState([]);
     const [terms, setTerms] = useState([]);
     const [histories, setHistories] = useState([]);

@@ -16,6 +16,7 @@ const clientIdParamsSchema = z.object({
 export const clientsRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.ClientsService(app.repositories.clients);
   const executionReadPermissions = [
+    "execution:all",
     "execution:litigation",
     "execution:corporate-labor",
     "execution:settlements",

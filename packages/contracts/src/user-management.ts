@@ -121,6 +121,14 @@ export function buildTaskModuleIdFromTeamKey(team?: string | null) {
     .replace(/^-+|-+$/g, "");
 }
 
+const TASK_EXECUTION_TEAM_KEYS = new Set<string>([
+  "LITIGATION",
+  "CORPORATE_LABOR",
+  "SETTLEMENTS",
+  "FINANCIAL_LAW",
+  "TAX_COMPLIANCE"
+]);
+
 function collapseWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -328,7 +336,7 @@ export function derivePermissions(input: {
     return ["*"];
   }
 
-  if (teamKey) {
+  if (teamKey && TASK_EXECUTION_TEAM_KEYS.has(teamKey)) {
     const taskModuleId = buildTaskModuleIdFromTeamKey(teamKey);
     if (taskModuleId) {
       permissions.add("tasks:read");
@@ -346,6 +354,7 @@ export function derivePermissions(input: {
     permissions.add("leads:write");
     permissions.add("matters:read");
     permissions.add("matters:write");
+    permissions.add("execution:all");
     permissions.add("finances:read");
     permissions.add("internal-contracts:read");
     permissions.add("internal-contract-templates:read");

@@ -6,6 +6,7 @@ const MODULE_ACCESS = {
     sales: { read: ["sales:read", "sales:write"], write: ["sales:write"] },
     execution: {
         read: [
+            "execution:all",
             "execution:litigation",
             "execution:corporate-labor",
             "execution:settlements",
