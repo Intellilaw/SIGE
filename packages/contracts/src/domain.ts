@@ -108,7 +108,7 @@ export interface Client {
   createdAt: string;
 }
 
-export type InternalContractType = "PROFESSIONAL_SERVICES" | "LABOR";
+export type InternalContractType = "PROFESSIONAL_SERVICES" | "LEGAL_POLICIES" | "LABOR";
 export type InternalContractDocumentKind = "CONTRACT" | "ADDENDUM";
 export type InternalContractDownloadFormat = "docx" | "pdf";
 export type InternalContractSignatureStatus = "PENDING" | "SIGNED";
@@ -209,10 +209,13 @@ export interface InternalContractCollaborator {
 export type ExternalContractType = "LEASE";
 export type ExternalContractStatus = "ACTIVE" | "ARCHIVED";
 export type ExternalContractDownloadFormat = "docx" | "pdf";
+export type ExternalContractRenewalDocumentKind = "NEW_CONTRACT_OR_AGREEMENT" | "RENT_UPDATE_FORMAT";
+export type ExternalContractMilestoneSource = "EXTRACTED" | "MANUAL";
 
 export interface ExternalContractRenewal {
   id: string;
   sequence: number;
+  documentKind: ExternalContractRenewalDocumentKind;
   renewalDate?: string;
   leaseStartDate?: string;
   leaseEndDate?: string;
@@ -249,6 +252,17 @@ export interface ExternalContractGeneratedDocument {
   updatedAt: string;
 }
 
+export interface ExternalContractMilestone {
+  id: string;
+  contractId: string;
+  source: ExternalContractMilestoneSource;
+  title: string;
+  dueDate: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ExternalContract {
   id: string;
   contractNumber: string;
@@ -273,6 +287,7 @@ export interface ExternalContract {
   availableFormats: ExternalContractDownloadFormat[];
   renewals: ExternalContractRenewal[];
   generatedDocuments: ExternalContractGeneratedDocument[];
+  milestones: ExternalContractMilestone[];
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -293,6 +308,27 @@ export interface ExternalContractPrefillFields {
 
 export interface ExternalContractPrefillResult {
   fields: ExternalContractPrefillFields;
+  importantDates: ExternalContractPrefillImportantDate[];
+  notes: string[];
+}
+
+export interface ExternalContractPrefillImportantDate {
+  title: string;
+  dueDate: string;
+  description: string;
+}
+
+export interface ExternalContractRenewalPrefillFields {
+  renewalDate: string;
+  leaseStartDate: string;
+  leaseEndDate: string;
+  monthlyRentMxn: string;
+  rentIncreasePct: string;
+  notes: string;
+}
+
+export interface ExternalContractRenewalPrefillResult {
+  fields: ExternalContractRenewalPrefillFields;
   notes: string[];
 }
 

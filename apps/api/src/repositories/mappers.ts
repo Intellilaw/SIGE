@@ -11,6 +11,7 @@ import type {
   ExternalContract,
   ExternalContractGeneratedDocument,
   ExternalContractInpc,
+  ExternalContractMilestone,
   ExternalContractRenewal,
   ExternalContractRenewalDocument,
   FinanceRecord,
@@ -546,6 +547,7 @@ export function mapExternalContract(record: {
   renewals?: Array<{
     id: string;
     sequence: number;
+    documentKind: string;
     renewalDate: Date | null;
     leaseStartDate: Date | null;
     leaseEndDate: Date | null;
@@ -578,6 +580,16 @@ export function mapExternalContract(record: {
     createdAt: Date;
     updatedAt: Date;
   }>;
+  milestones?: Array<{
+    id: string;
+    externalContractId: string;
+    source: string;
+    title: string;
+    dueDate: Date;
+    description: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
 }): ExternalContract {
   const format = inferExternalContractFormat(record.originalFileName, record.fileMimeType);
 
@@ -605,7 +617,30 @@ export function mapExternalContract(record: {
     availableFormats: format ? [format] : [],
     renewals: (record.renewals ?? []).map(mapExternalContractRenewal),
     generatedDocuments: (record.generatedDocuments ?? []).map(mapExternalContractGeneratedDocument),
+    milestones: (record.milestones ?? []).map(mapExternalContractMilestone),
     notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapExternalContractMilestone(record: {
+  id: string;
+  externalContractId: string;
+  source: string;
+  title: string;
+  dueDate: Date;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExternalContractMilestone {
+  return {
+    id: record.id,
+    contractId: record.externalContractId,
+    source: record.source === "EXTRACTED" ? "EXTRACTED" : "MANUAL",
+    title: record.title,
+    dueDate: toDateOnly(record.dueDate) ?? record.dueDate.toISOString().slice(0, 10),
+    description: record.description ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };
@@ -638,6 +673,7 @@ export function mapExternalContractGeneratedDocument(record: {
 export function mapExternalContractRenewal(record: {
   id: string;
   sequence: number;
+  documentKind: string;
   renewalDate: Date | null;
   leaseStartDate: Date | null;
   leaseEndDate: Date | null;
@@ -662,6 +698,7 @@ export function mapExternalContractRenewal(record: {
   return {
     id: record.id,
     sequence: record.sequence,
+    documentKind: record.documentKind === "RENT_UPDATE_FORMAT" ? "RENT_UPDATE_FORMAT" : "NEW_CONTRACT_OR_AGREEMENT",
     renewalDate: toDateOnly(record.renewalDate),
     leaseStartDate: toDateOnly(record.leaseStartDate),
     leaseEndDate: toDateOnly(record.leaseEndDate),

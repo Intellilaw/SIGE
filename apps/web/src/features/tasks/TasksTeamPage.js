@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
+import { externalContractMilestoneKindLabel, getAllExternalContractMilestones } from "../modules/external-contract-milestones";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
 import { buildTaskDashboardMembers, findTaskModuleDescriptorBySlug } from "./task-module-descriptors";
 import { getEffectiveTrackingResponsible, hasValidTrackingResponsible, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
@@ -12,6 +13,7 @@ const TIMEFRAMES = [
     { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
+const SETTLEMENTS_MODULE_ID = "settlements";
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
 const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
@@ -59,6 +61,20 @@ function getLocalDateInput(offset = 0) {
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + offset);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function shiftMonthsDateInput(value, monthOffset) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return "";
+    }
+    const [year, month, day] = value.split("-").map(Number);
+    const firstDayOfTargetMonth = new Date(year, month - 1 + monthOffset, 1, 12, 0, 0, 0);
+    const lastDayOfTargetMonth = new Date(firstDayOfTargetMonth.getFullYear(), firstDayOfTargetMonth.getMonth() + 1, 0, 12, 0, 0, 0).getDate();
+    const target = new Date(firstDayOfTargetMonth);
+    target.setDate(Math.min(day, lastDayOfTargetMonth));
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
+}
+function getExternalContractReminderDate(dueDate) {
+    return shiftMonthsDateInput(dueDate, -1) || dueDate;
 }
 function matchesResponsible(taskResponsible, member, sharedResponsibleAliases) {
     const normalizedResponsible = normalizeComparableText(taskResponsible);
@@ -296,6 +312,7 @@ export function TasksTeamPage() {
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const [trackingRecords, setTrackingRecords] = useState([]);
     const [terms, setTerms] = useState([]);
+    const [externalContracts, setExternalContracts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [expandedView, setExpandedView] = useState(null);
     const canAccess = Boolean(module);
@@ -343,6 +360,7 @@ export function TasksTeamPage() {
         if (!legacyConfig) {
             setTrackingRecords([]);
             setTerms([]);
+            setExternalContracts([]);
             setLoading(false);
             return;
         }
@@ -350,12 +368,17 @@ export function TasksTeamPage() {
         async function loadDashboard() {
             setLoading(true);
             try {
-                const [loadedTracking, loadedTerms] = await Promise.all([
+                const externalContractsPromise = currentModule.moduleId === SETTLEMENTS_MODULE_ID
+                    ? apiGet("/external-contracts").catch(() => [])
+                    : Promise.resolve([]);
+                const [loadedTracking, loadedTerms, loadedExternalContracts] = await Promise.all([
                     apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
-                    apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`)
+                    apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`),
+                    externalContractsPromise
                 ]);
                 setTrackingRecords(loadedTracking);
                 setTerms(loadedTerms);
+                setExternalContracts(loadedExternalContracts);
             }
             finally {
                 setLoading(false);
@@ -390,6 +413,7 @@ export function TasksTeamPage() {
         });
         return { byId, bySourceRecordId };
     }, [terms]);
+    const externalContractMilestones = useMemo(() => module?.moduleId === SETTLEMENTS_MODULE_ID ? getAllExternalContractMilestones(externalContracts) : [], [externalContracts, module?.moduleId]);
     function buildTrackingRows(member, timeframe) {
         return trackingRecords
             .filter((record) => !record.deletedAt)
@@ -470,10 +494,37 @@ export function TasksTeamPage() {
             }));
         });
     }
+    function buildExternalContractMilestoneRows(timeframe) {
+        if (module?.moduleId !== SETTLEMENTS_MODULE_ID) {
+            return [];
+        }
+        const today = getLocalDateInput();
+        return externalContractMilestones
+            .map((milestone) => {
+            const reminderDate = getExternalContractReminderDate(milestone.dueDate);
+            const kindLabel = externalContractMilestoneKindLabel(milestone.kind);
+            return {
+                taskId: `external-contract-milestone-${milestone.id}-${milestone.dueDate}`,
+                clientNumber: milestone.clientNumber || "-",
+                clientName: milestone.clientName || "-",
+                subject: milestone.contractTitle || milestone.propertyAddress || `Contrato ${milestone.contractNumber}`,
+                specificProcess: [kindLabel, milestone.description].filter(Boolean).join(" - ") || "Hito o alerta de contrato externo",
+                taskLabel: `Recordatorio: ${milestone.title} (fecha del hito/alerta: ${milestone.dueDate})`,
+                typeLabel: "Recordatorio 1 mes antes",
+                displayDate: reminderDate,
+                originLabel: "Proximos hitos y alertas",
+                originPath: "/app/external-contracts",
+                actionLabel: "Ir a contratos",
+                highlighted: reminderDate <= today
+            };
+        })
+            .filter((row) => belongsToTimeframe({ state: "open", date: row.displayDate }, timeframe));
+    }
     function buildRows(member, timeframe) {
         return [
             ...buildTrackingRows(member, timeframe),
-            ...buildTermVerificationRows(member, timeframe)
+            ...buildTermVerificationRows(member, timeframe),
+            ...buildExternalContractMilestoneRows(timeframe)
         ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
     }
     if (!modulesLoading && modulesError) {

@@ -2,7 +2,14 @@ import { Buffer } from "node:buffer";
 
 import JSZip from "jszip";
 import { z } from "zod";
-import type { ExternalContractPrefillFields, ExternalContractPrefillResult } from "@sige/contracts";
+import type {
+  ExternalContractPrefillFields,
+  ExternalContractPrefillImportantDate,
+  ExternalContractPrefillResult,
+  ExternalContractRenewalDocumentKind,
+  ExternalContractRenewalPrefillFields,
+  ExternalContractRenewalPrefillResult
+} from "@sige/contracts";
 
 import { env } from "../../config/env";
 import { AppError } from "../../core/errors/app-error";
@@ -43,10 +50,42 @@ const fieldLabels: Record<keyof ExternalContractPrefillFields, string> = {
   tenantName: "Arrendatario",
   leaseStartDate: "Inicio de vigencia",
   leaseEndDate: "Fin de vigencia",
-  renewalDate: "Fecha de renovacion",
+  renewalDate: "Fecha de renovación",
   rentIncreaseDate: "Fecha de aumento de renta",
   monthlyRentMxn: "Renta mensual",
   rentIncreasePct: "% aumento"
+};
+
+const externalContractRenewalFieldNames = [
+  "renewalDate",
+  "leaseStartDate",
+  "leaseEndDate",
+  "monthlyRentMxn",
+  "rentIncreasePct",
+  "notes"
+] as const satisfies ReadonlyArray<keyof ExternalContractRenewalPrefillFields>;
+
+const emptyRenewalPrefillFields: ExternalContractRenewalPrefillFields = {
+  renewalDate: "",
+  leaseStartDate: "",
+  leaseEndDate: "",
+  monthlyRentMxn: "",
+  rentIncreasePct: "",
+  notes: ""
+};
+
+const renewalFieldLabels: Record<keyof ExternalContractRenewalPrefillFields, string> = {
+  renewalDate: "Fecha de renovación o firma",
+  leaseStartDate: "Inicio de vigencia renovada",
+  leaseEndDate: "Fin de vigencia renovada",
+  monthlyRentMxn: "Renta mensual actualizada",
+  rentIncreasePct: "% aumento",
+  notes: "Notas relevantes"
+};
+
+const renewalDocumentKindLabels: Record<ExternalContractRenewalDocumentKind, string> = {
+  NEW_CONTRACT_OR_AGREEMENT: "Nuevo contrato o convenio",
+  RENT_UPDATE_FORMAT: "Formato de actualización de renta"
 };
 
 const prefillSchema = z.object({
@@ -62,10 +101,25 @@ const prefillSchema = z.object({
     monthlyRentMxn: z.string(),
     rentIncreasePct: z.string()
   }),
+  importantDates: z.array(z.object({
+    title: z.string(),
+    dueDate: z.string(),
+    description: z.string()
+  })),
   notes: z.array(z.string())
 });
 
 const stringFieldSchema = { type: "string" };
+const importantDateJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    title: stringFieldSchema,
+    dueDate: stringFieldSchema,
+    description: stringFieldSchema
+  },
+  required: ["title", "dueDate", "description"]
+};
 const EXTERNAL_CONTRACT_PREFILL_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -75,6 +129,40 @@ const EXTERNAL_CONTRACT_PREFILL_JSON_SCHEMA = {
       additionalProperties: false,
       properties: Object.fromEntries(externalContractFieldNames.map((field) => [field, stringFieldSchema])),
       required: externalContractFieldNames
+    },
+    importantDates: {
+      type: "array",
+      items: importantDateJsonSchema
+    },
+    notes: {
+      type: "array",
+      items: { type: "string" }
+    }
+  },
+  required: ["fields", "importantDates", "notes"]
+};
+
+const renewalPrefillSchema = z.object({
+  fields: z.object({
+    renewalDate: z.string(),
+    leaseStartDate: z.string(),
+    leaseEndDate: z.string(),
+    monthlyRentMxn: z.string(),
+    rentIncreasePct: z.string(),
+    notes: z.string()
+  }),
+  notes: z.array(z.string())
+});
+
+const EXTERNAL_CONTRACT_RENEWAL_PREFILL_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    fields: {
+      type: "object",
+      additionalProperties: false,
+      properties: Object.fromEntries(externalContractRenewalFieldNames.map((field) => [field, stringFieldSchema])),
+      required: externalContractRenewalFieldNames
     },
     notes: {
       type: "array",
@@ -88,6 +176,10 @@ export interface ExternalContractPrefillInput {
   originalFileName: string;
   fileMimeType?: string | null;
   fileContent: Buffer;
+}
+
+export interface ExternalContractRenewalPrefillInput extends ExternalContractPrefillInput {
+  documentKind: ExternalContractRenewalDocumentKind;
 }
 
 function normalizeText(value?: string | null) {
@@ -258,6 +350,27 @@ function normalizePrefillFields(fields: ExternalContractPrefillFields): External
   };
 }
 
+function normalizeImportantDates(dates: ExternalContractPrefillImportantDate[]): ExternalContractPrefillImportantDate[] {
+  return dates
+    .map((date) => ({
+      title: normalizeText(date.title),
+      dueDate: normalizeDate(date.dueDate),
+      description: normalizeText(date.description)
+    }))
+    .filter((date) => Boolean(date.title && date.dueDate));
+}
+
+function normalizeRenewalPrefillFields(fields: ExternalContractRenewalPrefillFields): ExternalContractRenewalPrefillFields {
+  return {
+    renewalDate: normalizeDate(fields.renewalDate),
+    leaseStartDate: normalizeDate(fields.leaseStartDate),
+    leaseEndDate: normalizeDate(fields.leaseEndDate),
+    monthlyRentMxn: normalizeNumberText(fields.monthlyRentMxn),
+    rentIncreasePct: normalizeNumberText(fields.rentIncreasePct),
+    notes: normalizeText(fields.notes)
+  };
+}
+
 function normalizeDate(value?: string | null) {
   const normalized = normalizeText(value);
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
@@ -302,7 +415,7 @@ async function buildDocumentContent(input: ExternalContractPrefillInput) {
     };
   }
 
-  throw new AppError(400, "EXTERNAL_CONTRACT_PREFILL_UNSUPPORTED_FILE", "La extraccion con IA acepta PDF o DOCX.");
+  throw new AppError(400, "EXTERNAL_CONTRACT_PREFILL_UNSUPPORTED_FILE", "La extracción con IA acepta PDF o DOCX.");
 }
 
 export async function prefillExternalContractFields(input: ExternalContractPrefillInput): Promise<ExternalContractPrefillResult> {
@@ -310,7 +423,7 @@ export async function prefillExternalContractFields(input: ExternalContractPrefi
     throw new AppError(
       503,
       "EXTERNAL_CONTRACT_OPENAI_NOT_CONFIGURED",
-      "La extraccion de contratos externos no esta conectada a OpenAI. Falta configurar OPENAI_API_KEY en el runtime de la API."
+      "La extracción de contratos externos no está conectada a OpenAI. Falta configurar OPENAI_API_KEY en el runtime de la API."
     );
   }
 
@@ -329,7 +442,7 @@ export async function prefillExternalContractFields(input: ExternalContractPrefi
       body: JSON.stringify({
         model: env.OPENAI_EXTERNAL_CONTRACT_MODEL,
         temperature: 0,
-        max_output_tokens: 1400,
+        max_output_tokens: 1800,
         text: {
           format: {
             type: "json_schema",
@@ -352,8 +465,10 @@ export async function prefillExternalContractFields(input: ExternalContractPrefi
                 text:
                   "Extrae los campos para prellenar un formulario de administracion de contratos externos. " +
                   "Usa fechas en formato YYYY-MM-DD. Usa monthlyRentMxn como numero sin simbolo de moneda. Usa rentIncreasePct como porcentaje, por ejemplo 10 para diez por ciento. " +
-                  "Para renewalDate usa la fecha de terminacion o renovacion del contrato si no hay fecha de aviso separada. " +
+                  "Para renewalDate usa la fecha de terminación o renovación del contrato si no hay fecha de aviso separada. " +
                   "Para rentIncreaseDate usa la primera fecha de aumento de renta si aparece expresamente o puede inferirse de una regla anual clara. " +
+                  "En importantDates incluye otras fechas importantes del contrato que no sean la vigencia, renovacion o renta ya capturadas: avisos obligatorios, periodos de gracia, fechas limite de entrega, garantias, seguros, penalidades, opciones de terminacion, prorroga o cualquier alerta futura relevante. " +
+                  "Cada importantDates debe tener title, dueDate en formato YYYY-MM-DD y description breve. Si no hay otras fechas claras, usa arreglo vacio. " +
                   "No incluyas explicaciones fuera del JSON.\n\n" +
                   JSON.stringify({ fields: fieldLabels, originalFileName: input.originalFileName })
               },
@@ -377,6 +492,7 @@ export async function prefillExternalContractFields(input: ExternalContractPrefi
     const parsed = prefillSchema.parse(JSON.parse(stripJsonFence(responseText)));
     return {
       fields: normalizePrefillFields({ ...emptyPrefillFields, ...parsed.fields }),
+      importantDates: normalizeImportantDates(parsed.importantDates),
       notes: [...notes, ...parsed.notes.map(normalizeText).filter(Boolean)]
     };
   } catch (error) {
@@ -393,6 +509,104 @@ export async function prefillExternalContractFields(input: ExternalContractPrefi
     }
 
     throw new AppError(502, "EXTERNAL_CONTRACT_PREFILL_FAILED", "No se pudo prellenar el contrato externo.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function prefillExternalContractRenewalFields(
+  input: ExternalContractRenewalPrefillInput
+): Promise<ExternalContractRenewalPrefillResult> {
+  if (!env.OPENAI_API_KEY) {
+    throw new AppError(
+      503,
+      "EXTERNAL_CONTRACT_OPENAI_NOT_CONFIGURED",
+      "La extracción de renovaciones no está conectada a OpenAI. Falta configurar OPENAI_API_KEY en el runtime de la API."
+    );
+  }
+
+  const { content, notes } = await buildDocumentContent(input);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.OPENAI_EXTERNAL_CONTRACT_TIMEOUT_MS);
+  const documentKindLabel = renewalDocumentKindLabels[input.documentKind];
+
+  try {
+    const response = await fetch(`${env.OPENAI_BASE_URL.replace(/\/$/, "")}/responses`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: env.OPENAI_EXTERNAL_CONTRACT_MODEL,
+        temperature: 0,
+        max_output_tokens: 1200,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "external_contract_renewal_prefill",
+            strict: true,
+            schema: EXTERNAL_CONTRACT_RENEWAL_PREFILL_JSON_SCHEMA
+          }
+        },
+        input: [
+          {
+            role: "system",
+            content:
+              "Eres un asistente jurídico mexicano especializado en contratos de arrendamiento y renovaciones. Extrae solo los datos relacionados con la renovación, convenio o actualización de renta. Devuelve solamente JSON válido. No inventes datos: usa cadena vacía cuando no tengas evidencia clara."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  `El documento cargado corresponde a ${documentKindLabel}. ` +
+                  "Extrae los campos para prellenar una renovación de contrato externo. " +
+                  "Usa fechas en formato YYYY-MM-DD. Usa monthlyRentMxn como numero sin simbolo de moneda. Usa rentIncreasePct como porcentaje, por ejemplo 10 para diez por ciento. " +
+                  "Para renewalDate usa la fecha de firma, convenio, renovación o inicio de actualización si aparece; si no, usa la fecha que marque el efecto de la renovación. " +
+                  "Para leaseStartDate y leaseEndDate usa la nueva vigencia renovada. " +
+                  "En notes incluye una frase corta con datos relevantes que no quepan en los campos, como cláusulas de actualización, inmueble o referencias al contrato original. " +
+                  "No incluyas explicaciones fuera del JSON.\n\n" +
+                  JSON.stringify({ fields: renewalFieldLabels, originalFileName: input.originalFileName })
+              },
+              ...content
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      await throwOpenAiResponseError(response);
+    }
+
+    const rawResponse = await response.json() as unknown;
+    const responseText = extractResponsesText(rawResponse);
+    if (!responseText) {
+      throw new AppError(502, "EXTERNAL_CONTRACT_RENEWAL_PREFILL_EMPTY", "OpenAI no devolvió datos para la renovación.");
+    }
+
+    const parsed = renewalPrefillSchema.parse(JSON.parse(stripJsonFence(responseText)));
+    return {
+      fields: normalizeRenewalPrefillFields({ ...emptyRenewalPrefillFields, ...parsed.fields }),
+      notes: [...notes, ...parsed.notes.map(normalizeText).filter(Boolean)]
+    };
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new AppError(
+        504,
+        "EXTERNAL_CONTRACT_OPENAI_TIMEOUT",
+        "OpenAI tardó demasiado en leer la renovación. Revisa OPENAI_EXTERNAL_CONTRACT_TIMEOUT_MS o intenta nuevamente."
+      );
+    }
+
+    throw new AppError(502, "EXTERNAL_CONTRACT_RENEWAL_PREFILL_FAILED", "No se pudo prellenar la renovación con IA.");
   } finally {
     clearTimeout(timeout);
   }

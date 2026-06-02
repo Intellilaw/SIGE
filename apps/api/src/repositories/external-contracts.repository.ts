@@ -17,6 +17,7 @@ import type {
   ExternalContractGeneratedDocumentRecord,
   ExternalContractGeneratedDocumentWriteRecord,
   ExternalContractInpcWriteRecord,
+  ExternalContractMilestoneWriteRecord,
   ExternalContractRenewalDocumentRecord,
   ExternalContractRenewalDocumentUploadRecord,
   ExternalContractRenewalWriteRecord,
@@ -110,6 +111,17 @@ const generatedDocumentMetadataSelect = {
   updatedAt: true
 } satisfies Prisma.ExternalContractGeneratedDocumentSelect;
 
+const milestoneMetadataSelect = {
+  id: true,
+  externalContractId: true,
+  source: true,
+  title: true,
+  dueDate: true,
+  description: true,
+  createdAt: true,
+  updatedAt: true
+} satisfies Prisma.ExternalContractMilestoneSelect;
+
 const renewalDocumentMetadataSelect = {
   id: true,
   renewalId: true,
@@ -154,9 +166,50 @@ function normalizeInpcPeriodKey(value?: string | null) {
   return normalized;
 }
 
+function normalizeRenewalDocumentKind(value?: string | null): ExternalContract["renewals"][number]["documentKind"] {
+  const normalized = normalizeText(value);
+
+  return normalized === "RENT_UPDATE_FORMAT" ? "RENT_UPDATE_FORMAT" : "NEW_CONTRACT_OR_AGREEMENT";
+}
+
+function normalizeMilestoneSource(value?: string | null) {
+  return normalizeText(value) === "EXTRACTED" ? "EXTRACTED" : "MANUAL";
+}
+
+function normalizeMilestoneRecords(
+  contractId: string,
+  organizationId: string,
+  records?: ExternalContractMilestoneWriteRecord[]
+): Array<Prisma.ExternalContractMilestoneCreateManyInput & { id?: string }> {
+  const normalized: Array<Prisma.ExternalContractMilestoneCreateManyInput & { id?: string }> = [];
+
+  for (const record of records ?? []) {
+    const id = normalizeNullableText(record.id);
+    const title = normalizeText(record.title);
+    const dueDate = normalizeDateKey(record.dueDate);
+
+    if (!title || !dueDate) {
+      continue;
+    }
+
+    normalized.push({
+      ...(id ? { id } : {}),
+      organizationId,
+      externalContractId: contractId,
+      source: normalizeMilestoneSource(record.source),
+      title,
+      dueDate,
+      description: normalizeNullableText(record.description)
+    });
+  }
+
+  return normalized;
+}
+
 function hasRenewalContent(record: ExternalContractRenewalWriteRecord) {
   return Boolean(
-    normalizeText(record.renewalDate)
+    record.documentKind
+    || normalizeText(record.renewalDate)
     || normalizeText(record.leaseStartDate)
     || normalizeText(record.leaseEndDate)
     || record.monthlyRentMxn
@@ -179,6 +232,7 @@ function normalizeRenewalRecords(
       organizationId,
       externalContractId: contractId,
       sequence: index + 1,
+      documentKind: normalizeRenewalDocumentKind(record.documentKind),
       renewalDate: normalizeDateKey(record.renewalDate),
       leaseStartDate: normalizeDateKey(record.leaseStartDate),
       leaseEndDate: normalizeDateKey(record.leaseEndDate),
@@ -231,6 +285,10 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
       where: { organizationId },
       include: {
         renewals: renewalInclude,
+        milestones: {
+          orderBy: { dueDate: "asc" },
+          select: milestoneMetadataSelect
+        },
         generatedDocuments: {
           orderBy: { createdAt: "desc" },
           select: generatedDocumentMetadataSelect
@@ -292,6 +350,10 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
 
         if (payload.renewals !== undefined) {
           await this.replaceRenewals(record.id, organizationId, payload.renewals);
+        }
+
+        if (payload.milestones !== undefined) {
+          await this.replaceMilestones(record.id, organizationId, payload.milestones);
         }
 
         return mapExternalContract(await this.findFullOrThrow(record.id, organizationId));
@@ -400,6 +462,10 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
 
       if (payload.renewals !== undefined) {
         await this.replaceRenewals(contractId, organizationId, payload.renewals);
+      }
+
+      if (payload.milestones !== undefined) {
+        await this.replaceMilestones(contractId, organizationId, payload.milestones);
       }
 
       return mapExternalContract(await this.findFullOrThrow(record.id, organizationId));
@@ -511,7 +577,8 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
         externalContract: {
           select: {
             contractNumber: true,
-            clientName: true
+            clientName: true,
+            tenantName: true
           }
         }
       }
@@ -525,12 +592,30 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
       id: record.id,
       contractNumber: record.externalContract.contractNumber,
       clientName: record.externalContract.clientName,
+      tenantName: record.externalContract.tenantName,
       templateId: record.templateId,
       originalFileName: record.originalFileName,
       fileMimeType: record.fileMimeType,
       fileContent: Buffer.from(record.fileContent),
       createdAt: record.createdAt.toISOString()
     };
+  }
+
+  public async deleteGeneratedDocument(contractId: string, documentId: string) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    await this.findOrThrow(contractId, organizationId);
+
+    const result = await this.prisma.externalContractGeneratedDocument.deleteMany({
+      where: {
+        id: documentId,
+        externalContractId: contractId,
+        organizationId
+      }
+    });
+
+    if (result.count === 0) {
+      throw new AppError(404, "EXTERNAL_CONTRACT_GENERATED_DOCUMENT_NOT_FOUND", "El formato generado no existe.");
+    }
   }
 
   public async uploadRenewalDocument(
@@ -760,6 +845,10 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
       where: { id: contractId, organizationId },
       include: {
         renewals: renewalInclude,
+        milestones: {
+          orderBy: { dueDate: "asc" },
+          select: milestoneMetadataSelect
+        },
         generatedDocuments: {
           orderBy: { createdAt: "desc" },
           select: generatedDocumentMetadataSelect
@@ -784,8 +873,22 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
     const retainedIds = renewals
       .map((renewal) => renewal.id)
       .filter((id): id is string => Boolean(id && existingIds.has(id)));
+    const retainedIdSet = new Set(retainedIds);
+    const deletedIds = existingRenewals
+      .map((renewal) => renewal.id)
+      .filter((id) => !retainedIdSet.has(id));
 
     await this.prisma.$transaction(async (tx) => {
+      if (deletedIds.length > 0) {
+        await tx.externalContractGeneratedDocument.deleteMany({
+          where: {
+            organizationId,
+            externalContractId: contractId,
+            renewalId: { in: deletedIds }
+          }
+        });
+      }
+
       await tx.externalContractRenewal.deleteMany({
         where: {
           organizationId,
@@ -805,6 +908,43 @@ export class PrismaExternalContractsRepository implements ExternalContractsRepos
         }
 
         await tx.externalContractRenewal.create({
+          data
+        });
+      }
+    });
+  }
+
+  private async replaceMilestones(contractId: string, organizationId: string, records: ExternalContractMilestoneWriteRecord[]) {
+    const milestones = normalizeMilestoneRecords(contractId, organizationId, records);
+    const existingMilestones = await this.prisma.externalContractMilestone.findMany({
+      where: { organizationId, externalContractId: contractId },
+      select: { id: true }
+    });
+    const existingIds = new Set(existingMilestones.map((milestone) => milestone.id));
+    const retainedIds = milestones
+      .map((milestone) => milestone.id)
+      .filter((id): id is string => Boolean(id && existingIds.has(id)));
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.externalContractMilestone.deleteMany({
+        where: {
+          organizationId,
+          externalContractId: contractId,
+          ...(retainedIds.length > 0 ? { id: { notIn: retainedIds } } : {})
+        }
+      });
+
+      for (const milestone of milestones) {
+        const { id, ...data } = milestone;
+        if (id && existingIds.has(id)) {
+          await tx.externalContractMilestone.update({
+            where: { id },
+            data
+          });
+          continue;
+        }
+
+        await tx.externalContractMilestone.create({
           data
         });
       }

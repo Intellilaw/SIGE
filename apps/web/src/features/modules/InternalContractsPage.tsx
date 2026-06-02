@@ -66,6 +66,7 @@ const BUNDLED_CONTRACT_TEMPLATES: DisplayInternalContractTemplate[] = [
 
 const SECTION_LABELS: Record<InternalContractSection, string> = {
   PROFESSIONAL_SERVICES: "Contratos de prestaci\u00f3n de servicios profesionales",
+  LEGAL_POLICIES: "P\u00f3lizas jur\u00eddicas",
   LABOR: "Contratos laborales",
   TEMPLATES: "Contratos machote"
 };
@@ -156,7 +157,7 @@ function sortContracts(items: InternalContract[]) {
   );
 }
 
-function groupProfessionalServicesContractsByClient(items: InternalContract[]) {
+function groupClientContractsByClient(items: InternalContract[]) {
   const groups = new Map<string, { key: string; label: string; contracts: InternalContract[] }>();
 
   sortContracts(items).forEach((contract) => {
@@ -197,6 +198,10 @@ function quoteTitleLabel(quote?: Quote) {
   return (quote?.title ?? quote?.subject ?? "").trim();
 }
 
+function isClientContractSection(section: InternalContractSection) {
+  return section === "PROFESSIONAL_SERVICES" || section === "LEGAL_POLICIES";
+}
+
 async function fetchOptionalRows<T>(request: Promise<T[]>) {
   try {
     return await request;
@@ -221,7 +226,7 @@ function buildLaborContractNumber(form: ContractFormState) {
 }
 
 function contractOwnerLabel(contract: InternalContract) {
-  if (contract.contractType === "PROFESSIONAL_SERVICES") {
+  if (isClientContractSection(contract.contractType)) {
     return [contract.clientNumber, contract.clientName].filter(Boolean).join(" - ") || "-";
   }
 
@@ -314,7 +319,7 @@ export function InternalContractsPage() {
     const sections: InternalContractSection[] = [];
 
     if (canReadContracts) {
-      sections.push("PROFESSIONAL_SERVICES", "LABOR");
+      sections.push("PROFESSIONAL_SERVICES", "LEGAL_POLICIES", "LABOR");
     }
 
     if (canReadTemplates) {
@@ -348,6 +353,7 @@ export function InternalContractsPage() {
 
   const sectionCounts = useMemo(() => ({
     PROFESSIONAL_SERVICES: contracts.filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES").length,
+    LEGAL_POLICIES: contracts.filter((contract) => contract.contractType === "LEGAL_POLICIES").length,
     LABOR: contracts.filter((contract) => contract.contractType === "LABOR").length,
     TEMPLATES: displayTemplates.length
   }), [contracts, displayTemplates]);
@@ -378,8 +384,8 @@ export function InternalContractsPage() {
       return haystack.includes(search);
     }));
   }, [activeSection, contracts, query]);
-  const groupedProfessionalContracts = useMemo(
-    () => activeSection === "PROFESSIONAL_SERVICES" ? groupProfessionalServicesContractsByClient(filteredContracts) : [],
+  const groupedClientContracts = useMemo(
+    () => isClientContractSection(activeSection) ? groupClientContractsByClient(filteredContracts) : [],
     [activeSection, filteredContracts]
   );
 
@@ -506,7 +512,7 @@ export function InternalContractsPage() {
       return;
     }
 
-    if (activeSection === "PROFESSIONAL_SERVICES" && !form.clientId) {
+    if (isClientContractSection(activeSection) && !form.clientId) {
       setFlash({ tone: "error", text: "Selecciona un cliente del padron." });
       return;
     }
@@ -539,10 +545,10 @@ export function InternalContractsPage() {
     try {
       const created = await apiPost<InternalContract>("/internal-contracts", {
         contractNumber,
-        title: activeSection === "PROFESSIONAL_SERVICES" ? form.contractTitle || selectedQuoteTitle : null,
+        title: isClientContractSection(activeSection) ? form.contractTitle || selectedQuoteTitle : null,
         contractType: activeSection,
         documentKind: activeSection === "LABOR" ? form.documentKind : "CONTRACT",
-        clientId: activeSection === "PROFESSIONAL_SERVICES" ? form.clientId : null,
+        clientId: isClientContractSection(activeSection) ? form.clientId : null,
         collaboratorName: activeSection === "LABOR" ? form.collaboratorName : null,
         paymentMilestones: [],
         notes: form.notes,
@@ -673,7 +679,11 @@ export function InternalContractsPage() {
           </div>
           <div className="internal-contract-card-tags">
             <span className="status-pill status-live">
-              {contract.documentKind === "ADDENDUM" ? "Addendum" : "Contrato"}
+              {contract.contractType === "LEGAL_POLICIES"
+                ? "P\u00f3liza"
+                : contract.documentKind === "ADDENDUM"
+                  ? "Addendum"
+                  : "Contrato"}
             </span>
             {signatureLabel ? (
               <span className={`status-pill ${contract.signatureStatus === "SIGNED" ? "status-live" : "status-warning"}`}>
@@ -781,7 +791,7 @@ export function InternalContractsPage() {
           </div>
         </div>
         <p className="muted">
-          Control de contratos por cliente, contratos laborales, addenda y machotes internos de Rusconii Consulting.
+          Control de contratos por cliente, p\u00f3lizas jur\u00eddicas, contratos laborales, addenda y machotes internos de Rusconii Consulting.
         </p>
       </header>
 
@@ -817,7 +827,9 @@ export function InternalContractsPage() {
                 ? "Machotes de empresa"
                 : activeSection === "LABOR"
                   ? "Laboral / addendum"
-                  : "Servicios profesionales"}
+                  : activeSection === "LEGAL_POLICIES"
+                    ? "P\u00f3lizas jur\u00eddicas"
+                    : "Servicios profesionales"}
             </span>
           </div>
 
@@ -834,7 +846,7 @@ export function InternalContractsPage() {
                       disabled={saving || loading}
                     />
                   </label>
-                ) : activeSection === "PROFESSIONAL_SERVICES" ? (
+                ) : isClientContractSection(activeSection) ? (
                   <>
                     <label className="form-field internal-contracts-wide-field">
                       <span>Buscar cliente</span>
@@ -863,7 +875,7 @@ export function InternalContractsPage() {
                     </label>
 
                     <label className="form-field">
-                      <span>Numero de contrato</span>
+                      <span>{activeSection === "LEGAL_POLICIES" ? "Numero de poliza" : "Numero de contrato"}</span>
                       <select
                         value={form.contractNumber}
                         onChange={(event) => handleContractNumberChange(event.target.value)}
@@ -885,7 +897,7 @@ export function InternalContractsPage() {
                     </label>
 
                     <label className="form-field internal-contracts-wide-field">
-                      <span>Titulo del contrato</span>
+                      <span>{activeSection === "LEGAL_POLICIES" ? "Titulo de la poliza" : "Titulo del contrato"}</span>
                       <input
                         value={form.contractTitle || selectedQuoteTitle}
                         readOnly
@@ -1046,8 +1058,8 @@ export function InternalContractsPage() {
                 </div>
               </article>
             ))}
-            {!loading && !isTemplateSection && activeSection !== "PROFESSIONAL_SERVICES" && filteredContracts.map((contract) => renderContractCard(contract))}
-            {!loading && activeSection === "PROFESSIONAL_SERVICES" && groupedProfessionalContracts.map((group) => (
+            {!loading && !isTemplateSection && !isClientContractSection(activeSection) && filteredContracts.map((contract) => renderContractCard(contract))}
+            {!loading && isClientContractSection(activeSection) && groupedClientContracts.map((group) => (
               <section className="internal-contract-group" key={group.key}>
                 <div className="internal-contract-group-head">
                   <h3>{group.label}</h3>

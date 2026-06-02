@@ -4,10 +4,14 @@ import type {
   ExternalContract,
   ExternalContractGeneratedDocument,
   ExternalContractInpc,
+  ExternalContractMilestone,
+  ExternalContractMilestoneSource,
   ExternalContractPrefillResult,
   ExternalContractRentIncreaseCalculation,
   ExternalContractRenewal,
+  ExternalContractRenewalDocumentKind,
   ExternalContractRenewalDocument,
+  ExternalContractRenewalPrefillResult,
   ExternalContractStatus
 } from "@sige/contracts";
 
@@ -34,11 +38,13 @@ type ContractFormState = {
   status: ExternalContractStatus;
   notes: string;
   renewals: RenewalFormState[];
+  milestones: MilestoneFormState[];
 };
 
 type RenewalFormState = {
   id?: string;
   sequence?: number;
+  documentKind: ExternalContractRenewalDocumentKind;
   renewalDate: string;
   leaseStartDate: string;
   leaseEndDate: string;
@@ -50,8 +56,36 @@ type RenewalFormState = {
   notes: string;
 };
 
+type MilestoneFormState = {
+  id?: string;
+  source: ExternalContractMilestoneSource;
+  title: string;
+  dueDate: string;
+  description: string;
+};
+
 type FormatTemplateId = "rent-increase" | "property-delivery" | "termination-agreement";
-type ExternalContractsSection = "contracts" | "inpc";
+type ExternalContractsSection = "contracts" | "milestones" | "inpc";
+type ExternalContractStatusView = "active" | "archived";
+type ContractMilestoneKind = "renewal" | "lease-end" | "rent-increase" | "manual" | "extracted";
+type ContractMilestoneView = {
+  id: string;
+  contractId: string;
+  contractNumber: string;
+  contractTitle: string;
+  clientName: string;
+  propertyAddress: string;
+  dueDate: string;
+  title: string;
+  description?: string;
+  kind: ContractMilestoneKind;
+  source: "AUTOMATIC" | ExternalContractMilestoneSource;
+};
+type ManualAlertFormState = {
+  title: string;
+  dueDate: string;
+  description: string;
+};
 type GeneratedFormat = {
   title: string;
   subtitle: string;
@@ -63,11 +97,53 @@ type RentCalculatorState = {
   basePeriod: string;
   targetPeriod: string;
 };
+type RentUpdateFormatPreview = {
+  baseLabel: string;
+  documentDate: string;
+  effectiveDate: string;
+  previousRentMxn?: number;
+  updatedRentMxn?: number;
+  increaseMxn?: number;
+  increasePct?: number;
+  factor?: number;
+  useRoundedRent?: boolean;
+  roundedRentMxn?: number;
+  presentedRentMxn?: number;
+  presentedIncreaseMxn?: number;
+  presentedIncreasePct?: number;
+  baseInpc?: ExternalContractInpc;
+  targetInpc?: ExternalContractInpc;
+  basePeriod?: string;
+  targetPeriod?: string;
+};
+type RentUpdateFormatFormState = {
+  effectiveDate: string;
+  previousRentMxn: string;
+  basePeriod: string;
+  targetPeriod: string;
+  useRoundedRent: boolean;
+  roundedRentMxn: string;
+};
+type RentUpdateFormatGenerationResult = {
+  wordDocument: ExternalContractGeneratedDocument;
+  pdfDocument: ExternalContractGeneratedDocument;
+};
+type GeneratedDocumentFormat = "word" | "pdf" | "other";
+type GeneratedDocumentGroup = {
+  key: string;
+  templateTitle: string;
+  renewalId?: string;
+  createdAt: string;
+  word?: ExternalContractGeneratedDocument;
+  pdf?: ExternalContractGeneratedDocument;
+  other?: ExternalContractGeneratedDocument;
+};
 
 const MODULE_TITLE = "Administraci\u00f3n de contratos externos";
 const CONTRACT_SECTION_LABEL = "Contratos de arrendamiento";
 const INPC_SECTION_LABEL = "INPC";
 const FORMAT_SCOPE_ORIGINAL = "original";
+const DEFAULT_RENEWAL_DOCUMENT_KIND: ExternalContractRenewalDocumentKind = "NEW_CONTRACT_OR_AGREEMENT";
 
 const initialFormState: ContractFormState = {
   title: "",
@@ -80,7 +156,23 @@ const initialFormState: ContractFormState = {
   monthlyRentMxn: "",
   status: "ACTIVE",
   notes: "",
-  renewals: []
+  renewals: [],
+  milestones: []
+};
+
+const initialManualAlertFormState: ManualAlertFormState = {
+  title: "",
+  dueDate: "",
+  description: ""
+};
+
+const initialRentUpdateFormatFormState: RentUpdateFormatFormState = {
+  effectiveDate: "",
+  previousRentMxn: "",
+  basePeriod: "",
+  targetPeriod: "",
+  useRoundedRent: false,
+  roundedRentMxn: ""
 };
 
 const formatTemplateLabels: Record<FormatTemplateId, string> = {
@@ -89,6 +181,19 @@ const formatTemplateLabels: Record<FormatTemplateId, string> = {
   "termination-agreement": "Convenio de rescision"
 };
 
+const renewalDocumentKindLabels: Record<ExternalContractRenewalDocumentKind, string> = {
+  NEW_CONTRACT_OR_AGREEMENT: "Nuevo contrato o convenio",
+  RENT_UPDATE_FORMAT: "Formato de actualizaci\u00f3n de renta"
+};
+
+const renewalDocumentKindOptions: Array<{
+  value: ExternalContractRenewalDocumentKind;
+  label: string;
+}> = [
+  { value: "NEW_CONTRACT_OR_AGREEMENT", label: renewalDocumentKindLabels.NEW_CONTRACT_OR_AGREEMENT },
+  { value: "RENT_UPDATE_FORMAT", label: renewalDocumentKindLabels.RENT_UPDATE_FORMAT }
+];
+
 const initialRentCalculatorState: RentCalculatorState = {
   rentMxn: "",
   basePeriod: "",
@@ -96,20 +201,21 @@ const initialRentCalculatorState: RentCalculatorState = {
 };
 
 const renewalOrdinalLabels = [
-  "Primera renovacion",
-  "Segunda renovacion",
-  "Tercera renovacion",
-  "Cuarta renovacion",
-  "Quinta renovacion",
-  "Sexta renovacion",
-  "Septima renovacion",
-  "Octava renovacion",
-  "Novena renovacion",
-  "Decima renovacion"
+  "Primera renovación",
+  "Segunda renovación",
+  "Tercera renovación",
+  "Cuarta renovación",
+  "Quinta renovación",
+  "Sexta renovación",
+  "Séptima renovación",
+  "Octava renovación",
+  "Novena renovación",
+  "Décima renovación"
 ];
 
 function createEmptyRenewal(): RenewalFormState {
   return {
+    documentKind: DEFAULT_RENEWAL_DOCUMENT_KIND,
     renewalDate: "",
     leaseStartDate: "",
     leaseEndDate: "",
@@ -293,6 +399,129 @@ function calculateRentIncreaseFromInpc(
   };
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function numberToInputValue(value?: number) {
+  if (value === undefined || value === null || !Number.isFinite(value)) {
+    return "";
+  }
+
+  return String(value);
+}
+
+function parseEditableNumber(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function getBaseRentForRenewal(contract: ExternalContract, renewal: ExternalContractRenewal) {
+  const previousRenewal = contract.renewals.find((entry) => entry.sequence === renewal.sequence - 1);
+  return renewal.monthlyRentMxn ?? previousRenewal?.monthlyRentMxn ?? contract.monthlyRentMxn;
+}
+
+function dateToInpcPeriodKey(value?: string) {
+  if (!isValidDateKey(value)) {
+    return "";
+  }
+
+  return value!.slice(0, 7);
+}
+
+function resolveInpcRecord(
+  inpcRecords: ExternalContractInpc[],
+  periodKey: string,
+  fallbackToLatest = false
+) {
+  const exact = inpcRecords.find((record) => inpcPeriodKey(record) === periodKey);
+  if (exact || !fallbackToLatest) {
+    return exact;
+  }
+
+  return sortInpcDesc(inpcRecords)[0];
+}
+
+function resolveInpcRecordOnOrBefore(inpcRecords: ExternalContractInpc[], periodKey: string) {
+  const sorted = sortInpcAsc(inpcRecords);
+  const previous = sorted.filter((record) => inpcPeriodKey(record) <= periodKey).at(-1);
+
+  return previous ?? sorted[0];
+}
+
+function resolveRentUpdateBaseInpc(
+  inpcRecords: ExternalContractInpc[],
+  renewal: ExternalContractRenewal,
+  desiredBasePeriod: string,
+  selectedBasePeriod?: string
+) {
+  if (selectedBasePeriod) {
+    return resolveInpcRecord(inpcRecords, selectedBasePeriod);
+  }
+
+  const renewalTargetInpc = renewal.inpcTargetPeriod
+    ? resolveInpcRecord(inpcRecords, renewal.inpcTargetPeriod)
+    : undefined;
+  if (renewalTargetInpc) {
+    return renewalTargetInpc;
+  }
+
+  const desiredBaseInpc = resolveInpcRecord(inpcRecords, desiredBasePeriod);
+  return desiredBaseInpc ?? resolveInpcRecordOnOrBefore(inpcRecords, desiredBasePeriod);
+}
+
+function buildRentUpdateFormatPreview(
+  contract: ExternalContract,
+  renewal: ExternalContractRenewal,
+  documentDate: string,
+  inpcRecords: ExternalContractInpc[],
+  overrides: Partial<RentUpdateFormatFormState> = {}
+): RentUpdateFormatPreview {
+  const baseEffectiveDate = renewal.leaseStartDate || renewal.renewalDate || documentDate;
+  const effectiveDate = isValidDateKey(overrides.effectiveDate) ? overrides.effectiveDate! : addYearsDateKey(baseEffectiveDate, 1);
+  const desiredBasePeriod = dateToInpcPeriodKey(baseEffectiveDate);
+  const desiredTargetPeriod = dateToInpcPeriodKey(effectiveDate);
+  const selectedTargetPeriod = overrides.targetPeriod || desiredTargetPeriod;
+  const baseInpc = resolveRentUpdateBaseInpc(inpcRecords, renewal, desiredBasePeriod, overrides.basePeriod);
+  const targetInpc = resolveInpcRecord(inpcRecords, selectedTargetPeriod, !overrides.targetPeriod);
+  const previousRentMxn = parseEditableNumber(overrides.previousRentMxn ?? "") ?? getBaseRentForRenewal(contract, renewal);
+  const factor = baseInpc && targetInpc && baseInpc.value > 0 ? targetInpc.value / baseInpc.value : undefined;
+  const updatedRentMxn = previousRentMxn && factor ? roundMoney(previousRentMxn * factor) : undefined;
+  const increaseMxn = previousRentMxn && updatedRentMxn ? roundMoney(updatedRentMxn - previousRentMxn) : undefined;
+  const increasePct = factor
+    ? (factor - 1) * 100
+    : previousRentMxn && increaseMxn ? (increaseMxn / previousRentMxn) * 100 : undefined;
+  const roundedRentMxn = overrides.useRoundedRent ? parseEditableNumber(overrides.roundedRentMxn ?? "") : undefined;
+  const presentedRentMxn = roundedRentMxn ?? updatedRentMxn;
+  const presentedIncreaseMxn = previousRentMxn && presentedRentMxn ? roundMoney(presentedRentMxn - previousRentMxn) : undefined;
+  const presentedIncreasePct = previousRentMxn && presentedIncreaseMxn ? (presentedIncreaseMxn / previousRentMxn) * 100 : increasePct;
+
+  return {
+    baseLabel: `${renewalLabel(renewal.sequence - 1)} - ${formatDate(getRenewalDisplayDate(renewal))}`,
+    documentDate,
+    effectiveDate,
+    previousRentMxn,
+    updatedRentMxn,
+    increaseMxn,
+    increasePct,
+    factor,
+    useRoundedRent: overrides.useRoundedRent,
+    roundedRentMxn,
+    presentedRentMxn,
+    presentedIncreaseMxn,
+    presentedIncreasePct,
+    baseInpc,
+    targetInpc,
+    basePeriod: baseInpc ? inpcPeriodKey(baseInpc) : "",
+    targetPeriod: targetInpc ? inpcPeriodKey(targetInpc) : selectedTargetPeriod
+  };
+}
+
 function formatFileSize(value?: number) {
   if (!value) {
     return "Sin archivo";
@@ -303,6 +532,65 @@ function formatFileSize(value?: number) {
   }
 
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function inferGeneratedDocumentFormat(document: ExternalContractGeneratedDocument): GeneratedDocumentFormat {
+  const mimeType = (document.fileMimeType ?? "").toLowerCase();
+  const fileName = document.originalFileName.toLowerCase();
+
+  if (mimeType.includes("pdf") || fileName.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (mimeType.includes("word") || fileName.endsWith(".doc") || fileName.endsWith(".docx")) {
+    return "word";
+  }
+
+  return "other";
+}
+
+function generatedDocumentStem(document: ExternalContractGeneratedDocument) {
+  return document.originalFileName
+    .trim()
+    .replace(/\.[a-z0-9]+$/i, "")
+    .toLowerCase();
+}
+
+function groupGeneratedDocuments(documents: ExternalContractGeneratedDocument[]): GeneratedDocumentGroup[] {
+  const groups = new Map<string, GeneratedDocumentGroup>();
+
+  documents.forEach((document) => {
+    const key = `${document.templateId}:${document.renewalId ?? "original"}:${generatedDocumentStem(document) || document.id}`;
+    const group = groups.get(key) ?? {
+      key,
+      templateTitle: document.templateTitle,
+      renewalId: document.renewalId,
+      createdAt: document.createdAt
+    };
+    const format = inferGeneratedDocumentFormat(document);
+
+    if (format === "pdf") {
+      group.pdf = document;
+    } else if (format === "word") {
+      group.word = document;
+    } else {
+      group.other = document;
+    }
+
+    if (document.createdAt > group.createdAt) {
+      group.createdAt = document.createdAt;
+    }
+
+    groups.set(key, group);
+  });
+
+  return [...groups.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function getGeneratedDocumentGroupDocuments(group: GeneratedDocumentGroup) {
+  return [group.word, group.pdf, group.other].filter(
+    (document): document is ExternalContractGeneratedDocument => Boolean(document)
+  );
 }
 
 function fileToBase64(file: File) {
@@ -394,9 +682,14 @@ function isSupportedContractPrefillFile(file: File) {
   );
 }
 
+function toRenewalDocumentKind(value?: string | null): ExternalContractRenewalDocumentKind {
+  return value === "RENT_UPDATE_FORMAT" ? "RENT_UPDATE_FORMAT" : DEFAULT_RENEWAL_DOCUMENT_KIND;
+}
+
 function hasRenewalFormContent(renewal: RenewalFormState) {
   return Boolean(
-    renewal.renewalDate.trim()
+    renewal.documentKind
+    || renewal.renewalDate.trim()
     || renewal.leaseStartDate.trim()
     || renewal.leaseEndDate.trim()
     || renewal.monthlyRentMxn.trim()
@@ -411,6 +704,7 @@ function toRenewalFormState(renewal: ExternalContractRenewal): RenewalFormState 
   return {
     id: renewal.id,
     sequence: renewal.sequence,
+    documentKind: toRenewalDocumentKind(renewal.documentKind),
     renewalDate: renewal.renewalDate ?? "",
     leaseStartDate: renewal.leaseStartDate ?? "",
     leaseEndDate: renewal.leaseEndDate ?? "",
@@ -421,6 +715,39 @@ function toRenewalFormState(renewal: ExternalContractRenewal): RenewalFormState 
     documents: renewal.documents ?? [],
     notes: renewal.notes ?? ""
   };
+}
+
+function toMilestoneFormState(milestone: ExternalContractMilestone): MilestoneFormState {
+  return {
+    id: milestone.id,
+    source: milestone.source,
+    title: milestone.title,
+    dueDate: milestone.dueDate,
+    description: milestone.description ?? ""
+  };
+}
+
+function createExtractedMilestone(date: ExternalContractPrefillResult["importantDates"][number]): MilestoneFormState {
+  return {
+    source: "EXTRACTED",
+    title: date.title,
+    dueDate: date.dueDate,
+    description: date.description
+  };
+}
+
+function mergeMilestoneForms(current: MilestoneFormState[], incoming: MilestoneFormState[]) {
+  const seen = new Set<string>();
+
+  return [...current, ...incoming].filter((milestone) => {
+    const key = `${normalizeSearchValue(milestone.source)}|${normalizeSearchValue(milestone.title)}|${milestone.dueDate}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return Boolean(milestone.title.trim() && milestone.dueDate.trim());
+  });
 }
 
 function mergePrefillFields(current: ContractFormState, fields: ExternalContractPrefillResult["fields"]): ContractFormState {
@@ -434,6 +761,36 @@ function mergePrefillFields(current: ContractFormState, fields: ExternalContract
     leaseEndDate: fields.leaseEndDate || current.leaseEndDate,
     monthlyRentMxn: fields.monthlyRentMxn || current.monthlyRentMxn
   };
+}
+
+function mergeRenewalPrefillFields(
+  current: RenewalFormState,
+  fields: ExternalContractRenewalPrefillResult["fields"]
+): RenewalFormState {
+  const extractedNotes = fields.notes.trim();
+  const leaseEndDate = current.documentKind === "RENT_UPDATE_FORMAT" ? "" : fields.leaseEndDate || current.leaseEndDate;
+
+  return {
+    ...current,
+    renewalDate: fields.renewalDate || current.renewalDate,
+    leaseStartDate: fields.leaseStartDate || current.leaseStartDate,
+    leaseEndDate,
+    monthlyRentMxn: fields.monthlyRentMxn || current.monthlyRentMxn,
+    rentIncreasePct: fields.rentIncreasePct || current.rentIncreasePct,
+    notes: extractedNotes ? [current.notes, extractedNotes].filter(Boolean).join("\n") : current.notes
+  };
+}
+
+function isRentUpdateRenewal(renewal: RenewalFormState) {
+  return renewal.documentKind === "RENT_UPDATE_FORMAT";
+}
+
+function getRenewalDateLabel(renewal: RenewalFormState) {
+  return isRentUpdateRenewal(renewal) ? "Fecha de formato" : "Fecha de renovación";
+}
+
+function getRenewalStartDateLabel(renewal: RenewalFormState) {
+  return isRentUpdateRenewal(renewal) ? "Inicio de aplicación de nueva renta" : "Inicio de vigencia";
 }
 
 function deadlineStatus(value?: string) {
@@ -478,6 +835,166 @@ function getLatestRenewal(contract: ExternalContract) {
   return [...contract.renewals].sort((left, right) => right.sequence - left.sequence)[0];
 }
 
+function isValidDateKey(value?: string) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function isFutureOrToday(value?: string) {
+  return Boolean(isValidDateKey(value) && value! >= dateInputValue(new Date()));
+}
+
+function addYearsDateKey(value: string, years: number) {
+  const source = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(source.getTime())) {
+    return "";
+  }
+
+  const next = new Date(source);
+  next.setFullYear(source.getFullYear() + years);
+  return dateInputValue(next);
+}
+
+function nextAnnualDateFrom(value?: string) {
+  if (!isValidDateKey(value)) {
+    return "";
+  }
+
+  let next = value!.slice(0, 10);
+  const today = dateInputValue(new Date());
+  while (next < today) {
+    next = addYearsDateKey(next, 1);
+  }
+
+  return next;
+}
+
+function getLatestRenewalBasisDate(contract: ExternalContract) {
+  const datedRenewals = contract.renewals
+    .map((renewal) => getRenewalDisplayDate(renewal) || renewal.leaseStartDate)
+    .filter((value): value is string => isValidDateKey(value))
+    .sort((left, right) => right.localeCompare(left));
+
+  return datedRenewals[0] ?? contract.leaseStartDate;
+}
+
+function getNextRentIncreaseDate(contract: ExternalContract) {
+  if (isValidDateKey(contract.rentIncreaseDate)) {
+    return nextAnnualDateFrom(contract.rentIncreaseDate);
+  }
+
+  const basisDate = getLatestRenewalBasisDate(contract);
+  if (!isValidDateKey(basisDate)) {
+    return "";
+  }
+
+  return nextAnnualDateFrom(addYearsDateKey(basisDate, 1));
+}
+
+function baseContractMilestone(contract: ExternalContract, dueDate: string, title: string, kind: ContractMilestoneKind, description?: string): ContractMilestoneView {
+  return {
+    id: `${contract.id}-${kind}-${dueDate}-${normalizeSearchValue(title)}`,
+    contractId: contract.id,
+    contractNumber: contract.contractNumber,
+    contractTitle: contract.title,
+    clientName: contract.clientName,
+    propertyAddress: contract.propertyAddress ?? "",
+    dueDate,
+    title,
+    description,
+    kind,
+    source: "AUTOMATIC"
+  };
+}
+
+function getContractMilestones(contract: ExternalContract) {
+  const milestones: ContractMilestoneView[] = [];
+
+  if (isFutureOrToday(contract.renewalDate)) {
+    milestones.push(baseContractMilestone(contract, contract.renewalDate!, "Renovación del contrato", "renewal"));
+  }
+
+  contract.renewals.forEach((renewal) => {
+    const renewalDate = getRenewalDisplayDate(renewal);
+    if (isFutureOrToday(renewalDate)) {
+      milestones.push(baseContractMilestone(contract, renewalDate!, `${renewalLabel(renewal.sequence - 1)}`, "renewal"));
+    }
+
+    if (isFutureOrToday(renewal.leaseEndDate)) {
+      milestones.push(baseContractMilestone(contract, renewal.leaseEndDate!, `Fin de vigencia - ${renewalLabel(renewal.sequence - 1)}`, "lease-end"));
+    }
+  });
+
+  if (isFutureOrToday(contract.leaseEndDate)) {
+    milestones.push(baseContractMilestone(contract, contract.leaseEndDate!, "Fin de vigencia del contrato", "lease-end"));
+  }
+
+  const rentIncreaseDate = getNextRentIncreaseDate(contract);
+  if (isFutureOrToday(rentIncreaseDate)) {
+    milestones.push(baseContractMilestone(contract, rentIncreaseDate, "Próximo aumento de renta", "rent-increase"));
+  }
+
+  (contract.milestones ?? []).forEach((milestone) => {
+    if (!isFutureOrToday(milestone.dueDate)) {
+      return;
+    }
+
+    milestones.push({
+      id: milestone.id,
+      contractId: contract.id,
+      contractNumber: contract.contractNumber,
+      contractTitle: contract.title,
+      clientName: contract.clientName,
+      propertyAddress: contract.propertyAddress ?? "",
+      dueDate: milestone.dueDate,
+      title: milestone.title,
+      description: milestone.description,
+      kind: milestone.source === "EXTRACTED" ? "extracted" : "manual",
+      source: milestone.source
+    });
+  });
+
+  return mergeContractMilestones(milestones);
+}
+
+function mergeContractMilestones(milestones: ContractMilestoneView[]) {
+  const grouped = new Map<string, ContractMilestoneView>();
+
+  milestones
+    .sort((left, right) => left.dueDate.localeCompare(right.dueDate) || left.title.localeCompare(right.title, "es-MX"))
+    .forEach((milestone) => {
+      const key = `${milestone.contractId}|${milestone.dueDate}`;
+      const existing = grouped.get(key);
+      if (!existing) {
+        grouped.set(key, milestone);
+        return;
+      }
+
+      const titleParts = new Set([...existing.title.split(" / "), milestone.title]);
+      const descriptions = [existing.description, milestone.description].filter(Boolean);
+      grouped.set(key, {
+        ...existing,
+        id: `${existing.id}-${milestone.id}`,
+        title: [...titleParts].join(" / "),
+        description: descriptions.length > 0 ? descriptions.join(" ") : undefined,
+        kind: existing.kind
+      });
+    });
+
+  return [...grouped.values()].sort((left, right) => left.dueDate.localeCompare(right.dueDate));
+}
+
+function milestoneKindLabel(kind: ContractMilestoneKind) {
+  const labels: Record<ContractMilestoneKind, string> = {
+    renewal: "Renovación",
+    "lease-end": "Fin de vigencia",
+    "rent-increase": "Aumento de renta",
+    manual: "Alerta manual",
+    extracted: "Fecha extraída"
+  };
+
+  return labels[kind];
+}
+
 function buildGeneratedFormat(contract: ExternalContract, templateId: FormatTemplateId, documentDate: string): GeneratedFormat {
   const todayLabel = formatLongDate(documentDate);
   const property = valueOrFallback(contract.propertyAddress, "el inmueble materia del contrato");
@@ -520,7 +1037,7 @@ function buildGeneratedFormat(contract: ExternalContract, templateId: FormatTemp
     paragraphs: [
       `Por medio de la presente se informa a ${tenant} que la renta correspondiente a ${property} sera actualizada conforme al contrato ${contract.contractNumber}.`,
       `La renta mensual vigente registrada es ${rent}. El porcentaje de aumento registrado es ${increase}, aplicable a partir del ${renewalDate}.`,
-      `La proxima fecha de renovacion registrada es ${renewalDate}. Las partes podran formalizar la actualizacion mediante addendum, aviso o convenio complementario.`
+      `La próxima fecha de renovación registrada es ${renewalDate}. Las partes podrán formalizar la actualización mediante addendum, aviso o convenio complementario.`
     ],
     signatures: [landlord, tenant]
   };
@@ -621,12 +1138,16 @@ export function ExternalContractsPage() {
   const [clientSearch, setClientSearch] = useState("");
   const [query, setQuery] = useState("");
   const [contractClientFilterId, setContractClientFilterId] = useState("");
+  const [contractStatusView, setContractStatusView] = useState<ExternalContractStatusView>("active");
   const [selectedContractId, setSelectedContractId] = useState("");
   const [managedRenewals, setManagedRenewals] = useState<RenewalFormState[]>([]);
+  const [manualAlertForm, setManualAlertForm] = useState<ManualAlertFormState>(initialManualAlertFormState);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingRenewals, setSavingRenewals] = useState(false);
+  const [savingManualAlert, setSavingManualAlert] = useState(false);
   const [prefillingContract, setPrefillingContract] = useState(false);
+  const [prefillingRenewalKey, setPrefillingRenewalKey] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [uploadingRenewalDocumentId, setUploadingRenewalDocumentId] = useState<string | null>(null);
   const [downloadingRenewalDocumentId, setDownloadingRenewalDocumentId] = useState<string | null>(null);
@@ -636,8 +1157,10 @@ export function ExternalContractsPage() {
   const [formatRenewalId, setFormatRenewalId] = useState(FORMAT_SCOPE_ORIGINAL);
   const [formatTemplateId, setFormatTemplateId] = useState<FormatTemplateId>("rent-increase");
   const [formatDateValue, setFormatDateValue] = useState(dateInputValue(new Date()));
+  const [rentUpdateFormatForm, setRentUpdateFormatForm] = useState<RentUpdateFormatFormState>(initialRentUpdateFormatFormState);
   const [generatingFormat, setGeneratingFormat] = useState(false);
   const [downloadingGeneratedDocumentId, setDownloadingGeneratedDocumentId] = useState<string | null>(null);
+  const [deletingGeneratedDocumentGroupKey, setDeletingGeneratedDocumentGroupKey] = useState<string | null>(null);
   const [contractPrefillNotes, setContractPrefillNotes] = useState<string[]>([]);
   const [flash, setFlash] = useState<FlashState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -679,18 +1202,31 @@ export function ExternalContractsPage() {
     void loadModule();
   }, [canRead, canWrite]);
 
+  const leaseContracts = useMemo(
+    () => contracts.filter((contract) => contract.contractType === "LEASE"),
+    [contracts]
+  );
+  const activeLeaseCount = useMemo(
+    () => leaseContracts.filter((contract) => contract.status === "ACTIVE").length,
+    [leaseContracts]
+  );
+  const archivedLeaseCount = useMemo(
+    () => leaseContracts.filter((contract) => contract.status !== "ACTIVE").length,
+    [leaseContracts]
+  );
+
   const filteredContracts = useMemo(() => {
     const search = normalizeSearchValue(query);
-    const leaseContracts = contracts.filter((contract) =>
-      contract.contractType === "LEASE"
+    const visibleContracts = leaseContracts.filter((contract) =>
+      (contractStatusView === "active" ? contract.status === "ACTIVE" : contract.status !== "ACTIVE")
       && (!contractClientFilterId || contract.clientId === contractClientFilterId)
     );
 
     if (!search) {
-      return sortContracts(leaseContracts);
+      return sortContracts(visibleContracts);
     }
 
-    return sortContracts(leaseContracts.filter((contract) => {
+    return sortContracts(visibleContracts.filter((contract) => {
       const haystack = normalizeSearchValue([
         contract.contractNumber,
         contract.title,
@@ -704,6 +1240,11 @@ export function ExternalContractsPage() {
         ...(contract.generatedDocuments ?? []).flatMap((document) => [
           document.templateTitle,
           document.originalFileName
+        ]),
+        ...(contract.milestones ?? []).flatMap((milestone) => [
+          milestone.title,
+          milestone.dueDate,
+          milestone.description
         ]),
         ...contract.renewals.flatMap((renewal) => [
           renewalLabel(renewal.sequence - 1),
@@ -720,27 +1261,43 @@ export function ExternalContractsPage() {
 
       return haystack.includes(search);
     }));
-  }, [contracts, contractClientFilterId, query]);
+  }, [contractClientFilterId, contractStatusView, leaseContracts, query]);
 
   const groupedContracts = useMemo(() => groupContractsByClient(filteredContracts), [filteredContracts]);
   const selectedManagedContract = useMemo(
     () => filteredContracts.find((contract) => contract.id === selectedContractId)
-      ?? filteredContracts[0]
-      ?? contracts.find((contract) => contract.id === selectedContractId)
-      ?? contracts[0],
-    [contracts, filteredContracts, selectedContractId]
+      ?? filteredContracts[0],
+    [filteredContracts, selectedContractId]
   );
   const selectedFormatContract = useMemo(
     () => selectedManagedContract ?? contracts.find((contract) => contract.id === formatContractId) ?? contracts[0],
     [contracts, formatContractId, selectedManagedContract]
   );
-  const selectedFormatRenewals = selectedFormatContract?.renewals ?? [];
+  const selectedFormatRenewals = useMemo(() => {
+    const storedRenewals = selectedFormatContract?.renewals ?? [];
+
+    if (!selectedFormatContract || selectedFormatContract.id !== selectedManagedContract?.id) {
+      return storedRenewals;
+    }
+
+    const retainedSavedRenewalIds = new Set(
+      managedRenewals
+        .map((renewal) => renewal.id)
+        .filter((id): id is string => Boolean(id))
+    );
+
+    return storedRenewals.filter((renewal) => retainedSavedRenewalIds.has(renewal.id));
+  }, [managedRenewals, selectedFormatContract, selectedManagedContract?.id]);
+  const latestSelectedFormatRenewal = useMemo(
+    () => [...selectedFormatRenewals].sort((left, right) => right.sequence - left.sequence)[0],
+    [selectedFormatRenewals]
+  );
   const selectedFormatRenewal = useMemo(
     () => formatRenewalId === FORMAT_SCOPE_ORIGINAL
       ? undefined
       : selectedFormatRenewals.find((renewal) => renewal.id === formatRenewalId)
-      ?? (selectedFormatContract ? getLatestRenewal(selectedFormatContract) : undefined),
-    [selectedFormatContract, selectedFormatRenewals, formatRenewalId]
+      ?? latestSelectedFormatRenewal,
+    [latestSelectedFormatRenewal, selectedFormatRenewals, formatRenewalId]
   );
   const inpcRowsAsc = useMemo(() => sortInpcAsc(inpcRecords), [inpcRecords]);
   const inpcRowsDesc = useMemo(() => sortInpcDesc(inpcRecords), [inpcRecords]);
@@ -759,6 +1316,10 @@ export function ExternalContractsPage() {
   const rentIncreaseCalculation = useMemo(
     () => calculateRentIncreaseFromInpc(inpcRecords, rentCalculator),
     [inpcRecords, rentCalculator]
+  );
+  const allContractMilestones = useMemo(
+    () => contracts.flatMap((contract) => getContractMilestones(contract)),
+    [contracts]
   );
 
   useEffect(() => {
@@ -792,6 +1353,7 @@ export function ExternalContractsPage() {
   useEffect(() => {
     if (!selectedFormatContract) {
       setFormatRenewalId(FORMAT_SCOPE_ORIGINAL);
+      setRentUpdateFormatForm(initialRentUpdateFormatFormState);
       return;
     }
 
@@ -800,13 +1362,39 @@ export function ExternalContractsPage() {
         return current;
       }
 
-      if (current && selectedFormatContract.renewals.some((renewal) => renewal.id === current)) {
+      if (current && selectedFormatRenewals.some((renewal) => renewal.id === current)) {
         return current;
       }
 
-      return getLatestRenewal(selectedFormatContract)?.id ?? FORMAT_SCOPE_ORIGINAL;
+      return latestSelectedFormatRenewal?.id ?? FORMAT_SCOPE_ORIGINAL;
     });
-  }, [selectedFormatContract]);
+  }, [latestSelectedFormatRenewal, selectedFormatContract, selectedFormatRenewals]);
+
+  useEffect(() => {
+    if (!selectedFormatContract || !selectedFormatRenewal) {
+      setRentUpdateFormatForm(initialRentUpdateFormatFormState);
+      return;
+    }
+
+    const preview = buildRentUpdateFormatPreview(
+      selectedFormatContract,
+      selectedFormatRenewal,
+      formatDateValue || dateInputValue(new Date()),
+      inpcRecords
+    );
+    const roundedSuggestion = preview.updatedRentMxn
+      ? Math.floor(preview.updatedRentMxn / 5) * 5
+      : undefined;
+
+    setRentUpdateFormatForm({
+      effectiveDate: preview.effectiveDate,
+      previousRentMxn: numberToInputValue(preview.previousRentMxn),
+      basePeriod: preview.basePeriod ?? "",
+      targetPeriod: preview.targetPeriod ?? "",
+      useRoundedRent: false,
+      roundedRentMxn: numberToInputValue(roundedSuggestion)
+    });
+  }, [selectedFormatContract?.id, selectedFormatRenewal?.id, inpcRecords]);
 
   const filteredClients = useMemo(() => {
     const search = normalizeSearchValue(clientSearch);
@@ -824,10 +1412,8 @@ export function ExternalContractsPage() {
     return matches;
   }, [clientSearch, clients, form.clientId]);
 
-  const activeCount = contracts.filter((contract) => contract.status === "ACTIVE").length;
-  const upcomingCount = contracts.filter((contract) =>
-    contract.renewals.some((renewal) => deadlineStatus(getRenewalDisplayDate(renewal)) === "soon")
-  ).length;
+  const activeCount = activeLeaseCount;
+  const upcomingCount = allContractMilestones.length;
 
   function updateForm<K extends keyof ContractFormState>(key: K, value: ContractFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -841,6 +1427,7 @@ export function ExternalContractsPage() {
     setClientSearch("");
     setContractPrefillNotes([]);
     setActiveRenewalIndex(0);
+    setManualAlertForm(initialManualAlertFormState);
     setFileInputKey((current) => current + 1);
     if (clearFlash) {
       setFlash(null);
@@ -871,7 +1458,8 @@ export function ExternalContractsPage() {
       monthlyRentMxn: contract.monthlyRentMxn ? String(contract.monthlyRentMxn) : "",
       status: contract.status,
       notes: contract.notes ?? "",
-      renewals: contract.renewals.map(toRenewalFormState)
+      renewals: contract.renewals.map(toRenewalFormState),
+      milestones: (contract.milestones ?? []).map(toMilestoneFormState)
     });
     setClientSearch("");
     setSelectedFile(null);
@@ -888,7 +1476,7 @@ export function ExternalContractsPage() {
     }
 
     if (!isSupportedContractPrefillFile(file)) {
-      setFlash({ tone: "error", text: "La extraccion con IA acepta PDF o DOCX." });
+      setFlash({ tone: "error", text: "La extracción con IA acepta PDF o DOCX." });
       return;
     }
 
@@ -901,7 +1489,10 @@ export function ExternalContractsPage() {
         fileMimeType: file.type || "application/octet-stream",
         fileBase64: await fileToBase64(file)
       });
-      setForm((current) => mergePrefillFields(current, result.fields));
+      setForm((current) => ({
+        ...mergePrefillFields(current, result.fields),
+        milestones: mergeMilestoneForms(current.milestones, result.importantDates.map(createExtractedMilestone))
+      }));
       setContractPrefillNotes(result.notes);
       setFlash({ tone: "success", text: "Datos del contrato extraidos con IA. Revisa y ajusta antes de guardar." });
     } catch (error) {
@@ -931,6 +1522,10 @@ export function ExternalContractsPage() {
   }
 
   function removeRenewal(index: number) {
+    if (!window.confirm(`¿Quitar ${renewalLabel(index).toLowerCase()}?`)) {
+      return;
+    }
+
     setForm((current) => {
       const renewals = current.renewals.filter((_renewal, renewalIndex) => renewalIndex !== index);
       setActiveRenewalIndex((currentIndex) => Math.min(currentIndex, Math.max(renewals.length - 1, 0)));
@@ -958,27 +1553,76 @@ export function ExternalContractsPage() {
     setFlash(null);
   }
 
-  function removeManagedRenewal(index: number) {
-    setManagedRenewals((current) => {
-      const renewals = current.filter((_renewal, renewalIndex) => renewalIndex !== index);
-      setActiveRenewalIndex((currentIndex) => Math.min(currentIndex, Math.max(renewals.length - 1, 0)));
-      return renewals;
-    });
+  async function removeManagedRenewal(index: number) {
+    const renewalToRemove = managedRenewals[index];
+    if (!window.confirm(`¿Quitar ${renewalLabel(index).toLowerCase()}? Esta acción eliminará la renovación del sistema.`)) {
+      return;
+    }
+
+    const nextRenewals = managedRenewals.filter((_renewal, renewalIndex) => renewalIndex !== index);
+
+    if (!selectedManagedContract || !renewalToRemove?.id) {
+      setManagedRenewals(nextRenewals);
+      setActiveRenewalIndex((currentIndex) => Math.min(currentIndex, Math.max(nextRenewals.length - 1, 0)));
+      setFlash(null);
+      return;
+    }
+
+    setSavingRenewals(true);
     setFlash(null);
+
+    try {
+      const updated = await apiPatch<ExternalContract>(
+        `/external-contracts/${encodeURIComponent(selectedManagedContract.id)}`,
+        { renewals: buildRenewalPayload(nextRenewals) }
+      );
+      const updatedRenewals = updated.renewals.map(toRenewalFormState);
+
+      setContracts((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setManagedRenewals(updatedRenewals);
+      setActiveRenewalIndex((currentIndex) => Math.min(currentIndex, Math.max(updatedRenewals.length - 1, 0)));
+      setFormatRenewalId((current) =>
+        current === renewalToRemove.id
+          ? getLatestRenewal(updated)?.id ?? FORMAT_SCOPE_ORIGINAL
+          : current
+      );
+      setFlash({ tone: "success", text: "Renovación eliminada del contrato." });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSavingRenewals(false);
+    }
   }
 
   function buildRenewalPayload(renewals: RenewalFormState[]) {
     return renewals.map((renewal, index) => ({
       id: renewal.id ?? null,
+      documentKind: renewal.documentKind,
       renewalDate: renewal.renewalDate || null,
       leaseStartDate: renewal.leaseStartDate || null,
-      leaseEndDate: renewal.leaseEndDate || null,
+      leaseEndDate: isRentUpdateRenewal(renewal) ? null : renewal.leaseEndDate || null,
       monthlyRentMxn: parseOptionalNumber(renewal.monthlyRentMxn, `El monto de renta de ${renewalLabel(index).toLowerCase()}`),
       rentIncreasePct: parseOptionalNumber(renewal.rentIncreasePct, `El porcentaje de aumento de ${renewalLabel(index).toLowerCase()}`),
       inpcBasePeriod: renewal.inpcBasePeriod || null,
       inpcTargetPeriod: renewal.inpcTargetPeriod || null,
       notes: renewal.notes
     }));
+  }
+
+  function buildMilestonePayload(milestones: MilestoneFormState[]) {
+    return milestones
+      .filter((milestone) => milestone.title.trim() && milestone.dueDate.trim())
+      .map((milestone) => ({
+        id: milestone.id ?? null,
+        source: milestone.source,
+        title: milestone.title.trim(),
+        dueDate: milestone.dueDate,
+        description: milestone.description.trim() || null
+      }));
+  }
+
+  function contractMilestonesToForm(contract: ExternalContract) {
+    return (contract.milestones ?? []).map(toMilestoneFormState);
   }
 
   async function saveManagedRenewals() {
@@ -1002,6 +1646,84 @@ export function ExternalContractsPage() {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
       setSavingRenewals(false);
+    }
+  }
+
+  function updateManualAlertForm<K extends keyof ManualAlertFormState>(key: K, value: ManualAlertFormState[K]) {
+    setManualAlertForm((current) => ({ ...current, [key]: value }));
+    setFlash(null);
+  }
+
+  function updateRentUpdateFormatForm<K extends keyof RentUpdateFormatFormState>(
+    key: K,
+    value: RentUpdateFormatFormState[K]
+  ) {
+    setRentUpdateFormatForm((current) => ({ ...current, [key]: value }));
+    setFlash(null);
+  }
+
+  async function saveManualAlert(contract: ExternalContract) {
+    if (!canWrite) {
+      return;
+    }
+
+    if (!manualAlertForm.title.trim() || !manualAlertForm.dueDate.trim()) {
+      setFlash({ tone: "error", text: "Escribe el titulo y la fecha de la alerta." });
+      return;
+    }
+
+    setSavingManualAlert(true);
+    setFlash(null);
+
+    try {
+      const milestones = [
+        ...contractMilestonesToForm(contract),
+        {
+          source: "MANUAL" as const,
+          title: manualAlertForm.title,
+          dueDate: manualAlertForm.dueDate,
+          description: manualAlertForm.description
+        }
+      ];
+      const updated = await apiPatch<ExternalContract>(
+        `/external-contracts/${encodeURIComponent(contract.id)}`,
+        { milestones: buildMilestonePayload(milestones) }
+      );
+
+      setContracts((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setManualAlertForm(initialManualAlertFormState);
+      setFlash({ tone: "success", text: "Alerta agregada al contrato." });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSavingManualAlert(false);
+    }
+  }
+
+  async function removeContractMilestone(contract: ExternalContract, milestoneId: string) {
+    if (!canWrite) {
+      return;
+    }
+
+    setSavingManualAlert(true);
+    setFlash(null);
+
+    try {
+      const updated = await apiPatch<ExternalContract>(
+        `/external-contracts/${encodeURIComponent(contract.id)}`,
+        {
+          milestones: buildMilestonePayload(
+            contractMilestonesToForm(contract).filter((milestone) => milestone.id !== milestoneId)
+          )
+        }
+      );
+
+      setContracts((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setFlash({ tone: "success", text: "Alerta retirada del contrato." });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSavingManualAlert(false);
     }
   }
 
@@ -1051,15 +1773,17 @@ export function ExternalContractsPage() {
         monthlyRentMxn: parseOptionalNumber(form.monthlyRentMxn, "La renta mensual"),
         notes: form.notes,
         renewals: form.renewals.map((renewal, index) => ({
+          documentKind: renewal.documentKind,
           renewalDate: renewal.renewalDate || null,
           leaseStartDate: renewal.leaseStartDate || null,
-          leaseEndDate: renewal.leaseEndDate || null,
+          leaseEndDate: isRentUpdateRenewal(renewal) ? null : renewal.leaseEndDate || null,
           monthlyRentMxn: parseOptionalNumber(renewal.monthlyRentMxn, `El monto de renta de ${renewalLabel(index).toLowerCase()}`),
           rentIncreasePct: parseOptionalNumber(renewal.rentIncreasePct, `El porcentaje de aumento de ${renewalLabel(index).toLowerCase()}`),
           inpcBasePeriod: renewal.inpcBasePeriod || null,
           inpcTargetPeriod: renewal.inpcTargetPeriod || null,
           notes: renewal.notes
         })),
+        milestones: buildMilestonePayload(form.milestones),
         originalFileName: selectedFile?.name,
         fileMimeType: selectedFile?.type || undefined,
         fileBase64
@@ -1119,29 +1843,76 @@ export function ExternalContractsPage() {
     }
   }
 
-  async function handleRenewalDocumentUpload(
+  async function handleGeneratedDocumentGroupDelete(contract: ExternalContract, group: GeneratedDocumentGroup) {
+    const documents = getGeneratedDocumentGroupDocuments(group);
+
+    if (documents.length === 0) {
+      return;
+    }
+
+    if (!window.confirm(`Seguro que deseas borrar el formato "${group.templateTitle}"? Se eliminarán sus archivos Word y PDF guardados.`)) {
+      return;
+    }
+
+    setDeletingGeneratedDocumentGroupKey(group.key);
+    setFlash(null);
+
+    try {
+      const results = await Promise.allSettled(
+        documents.map((document) =>
+          apiDelete(`/external-contracts/${encodeURIComponent(contract.id)}/generated-documents/${encodeURIComponent(document.id)}`)
+        )
+      );
+      const deletedIds = new Set(
+        documents
+          .filter((_, index) => results[index]?.status === "fulfilled")
+          .map((document) => document.id)
+      );
+      const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+
+      if (deletedIds.size > 0) {
+        setContracts((current) => current.map((entry) => entry.id === contract.id
+          ? {
+              ...entry,
+              generatedDocuments: (entry.generatedDocuments ?? []).filter((document) => !deletedIds.has(document.id))
+            }
+          : entry
+        ));
+      }
+
+      if (failed) {
+        setFlash({ tone: "error", text: `No se pudieron borrar todos los archivos del formato. ${toErrorMessage(failed.reason)}` });
+        return;
+      }
+
+      setFlash({ tone: "success", text: "Formato borrado." });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setDeletingGeneratedDocumentGroupKey(null);
+    }
+  }
+
+  async function uploadRenewalDocument(
     contract: ExternalContract,
     renewal: RenewalFormState,
     file: File | null
-  ) {
+  ): Promise<ExternalContractRenewalDocument | null> {
     if (!file || !renewal.id) {
-      setFlash({ tone: "error", text: "Guarda la renovacion antes de cargar documentos." });
-      return;
+      return null;
     }
 
     if (!isSupportedContractFile(file)) {
-      setFlash({ tone: "error", text: "El documento debe ser Word (.doc/.docx) o PDF." });
-      return;
+      throw new Error("El documento debe ser Word (.doc/.docx) o PDF.");
     }
 
     setUploadingRenewalDocumentId(renewal.id);
-    setFlash(null);
 
     try {
       const document = await apiPost<ExternalContractRenewalDocument>(
         `/external-contracts/${encodeURIComponent(contract.id)}/renewals/${encodeURIComponent(renewal.id)}/documents`,
         {
-          documentType: "RENEWAL_SUPPORT",
+          documentType: renewal.documentKind,
           originalFileName: file.name,
           fileMimeType: file.type || "application/octet-stream",
           fileBase64: await fileToBase64(file)
@@ -1173,11 +1944,81 @@ export function ExternalContractsPage() {
           }
         : entry
       ));
-      setFlash({ tone: "success", text: "Documento de renovacion cargado." });
-    } catch (error) {
-      setFlash({ tone: "error", text: toErrorMessage(error) });
+      return document;
     } finally {
       setUploadingRenewalDocumentId(null);
+    }
+  }
+
+  async function handleRenewalDocumentSelection(
+    source: "form" | "managed",
+    index: number,
+    renewal: RenewalFormState,
+    file: File | null,
+    contract?: ExternalContract
+  ) {
+    if (!file) {
+      return;
+    }
+
+    if (!isSupportedContractFile(file)) {
+      setFlash({ tone: "error", text: "El documento debe ser Word (.doc/.docx) o PDF." });
+      return;
+    }
+
+    const renewalKey = `${source}-${renewal.id ?? index}`;
+    let uploadedDocument = false;
+    setPrefillingRenewalKey(renewalKey);
+    setFlash(null);
+
+    try {
+      if (contract && renewal.id) {
+        uploadedDocument = Boolean(await uploadRenewalDocument(contract, renewal, file));
+      }
+
+      if (!isSupportedContractPrefillFile(file)) {
+        setFlash({
+          tone: uploadedDocument ? "success" : "error",
+          text: uploadedDocument
+            ? "Documento de renovación cargado. La extracción con IA acepta PDF o DOCX."
+            : "La extracción con IA acepta PDF o DOCX."
+        });
+        return;
+      }
+
+      const result = await apiPost<ExternalContractRenewalPrefillResult>("/external-contracts/renewals/prefill", {
+        documentKind: renewal.documentKind,
+        originalFileName: file.name,
+        fileMimeType: file.type || "application/octet-stream",
+        fileBase64: await fileToBase64(file)
+      });
+
+      if (source === "form") {
+        setForm((current) => ({
+          ...current,
+          renewals: current.renewals.map((entry, entryIndex) =>
+            entryIndex === index ? mergeRenewalPrefillFields(entry, result.fields) : entry
+          )
+        }));
+      } else {
+        setManagedRenewals((current) => current.map((entry, entryIndex) =>
+          entryIndex === index ? mergeRenewalPrefillFields(entry, result.fields) : entry
+        ));
+      }
+
+      setFlash({
+        tone: "success",
+        text: uploadedDocument
+          ? "Documento de renovación cargado y datos extraídos con IA."
+          : "Datos de la renovación extraídos con IA. Guarda la renovación para conservarlos."
+      });
+    } catch (error) {
+      setFlash({
+        tone: "error",
+        text: uploadedDocument ? `El documento se cargo, pero ${toErrorMessage(error)}` : toErrorMessage(error)
+      });
+    } finally {
+      setPrefillingRenewalKey(null);
     }
   }
 
@@ -1235,6 +2076,106 @@ export function ExternalContractsPage() {
     }
   }
 
+  function buildRentUpdateFormatPayload(preview: RentUpdateFormatPreview) {
+    const documentDate = formatDateValue || dateInputValue(new Date());
+    const previousRentMxn = parseEditableNumber(rentUpdateFormatForm.previousRentMxn);
+    const roundedRentMxn = rentUpdateFormatForm.useRoundedRent
+      ? parseEditableNumber(rentUpdateFormatForm.roundedRentMxn)
+      : undefined;
+    const basePeriod = rentUpdateFormatForm.basePeriod || preview.basePeriod || "";
+    const targetPeriod = rentUpdateFormatForm.targetPeriod || preview.targetPeriod || "";
+
+    if (!isValidDateKey(documentDate)) {
+      throw new Error("Selecciona una fecha valida para el formato.");
+    }
+
+    if (!isValidDateKey(rentUpdateFormatForm.effectiveDate)) {
+      throw new Error("Selecciona el inicio de nueva renta.");
+    }
+
+    if (!previousRentMxn) {
+      throw new Error("Captura la renta anterior.");
+    }
+
+    if (!basePeriod || !preview.baseInpc) {
+      throw new Error("Selecciona un INPC base cargado en el sistema.");
+    }
+
+    if (!targetPeriod || !preview.targetInpc) {
+      throw new Error("Selecciona un INPC de actualizacion cargado en el sistema.");
+    }
+
+    if (!preview.updatedRentMxn) {
+      throw new Error("No se pudo calcular la nueva renta con los INPC seleccionados.");
+    }
+
+    if (rentUpdateFormatForm.useRoundedRent && !roundedRentMxn) {
+      throw new Error("Captura la renta redondeada que se presentara al arrendatario.");
+    }
+
+    return {
+      renewalId: selectedFormatRenewal?.id,
+      documentDate,
+      effectiveDate: rentUpdateFormatForm.effectiveDate,
+      previousRentMxn,
+      inpcBasePeriod: basePeriod,
+      inpcTargetPeriod: targetPeriod,
+      useRoundedRent: rentUpdateFormatForm.useRoundedRent,
+      roundedRentMxn: roundedRentMxn ?? null
+    };
+  }
+
+  function getRentUpdateFormatIssue(preview: RentUpdateFormatPreview | null, scopeValue: string) {
+    if (!selectedManagedContract) {
+      return "Selecciona un contrato para generar el formato.";
+    }
+
+    if (!canWrite) {
+      return "Tu perfil no tiene permiso para generar formatos guardados.";
+    }
+
+    if (scopeValue === FORMAT_SCOPE_ORIGINAL || !selectedFormatRenewal) {
+      return "Selecciona una renovación guardada como documento base.";
+    }
+
+    if (!preview) {
+      return "No se pudo preparar la información del formato.";
+    }
+
+    if (!isValidDateKey(formatDateValue || dateInputValue(new Date()))) {
+      return "Selecciona una fecha válida para el formato.";
+    }
+
+    if (!isValidDateKey(rentUpdateFormatForm.effectiveDate)) {
+      return "Selecciona el inicio de nueva renta.";
+    }
+
+    if (!parseEditableNumber(rentUpdateFormatForm.previousRentMxn)) {
+      return "Captura la renta anterior.";
+    }
+
+    const basePeriod = rentUpdateFormatForm.basePeriod || preview.basePeriod || "";
+    const targetPeriod = rentUpdateFormatForm.targetPeriod || preview.targetPeriod || "";
+
+    if (!basePeriod || !preview.baseInpc) {
+      return "Selecciona un INPC base cargado en el sistema.";
+    }
+
+    if (!targetPeriod || !preview.targetInpc) {
+      return "Selecciona un INPC de actualización cargado en el sistema.";
+    }
+
+    if (!preview.updatedRentMxn) {
+      return "No se pudo calcular la nueva renta con los INPC seleccionados.";
+    }
+
+    if (rentUpdateFormatForm.useRoundedRent && !parseEditableNumber(rentUpdateFormatForm.roundedRentMxn)) {
+      return "Captura la renta redondeada que se presentará al arrendatario.";
+    }
+
+    return null;
+  }
+
   async function handleFormatDownload(output: "word" | "pdf") {
     if (!selectedFormatContract) {
       setFlash({ tone: "error", text: "Selecciona un contrato para generar el formato." });
@@ -1247,13 +2188,8 @@ export function ExternalContractsPage() {
         return;
       }
 
-      if (output !== "word") {
-        setFlash({ tone: "error", text: "El formato base de actualizacion de renta se genera en Word." });
-        return;
-      }
-
       if (!selectedFormatRenewal) {
-        setFlash({ tone: "error", text: "Selecciona o agrega una renovacion para generar el formato." });
+        setFlash({ tone: "error", text: "Selecciona o agrega una renovación para generar el formato." });
         return;
       }
 
@@ -1261,30 +2197,42 @@ export function ExternalContractsPage() {
       setFlash(null);
 
       try {
-        const generatedDocument = await apiPost<ExternalContractGeneratedDocument>(
-          `/external-contracts/${encodeURIComponent(selectedFormatContract.id)}/formats/rent-increase`,
-          {
-            renewalId: selectedFormatRenewal.id,
-            documentDate: formatDateValue || null
-          }
+        const rentUpdatePreview = buildRentUpdateFormatPreview(
+          selectedFormatContract,
+          selectedFormatRenewal,
+          formatDateValue || dateInputValue(new Date()),
+          inpcRecords,
+          rentUpdateFormatForm
         );
+        const generated = await apiPost<RentUpdateFormatGenerationResult>(
+          `/external-contracts/${encodeURIComponent(selectedFormatContract.id)}/formats/rent-increase`,
+          buildRentUpdateFormatPayload(rentUpdatePreview)
+        );
+        const generatedDocuments = [generated.wordDocument, generated.pdfDocument];
+        const downloadDocument = output === "pdf" ? generated.pdfDocument : generated.wordDocument;
 
         setContracts((current) => current.map((entry) => entry.id === selectedFormatContract.id
           ? {
               ...entry,
               generatedDocuments: [
-                generatedDocument,
-                ...(entry.generatedDocuments ?? []).filter((document) => document.id !== generatedDocument.id)
+                ...generatedDocuments,
+                ...(entry.generatedDocuments ?? []).filter((document) =>
+                  !generatedDocuments.some((generatedDocument) => generatedDocument.id === document.id)
+                )
               ]
             }
           : entry
         ));
 
         const { blob, filename } = await apiDownload(
-          `/external-contracts/${encodeURIComponent(selectedFormatContract.id)}/generated-documents/${encodeURIComponent(generatedDocument.id)}`
+          `/external-contracts/${encodeURIComponent(selectedFormatContract.id)}/generated-documents/${encodeURIComponent(downloadDocument.id)}`
         );
-        downloadBlobFile(blob, filename ?? generatedDocument.originalFileName);
-        setFlash({ tone: "success", text: "Formato de actualizacion de renta generado y guardado con el contrato." });
+        downloadBlobFile(blob, filename ?? downloadDocument.originalFileName);
+        await loadModule();
+        if (generated.wordDocument.renewalId) {
+          setFormatRenewalId(generated.wordDocument.renewalId);
+        }
+        setFlash({ tone: "success", text: "Formato de actualización de renta generado y guardado con Word y PDF." });
       } catch (error) {
         setFlash({ tone: "error", text: toErrorMessage(error) });
       } finally {
@@ -1314,6 +2262,70 @@ export function ExternalContractsPage() {
     setFlash(null);
   }
 
+  function renderRenewalDocumentKindField(
+    source: "form" | "managed",
+    index: number,
+    renewal: RenewalFormState,
+    disabled: boolean
+  ) {
+    return (
+      <label className="form-field">
+        <span>Documento a cargar</span>
+        <select
+          value={renewal.documentKind}
+          onChange={(event) => {
+            const value = toRenewalDocumentKind(event.target.value);
+            if (source === "form") {
+              updateRenewal(index, "documentKind", value);
+            } else {
+              updateManagedRenewal(index, "documentKind", value);
+            }
+          }}
+          disabled={disabled}
+        >
+          {renewalDocumentKindOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  function renderRenewalExtractionPanel(
+    source: "form" | "managed",
+    index: number,
+    renewal: RenewalFormState,
+    disabled: boolean,
+    contract?: ExternalContract
+  ) {
+    const renewalKey = `${source}-${renewal.id ?? index}`;
+    const busy = prefillingRenewalKey === renewalKey || uploadingRenewalDocumentId === renewal.id;
+
+    return (
+      <div className="external-contract-renewal-extraction internal-contracts-wide-field">
+        <div>
+          <strong>Documento para extraer datos</strong>
+          <span>{renewalDocumentKindLabels[renewal.documentKind]}</span>
+        </div>
+        <label className={`secondary-button external-contract-renewal-document-upload ${disabled || busy ? "is-disabled" : ""}`}>
+          {busy ? "Procesando..." : "Cargar documento"}
+          <input
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            disabled={disabled || busy}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0] ?? null;
+              void handleRenewalDocumentSelection(source, index, renewal, file, contract);
+              event.currentTarget.value = "";
+            }}
+          />
+        </label>
+      </div>
+    );
+  }
+
   function renderRenewalsEditor() {
     const activeRenewal = form.renewals[activeRenewalIndex];
 
@@ -1324,13 +2336,13 @@ export function ExternalContractsPage() {
             <h3>Renovaciones</h3>
             <span>{form.renewals.length} registrada{form.renewals.length === 1 ? "" : "s"}</span>
           </div>
-          <button className="secondary-button" type="button" onClick={addRenewal} disabled={saving || prefillingContract}>
-            Agregar renovacion
+          <button className="secondary-button" type="button" onClick={addRenewal} disabled={saving || prefillingContract || Boolean(prefillingRenewalKey)}>
+            Agregar renovación
           </button>
         </div>
 
         {form.renewals.length === 0 ? (
-          <div className="centered-inline-message">Aun no hay renovaciones cargadas para este contrato.</div>
+          <div className="centered-inline-message">Aún no hay renovaciones cargadas para este contrato.</div>
         ) : (
           <>
             <div className="external-contract-renewal-tabs" role="tablist" aria-label="Renovaciones del contrato">
@@ -1349,47 +2361,67 @@ export function ExternalContractsPage() {
 
             {activeRenewal ? (
               <div className="external-contract-renewal-fields">
+                {renderRenewalDocumentKindField(
+                  "form",
+                  activeRenewalIndex,
+                  activeRenewal,
+                  saving || prefillingContract || Boolean(prefillingRenewalKey)
+                )}
+
+                {renderRenewalExtractionPanel(
+                  "form",
+                  activeRenewalIndex,
+                  activeRenewal,
+                  saving || prefillingContract
+                )}
+
                 <label className="form-field">
-                  <span>Fecha de renovacion</span>
+                  <span>{getRenewalDateLabel(activeRenewal)}</span>
                   <input
                     type="date"
                     value={activeRenewal.renewalDate}
                     onChange={(event) => updateRenewal(activeRenewalIndex, "renewalDate", event.target.value)}
-                    disabled={saving}
+                    disabled={saving || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
                 <label className="form-field">
-                  <span>Inicio de vigencia</span>
+                  <span>{getRenewalStartDateLabel(activeRenewal)}</span>
                   <input
                     type="date"
                     value={activeRenewal.leaseStartDate}
                     onChange={(event) => updateRenewal(activeRenewalIndex, "leaseStartDate", event.target.value)}
-                    disabled={saving}
+                    disabled={saving || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
-                <label className="form-field">
-                  <span>Fin de vigencia</span>
-                  <input
-                    type="date"
-                    value={activeRenewal.leaseEndDate}
-                    onChange={(event) => updateRenewal(activeRenewalIndex, "leaseEndDate", event.target.value)}
-                    disabled={saving}
-                  />
-                </label>
+                {!isRentUpdateRenewal(activeRenewal) ? (
+                  <label className="form-field">
+                    <span>Fin de vigencia</span>
+                    <input
+                      type="date"
+                      value={activeRenewal.leaseEndDate}
+                      onChange={(event) => updateRenewal(activeRenewalIndex, "leaseEndDate", event.target.value)}
+                      disabled={saving || Boolean(prefillingRenewalKey)}
+                    />
+                  </label>
+                ) : null}
 
                 <label className="form-field">
                   <span>Monto de renta</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={activeRenewal.monthlyRentMxn}
-                    onChange={(event) => updateRenewal(activeRenewalIndex, "monthlyRentMxn", event.target.value)}
-                    placeholder="0.00"
-                    disabled={saving}
-                  />
+                  <div className="money-input-control has-suffix">
+                    <span className="money-input-prefix">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={activeRenewal.monthlyRentMxn}
+                      onChange={(event) => updateRenewal(activeRenewalIndex, "monthlyRentMxn", event.target.value)}
+                      placeholder="0.00"
+                      disabled={saving || Boolean(prefillingRenewalKey)}
+                    />
+                    <span className="money-input-suffix">MXN</span>
+                  </div>
                 </label>
 
                 <label className="form-field">
@@ -1401,7 +2433,7 @@ export function ExternalContractsPage() {
                     value={activeRenewal.rentIncreasePct}
                     onChange={(event) => updateRenewal(activeRenewalIndex, "rentIncreasePct", event.target.value)}
                     placeholder="0"
-                    disabled={saving}
+                    disabled={saving || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
@@ -1410,7 +2442,7 @@ export function ExternalContractsPage() {
                   <select
                     value={activeRenewal.inpcBasePeriod}
                     onChange={(event) => updateRenewal(activeRenewalIndex, "inpcBasePeriod", event.target.value)}
-                    disabled={saving || inpcRowsAsc.length === 0}
+                    disabled={saving || Boolean(prefillingRenewalKey) || inpcRowsAsc.length === 0}
                   >
                     <option value="">-- No aplicar --</option>
                     {inpcRowsAsc.map((record) => (
@@ -1422,11 +2454,11 @@ export function ExternalContractsPage() {
                 </label>
 
                 <label className="form-field">
-                  <span>INPC actualizacion</span>
+                  <span>INPC actualización</span>
                   <select
                     value={activeRenewal.inpcTargetPeriod}
                     onChange={(event) => updateRenewal(activeRenewalIndex, "inpcTargetPeriod", event.target.value)}
-                    disabled={saving || inpcRowsAsc.length === 0}
+                    disabled={saving || Boolean(prefillingRenewalKey) || inpcRowsAsc.length === 0}
                   >
                     <option value="">-- No aplicar --</option>
                     {inpcRowsAsc.map((record) => (
@@ -1442,8 +2474,8 @@ export function ExternalContractsPage() {
                   <textarea
                     value={activeRenewal.notes}
                     onChange={(event) => updateRenewal(activeRenewalIndex, "notes", event.target.value)}
-                    placeholder="Observaciones de esta renovacion..."
-                    disabled={saving}
+                    placeholder="Observaciones de esta renovación..."
+                    disabled={saving || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
@@ -1452,9 +2484,9 @@ export function ExternalContractsPage() {
                     className="danger-button"
                     type="button"
                     onClick={() => removeRenewal(activeRenewalIndex)}
-                    disabled={saving || prefillingContract}
+                    disabled={saving || prefillingContract || Boolean(prefillingRenewalKey)}
                   >
-                    Quitar renovacion
+                    Quitar renovación
                   </button>
                 </div>
               </div>
@@ -1480,14 +2512,14 @@ export function ExternalContractsPage() {
             <span>{managedRenewals.length} registrada{managedRenewals.length === 1 ? "" : "s"}</span>
           </div>
           {canWrite ? (
-            <button className="secondary-button" type="button" onClick={addManagedRenewal} disabled={savingRenewals}>
-              Agregar renovacion
+            <button className="secondary-button" type="button" onClick={addManagedRenewal} disabled={savingRenewals || Boolean(prefillingRenewalKey)}>
+              Agregar renovación
             </button>
           ) : null}
         </div>
 
         {managedRenewals.length === 0 ? (
-          <div className="centered-inline-message">Aun no hay renovaciones cargadas para este contrato.</div>
+          <div className="centered-inline-message">Aún no hay renovaciones cargadas para este contrato.</div>
         ) : (
           <>
             <div className="external-contract-renewal-tabs" role="tablist" aria-label="Renovaciones del contrato cargado">
@@ -1497,7 +2529,7 @@ export function ExternalContractsPage() {
                   type="button"
                   className={`external-contract-renewal-tab ${activeRenewalIndex === index ? "is-active" : ""}`}
                   onClick={() => setActiveRenewalIndex(index)}
-                  disabled={savingRenewals}
+                  disabled={savingRenewals || Boolean(prefillingRenewalKey)}
                 >
                   {renewalLabel(index)}
                 </button>
@@ -1506,47 +2538,68 @@ export function ExternalContractsPage() {
 
             {activeRenewal ? (
               <div className="external-contract-renewal-fields">
+                {renderRenewalDocumentKindField(
+                  "managed",
+                  activeRenewalIndex,
+                  activeRenewal,
+                  savingRenewals || !canWrite || Boolean(prefillingRenewalKey)
+                )}
+
+                {renderRenewalExtractionPanel(
+                  "managed",
+                  activeRenewalIndex,
+                  activeRenewal,
+                  savingRenewals || !canWrite,
+                  selectedManagedContract
+                )}
+
                 <label className="form-field">
-                  <span>Fecha de renovacion</span>
+                  <span>{getRenewalDateLabel(activeRenewal)}</span>
                   <input
                     type="date"
                     value={activeRenewal.renewalDate}
                     onChange={(event) => updateManagedRenewal(activeRenewalIndex, "renewalDate", event.target.value)}
-                    disabled={savingRenewals || !canWrite}
+                    disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
                 <label className="form-field">
-                  <span>Inicio de vigencia</span>
+                  <span>{getRenewalStartDateLabel(activeRenewal)}</span>
                   <input
                     type="date"
                     value={activeRenewal.leaseStartDate}
                     onChange={(event) => updateManagedRenewal(activeRenewalIndex, "leaseStartDate", event.target.value)}
-                    disabled={savingRenewals || !canWrite}
+                    disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
-                <label className="form-field">
-                  <span>Fin de vigencia</span>
-                  <input
-                    type="date"
-                    value={activeRenewal.leaseEndDate}
-                    onChange={(event) => updateManagedRenewal(activeRenewalIndex, "leaseEndDate", event.target.value)}
-                    disabled={savingRenewals || !canWrite}
-                  />
-                </label>
+                {!isRentUpdateRenewal(activeRenewal) ? (
+                  <label className="form-field">
+                    <span>Fin de vigencia</span>
+                    <input
+                      type="date"
+                      value={activeRenewal.leaseEndDate}
+                      onChange={(event) => updateManagedRenewal(activeRenewalIndex, "leaseEndDate", event.target.value)}
+                      disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey)}
+                    />
+                  </label>
+                ) : null}
 
                 <label className="form-field">
                   <span>Monto de renta</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={activeRenewal.monthlyRentMxn}
-                    onChange={(event) => updateManagedRenewal(activeRenewalIndex, "monthlyRentMxn", event.target.value)}
-                    placeholder="0.00"
-                    disabled={savingRenewals || !canWrite}
-                  />
+                  <div className="money-input-control has-suffix">
+                    <span className="money-input-prefix">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={activeRenewal.monthlyRentMxn}
+                      onChange={(event) => updateManagedRenewal(activeRenewalIndex, "monthlyRentMxn", event.target.value)}
+                      placeholder="0.00"
+                      disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey)}
+                    />
+                    <span className="money-input-suffix">MXN</span>
+                  </div>
                 </label>
 
                 <label className="form-field">
@@ -1558,7 +2611,7 @@ export function ExternalContractsPage() {
                     value={activeRenewal.rentIncreasePct}
                     onChange={(event) => updateManagedRenewal(activeRenewalIndex, "rentIncreasePct", event.target.value)}
                     placeholder="0"
-                    disabled={savingRenewals || !canWrite}
+                    disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
@@ -1567,7 +2620,7 @@ export function ExternalContractsPage() {
                   <select
                     value={activeRenewal.inpcBasePeriod}
                     onChange={(event) => updateManagedRenewal(activeRenewalIndex, "inpcBasePeriod", event.target.value)}
-                    disabled={savingRenewals || !canWrite || inpcRowsAsc.length === 0}
+                    disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey) || inpcRowsAsc.length === 0}
                   >
                     <option value="">-- No aplicar --</option>
                     {inpcRowsAsc.map((record) => (
@@ -1579,11 +2632,11 @@ export function ExternalContractsPage() {
                 </label>
 
                 <label className="form-field">
-                  <span>INPC actualizacion</span>
+                  <span>INPC actualización</span>
                   <select
                     value={activeRenewal.inpcTargetPeriod}
                     onChange={(event) => updateManagedRenewal(activeRenewalIndex, "inpcTargetPeriod", event.target.value)}
-                    disabled={savingRenewals || !canWrite || inpcRowsAsc.length === 0}
+                    disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey) || inpcRowsAsc.length === 0}
                   >
                     <option value="">-- No aplicar --</option>
                     {inpcRowsAsc.map((record) => (
@@ -1599,40 +2652,25 @@ export function ExternalContractsPage() {
                   <textarea
                     value={activeRenewal.notes}
                     onChange={(event) => updateManagedRenewal(activeRenewalIndex, "notes", event.target.value)}
-                    placeholder="Observaciones de esta renovacion..."
-                    disabled={savingRenewals || !canWrite}
+                    placeholder="Observaciones de esta renovación..."
+                    disabled={savingRenewals || !canWrite || Boolean(prefillingRenewalKey)}
                   />
                 </label>
 
                 <div className="external-contract-renewal-documents internal-contracts-wide-field">
                   <div className="external-contract-renewal-documents-head">
                     <div>
-                      <strong>Documentos de renovacion</strong>
+                      <strong>Documentos de renovación</strong>
                       <span>{activeRenewal.documents?.length ?? 0} archivo{(activeRenewal.documents?.length ?? 0) === 1 ? "" : "s"}</span>
                     </div>
-                    {canWrite ? (
-                      <label className={`secondary-button external-contract-renewal-document-upload ${!activeRenewal.id ? "is-disabled" : ""}`}>
-                        {uploadingRenewalDocumentId === activeRenewal.id ? "Cargando..." : "Cargar documento"}
-                        <input
-                          type="file"
-                          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          disabled={!activeRenewal.id || uploadingRenewalDocumentId === activeRenewal.id}
-                          onChange={(event) => {
-                            const file = event.currentTarget.files?.[0] ?? null;
-                            void handleRenewalDocumentUpload(selectedManagedContract, activeRenewal, file);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    ) : null}
                   </div>
 
                   {!activeRenewal.id ? (
-                    <small>Guarda la renovacion antes de cargar documentos.</small>
+                    <small>La carga se conservará cuando la renovación esté guardada.</small>
                   ) : null}
 
                   {(activeRenewal.documents ?? []).length === 0 ? (
-                    <small>No hay documentos cargados para esta renovacion.</small>
+                    <small>No hay documentos cargados para esta renovación.</small>
                   ) : (
                     <div className="external-contract-renewal-document-list">
                       {(activeRenewal.documents ?? []).map((document) => (
@@ -1661,17 +2699,17 @@ export function ExternalContractsPage() {
                       className="primary-button"
                       type="button"
                       onClick={() => void saveManagedRenewals()}
-                      disabled={savingRenewals}
+                      disabled={savingRenewals || Boolean(prefillingRenewalKey)}
                     >
-                      {savingRenewals ? "Guardando..." : "Guardar renovaciones"}
+                      {savingRenewals ? "Guardando..." : activeRenewal.id ? "Actualizar información" : "Guardar renovación"}
                     </button>
                     <button
                       className="danger-button"
                       type="button"
-                      onClick={() => removeManagedRenewal(activeRenewalIndex)}
-                      disabled={savingRenewals}
+                      onClick={() => void removeManagedRenewal(activeRenewalIndex)}
+                      disabled={savingRenewals || Boolean(prefillingRenewalKey)}
                     >
-                      Quitar renovacion
+                      Quitar renovación
                     </button>
                   </div>
                 ) : null}
@@ -1683,13 +2721,378 @@ export function ExternalContractsPage() {
     );
   }
 
+  function renderMilestoneRow(milestone: ContractMilestoneView, contract?: ExternalContract) {
+    const storedMilestone = contract?.milestones.find((entry) => entry.id === milestone.id);
+    const contractSummary = [milestone.contractTitle, milestone.propertyAddress].filter(Boolean).join(" · ") || milestone.clientName;
+    const contractSummaryTitle = [
+      milestone.contractNumber,
+      milestone.clientName,
+      milestone.contractTitle,
+      milestone.propertyAddress
+    ].filter(Boolean).join(" · ");
+
+    return (
+      <div className={`external-contract-milestone-row is-${milestone.kind}`} key={milestone.id}>
+        <div className="external-contract-milestone-date">
+          <strong>{formatDate(milestone.dueDate)}</strong>
+          <span>{milestoneKindLabel(milestone.kind)}</span>
+        </div>
+        <div className="external-contract-milestone-body">
+          <strong>{milestone.title}</strong>
+          {milestone.description ? <small>{milestone.description}</small> : null}
+        </div>
+        <div className="external-contract-milestone-summary" title={contractSummaryTitle}>
+          <strong>{milestone.contractNumber} · {milestone.clientName}</strong>
+          <span>{contractSummary}</span>
+        </div>
+        {contract && storedMilestone && canWrite ? (
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={savingManualAlert}
+            onClick={() => void removeContractMilestone(contract, storedMilestone.id)}
+          >
+            Quitar
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderContractNextActionPanel(contract: ExternalContract) {
+    const milestones = getContractMilestones(contract);
+    const nextMilestones = milestones.slice(0, 8);
+
+    return (
+      <div className="external-contract-next-actions">
+        <div className="external-contract-next-actions-head">
+          <div>
+            <strong>Hitos y alertas de este contrato</strong>
+            <span>{nextMilestones.length} hito{nextMilestones.length === 1 ? "" : "s"} futuro{nextMilestones.length === 1 ? "" : "s"}</span>
+          </div>
+        </div>
+
+        {nextMilestones.length === 0 ? (
+          <small>No hay hitos futuros registrados para este contrato.</small>
+        ) : (
+          <div className="external-contract-milestone-list">
+            {nextMilestones.map((milestone) => renderMilestoneRow(milestone, contract))}
+          </div>
+        )}
+
+        {canWrite ? (
+          <div className="external-contract-manual-alert">
+            <label className="form-field">
+              <span>Nueva alerta</span>
+              <input
+                value={manualAlertForm.title}
+                onChange={(event) => updateManualAlertForm("title", event.target.value)}
+                placeholder="Ej. Aviso previo al arrendador"
+                disabled={savingManualAlert}
+              />
+            </label>
+            <label className="form-field">
+              <span>Fecha</span>
+              <input
+                type="date"
+                value={manualAlertForm.dueDate}
+                onChange={(event) => updateManualAlertForm("dueDate", event.target.value)}
+                disabled={savingManualAlert}
+              />
+            </label>
+            <label className="form-field internal-contracts-wide-field">
+              <span>Detalle</span>
+              <textarea
+                value={manualAlertForm.description}
+                onChange={(event) => updateManualAlertForm("description", event.target.value)}
+                placeholder="Notas de seguimiento..."
+                disabled={savingManualAlert}
+              />
+            </label>
+            <div className="form-actions external-contract-renewal-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={savingManualAlert}
+                onClick={() => void saveManualAlert(contract)}
+              >
+                {savingManualAlert ? "Guardando..." : "Agregar alerta"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderGeneratedDocumentsArea(contract: ExternalContract) {
+    const documents = contract.generatedDocuments ?? [];
+    const groups = groupGeneratedDocuments(documents);
+
+    return (
+      <div className="external-contract-generated-documents">
+        {documents.length === 0 ? (
+          <div className="centered-inline-message">No hay formatos generados para este contrato.</div>
+        ) : (
+          groups.map((group) => {
+            const renewal = contract.renewals.find((entry) => entry.id === group.renewalId);
+            const displayDocument = group.word ?? group.pdf ?? group.other;
+            const deletingGroup = deletingGeneratedDocumentGroupKey === group.key;
+
+            return (
+              <div className="external-contract-generated-document" key={group.key}>
+                <div>
+                  <strong>{group.templateTitle}</strong>
+                  <small>
+                    {displayDocument?.originalFileName ?? "Formato generado"}
+                    {renewal ? ` - ${renewalLabel(renewal.sequence - 1)}` : " - Contrato original"}
+                    {" - "}
+                    {formatDate(group.createdAt)}
+                  </small>
+                </div>
+                <div className="external-contract-generated-document-actions">
+                  {group.word ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={deletingGroup || downloadingGeneratedDocumentId === group.word.id}
+                      onClick={() => void handleGeneratedDocumentDownload(contract, group.word!)}
+                    >
+                      {downloadingGeneratedDocumentId === group.word.id ? "Descargando..." : "Word"}
+                    </button>
+                  ) : null}
+                  {group.pdf ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={deletingGroup || downloadingGeneratedDocumentId === group.pdf.id}
+                      onClick={() => void handleGeneratedDocumentDownload(contract, group.pdf!)}
+                    >
+                      {downloadingGeneratedDocumentId === group.pdf.id ? "Descargando..." : "PDF"}
+                    </button>
+                  ) : null}
+                  {!group.word && !group.pdf && group.other ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={deletingGroup || downloadingGeneratedDocumentId === group.other.id}
+                      onClick={() => void handleGeneratedDocumentDownload(contract, group.other!)}
+                    >
+                      {downloadingGeneratedDocumentId === group.other.id ? "Descargando..." : "Descargar"}
+                    </button>
+                  ) : null}
+                  {canWrite ? (
+                    <button
+                      className="danger-button"
+                      type="button"
+                      disabled={deletingGroup}
+                      onClick={() => void handleGeneratedDocumentGroupDelete(contract, group)}
+                    >
+                      {deletingGroup ? "Borrando..." : "Borrar"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+  }
+
+  function renderMilestonesSection() {
+    const milestones = allContractMilestones
+      .filter((milestone) => !contractClientFilterId || contracts.find((contract) => contract.id === milestone.contractId)?.clientId === contractClientFilterId)
+      .sort((left, right) => left.dueDate.localeCompare(right.dueDate) || left.contractNumber.localeCompare(right.contractNumber, "es-MX"));
+
+    return (
+      <section className="external-contracts-milestones-layout">
+        <section className="panel external-contracts-milestones-panel">
+          <div className="panel-header">
+            <h2>Próximos hitos y alertas</h2>
+            <span>{milestones.length} fecha{milestones.length === 1 ? "" : "s"} futura{milestones.length === 1 ? "" : "s"}</span>
+          </div>
+
+          <div className="internal-contracts-toolbar external-contracts-management-toolbar">
+            <label className="form-field internal-contracts-wide-field">
+              <span>Cliente</span>
+              <select value={contractClientFilterId} onChange={(event) => setContractClientFilterId(event.target.value)}>
+                <option value="">Todos los clientes</option>
+                {sortClients(clients).map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.clientNumber} - {client.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {milestones.length === 0 ? (
+            <div className="centered-inline-message">No hay hitos o alertas futuras.</div>
+          ) : (
+            <div className="external-contract-milestone-list">
+              {milestones.map((milestone) => renderMilestoneRow(milestone))}
+            </div>
+          )}
+        </section>
+      </section>
+    );
+  }
+
+  function renderRentUpdateFormatPreview(preview: RentUpdateFormatPreview | null) {
+    if (!preview) {
+      return (
+        <div className="external-contracts-format-preview">
+          <strong>Información del formato</strong>
+          <span>Selecciona una renovación como documento base para ver el cálculo antes de generar el Word.</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="external-contracts-format-preview">
+        <div className="external-contracts-format-preview-head">
+          <div>
+            <strong>Información que se usará para generar el formato</strong>
+            <span>Al generarlo, se registrará como nueva renovación de actualización de renta.</span>
+          </div>
+        </div>
+
+        <div className="external-contracts-format-preview-grid">
+          <div>
+            <span>Documento base</span>
+            <strong>{preview.baseLabel}</strong>
+          </div>
+          <label className="external-contracts-format-preview-field">
+            <span>Fecha del formato</span>
+            <input
+              type="date"
+              value={formatDateValue}
+              onChange={(event) => setFormatDateValue(event.target.value)}
+              disabled={generatingFormat}
+            />
+          </label>
+          <label className="external-contracts-format-preview-field">
+            <span>Inicio de nueva renta</span>
+            <input
+              type="date"
+              value={rentUpdateFormatForm.effectiveDate}
+              onChange={(event) => updateRentUpdateFormatForm("effectiveDate", event.target.value)}
+              disabled={generatingFormat}
+            />
+          </label>
+          <label className="external-contracts-format-preview-field">
+            <span>Renta anterior</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={rentUpdateFormatForm.previousRentMxn}
+              onChange={(event) => updateRentUpdateFormatForm("previousRentMxn", event.target.value)}
+              placeholder="0.00"
+              disabled={generatingFormat}
+            />
+          </label>
+          <label className="external-contracts-format-preview-field">
+              <span>INPC base</span>
+              <select
+                value={rentUpdateFormatForm.basePeriod || preview.basePeriod || ""}
+                onChange={(event) => updateRentUpdateFormatForm("basePeriod", event.target.value)}
+                disabled={generatingFormat || inpcRowsAsc.length === 0}
+              >
+              <option value="">-- Seleccionar --</option>
+              {inpcRowsAsc.map((record) => (
+                <option key={record.id} value={inpcPeriodKey(record)}>
+                  {formatInpcPeriod(record)}
+                </option>
+              ))}
+            </select>
+            <small>{formatInpcValue(preview.baseInpc?.value)}</small>
+          </label>
+          <label className="external-contracts-format-preview-field">
+              <span>INPC actualización</span>
+              <select
+                value={rentUpdateFormatForm.targetPeriod || preview.targetPeriod || ""}
+                onChange={(event) => updateRentUpdateFormatForm("targetPeriod", event.target.value)}
+                disabled={generatingFormat || inpcRowsAsc.length === 0}
+              >
+              <option value="">-- Seleccionar --</option>
+              {inpcRowsAsc.map((record) => (
+                <option key={record.id} value={inpcPeriodKey(record)}>
+                  {formatInpcPeriod(record)}
+                </option>
+              ))}
+            </select>
+            <small>{formatInpcValue(preview.targetInpc?.value)}</small>
+          </label>
+          <div>
+            <span>Factor</span>
+            <strong>{preview.factor ? preview.factor.toFixed(6) : "-"}</strong>
+          </div>
+          <div>
+            <span>Aumento</span>
+            <strong>{formatCurrency(preview.increaseMxn)}</strong>
+            <small>{formatSignedPercent(preview.increasePct)}</small>
+          </div>
+          <div>
+            <span>Nueva renta calculada</span>
+            <strong>{formatCurrency(preview.updatedRentMxn)}</strong>
+          </div>
+          <label className="external-contracts-format-preview-field external-contracts-format-preview-rounding">
+            <span>Renta redondeada</span>
+            <span className="external-contracts-format-preview-check">
+              <input
+                type="checkbox"
+                checked={rentUpdateFormatForm.useRoundedRent}
+                onChange={(event) => updateRentUpdateFormatForm("useRoundedRent", event.target.checked)}
+                disabled={generatingFormat}
+              />
+              Usar renta redondeada
+            </span>
+            <span className="external-contracts-format-money-input">
+              <span className="external-contracts-format-money-prefix">$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={rentUpdateFormatForm.roundedRentMxn}
+                onChange={(event) => updateRentUpdateFormatForm("roundedRentMxn", event.target.value)}
+                placeholder="0.00"
+                disabled={generatingFormat || !rentUpdateFormatForm.useRoundedRent}
+              />
+              <span className="external-contracts-format-money-suffix">MXN</span>
+            </span>
+          </label>
+          <div>
+            <span>Renta a presentar</span>
+            <strong>{formatCurrency(preview.presentedRentMxn)}</strong>
+            <small>{preview.useRoundedRent ? formatSignedPercent(preview.presentedIncreasePct) : "Sin redondeo"}</small>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderFormatPanel() {
     const scopeValue = formatRenewalId || FORMAT_SCOPE_ORIGINAL;
+    const rentUpdateDocumentDate = formatDateValue || dateInputValue(new Date());
+    const rentUpdatePreview = formatTemplateId === "rent-increase" && selectedFormatContract && selectedFormatRenewal
+      ? buildRentUpdateFormatPreview(
+          selectedFormatContract,
+          selectedFormatRenewal,
+          rentUpdateDocumentDate,
+          inpcRecords,
+          rentUpdateFormatForm
+        )
+      : null;
+    const rentUpdateFormatIssue = formatTemplateId === "rent-increase"
+      ? getRentUpdateFormatIssue(rentUpdatePreview, scopeValue)
+      : null;
 
     return (
       <div className="external-contracts-format-panel">
         <div className="panel-header">
-          <h2>Generar formatos</h2>
+          <h2>Generar nuevo formato</h2>
           <span>{selectedManagedContract?.contractNumber ?? "Sin contrato"}</span>
         </div>
 
@@ -1710,7 +3113,7 @@ export function ExternalContractsPage() {
           </label>
 
           <label className="form-field internal-contracts-wide-field">
-            <span>Base del formato</span>
+            <span>Documento base para la generación de este formato</span>
             <select
               value={scopeValue}
               onChange={(event) => setFormatRenewalId(event.target.value)}
@@ -1725,35 +3128,56 @@ export function ExternalContractsPage() {
             </select>
           </label>
 
-          <label className="form-field internal-contracts-wide-field">
-            <span>Fecha del formato</span>
-            <input
-              type="date"
-              value={formatDateValue}
-              onChange={(event) => setFormatDateValue(event.target.value)}
-              disabled={!selectedManagedContract}
-            />
-          </label>
+          {formatTemplateId !== "rent-increase" ? (
+            <label className="form-field internal-contracts-wide-field">
+              <span>Fecha del formato</span>
+              <input
+                type="date"
+                value={formatDateValue}
+                onChange={(event) => setFormatDateValue(event.target.value)}
+                disabled={!selectedManagedContract}
+              />
+            </label>
+          ) : null}
         </div>
 
+        {formatTemplateId === "rent-increase" ? renderRentUpdateFormatPreview(rentUpdatePreview) : null}
+
         <div className="form-actions">
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={
-              !selectedManagedContract
-              || generatingFormat
-              || (formatTemplateId === "rent-increase" && (!canWrite || scopeValue === FORMAT_SCOPE_ORIGINAL || !selectedFormatRenewal))
-            }
-            onClick={() => void handleFormatDownload("word")}
-          >
-            {generatingFormat
-              ? "Generando..."
-              : formatTemplateId === "rent-increase"
-                ? "Generar y guardar Word"
-                : "Descargar Word"}
-          </button>
-          {formatTemplateId !== "rent-increase" ? (
+          {formatTemplateId === "rent-increase" ? (
+            <>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={generatingFormat || Boolean(rentUpdateFormatIssue)}
+                onClick={() => void handleFormatDownload("word")}
+              >
+                {generatingFormat ? "Generando..." : "Generar y guardar Word"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={generatingFormat || Boolean(rentUpdateFormatIssue)}
+                onClick={() => void handleFormatDownload("pdf")}
+              >
+                {generatingFormat ? "Generando..." : "Generar y guardar PDF"}
+              </button>
+              {rentUpdateFormatIssue ? (
+                <div className="external-contracts-format-action-message message-banner message-warning">
+                  {rentUpdateFormatIssue}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={!selectedManagedContract || generatingFormat}
+                onClick={() => void handleFormatDownload("word")}
+              >
+                Descargar Word
+              </button>
             <button
               className="primary-button"
               type="button"
@@ -1762,7 +3186,8 @@ export function ExternalContractsPage() {
             >
               Descargar PDF
             </button>
-          ) : null}
+            </>
+          )}
         </div>
       </div>
     );
@@ -1838,7 +3263,7 @@ export function ExternalContractsPage() {
             </label>
 
             <label className="form-field">
-              <span>INPC actualizacion</span>
+              <span>INPC actualización</span>
               <select
                 value={rentCalculator.targetPeriod}
                 onChange={(event) => updateRentCalculator("targetPeriod", event.target.value)}
@@ -1941,7 +3366,7 @@ export function ExternalContractsPage() {
             <span className="status-pill status-live">Arrendamiento</span>
             {contract.renewals.length > 0 ? (
               <span className="status-pill status-warning">
-                {contract.renewals.length} renovacion{contract.renewals.length === 1 ? "" : "es"}
+                {contract.renewals.length} {contract.renewals.length === 1 ? "renovación" : "renovaciones"}
               </span>
             ) : null}
           </div>
@@ -1967,7 +3392,7 @@ export function ExternalContractsPage() {
 
         <div className="external-contract-deadlines">
           <div className={`external-contract-deadline is-${renewalTone}`}>
-            <span>Siguiente renovacion</span>
+            <span>Siguiente renovación</span>
             <strong>{formatDate(getRenewalDisplayDate(nextRenewal))}</strong>
             <small>{nextRenewal ? renewalLabel(nextRenewal.sequence - 1) : "Sin renovaciones"}</small>
           </div>
@@ -1979,6 +3404,8 @@ export function ExternalContractsPage() {
         </div>
 
         {contract.notes ? <p className="internal-contract-notes">{contract.notes}</p> : null}
+
+        {renderContractNextActionPanel(contract)}
 
         {(contract.generatedDocuments ?? []).length > 0 ? (
           <div className="external-contract-generated-documents">
@@ -2022,7 +3449,7 @@ export function ExternalContractsPage() {
           </button>
           {canWrite ? (
             <button className="secondary-button" type="button" onClick={() => startEdit(contract)}>
-              Modificar
+              Editar información
             </button>
           ) : null}
           {canWrite ? (
@@ -2067,28 +3494,49 @@ export function ExternalContractsPage() {
           </div>
         </div>
         <p className="muted">
-          Control de contratos de clientes por empresa, organizados por cliente y con fechas clave de renovacion y aumento de renta.
+          Control de contratos de clientes por empresa, organizados por cliente y con fechas clave de renovación y aumento de renta.
         </p>
       </header>
 
-      <section className="panel">
-        <div className="leads-tabs internal-contracts-tabs" role="tablist" aria-label="Secciones de contratos externos">
-          <button
-            type="button"
-            className={`lead-tab ${activeSection === "contracts" ? "is-active" : ""}`}
-            onClick={() => setActiveSection("contracts")}
-          >
-            {CONTRACT_SECTION_LABEL} ({contracts.length})
-          </button>
-          <button
-            type="button"
-            className={`lead-tab ${activeSection === "inpc" ? "is-active" : ""}`}
-            onClick={() => setActiveSection("inpc")}
-          >
-            {INPC_SECTION_LABEL} ({inpcRecords.length})
-          </button>
-          <span className="external-contracts-summary-pill">{activeCount} activos</span>
-          <span className="external-contracts-summary-pill">{upcomingCount} fechas proximas</span>
+      <section className="panel external-contracts-navigation-panel">
+        <div className="external-contracts-navigation-head">
+          <div className="external-contracts-navigation-title">
+            <span>Tipos de contratos</span>
+            <strong>Contratos externos</strong>
+          </div>
+          <div className="external-contracts-summary-group" aria-label="Resumen de contratos externos">
+            <span className="external-contracts-summary-pill">{activeCount} activos</span>
+            <span className="external-contracts-summary-pill">{upcomingCount} fechas próximas</span>
+          </div>
+        </div>
+        <div className="external-contracts-navigation-body">
+          <div className="leads-tabs internal-contracts-tabs external-contracts-type-tabs" role="tablist" aria-label="Tipos de contratos externos">
+            <button
+              type="button"
+              className={`lead-tab ${activeSection === "contracts" ? "is-active" : ""}`}
+              onClick={() => setActiveSection("contracts")}
+            >
+              {CONTRACT_SECTION_LABEL} ({activeLeaseCount})
+            </button>
+          </div>
+          <div className="external-contracts-utility-nav" aria-label="Herramientas de contratos externos">
+            <button
+              type="button"
+              className={`external-contracts-utility-button is-alerts ${activeSection === "milestones" ? "is-active" : ""}`}
+              onClick={() => setActiveSection("milestones")}
+            >
+              <span>Próximos hitos y alertas</span>
+              <strong>{allContractMilestones.length}</strong>
+            </button>
+            <button
+              type="button"
+              className={`external-contracts-utility-button ${activeSection === "inpc" ? "is-active" : ""}`}
+              onClick={() => setActiveSection("inpc")}
+            >
+              <span>{INPC_SECTION_LABEL}</span>
+              <strong>{inpcRecords.length}</strong>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -2100,12 +3548,12 @@ export function ExternalContractsPage() {
 
       {errorMessage ? <div className="message-banner message-error">{errorMessage}</div> : null}
 
-      {activeSection === "inpc" ? renderInpcSection() : (
+      {activeSection === "inpc" ? renderInpcSection() : activeSection === "milestones" ? renderMilestonesSection() : (
         <section className="internal-contracts-layout">
           <section className="panel internal-contracts-form-panel">
             <div className="panel-header">
-              <h2>Cargar contrato</h2>
-              <span>Contrato original</span>
+              <h2>{editingId ? "Editar contrato" : "Cargar contrato"}</h2>
+              <span>{editingId ? "Información guardada" : "Contrato original"}</span>
             </div>
 
             {canWrite ? (
@@ -2260,6 +3708,8 @@ export function ExternalContractsPage() {
                   </label>
                 </div>
 
+                {renderRenewalsEditor()}
+
                 {contractPrefillNotes.length > 0 ? (
                   <div className="labor-file-contract-prefill-panel">
                     <div>
@@ -2270,10 +3720,15 @@ export function ExternalContractsPage() {
                 ) : null}
 
                 <div className="form-actions">
-                  <button className="primary-button" type="submit" disabled={saving || loading || prefillingContract}>
-                    {saving ? "Cargando..." : "Cargar contrato"}
+                  <button className="primary-button" type="submit" disabled={saving || loading || prefillingContract || Boolean(prefillingRenewalKey)}>
+                    {saving ? (editingId ? "Actualizando..." : "Cargando...") : editingId ? "Actualizar contrato" : "Cargar contrato"}
                   </button>
-                  <button className="secondary-button" type="button" onClick={() => void loadModule()} disabled={saving || loading || prefillingContract}>
+                  {editingId ? (
+                    <button className="secondary-button" type="button" onClick={() => resetForm()} disabled={saving || loading || prefillingContract || Boolean(prefillingRenewalKey)}>
+                      Cancelar edición
+                    </button>
+                  ) : null}
+                  <button className="secondary-button" type="button" onClick={() => void loadModule()} disabled={saving || loading || prefillingContract || Boolean(prefillingRenewalKey)}>
                     Refrescar
                   </button>
                 </div>
@@ -2285,57 +3740,98 @@ export function ExternalContractsPage() {
 
           <section className="panel internal-contracts-list-panel external-contracts-management-panel">
             <div className="panel-header">
-              <h2>Contratos cargados</h2>
+              <h2>{contractStatusView === "active" ? "Contratos activos" : "Contratos archivados"}</h2>
               <span>{filteredContracts.length} registros</span>
             </div>
 
-            <div className="internal-contracts-toolbar external-contracts-management-toolbar">
-              <label className="form-field internal-contracts-wide-field">
-                <span>Buscar</span>
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Contrato, cliente, inmueble, partes o archivo..."
-                  type="search"
-                />
-              </label>
+            <div className="external-contracts-side-area">
+              <div className="external-contracts-side-area-head">
+                <div>
+                  <h3>Buscador de contratos</h3>
+                  <span>{filteredContracts.length} resultado{filteredContracts.length === 1 ? "" : "s"}</span>
+                </div>
+              </div>
 
-              <label className="form-field internal-contracts-wide-field">
-                <span>Cliente</span>
-                <select value={contractClientFilterId} onChange={(event) => setContractClientFilterId(event.target.value)}>
-                  <option value="">Todos los clientes</option>
-                  {sortClients(clients).map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.clientNumber} - {client.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="form-field internal-contracts-wide-field">
-                <span>Contrato cargado</span>
-                <select
-                  value={selectedManagedContract?.id ?? ""}
-                  onChange={(event) => setSelectedContractId(event.target.value)}
-                  disabled={filteredContracts.length === 0}
+              <div className="external-contracts-status-tabs" role="tablist" aria-label="Estatus de contratos de arrendamiento">
+                <button
+                  type="button"
+                  className={`external-contracts-status-tab ${contractStatusView === "active" ? "is-active" : ""}`}
+                  onClick={() => setContractStatusView("active")}
                 >
-                  <option value="">-- Seleccionar contrato --</option>
-                  {filteredContracts.map((contract) => (
-                    <option key={contract.id} value={contract.id}>
-                      {contract.contractNumber} - {contract.title || contract.clientName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <span>Activos</span>
+                  <strong>{activeLeaseCount}</strong>
+                </button>
+                <button
+                  type="button"
+                  className={`external-contracts-status-tab ${contractStatusView === "archived" ? "is-active" : ""}`}
+                  onClick={() => setContractStatusView("archived")}
+                >
+                  <span>Archivados</span>
+                  <strong>{archivedLeaseCount}</strong>
+                </button>
+              </div>
+
+              <div className="internal-contracts-toolbar external-contracts-management-toolbar">
+                <label className="form-field internal-contracts-wide-field">
+                  <span>Buscar</span>
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Contrato, cliente, inmueble, partes o archivo..."
+                    type="search"
+                  />
+                </label>
+
+                <label className="form-field internal-contracts-wide-field">
+                  <span>Cliente</span>
+                  <select value={contractClientFilterId} onChange={(event) => setContractClientFilterId(event.target.value)}>
+                    <option value="">Todos los clientes</option>
+                    {sortClients(clients).map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.clientNumber} - {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
 
-            {loading ? <div className="centered-inline-message">Cargando contratos externos...</div> : null}
-            {!loading && !selectedManagedContract ? (
-              <div className="centered-inline-message">No hay contratos de arrendamiento cargados.</div>
-            ) : null}
+            <div className="external-contracts-side-area">
+              <div className="external-contracts-side-area-head">
+                <div>
+                  <h3>Contrato cargado</h3>
+                  <span>{selectedManagedContract?.contractNumber ?? "Sin selección"}</span>
+                </div>
+              </div>
 
-            {selectedManagedContract ? (
-              <div className="external-contracts-selected-stack">
+              <div className="internal-contracts-toolbar external-contracts-management-toolbar">
+                <label className="form-field internal-contracts-wide-field">
+                  <span>Contrato cargado</span>
+                  <select
+                    value={selectedManagedContract?.id ?? ""}
+                    onChange={(event) => setSelectedContractId(event.target.value)}
+                    disabled={filteredContracts.length === 0}
+                  >
+                    <option value="">-- Seleccionar contrato --</option>
+                    {filteredContracts.map((contract) => (
+                      <option key={contract.id} value={contract.id}>
+                        {contract.contractNumber} - {contract.title || contract.clientName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {loading ? <div className="centered-inline-message">Cargando contratos externos...</div> : null}
+              {!loading && !selectedManagedContract ? (
+                <div className="centered-inline-message">
+                  {contractStatusView === "active"
+                    ? "No hay contratos de arrendamiento activos."
+                    : "No hay contratos de arrendamiento archivados."}
+                </div>
+              ) : null}
+
+              {selectedManagedContract ? (
                 <article className="internal-contract-card external-contract-card">
                   <div className="internal-contract-card-head">
                     <div>
@@ -2371,37 +3867,6 @@ export function ExternalContractsPage() {
 
                   {selectedManagedContract.notes ? <p className="internal-contract-notes">{selectedManagedContract.notes}</p> : null}
 
-                  {(selectedManagedContract.generatedDocuments ?? []).length > 0 ? (
-                    <div className="external-contract-generated-documents">
-                      <span>Formatos generados</span>
-                      {(selectedManagedContract.generatedDocuments ?? []).map((document) => {
-                        const renewal = selectedManagedContract.renewals.find((entry) => entry.id === document.renewalId);
-
-                        return (
-                          <div className="external-contract-generated-document" key={document.id}>
-                            <div>
-                              <strong>{document.templateTitle}</strong>
-                              <small>
-                                {document.originalFileName}
-                                {renewal ? ` - ${renewalLabel(renewal.sequence - 1)}` : " - Contrato original"}
-                                {" - "}
-                                {formatDate(document.createdAt)}
-                              </small>
-                            </div>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              disabled={downloadingGeneratedDocumentId === document.id}
-                              onClick={() => void handleGeneratedDocumentDownload(selectedManagedContract, document)}
-                            >
-                              {downloadingGeneratedDocumentId === document.id ? "Descargando..." : "Descargar"}
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-
                   <div className="table-actions">
                     <button
                       className="secondary-button"
@@ -2411,6 +3876,11 @@ export function ExternalContractsPage() {
                     >
                       {downloadingId === selectedManagedContract.id ? "Descargando..." : "Descargar contrato"}
                     </button>
+                    {canWrite ? (
+                      <button className="secondary-button" type="button" onClick={() => startEdit(selectedManagedContract)}>
+                        Editar información
+                      </button>
+                    ) : null}
                     {canWrite ? (
                       <button
                         className="danger-button"
@@ -2423,10 +3893,33 @@ export function ExternalContractsPage() {
                     ) : null}
                   </div>
                 </article>
+              ) : null}
+            </div>
 
-                {renderManagedRenewalsEditor()}
-                {renderFormatPanel()}
-              </div>
+            {selectedManagedContract ? (
+              <>
+                <div className="external-contracts-side-area is-subordinate">
+                  {renderContractNextActionPanel(selectedManagedContract)}
+                </div>
+
+                <div className="external-contracts-side-area is-subordinate">
+                  <div className="external-contracts-side-area-head">
+                    <div>
+                      <h3>Formatos de este contrato</h3>
+                      <span>{(selectedManagedContract.generatedDocuments ?? []).length} generado{(selectedManagedContract.generatedDocuments ?? []).length === 1 ? "" : "s"}</span>
+                    </div>
+                  </div>
+                  {renderGeneratedDocumentsArea(selectedManagedContract)}
+                </div>
+
+                <div className="external-contracts-side-area is-subordinate">
+                  {renderManagedRenewalsEditor()}
+                </div>
+
+                <div className="external-contracts-side-area is-subordinate">
+                  {renderFormatPanel()}
+                </div>
+              </>
             ) : null}
           </section>
         </section>

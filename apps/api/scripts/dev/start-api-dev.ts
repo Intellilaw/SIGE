@@ -23,6 +23,7 @@ const DEFAULT_RDS_TUNNEL_REMOTE_PORT = 5432;
 
 type RuntimeSecret = {
   DATABASE_URL?: string;
+  [key: string]: string | number | boolean | undefined;
 };
 
 type RdsTunnelConfig = {
@@ -101,7 +102,24 @@ function ensureSessionManagerPluginPath() {
   process.env.PATH = `${SESSION_MANAGER_PLUGIN_BIN};${currentPath}`;
 }
 
-async function getRuntimeDatabaseUrl(config: RdsTunnelConfig) {
+const RUNTIME_SECRET_ENV_KEYS = [
+  "JWT_ACCESS_SECRET",
+  "JWT_REFRESH_SECRET",
+  "MANAGER_DE_ESCRITOS_URL",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_QUOTE_TRANSLATION_MODEL",
+  "OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS",
+  "OPENAI_LABOR_CONTRACT_MODEL",
+  "OPENAI_LABOR_CONTRACT_TIMEOUT_MS",
+  "OPENAI_EXTERNAL_CONTRACT_MODEL",
+  "OPENAI_EXTERNAL_CONTRACT_TIMEOUT_MS",
+  "SSO_AUDIENCE",
+  "SSO_ISSUER",
+  "SSO_SECRET_KEY"
+];
+
+async function getRuntimeSecret(config: RdsTunnelConfig) {
   const { stdout } = await execFileAsync("aws", [
     "secretsmanager",
     "get-secret-value",
@@ -115,8 +133,19 @@ async function getRuntimeDatabaseUrl(config: RdsTunnelConfig) {
     "text"
   ]);
 
-  const secret = JSON.parse(stdout.trim()) as RuntimeSecret;
-  return requireDevEnv(secret.DATABASE_URL, "DATABASE_URL in SIGE_AWS_APP_SECRET_ID");
+  return JSON.parse(stdout.trim()) as RuntimeSecret;
+}
+
+function applyRuntimeSecretEnvironment(secret: RuntimeSecret) {
+  for (const key of RUNTIME_SECRET_ENV_KEYS) {
+    const value = secret[key];
+
+    if (value === undefined || value === null || process.env[key]) {
+      continue;
+    }
+
+    process.env[key] = String(value);
+  }
 }
 
 function toTunnelDatabaseUrl(databaseUrl: string, config: RdsTunnelConfig) {
@@ -361,8 +390,13 @@ async function main() {
 
   if (shouldUseRdsTunnel()) {
     const rdsTunnelConfig = getRdsTunnelConfig();
+    const runtimeSecret = await getRuntimeSecret(rdsTunnelConfig);
     tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
-    process.env.DATABASE_URL = toTunnelDatabaseUrl(await getRuntimeDatabaseUrl(rdsTunnelConfig), rdsTunnelConfig);
+    applyRuntimeSecretEnvironment(runtimeSecret);
+    process.env.DATABASE_URL = toTunnelDatabaseUrl(
+      requireDevEnv(runtimeSecret.DATABASE_URL, "DATABASE_URL in SIGE_AWS_APP_SECRET_ID"),
+      rdsTunnelConfig
+    );
     process.env.SIGE_SKIP_LOCAL_POSTGRES = "true";
     console.log("[dev] API database points to AWS RDS through the local SSM tunnel.");
   }

@@ -14,6 +14,7 @@ import type {
   ExternalContractDownloadFormat,
   ExternalContractGeneratedDocument,
   ExternalContractInpc,
+  ExternalContractMilestone,
   ExternalContractRenewal,
   ExternalContractRenewalDocument,
   FinanceRecord,
@@ -240,6 +241,7 @@ export interface ExternalContractWriteRecord {
   fileSizeBytes?: number | null;
   fileContent?: Buffer | null;
   renewals?: ExternalContractRenewalWriteRecord[];
+  milestones?: ExternalContractMilestoneWriteRecord[];
 }
 
 export interface ExternalContractUpdateRecord {
@@ -262,6 +264,7 @@ export interface ExternalContractUpdateRecord {
   fileSizeBytes?: number | null;
   fileContent?: Buffer | null;
   renewals?: ExternalContractRenewalWriteRecord[];
+  milestones?: ExternalContractMilestoneWriteRecord[];
 }
 
 export interface ExternalContractDocumentRecord {
@@ -285,6 +288,7 @@ export interface ExternalContractGeneratedDocumentRecord {
   id: string;
   contractNumber: string;
   clientName: string;
+  tenantName: string | null;
   templateId: string;
   originalFileName: string;
   fileMimeType?: string | null;
@@ -309,6 +313,7 @@ export interface ExternalContractRenewalDocumentRecord {
 
 export interface ExternalContractRenewalWriteRecord {
   id?: string | null;
+  documentKind?: ExternalContractRenewal["documentKind"] | null;
   renewalDate?: string | null;
   leaseStartDate?: string | null;
   leaseEndDate?: string | null;
@@ -317,6 +322,14 @@ export interface ExternalContractRenewalWriteRecord {
   inpcBasePeriod?: string | null;
   inpcTargetPeriod?: string | null;
   notes?: string | null;
+}
+
+export interface ExternalContractMilestoneWriteRecord {
+  id?: string | null;
+  source?: ExternalContractMilestone["source"] | null;
+  title: string;
+  dueDate: string;
+  description?: string | null;
 }
 
 export interface ExternalContractInpcWriteRecord {
@@ -345,6 +358,7 @@ export interface ExternalContractsRepository {
   findDocument(contractId: string): Promise<ExternalContractDocumentRecord | null>;
   createGeneratedDocument(contractId: string, payload: ExternalContractGeneratedDocumentWriteRecord): Promise<ExternalContractGeneratedDocument>;
   findGeneratedDocument(contractId: string, documentId: string): Promise<ExternalContractGeneratedDocumentRecord | null>;
+  deleteGeneratedDocument(contractId: string, documentId: string): Promise<void>;
   uploadRenewalDocument(contractId: string, renewalId: string, payload: ExternalContractRenewalDocumentUploadRecord): Promise<ExternalContractRenewalDocument>;
   findRenewalDocument(contractId: string, renewalId: string, documentId: string): Promise<ExternalContractRenewalDocumentRecord | null>;
   listRenewals(contractId: string): Promise<ExternalContractRenewal[]>;

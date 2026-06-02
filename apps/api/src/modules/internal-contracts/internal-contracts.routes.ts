@@ -19,7 +19,7 @@ const paymentMilestoneSchema = z.object({
 const createContractSchema = z.object({
   contractNumber: z.string().min(1),
   title: z.string().nullable().optional(),
-  contractType: z.enum(["PROFESSIONAL_SERVICES", "LABOR"]),
+  contractType: z.enum(["PROFESSIONAL_SERVICES", "LEGAL_POLICIES", "LABOR"]),
   documentKind: z.enum(["CONTRACT", "ADDENDUM"]).default("CONTRACT"),
   clientId: z.string().nullable().optional(),
   collaboratorName: z.string().nullable().optional(),

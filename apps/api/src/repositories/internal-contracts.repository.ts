@@ -65,9 +65,13 @@ function buildGeneratedProfessionalServicesAvailableFormats(record: {
 }
 
 function validateContractType(value: InternalContract["contractType"]) {
-  if (value !== "PROFESSIONAL_SERVICES" && value !== "LABOR") {
+  if (value !== "PROFESSIONAL_SERVICES" && value !== "LEGAL_POLICIES" && value !== "LABOR") {
     throw new AppError(400, "INVALID_INTERNAL_CONTRACT_TYPE", "Tipo de contrato interno invalido.");
   }
+}
+
+function isClientScopedContractType(value: InternalContract["contractType"]) {
+  return value === "PROFESSIONAL_SERVICES" || value === "LEGAL_POLICIES";
 }
 
 function validateDocumentKind(value: InternalContract["documentKind"]) {
@@ -670,7 +674,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
   }
 
   private async buildScopedData(payload: InternalContractWriteRecord) {
-    if (payload.contractType === "PROFESSIONAL_SERVICES") {
+    if (isClientScopedContractType(payload.contractType)) {
       const clientId = normalizeText(payload.clientId);
       if (!clientId) {
         throw new AppError(400, "INTERNAL_CONTRACT_CLIENT_REQUIRED", "Selecciona un cliente del catalogo.");
@@ -712,7 +716,7 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       return explicitTitle;
     }
 
-    if (payload.contractType !== "PROFESSIONAL_SERVICES") {
+    if (!isClientScopedContractType(payload.contractType)) {
       return null;
     }
 

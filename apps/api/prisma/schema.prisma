@@ -23,6 +23,7 @@ model Organization {
   externalContractRenewalDocuments ExternalContractRenewalDocument[]
   externalContractDocuments        ExternalContractGeneratedDocument[]
   externalContractInpcValues       ExternalContractInpc[]
+  externalContractMilestones       ExternalContractMilestone[]
   dailyDocumentAssignments         DailyDocumentAssignment[]
   quotes                           Quote[]
   quoteTemplates                   QuoteTemplate[]
@@ -350,6 +351,7 @@ model ExternalContract {
   renewals           ExternalContractRenewal[]
   renewalDocuments   ExternalContractRenewalDocument[]
   generatedDocuments ExternalContractGeneratedDocument[]
+  milestones         ExternalContractMilestone[]
 
   @@unique([organizationId, contractNumber])
   @@index([organizationId, clientId, status])
@@ -358,11 +360,29 @@ model ExternalContract {
   @@index([organizationId, clientName])
 }
 
+model ExternalContractMilestone {
+  id                 String           @id @default(uuid())
+  organizationId     String           @default("org-rusconi")
+  externalContractId String
+  source             String           @default("MANUAL")
+  title              String
+  dueDate            DateTime         @db.Date
+  description        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  externalContract   ExternalContract @relation(fields: [externalContractId], references: [id], onDelete: Cascade)
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, dueDate])
+  @@index([organizationId, externalContractId, dueDate])
+}
+
 model ExternalContractRenewal {
   id                 String                            @id @default(uuid())
   organizationId     String                            @default("org-rusconi")
   externalContractId String
   sequence           Int
+  documentKind       String                            @default("NEW_CONTRACT_OR_AGREEMENT")
   renewalDate        DateTime?                         @db.Date
   leaseStartDate     DateTime?                         @db.Date
   leaseEndDate       DateTime?                         @db.Date
