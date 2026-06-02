@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
-const MODULE_TITLE = "Administraci\u00f3n de contratos externos";
+const MODULE_TITLE = "Minka";
 const CONTRACT_SECTION_LABEL = "Contratos de arrendamiento";
 const INPC_SECTION_LABEL = "INPC";
 const FORMAT_SCOPE_ORIGINAL = "original";

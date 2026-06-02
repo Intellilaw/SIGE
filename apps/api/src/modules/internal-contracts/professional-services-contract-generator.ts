@@ -29,9 +29,9 @@ import { z } from "zod";
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PDF_MIME_TYPE = "application/pdf";
-const PSP_CONTRACT_TEMPLATE_URLS = {
-  ES: new URL("../../../templates/Contrato de PSP (RC) (10.09.2024).docx", import.meta.url),
-  EN: new URL("../../../templates/Professional services agreement (RC) (10.09.2024).docx", import.meta.url)
+const PSP_CONTRACT_TEMPLATE_FILES = {
+  ES: "Contrato de PSP (RC) (10.09.2024).docx",
+  EN: "Professional services agreement (RC) (10.09.2024).docx"
 } as const;
 const IVA_RATE = 0.16;
 const RC_COMPANY_NAME = "Rusconi Legal and Tax Technology S.A. de C.V.";
@@ -131,6 +131,30 @@ const noBorder = {
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function getProfessionalServicesTemplateUrls(language: ProfessionalServicesContractFieldValues["language"]) {
+  const filename = PSP_CONTRACT_TEMPLATE_FILES[language];
+
+  return [
+    new URL(`../../../templates/${filename}`, import.meta.url),
+    new URL(`../../templates/${filename}`, import.meta.url)
+  ];
+}
+
+async function readProfessionalServicesTemplate(language: ProfessionalServicesContractFieldValues["language"]) {
+  const failures: string[] = [];
+
+  for (const templateUrl of getProfessionalServicesTemplateUrls(language)) {
+    try {
+      return await readFile(templateUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(`${templateUrl.pathname}: ${message}`);
+    }
+  }
+
+  throw new Error(`No se pudo cargar la plantilla PSP ${language}. Rutas intentadas: ${failures.join(" | ")}`);
 }
 
 function currentDateKey() {
@@ -950,7 +974,7 @@ function fillProfessionalServicesTemplateXml(documentXml: string, input: Contrac
 
 async function renderProfessionalServicesContractTemplateDocx(input: ContractRenderInput) {
   const fields = normalizeFieldValues(input.fields);
-  const template = await readFile(PSP_CONTRACT_TEMPLATE_URLS[fields.language]);
+  const template = await readProfessionalServicesTemplate(fields.language);
   const zip = await JSZip.loadAsync(template);
   const documentFile = zip.file("word/document.xml");
 
@@ -1350,6 +1374,5 @@ function renderProfessionalServicesContractPdf(input: ContractRenderInput) {
 
 export async function renderProfessionalServicesContractFiles(input: ContractRenderInput): Promise<GeneratedContractFiles> {
   const docx = await renderProfessionalServicesContractDocx(input);
-  const pdf = await renderProfessionalServicesContractPdf(input);
-  return { docx, pdf };
+  return { docx, pdf: null };
 }

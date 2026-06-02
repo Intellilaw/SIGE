@@ -139,7 +139,7 @@ type GeneratedDocumentGroup = {
   other?: ExternalContractGeneratedDocument;
 };
 
-const MODULE_TITLE = "Administraci\u00f3n de contratos externos";
+const MODULE_TITLE = "Minka";
 const CONTRACT_SECTION_LABEL = "Contratos de arrendamiento";
 const INPC_SECTION_LABEL = "INPC";
 const FORMAT_SCOPE_ORIGINAL = "original";

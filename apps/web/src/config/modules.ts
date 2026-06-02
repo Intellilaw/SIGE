@@ -209,8 +209,8 @@ export const appModules: AppModuleDefinition[] = [
   {
     id: "external-contracts",
     path: "/app/external-contracts",
-    label: "Administraci\u00f3n de contratos externos",
-    shortLabel: "Contratos ext.",
+    label: "Minka",
+    shortLabel: "Minka",
     icon: "\u{1F3E2}",
     description: "Carga, control por cliente y fechas clave de contratos externos de clientes.",
     phase: "Operativo",

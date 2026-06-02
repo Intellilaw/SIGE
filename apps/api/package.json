@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json --resolve-full-paths",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json --resolve-full-paths && tsx scripts/build/copy-runtime-assets.ts",
     "dev": "tsx scripts/dev/start-api-dev.ts",
     "start": "node dist/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
