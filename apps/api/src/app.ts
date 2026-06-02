@@ -8,7 +8,7 @@ import rateLimit from "@fastify/rate-limit";
 import { env } from "./config/env";
 import { AppError } from "./core/errors/app-error";
 import { registerErrorHandler } from "./core/http/error-handler";
-import { prisma } from "./lib/prisma";
+import { assertTenantScopedDatabaseSchema, prisma } from "./lib/prisma";
 import { AuthService } from "./modules/auth/auth.service";
 import { BudgetPlanningService } from "./modules/budget-planning/budget-planning.service";
 import { ClientsService } from "./modules/clients/clients.service";
@@ -165,6 +165,10 @@ export async function buildApp() {
     ? env.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [env.WEB_ORIGIN];
   const allowedOrigins = new Set(configuredWebOrigins);
+
+  if (env.APP_ENV !== "test") {
+    await assertTenantScopedDatabaseSchema(prisma);
+  }
 
   if (env.APP_ENV === "development") {
     for (const origin of configuredWebOrigins) {

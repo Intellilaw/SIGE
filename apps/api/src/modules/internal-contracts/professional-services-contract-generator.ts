@@ -30,8 +30,8 @@ import { z } from "zod";
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PDF_MIME_TYPE = "application/pdf";
 const PSP_CONTRACT_TEMPLATE_URLS = {
-  ES: new URL("../../../templates/contrato-psp-rc-base.docx", import.meta.url),
-  EN: new URL("../../../templates/professional-services-agreement-rc-base.docx", import.meta.url)
+  ES: new URL("../../../templates/Contrato de PSP (RC) (10.09.2024).docx", import.meta.url),
+  EN: new URL("../../../templates/Professional services agreement (RC) (10.09.2024).docx", import.meta.url)
 } as const;
 const IVA_RATE = 0.16;
 const RC_COMPANY_NAME = "Rusconi Legal and Tax Technology S.A. de C.V.";
@@ -1119,7 +1119,18 @@ async function renderLegacyProfessionalServicesContractDocx(input: ContractRende
 }
 
 async function renderProfessionalServicesContractDocx(input: ContractRenderInput) {
-  return renderProfessionalServicesContractTemplateDocx(input);
+  try {
+    return await renderProfessionalServicesContractTemplateDocx(input);
+  } catch (error) {
+    if (
+      error instanceof Error
+      && ("code" in error ? (error as Error & { code?: string }).code === "ENOENT" : false)
+    ) {
+      return renderLegacyProfessionalServicesContractDocx(input);
+    }
+
+    throw error;
+  }
 }
 
 function drawPdfSectionTitle(doc: PDFKit.PDFDocument, text: string) {
@@ -1339,5 +1350,6 @@ function renderProfessionalServicesContractPdf(input: ContractRenderInput) {
 
 export async function renderProfessionalServicesContractFiles(input: ContractRenderInput): Promise<GeneratedContractFiles> {
   const docx = await renderProfessionalServicesContractDocx(input);
-  return { docx, pdf: null };
+  const pdf = await renderProfessionalServicesContractPdf(input);
+  return { docx, pdf };
 }

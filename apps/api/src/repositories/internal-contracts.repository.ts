@@ -56,6 +56,14 @@ function buildGeneratedProfessionalServicesDownloadFilename(record: {
   return `Contrato (${contractNumber}) (${clientName}) (${title}).${format}`;
 }
 
+function buildGeneratedProfessionalServicesAvailableFormats(record: {
+  originalFileName: string | null;
+  fileMimeType: string | null;
+}) {
+  const primaryFormat = inferInternalContractFormat(record.originalFileName, record.fileMimeType);
+  return primaryFormat ? [primaryFormat] : [];
+}
+
 function validateContractType(value: InternalContract["contractType"]) {
   if (value !== "PROFESSIONAL_SERVICES" && value !== "LABOR") {
     throw new AppError(400, "INVALID_INTERNAL_CONTRACT_TYPE", "Tipo de contrato interno invalido.");
@@ -479,16 +487,15 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       where: { sourceMatterId },
       select: {
         id: true,
+        sourceMatterId: true,
         signatureStatus: true,
         generatedPayload: true,
         originalFileName: true,
-        fileMimeType: true,
-        pdfOriginalFileName: true,
-        pdfFileMimeType: true
+        fileMimeType: true
       }
     });
 
-    if (!record) {
+    if (!record?.sourceMatterId) {
       return null;
     }
 
@@ -502,15 +509,48 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
 
     return {
       contractId: record.id,
+      sourceMatterId: record.sourceMatterId,
       signatureStatus,
-      availableFormats: [
-        ...new Set(
-          [
-            inferInternalContractFormat(record.originalFileName, record.fileMimeType),
-            inferInternalContractFormat(record.pdfOriginalFileName, record.pdfFileMimeType)
-          ].filter((entry): entry is InternalContractDownloadFormat => Boolean(entry))
-        )
-      ],
+      availableFormats: buildGeneratedProfessionalServicesAvailableFormats(record),
+      fields
+    };
+  }
+
+  public async findGeneratedProfessionalServicesStateByContractId(contractId: string): Promise<InternalContractGeneratedStateRecord | null> {
+    const id = normalizeText(contractId);
+    if (!id || parseLaborFileDocumentContractId(id)) {
+      return null;
+    }
+
+    const record = await this.prisma.internalContract.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        sourceMatterId: true,
+        signatureStatus: true,
+        generatedPayload: true,
+        originalFileName: true,
+        fileMimeType: true
+      }
+    });
+
+    if (!record?.sourceMatterId) {
+      return null;
+    }
+
+    const fields = parseGeneratedProfessionalServicesFields(record.generatedPayload);
+    if (!fields) {
+      return null;
+    }
+
+    const signatureStatus: InternalContractGeneratedStateRecord["signatureStatus"] =
+      record.signatureStatus === "SIGNED" ? "SIGNED" : "PENDING";
+
+    return {
+      contractId: record.id,
+      sourceMatterId: record.sourceMatterId,
+      signatureStatus,
+      availableFormats: buildGeneratedProfessionalServicesAvailableFormats(record),
       fields
     };
   }

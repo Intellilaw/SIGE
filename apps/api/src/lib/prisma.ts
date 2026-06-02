@@ -1,47 +1,13 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 import { getCurrentOrganizationId } from "../core/tenant/tenant-context";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-const tenantScopedModels = new Set([
-  "AuditLog",
-  "BudgetPlan",
-  "BudgetPlanSnapshot",
-  "Client",
-  "CommissionExclusion",
-  "CommissionReceiver",
-  "CommissionSnapshot",
-  "DailyDocumentAssignment",
-  "ExternalContract",
-  "ExternalContractRenewal",
-  "ExternalContractRenewalDocument",
-  "ExternalContractGeneratedDocument",
-  "ExternalContractInpc",
-  "FinanceRecord",
-  "FinanceSnapshot",
-  "GeneralExpense",
-  "GeneralExpensePayrollEntry",
-  "Holiday",
-  "InternalContract",
-  "InternalContractTemplate",
-  "LaborFile",
-  "LaborFileDocument",
-  "LaborGlobalVacationDay",
-  "LaborVacationEvent",
-  "Lead",
-  "Matter",
-  "Quote",
-  "QuoteTemplate",
-  "TaskAdditionalTask",
-  "TaskDistributionEvent",
-  "TaskDistributionHistory",
-  "TaskItem",
-  "TaskTerm",
-  "TaskTrackingRecord",
-  "User",
-  "UserTeam"
-]);
+const tenantScopedDatamodelModels = Prisma.dmmf.datamodel.models.filter((model) =>
+  model.fields.some((field) => field.name === "organizationId")
+);
+const tenantScopedModels = new Set(tenantScopedDatamodelModels.map((model) => model.name));
 
 type PrismaQueryArgs = {
   where?: unknown;
@@ -145,6 +111,32 @@ function createPrismaClient() {
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+
+export async function assertTenantScopedDatabaseSchema(client: PrismaClient) {
+  const missing: string[] = [];
+
+  for (const model of tenantScopedDatamodelModels) {
+    const tableName = model.dbName ?? model.name;
+    const rows = await client.$queryRawUnsafe<Array<{ column_name: string }>>(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+          AND column_name = 'organizationId'
+      `,
+      tableName
+    );
+
+    if (rows.length === 0) {
+      missing.push(`${model.name} (${tableName})`);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Tenant schema check failed. Missing organizationId column in: ${missing.join(", ")}`);
+  }
+}
 
 if (process.env.APP_ENV !== "production") {
   globalForPrisma.prisma = prisma;

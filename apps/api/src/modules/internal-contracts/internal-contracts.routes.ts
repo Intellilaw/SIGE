@@ -213,6 +213,31 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
   app.get("/internal-contracts/:contractId/document", { preHandler: readGuards }, async (request, reply) => {
     const params = paramsSchema.parse(request.params);
     const query = documentQuerySchema.parse(request.query ?? {});
+    const requestedFormat = query.format ?? "docx";
+    const generatedState = await service.findGeneratedProfessionalServicesStateByContractId(params.contractId);
+
+    if (generatedState) {
+      if (requestedFormat === "pdf") {
+        throw new app.errors.AppError(404, "INTERNAL_CONTRACT_DOCUMENT_NOT_FOUND", "El archivo del contrato no existe.");
+      }
+
+      const { matter, quote, existingState } = await loadProfessionalServicesContext(generatedState.sourceMatterId);
+      const prefill = buildProfessionalServicesContractPrefill(matter, quote, existingState);
+      const files = await renderProfessionalServicesContractFiles({
+        coverContractNumber: prefill.contractNumber,
+        clientName: prefill.clientName,
+        title: prefill.title,
+        fields: prefill.fields,
+        serviceLines: prefill.serviceLines,
+        paymentMilestones: prefill.paymentMilestones,
+        totalMxn: prefill.totalMxn
+      });
+
+      reply.header("Content-Type", files.docx.contentType);
+      reply.header("Content-Disposition", encodeDispositionFilename(files.docx.filename));
+      return reply.send(files.docx.buffer);
+    }
+
     const document = await service.findDocument(params.contractId, query.format);
 
     if (!document) {

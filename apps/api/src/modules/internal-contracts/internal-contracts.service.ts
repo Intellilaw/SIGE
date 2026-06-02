@@ -34,6 +34,10 @@ export class InternalContractsService {
     return this.repository.findGeneratedProfessionalServicesState(matterId);
   }
 
+  public findGeneratedProfessionalServicesStateByContractId(contractId: string): Promise<InternalContractGeneratedStateRecord | null> {
+    return this.repository.findGeneratedProfessionalServicesStateByContractId(contractId);
+  }
+
   public listCollaborators() {
     return this.repository.listCollaborators();
   }

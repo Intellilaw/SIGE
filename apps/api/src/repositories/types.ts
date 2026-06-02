@@ -191,6 +191,7 @@ export interface InternalContractDocumentRecord {
 
 export interface InternalContractGeneratedStateRecord {
   contractId: string;
+  sourceMatterId: string;
   signatureStatus: InternalContractSignatureStatus;
   availableFormats: InternalContractDownloadFormat[];
   fields: ProfessionalServicesContractFieldValues;
@@ -210,6 +211,7 @@ export interface InternalContractsRepository {
   delete(contractId: string): Promise<void>;
   findDocument(contractId: string, format?: InternalContractDownloadFormat): Promise<InternalContractDocumentRecord | null>;
   findGeneratedProfessionalServicesState(matterId: string): Promise<InternalContractGeneratedStateRecord | null>;
+  findGeneratedProfessionalServicesStateByContractId(contractId: string): Promise<InternalContractGeneratedStateRecord | null>;
   listCollaborators(): Promise<InternalContractCollaborator[]>;
   listTemplates(): Promise<InternalContractTemplate[]>;
   createTemplate(payload: InternalContractTemplateWriteRecord): Promise<InternalContractTemplate>;

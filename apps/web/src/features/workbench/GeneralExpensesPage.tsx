@@ -494,6 +494,25 @@ function replaceExpense(items: GeneralExpense[], updated: GeneralExpense) {
   return items.map((item) => (item.id === updated.id ? updated : item));
 }
 
+function mergeRecordsPreservingOrder(current: GeneralExpense[], incoming: GeneralExpense[]) {
+  if (current.length === 0) {
+    return incoming;
+  }
+
+  const currentOrder = new Map(current.map((item, index) => [item.id, index]));
+  return incoming
+    .map((item, incomingIndex) => ({
+      item,
+      incomingIndex,
+      orderIndex: currentOrder.get(item.id) ?? Number.MAX_SAFE_INTEGER
+    }))
+    .sort((left, right) => (
+      left.orderIndex - right.orderIndex ||
+      left.incomingIndex - right.incomingIndex
+    ))
+    .map(({ item }) => item);
+}
+
 function replacePayrollEntry(items: GeneralExpensePayrollEntry[], updated: GeneralExpensePayrollEntry) {
   return applyPayrollCalculationsToEntries(items.map((item) => (item.id === updated.id ? updated : item)));
 }
@@ -668,7 +687,7 @@ export function GeneralExpensesPage() {
 
     try {
       const response = await apiGet<GeneralExpense[]>(`/general-expenses?year=${selectedYear}&month=${selectedMonth}`);
-      setRecords(response);
+      setRecords((current) => mergeRecordsPreservingOrder(current, response));
       setDrafts({});
     } catch (error) {
       setErrorMessage(toErrorMessage(error));

@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpensePayrollEntry } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import { getLaborDailySalaryRiStatus } from "../modules/labor-files/labor-salary-intelligence";
 import {
   buildVacationSummary,
@@ -112,6 +113,10 @@ const PAYROLL_GLOBAL_VACATION_DAY_SELECT = {
 type PayrollGlobalVacationDayRecord = Prisma.LaborGlobalVacationDayGetPayload<{
   select: typeof PAYROLL_GLOBAL_VACATION_DAY_SELECT;
 }>;
+type PayrollUpdateBuildResult = {
+  data: Prisma.GeneralExpensePayrollEntryUpdateInput;
+  laborFileUpdate?: Prisma.LaborFileUpdateInput;
+};
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
@@ -441,6 +446,10 @@ function getNextMonth(year: number, month: number) {
 export class PrismaGeneralExpensesRepository implements GeneralExpensesRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
+  private getOrganizationId() {
+    return getCurrentOrganizationIdOrDefault();
+  }
+
   private getPayrollVacationTotals(record: StoredGeneralExpensePayrollEntry) {
     const period = getPayrollPeriodDateRange(record.year, record.month, record.half === 2 ? 2 : 1);
     const vacationDays = record.laborFile?.vacationEvents.reduce(
@@ -505,7 +514,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   }
 
   private async listPayrollGlobalVacationDayRecords() {
+    const organizationId = this.getOrganizationId();
     return this.prisma.laborGlobalVacationDay.findMany({
+      where: { organizationId },
       select: PAYROLL_GLOBAL_VACATION_DAY_SELECT,
       orderBy: [{ date: "asc" }]
     });
@@ -540,9 +551,10 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   }
 
   private async mapPayrollEntryWithMonthlyBonuses(record: StoredGeneralExpensePayrollEntry) {
+    const organizationId = this.getOrganizationId();
     const [records, globalVacationDayRecords] = await Promise.all([
       this.prisma.generalExpensePayrollEntry.findMany({
-        where: { year: record.year, month: record.month },
+        where: { organizationId, year: record.year, month: record.month },
         include: PAYROLL_ENTRY_INCLUDE,
         orderBy: [{ half: "asc" }, { createdAt: "asc" }]
       }),
@@ -556,10 +568,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async list(year: number, month: number) {
     assertMonth(month);
+    const organizationId = this.getOrganizationId();
 
     const records = await this.prisma.generalExpense.findMany({
-      where: { year, month },
-      orderBy: [{ createdAt: "asc" }]
+      where: { organizationId, year, month },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
     });
 
     return records.map(mapGeneralExpense);
@@ -570,9 +583,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const year = payload.year ?? now.getFullYear();
     const month = payload.month ?? now.getMonth() + 1;
     assertMonth(month);
+    const organizationId = this.getOrganizationId();
 
     const record = await this.prisma.generalExpense.create({
       data: {
+        organizationId,
         year,
         month,
         detail: "",
@@ -607,7 +622,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     const data = this.buildUpdatePayload(current, payload);
     const record = await this.prisma.generalExpense.update({
-      where: { id: expenseId },
+      where: { id: expenseId, organizationId: this.getOrganizationId() },
       data
     });
 
@@ -620,22 +635,27 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       throw new AppError(400, "GENERAL_EXPENSE_APPROVED_LOCKED", "Approved expenses cannot be deleted.");
     }
 
-    await this.prisma.generalExpense.delete({
-      where: { id: expenseId }
+    await this.prisma.generalExpense.deleteMany({
+      where: {
+        id: expenseId,
+        organizationId: this.getOrganizationId()
+      }
     });
   }
 
   public async copyRecurringToNextMonth(year: number, month: number) {
     assertMonth(month);
+    const organizationId = this.getOrganizationId();
 
     const { year: targetYear, month: targetMonth } = getNextMonth(year, month);
     const recurringRows = await this.prisma.generalExpense.findMany({
       where: {
+        organizationId,
         year,
         month,
         recurring: true
       },
-      orderBy: [{ createdAt: "asc" }]
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
     });
 
     if (recurringRows.length === 0) {
@@ -644,6 +664,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     const result = await this.prisma.generalExpense.createMany({
       data: recurringRows.map((row) => ({
+        organizationId,
         year: targetYear,
         month: targetMonth,
         detail: row.detail,
@@ -677,7 +698,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   }
 
   public async listPayrollEmployeeOptions(): Promise<GeneralExpensePayrollEmployeeOption[]> {
+    const organizationId = this.getOrganizationId();
     const records = await this.prisma.laborFile.findMany({
+      where: { organizationId },
       select: {
         id: true,
         employeeName: true,
@@ -705,10 +728,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async listPayrollEntries(year: number, month: number) {
     assertMonth(month);
+    const organizationId = this.getOrganizationId();
 
     const [records, globalVacationDayRecords] = await Promise.all([
       this.prisma.generalExpensePayrollEntry.findMany({
-        where: { year, month },
+        where: { organizationId, year, month },
         include: PAYROLL_ENTRY_INCLUDE,
         orderBy: [{ half: "asc" }, { createdAt: "asc" }]
       }),
@@ -720,15 +744,16 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async copyPayrollToNextMonth(year: number, month: number) {
     assertMonth(month);
+    const organizationId = this.getOrganizationId();
 
     const { year: targetYear, month: targetMonth } = getNextMonth(year, month);
     const [sourceRows, existingTargetRows] = await Promise.all([
       this.prisma.generalExpensePayrollEntry.findMany({
-        where: { year, month },
+        where: { organizationId, year, month },
         orderBy: [{ half: "asc" }, { createdAt: "asc" }]
       }),
       this.prisma.generalExpensePayrollEntry.count({
-        where: { year: targetYear, month: targetMonth }
+        where: { organizationId, year: targetYear, month: targetMonth }
       })
     ]);
 
@@ -750,6 +775,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         const bonusMxn = 0;
 
         return {
+          organizationId,
           year: targetYear,
           month: targetMonth,
           half: row.half,
@@ -788,16 +814,18 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const half = payload.half ?? 1;
     assertMonth(month);
     assertPayrollHalf(half);
+    const organizationId = this.getOrganizationId();
     const laborFile = payload.laborFileId ? await this.findPayrollLaborFileOrThrow(payload.laborFileId) : null;
     const dailySalaryMxn = Number(laborFile?.dailySalaryMxn ?? 0);
     const bonusMxn = 0;
 
     const record = await this.prisma.generalExpensePayrollEntry.create({
       data: {
+        organizationId,
         year,
         month,
         half,
-        ...(laborFile ? { laborFile: { connect: { id: laborFile.id } } } : {}),
+        laborFileId: laborFile?.id ?? null,
         employeeName: laborFile?.employeeName ?? "",
         isPartTime: false,
         dailySalaryMxn: normalizeMoney(dailySalaryMxn),
@@ -829,11 +857,21 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const current = await this.findPayrollEntryOrThrow(payrollEntryId);
     this.assertPayrollFieldAccess(current, payload, actor);
 
-    const data = await this.buildPayrollUpdatePayload(current, payload);
-    const record = await this.prisma.generalExpensePayrollEntry.update({
-      where: { id: payrollEntryId },
-      data,
-      include: PAYROLL_ENTRY_INCLUDE
+    const organizationId = this.getOrganizationId();
+    const { data, laborFileUpdate } = await this.buildPayrollUpdatePayload(current, payload);
+    const record = await this.prisma.$transaction(async (tx) => {
+      if (laborFileUpdate && current.laborFileId) {
+        await tx.laborFile.update({
+          where: { id: current.laborFileId, organizationId },
+          data: laborFileUpdate
+        });
+      }
+
+      return tx.generalExpensePayrollEntry.update({
+        where: { id: payrollEntryId, organizationId },
+        data,
+        include: PAYROLL_ENTRY_INCLUDE
+      });
     });
 
     return this.mapPayrollEntryWithMonthlyBonuses(record);
@@ -845,14 +883,20 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       throw new AppError(400, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_LOCKED", "La fila ya fue autorizada por EMRT y no puede borrarse.");
     }
 
-    await this.prisma.generalExpensePayrollEntry.delete({
-      where: { id: payrollEntryId }
+    await this.prisma.generalExpensePayrollEntry.deleteMany({
+      where: {
+        id: payrollEntryId,
+        organizationId: this.getOrganizationId()
+      }
     });
   }
 
   private async findOrThrow(expenseId: string) {
-    const record = await this.prisma.generalExpense.findUnique({
-      where: { id: expenseId }
+    const record = await this.prisma.generalExpense.findFirst({
+      where: {
+        id: expenseId,
+        organizationId: this.getOrganizationId()
+      }
     });
 
     if (!record) {
@@ -863,8 +907,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   }
 
   private async findPayrollEntryOrThrow(payrollEntryId: string) {
-    const record = await this.prisma.generalExpensePayrollEntry.findUnique({
-      where: { id: payrollEntryId },
+    const record = await this.prisma.generalExpensePayrollEntry.findFirst({
+      where: {
+        id: payrollEntryId,
+        organizationId: this.getOrganizationId()
+      },
       include: PAYROLL_ENTRY_INCLUDE
     });
 
@@ -881,8 +928,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       return null;
     }
 
-    const laborFile = await this.prisma.laborFile.findUnique({
-      where: { id: normalizedLaborFileId },
+    const laborFile = await this.prisma.laborFile.findFirst({
+      where: {
+        id: normalizedLaborFileId,
+        organizationId: this.getOrganizationId()
+      },
       select: {
         id: true,
         employeeName: true,
@@ -1088,8 +1138,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   private async buildPayrollUpdatePayload(
     current: StoredGeneralExpensePayrollEntry,
     payload: GeneralExpensePayrollUpdateRecord
-  ): Promise<Prisma.GeneralExpensePayrollEntryUpdateInput> {
+  ): Promise<PayrollUpdateBuildResult> {
     const data: Prisma.GeneralExpensePayrollEntryUpdateInput = {};
+    let laborFileUpdate: Prisma.LaborFileUpdateInput | undefined;
     let nextDailySalaryMxn = Number(current.laborFile?.dailySalaryMxn ?? current.dailySalaryMxn ?? 0);
     let shouldRefreshCalculatedBonuses = false;
 
@@ -1186,18 +1237,14 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
           );
         }
 
-        data.laborFile = {
-          update: {
-            advanceVacationDaysPaidBalance: normalizeHours(advanceVacationData.rawAdvanceVacationDays),
-            advanceVacationDaysPaidCutoffDate: parseDateOnly(advanceVacationData.advanceVacationPremiumPaymentDate)
-          }
+        laborFileUpdate = {
+          advanceVacationDaysPaidBalance: normalizeHours(advanceVacationData.rawAdvanceVacationDays),
+          advanceVacationDaysPaidCutoffDate: parseDateOnly(advanceVacationData.advanceVacationPremiumPaymentDate)
         };
       } else {
-        data.laborFile = {
-          update: {
-            advanceVacationDaysPaidBalance: normalizeHours(0),
-            advanceVacationDaysPaidCutoffDate: null
-          }
+        laborFileUpdate = {
+          advanceVacationDaysPaidBalance: normalizeHours(0),
+          advanceVacationDaysPaidCutoffDate: null
         };
       }
     }
@@ -1214,6 +1261,6 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       data.reviewedByJnls = Boolean(payload.reviewedByJnls);
     }
 
-    return data;
+    return { data, laborFileUpdate };
   }
 }

@@ -382,6 +382,8 @@ function inferInternalContractFormat(originalFileName?: string | null, fileMimeT
 }
 
 function buildInternalContractAvailableFormats(record: {
+  contractType?: string | null;
+  sourceMatterId?: string | null;
   originalFileName?: string | null;
   fileMimeType?: string | null;
   pdfOriginalFileName?: string | null;
@@ -395,7 +397,7 @@ function buildInternalContractAvailableFormats(record: {
     formats.add(primaryFormat);
   }
 
-  if (pdfFormat) {
+  if (pdfFormat && !(record.contractType === "PROFESSIONAL_SERVICES" && record.sourceMatterId)) {
     formats.add(pdfFormat);
   }
 

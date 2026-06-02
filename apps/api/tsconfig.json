@@ -9,5 +9,8 @@
   },
   "include": [
     "src/**/*"
+  ],
+  "exclude": [
+    "src/**/*Copia en conflicto*"
   ]
 }
