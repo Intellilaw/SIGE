@@ -54,7 +54,7 @@ export const ORGANIZATION_PROFILES_BY_SLUG: Record<OrganizationSlug, Organizatio
     id: "org-legalflow",
     slug: ORGANIZATION_SLUGS.LEGALFLOW,
     name: "LegalFlow",
-    isActive: false
+    isActive: true
   }
 };
 

@@ -4,6 +4,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "./AuthContext";
 import intellilawLogo from "../../assets/intellilaw-logo.svg";
+import legalFlowLogo from "../../assets/legalflow-logo.svg";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 
 function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
@@ -29,6 +30,18 @@ function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
       <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
+}
+
+function getOrganizationLogo(slug: string) {
+  if (slug === ORGANIZATION_SLUGS.INTELLILAW) {
+    return intellilawLogo;
+  }
+
+  if (slug === ORGANIZATION_SLUGS.LEGALFLOW) {
+    return legalFlowLogo;
+  }
+
+  return rusconiLogo;
 }
 
 export function LoginPage() {
@@ -62,7 +75,7 @@ export function LoginPage() {
         <div className="login-brand">
           <img
             className={`${organization.slug === ORGANIZATION_SLUGS.RUSCONI_CONSULTING ? "rusconi-logo " : ""}login-brand-logo`}
-            src={organization.slug === ORGANIZATION_SLUGS.INTELLILAW ? intellilawLogo : rusconiLogo}
+            src={getOrganizationLogo(organization.slug)}
             alt={organization.name}
           />
         </div>

@@ -140,6 +140,7 @@ async function seedUserTeamTaskModules() {
 
 async function seedUsers() {
   const intellilawSuperadminName = "Eduardo Miguel Rusconi Trujillo";
+  const legalFlowSuperadminName = "Eduardo Miguel Rusconi Trujillo";
 
   await prisma.user.upsert({
     where: {
@@ -253,6 +254,48 @@ async function seedUsers() {
       email: "eduardo.rusconi@intellilaw.ai",
       username: intellilawSuperadminName,
       displayName: intellilawSuperadminName,
+      shortName: "EMRT",
+      role: "SUPERADMIN",
+      legacyRole: "SUPERADMIN",
+      team: "ADMIN",
+      legacyTeam: "Direccion general",
+      specificRole: "Direccion general",
+      permissions: ["*"],
+      isActive: true,
+      passwordResetRequired: false,
+      emailConfirmedAt: new Date(),
+      passwordHash: hashPassword("ChangeMe123!")
+    }
+  });
+
+  await prisma.user.upsert({
+    where: {
+      organizationId_email: {
+        organizationId: "org-legalflow",
+        email: "eduardo.rusconi@intellilaw.ai"
+      }
+    },
+    update: {
+      username: legalFlowSuperadminName,
+      displayName: legalFlowSuperadminName,
+      shortName: "EMRT",
+      role: "SUPERADMIN",
+      legacyRole: "SUPERADMIN",
+      team: "ADMIN",
+      legacyTeam: "Direccion general",
+      specificRole: "Direccion general",
+      permissions: ["*"],
+      isActive: true,
+      passwordResetRequired: false,
+      emailConfirmedAt: new Date(),
+      passwordHash: hashPassword("ChangeMe123!")
+    },
+    create: {
+      id: "usr-legalflow-superadmin",
+      organizationId: "org-legalflow",
+      email: "eduardo.rusconi@intellilaw.ai",
+      username: legalFlowSuperadminName,
+      displayName: legalFlowSuperadminName,
       shortName: "EMRT",
       role: "SUPERADMIN",
       legacyRole: "SUPERADMIN",

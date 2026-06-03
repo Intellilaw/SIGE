@@ -1,17 +1,30 @@
 import { Link } from "react-router-dom";
 
 import intellilawLogo from "../../assets/intellilaw-logo.svg";
+import legalFlowLogo from "../../assets/legalflow-logo.svg";
 import rusconiLogo from "../../assets/rusconi-logo-2025.jpg";
 import { getVisibleAppModules } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { useModuleAvailability } from "../modules/ModuleAvailabilityContext";
 import { openBriefManagerWindow, reportBriefManagerOpenError } from "../modules/openBriefManagerWindow";
 
+function getOrganizationLogo(slug?: string) {
+  if (slug === "intellilaw") {
+    return intellilawLogo;
+  }
+
+  if (slug === "legalflow") {
+    return legalFlowLogo;
+  }
+
+  return rusconiLogo;
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const { disabledModuleIds } = useModuleAvailability();
   const visibleModules = getVisibleAppModules(user, disabledModuleIds);
-  const organizationLogo = user?.organizationSlug === "intellilaw" ? intellilawLogo : rusconiLogo;
+  const organizationLogo = getOrganizationLogo(user?.organizationSlug);
   const organizationLogoClassName = `${user?.organizationSlug === "rusconi-consulting" ? "rusconi-logo " : ""}hero-logo-only-mark`;
 
   const handleOpenBriefManager = () => {

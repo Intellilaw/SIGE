@@ -5,8 +5,7 @@ import {
   APP_VERSION_TEXT,
   ORGANIZATION_PROFILES_BY_SLUG,
   ORGANIZATION_SLUGS,
-  getOrganizationAccessLabel,
-  getOrganizationUnavailableTitle
+  getOrganizationAccessLabel
 } from "@sige/contracts";
 
 import { useAuth } from "./AuthContext";
@@ -53,15 +52,9 @@ export function EntryPage() {
               <div className="entry-option-logo-shell">
                 <img className="entry-option-logo" src={legalFlowLogo} alt={legalFlowOrganization.name} />
               </div>
-              <button
-                type="button"
-                className="entry-button entry-button-disabled"
-                disabled
-                aria-disabled="true"
-                title={getOrganizationUnavailableTitle(legalFlowOrganization)}
-              >
+              <Link to={getAccessPath(legalFlowOrganization.slug)} className="entry-button entry-button-primary">
                 {getOrganizationAccessLabel(legalFlowOrganization)}
-              </button>
+              </Link>
             </div>
 
             <div className="entry-option">
