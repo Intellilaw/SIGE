@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { ORGANIZATION_SLUGS } from "@sige/contracts";
+
+import { useAuth } from "../auth/AuthContext";
 
 export type LibraryDocument = {
   title: string;
@@ -30,6 +33,15 @@ const KIND_LABELS: Record<DocumentKind, string> = {
   excel: "Excel",
   file: "Archivo"
 };
+
+const VIRGIN_LIBRARY_ORGANIZATION_SLUGS = new Set<string>([
+  ORGANIZATION_SLUGS.INTELLILAW,
+  ORGANIZATION_SLUGS.LEGALFLOW
+]);
+
+function shouldShowVirginLibrary(organizationSlug?: string) {
+  return Boolean(organizationSlug && VIRGIN_LIBRARY_ORGANIZATION_SLUGS.has(organizationSlug));
+}
 
 function extensionFromFile(filename: string) {
   const parts = filename.split(".");
@@ -139,16 +151,25 @@ export function DocumentLibraryPage({
   loadErrorMessage = "No se pudieron cargar los documentos.",
   filterDocument
 }: DocumentLibraryPageProps) {
+  const { user } = useAuth();
   const [documents, setDocuments] = useState<LibraryDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const manifestUrl = `${basePath}/manifest.json`;
+  const showVirginLibrary = shouldShowVirginLibrary(user?.organizationSlug);
 
   useEffect(() => {
     let active = true;
 
     async function loadDocuments() {
+      if (showVirginLibrary) {
+        setDocuments([]);
+        setError("");
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         const response = await fetch(manifestUrl, { cache: "no-store" });
@@ -179,7 +200,7 @@ export function DocumentLibraryPage({
     return () => {
       active = false;
     };
-  }, [filterDocument, loadErrorMessage, manifestUrl]);
+  }, [filterDocument, loadErrorMessage, manifestUrl, showVirginLibrary]);
 
   const filteredDocuments = useMemo(() => {
     const search = normalizeDocumentSearchValue(query.trim());

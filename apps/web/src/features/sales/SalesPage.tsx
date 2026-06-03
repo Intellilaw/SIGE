@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
 
+import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
+import minkaLogo from "../../assets/legalflow-minka-logo.png";
+import rematesLogo from "../../assets/legalflow-remates-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
 
-type SalesProductId = "start" | "pld" | "remates";
+type SalesProductId = "start" | "pld" | "remates" | "minka";
 type SalesTimeframe = "anteriores" | "hoy" | "manana" | "posteriores";
 type SalesTaskStatus = "pendiente" | "en_proceso" | "concluida";
 type SalesTaskPriority = "alta" | "media" | "normal";
@@ -14,6 +17,7 @@ interface SalesProduct {
   initials: string;
   accentColor: string;
   logoSrc?: string;
+  logoAlt: string;
   defaultStrategy: string;
   defaultDailyReport: string;
 }
@@ -48,6 +52,7 @@ const SALES_PRODUCTS: SalesProduct[] = [
     initials: "ST",
     accentColor: "#2563eb",
     logoSrc: startLogo,
+    logoAlt: "Start by LegalFlow",
     defaultStrategy:
       "Delimitar el mensaje de entrada de Start: explicar el beneficio concreto, el tipo de cliente ideal, los canales prioritarios y la oferta inicial que debe convertirse en llamada comercial.",
     defaultDailyReport:
@@ -55,12 +60,14 @@ const SALES_PRODUCTS: SalesProduct[] = [
   },
   {
     id: "pld",
-    name: "Sistema PLD",
+    name: "Intellilaw PLD",
     tagline: "Solucion para cumplimiento, prevencion y control operativo PLD.",
     initials: "PLD",
-    accentColor: "#0f766e",
+    accentColor: "#2563eb",
+    logoSrc: intellilawPldLogo,
+    logoAlt: "Intellilaw PLD by LegalFlow",
     defaultStrategy:
-      "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion del sistema PLD.",
+      "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion de Intellilaw PLD.",
     defaultDailyReport:
       "Registrar prospectos contactados, demostraciones agendadas, preguntas recurrentes, materiales enviados y acuerdos de seguimiento."
   },
@@ -69,11 +76,26 @@ const SALES_PRODUCTS: SalesProduct[] = [
     name: "Remates",
     tagline: "Oferta comercial enfocada en oportunidades inmobiliarias y seguimiento juridico.",
     initials: "RM",
-    accentColor: "#b45309",
+    accentColor: "#1d4ed8",
+    logoSrc: rematesLogo,
+    logoAlt: "Remates Inmobiliarios Mexico by LegalFlow",
     defaultStrategy:
       "Delimitar inventario objetivo, perfil de inversionista, mensajes de oportunidad, reglas de calificacion de leads y cadencia de seguimiento.",
     defaultDailyReport:
       "Registrar propiedades revisadas, leads calificados, llamadas realizadas, dudas legales y proximas tareas comerciales."
+  },
+  {
+    id: "minka",
+    name: "Minka",
+    tagline: "Inteligencia contractual con IA para abogados y equipos legales.",
+    initials: "MK",
+    accentColor: "#6d28d9",
+    logoSrc: minkaLogo,
+    logoAlt: "Minka by LegalFlow",
+    defaultStrategy:
+      "Delimitar casos de uso contractuales, promesas de eficiencia, perfil de usuarios juridicos, mensajes de confianza y secuencia de demostracion para Minka.",
+    defaultDailyReport:
+      "Registrar despachos y equipos legales contactados, demos agendadas, contratos analizados, dudas sobre IA y siguientes acciones comerciales."
   }
 ];
 
@@ -123,7 +145,7 @@ const SALES_TASK_SEEDS: SalesTaskSeed[] = [
     id: "pld-listado",
     productId: "pld",
     responsibleId: "IR",
-    task: "Preparar listado de prospectos regulados para Sistema PLD",
+    task: "Preparar listado de prospectos regulados para Intellilaw PLD",
     channel: "Prospeccion",
     dueOffset: 0,
     status: "pendiente",
@@ -176,6 +198,36 @@ const SALES_TASK_SEEDS: SalesTaskSeed[] = [
     task: "Consolidar aprendizajes de mensajes publicados",
     channel: "Reporte",
     dueOffset: -2,
+    status: "concluida",
+    priority: "normal"
+  },
+  {
+    id: "minka-casos-uso",
+    productId: "minka",
+    responsibleId: "IR",
+    task: "Definir casos de uso prioritarios y mensajes para Minka",
+    channel: "Producto",
+    dueOffset: 0,
+    status: "pendiente",
+    priority: "alta"
+  },
+  {
+    id: "minka-demo",
+    productId: "minka",
+    responsibleId: "IR",
+    task: "Preparar demo comercial con flujo de analisis contractual",
+    channel: "Demo",
+    dueOffset: 2,
+    status: "pendiente",
+    priority: "media"
+  },
+  {
+    id: "minka-reporte",
+    productId: "minka",
+    responsibleId: "IR",
+    task: "Documentar aprendizajes de conversaciones con usuarios juridicos",
+    channel: "Reporte",
+    dueOffset: -1,
     status: "concluida",
     priority: "normal"
   }
@@ -548,7 +600,7 @@ export function SalesPage() {
               >
                 <span className="sales-product-logo-shell">
                   {product.logoSrc ? (
-                    <img src={product.logoSrc} alt="Start by LegalFlow" />
+                    <img src={product.logoSrc} alt={product.logoAlt} />
                   ) : (
                     <span className="sales-product-monogram" style={{ color: product.accentColor }}>
                       {product.initials}
@@ -571,7 +623,7 @@ export function SalesPage() {
           <div className="sales-selected-product-head">
             <span className="sales-selected-product-logo" style={{ borderColor: selectedProduct.accentColor }}>
               {selectedProduct.logoSrc ? (
-                <img src={selectedProduct.logoSrc} alt="Start by LegalFlow" />
+                <img src={selectedProduct.logoSrc} alt={selectedProduct.logoAlt} />
               ) : (
                 <span style={{ color: selectedProduct.accentColor }}>{selectedProduct.initials}</span>
               )}

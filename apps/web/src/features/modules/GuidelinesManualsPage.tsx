@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { ORGANIZATION_SLUGS } from "@sige/contracts";
+
+import { useAuth } from "../auth/AuthContext";
 
 const DOCS_BASE_PATH = "/docs/lineamientos-manuales-internos";
 const MANIFEST_URL = `${DOCS_BASE_PATH}/manifest.json`;
+const VIRGIN_LIBRARY_ORGANIZATION_SLUGS = new Set<string>([
+  ORGANIZATION_SLUGS.INTELLILAW,
+  ORGANIZATION_SLUGS.LEGALFLOW
+]);
 
 type InternalDocument = {
   title: string;
@@ -25,16 +32,30 @@ function readManifestDocuments(payload: ManifestPayload): InternalDocument[] {
     }));
 }
 
+function shouldShowVirginLibrary(organizationSlug?: string) {
+  return Boolean(organizationSlug && VIRGIN_LIBRARY_ORGANIZATION_SLUGS.has(organizationSlug));
+}
+
 export function GuidelinesManualsPage() {
+  const { user } = useAuth();
   const [documents, setDocuments] = useState<InternalDocument[]>([]);
   const [selectedFile, setSelectedFile] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const showVirginLibrary = shouldShowVirginLibrary(user?.organizationSlug);
 
   useEffect(() => {
     let active = true;
 
     async function loadDocuments() {
+      if (showVirginLibrary) {
+        setDocuments([]);
+        setSelectedFile("");
+        setError("");
+        setLoading(false);
+        return;
+      }
+
       try {
         const response = await fetch(MANIFEST_URL, { cache: "no-store" });
 
@@ -66,7 +87,7 @@ export function GuidelinesManualsPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [showVirginLibrary]);
 
   const activeDocument = useMemo(
     () => documents.find((document) => document.file === selectedFile) ?? documents[0],

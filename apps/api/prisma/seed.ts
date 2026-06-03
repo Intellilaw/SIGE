@@ -140,7 +140,7 @@ async function seedUserTeamTaskModules() {
 
 async function seedUsers() {
   const intellilawSuperadminName = "Eduardo Miguel Rusconi Trujillo";
-  const legalFlowSuperadminName = "Eduardo Miguel Rusconi Trujillo";
+  const legalFlowSuperadminName = "Eduardo Rusconi";
 
   await prisma.user.upsert({
     where: {
@@ -287,8 +287,7 @@ async function seedUsers() {
       permissions: ["*"],
       isActive: true,
       passwordResetRequired: false,
-      emailConfirmedAt: new Date(),
-      passwordHash: hashPassword("ChangeMe123!")
+      emailConfirmedAt: new Date()
     },
     create: {
       id: "usr-legalflow-superadmin",

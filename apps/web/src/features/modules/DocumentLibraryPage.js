@@ -1,5 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
+import { ORGANIZATION_SLUGS } from "@sige/contracts";
+import { useAuth } from "../auth/AuthContext";
 const KIND_LABELS = {
     pdf: "PDF",
     word: "Word",
@@ -7,6 +9,13 @@ const KIND_LABELS = {
     excel: "Excel",
     file: "Archivo"
 };
+const VIRGIN_LIBRARY_ORGANIZATION_SLUGS = new Set([
+    ORGANIZATION_SLUGS.INTELLILAW,
+    ORGANIZATION_SLUGS.LEGALFLOW
+]);
+function shouldShowVirginLibrary(organizationSlug) {
+    return Boolean(organizationSlug && VIRGIN_LIBRARY_ORGANIZATION_SLUGS.has(organizationSlug));
+}
 function extensionFromFile(filename) {
     const parts = filename.split(".");
     return parts.length > 1 ? parts.pop()?.toLowerCase() ?? "" : "";
@@ -57,14 +66,22 @@ function DocumentCard({ basePath, document }) {
     return (_jsxs("article", { className: "third-party-doc-card", children: [_jsx("div", { className: "third-party-doc-icon-shell", children: _jsx(FileIcon, { kind: kind }) }), _jsxs("div", { className: "third-party-doc-body", children: [_jsx("h3", { children: document.title }), _jsxs("div", { className: "third-party-doc-meta", children: [_jsx("span", { children: extension ? extension.toUpperCase() : "ARCHIVO" }), _jsx("span", { children: KIND_LABELS[kind] })] }), _jsxs("div", { className: "third-party-doc-actions", children: [_jsx("a", { className: "primary-button third-party-doc-button", href: href, download: document.file, children: "Descargar" }), _jsx("a", { className: "secondary-button third-party-doc-button", href: href, target: "_blank", rel: "noreferrer", children: "Abrir" })] })] })] }));
 }
 export function DocumentLibraryPage({ basePath, title, iconLabel, description, pageClassName = "", searchLabel = "Buscar documento", searchPlaceholder = "Buscar por nombre o archivo...", emptyMessage = "No hay documentos que coincidan con la busqueda.", loadingMessage = "Cargando documentos...", loadErrorMessage = "No se pudieron cargar los documentos.", filterDocument }) {
+    const { user } = useAuth();
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [query, setQuery] = useState("");
     const manifestUrl = `${basePath}/manifest.json`;
+    const showVirginLibrary = shouldShowVirginLibrary(user?.organizationSlug);
     useEffect(() => {
         let active = true;
         async function loadDocuments() {
+            if (showVirginLibrary) {
+                setDocuments([]);
+                setError("");
+                setLoading(false);
+                return;
+            }
             try {
                 setLoading(true);
                 const response = await fetch(manifestUrl, { cache: "no-store" });
@@ -93,7 +110,7 @@ export function DocumentLibraryPage({ basePath, title, iconLabel, description, p
         return () => {
             active = false;
         };
-    }, [filterDocument, loadErrorMessage, manifestUrl]);
+    }, [filterDocument, loadErrorMessage, manifestUrl, showVirginLibrary]);
     const filteredDocuments = useMemo(() => {
         const search = normalizeDocumentSearchValue(query.trim());
         if (!search) {

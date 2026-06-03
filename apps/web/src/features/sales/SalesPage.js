@@ -1,5 +1,8 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useMemo, useState } from "react";
+import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
+import minkaLogo from "../../assets/legalflow-minka-logo.png";
+import rematesLogo from "../../assets/legalflow-remates-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
 const SALES_PRODUCTS = [
     {
@@ -9,16 +12,19 @@ const SALES_PRODUCTS = [
         initials: "ST",
         accentColor: "#2563eb",
         logoSrc: startLogo,
+        logoAlt: "Start by LegalFlow",
         defaultStrategy: "Delimitar el mensaje de entrada de Start: explicar el beneficio concreto, el tipo de cliente ideal, los canales prioritarios y la oferta inicial que debe convertirse en llamada comercial.",
         defaultDailyReport: "Registrar contactos realizados, piezas publicadas, respuestas recibidas, siguientes acciones y bloqueos detectados durante el dia."
     },
     {
         id: "pld",
-        name: "Sistema PLD",
+        name: "Intellilaw PLD",
         tagline: "Solucion para cumplimiento, prevencion y control operativo PLD.",
         initials: "PLD",
-        accentColor: "#0f766e",
-        defaultStrategy: "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion del sistema PLD.",
+        accentColor: "#2563eb",
+        logoSrc: intellilawPldLogo,
+        logoAlt: "Intellilaw PLD by LegalFlow",
+        defaultStrategy: "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion de Intellilaw PLD.",
         defaultDailyReport: "Registrar prospectos contactados, demostraciones agendadas, preguntas recurrentes, materiales enviados y acuerdos de seguimiento."
     },
     {
@@ -26,9 +32,22 @@ const SALES_PRODUCTS = [
         name: "Remates",
         tagline: "Oferta comercial enfocada en oportunidades inmobiliarias y seguimiento juridico.",
         initials: "RM",
-        accentColor: "#b45309",
+        accentColor: "#1d4ed8",
+        logoSrc: rematesLogo,
+        logoAlt: "Remates Inmobiliarios Mexico by LegalFlow",
         defaultStrategy: "Delimitar inventario objetivo, perfil de inversionista, mensajes de oportunidad, reglas de calificacion de leads y cadencia de seguimiento.",
         defaultDailyReport: "Registrar propiedades revisadas, leads calificados, llamadas realizadas, dudas legales y proximas tareas comerciales."
+    },
+    {
+        id: "minka",
+        name: "Minka",
+        tagline: "Inteligencia contractual con IA para abogados y equipos legales.",
+        initials: "MK",
+        accentColor: "#6d28d9",
+        logoSrc: minkaLogo,
+        logoAlt: "Minka by LegalFlow",
+        defaultStrategy: "Delimitar casos de uso contractuales, promesas de eficiencia, perfil de usuarios juridicos, mensajes de confianza y secuencia de demostracion para Minka.",
+        defaultDailyReport: "Registrar despachos y equipos legales contactados, demos agendadas, contratos analizados, dudas sobre IA y siguientes acciones comerciales."
     }
 ];
 const SALES_RESPONSIBLES = [
@@ -75,7 +94,7 @@ const SALES_TASK_SEEDS = [
         id: "pld-listado",
         productId: "pld",
         responsibleId: "IR",
-        task: "Preparar listado de prospectos regulados para Sistema PLD",
+        task: "Preparar listado de prospectos regulados para Intellilaw PLD",
         channel: "Prospeccion",
         dueOffset: 0,
         status: "pendiente",
@@ -128,6 +147,36 @@ const SALES_TASK_SEEDS = [
         task: "Consolidar aprendizajes de mensajes publicados",
         channel: "Reporte",
         dueOffset: -2,
+        status: "concluida",
+        priority: "normal"
+    },
+    {
+        id: "minka-casos-uso",
+        productId: "minka",
+        responsibleId: "IR",
+        task: "Definir casos de uso prioritarios y mensajes para Minka",
+        channel: "Producto",
+        dueOffset: 0,
+        status: "pendiente",
+        priority: "alta"
+    },
+    {
+        id: "minka-demo",
+        productId: "minka",
+        responsibleId: "IR",
+        task: "Preparar demo comercial con flujo de analisis contractual",
+        channel: "Demo",
+        dueOffset: 2,
+        status: "pendiente",
+        priority: "media"
+    },
+    {
+        id: "minka-reporte",
+        productId: "minka",
+        responsibleId: "IR",
+        task: "Documentar aprendizajes de conversaciones con usuarios juridicos",
+        channel: "Reporte",
+        dueOffset: -1,
         status: "concluida",
         priority: "normal"
     }
@@ -323,6 +372,6 @@ export function SalesPage() {
                         }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Productos" }), _jsxs("span", { children: [SALES_PRODUCTS.length, " productos"] })] }), _jsx("div", { className: "sales-product-grid", children: SALES_PRODUCTS.map((product) => {
                             const productOpenTasks = salesTasks.filter((task) => task.productId === product.id && task.status !== "concluida").length;
                             const isSelected = selectedProductId === product.id;
-                            return (_jsxs("button", { type: "button", className: `sales-product-card ${isSelected ? "is-selected" : ""}`, "aria-pressed": isSelected, onClick: () => setSelectedProductId(product.id), children: [_jsx("span", { className: "sales-product-logo-shell", children: product.logoSrc ? (_jsx("img", { src: product.logoSrc, alt: "Start by LegalFlow" })) : (_jsx("span", { className: "sales-product-monogram", style: { color: product.accentColor }, children: product.initials })) }), _jsxs("span", { className: "sales-product-card-copy", children: [_jsx("strong", { children: product.name }), _jsx("span", { children: product.tagline }), _jsxs("span", { className: "sales-product-task-summary", children: [productOpenTasks, " tareas abiertas"] })] })] }, product.id));
-                        }) })] }), _jsxs("section", { className: "sales-product-detail-grid", "aria-label": `Detalle de ${selectedProduct.name}`, children: [_jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "sales-selected-product-head", children: [_jsx("span", { className: "sales-selected-product-logo", style: { borderColor: selectedProduct.accentColor }, children: selectedProduct.logoSrc ? (_jsx("img", { src: selectedProduct.logoSrc, alt: "Start by LegalFlow" })) : (_jsx("span", { style: { color: selectedProduct.accentColor }, children: selectedProduct.initials })) }), _jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Producto" }), _jsx("h2", { children: selectedProduct.name }), _jsx("p", { className: "muted", children: selectedProduct.tagline })] })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Estrategia general de marketing" }), _jsx("textarea", { value: strategies[selectedProduct.id], onChange: (event) => updateStrategy(selectedProduct.id, event.target.value) })] })] }), _jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Reporte diario de tareas realizadas" }), _jsx("span", { children: formatDateInput(selectedReportDate) })] }), _jsxs("label", { className: "form-field sales-date-field", children: [_jsx("span", { children: "Fecha del reporte" }), _jsx("input", { type: "date", value: selectedReportDate, max: today, onChange: (event) => setSelectedReportDate(event.target.value) })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Bitacora diaria" }), _jsx("textarea", { value: selectedDailyReport, placeholder: selectedProduct.defaultDailyReport, onChange: (event) => updateDailyReport(selectedProduct.id, selectedReportDate, event.target.value) })] }), _jsx("div", { className: "sales-report-list", children: selectedCompletedTasks.length === 0 ? (_jsx("p", { className: "centered-inline-message sales-empty-report", children: "No hay tareas realizadas registradas para este producto." })) : (selectedCompletedTasks.map((task) => (_jsxs("div", { className: "sales-report-entry", children: [_jsx("strong", { children: task.task }), _jsx("span", { children: task.channel }), _jsx("small", { children: formatDateInput(task.dueDate) })] }, task.id)))) })] })] })] }));
+                            return (_jsxs("button", { type: "button", className: `sales-product-card ${isSelected ? "is-selected" : ""}`, "aria-pressed": isSelected, onClick: () => setSelectedProductId(product.id), children: [_jsx("span", { className: "sales-product-logo-shell", children: product.logoSrc ? (_jsx("img", { src: product.logoSrc, alt: product.logoAlt })) : (_jsx("span", { className: "sales-product-monogram", style: { color: product.accentColor }, children: product.initials })) }), _jsxs("span", { className: "sales-product-card-copy", children: [_jsx("strong", { children: product.name }), _jsx("span", { children: product.tagline }), _jsxs("span", { className: "sales-product-task-summary", children: [productOpenTasks, " tareas abiertas"] })] })] }, product.id));
+                        }) })] }), _jsxs("section", { className: "sales-product-detail-grid", "aria-label": `Detalle de ${selectedProduct.name}`, children: [_jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "sales-selected-product-head", children: [_jsx("span", { className: "sales-selected-product-logo", style: { borderColor: selectedProduct.accentColor }, children: selectedProduct.logoSrc ? (_jsx("img", { src: selectedProduct.logoSrc, alt: selectedProduct.logoAlt })) : (_jsx("span", { style: { color: selectedProduct.accentColor }, children: selectedProduct.initials })) }), _jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Producto" }), _jsx("h2", { children: selectedProduct.name }), _jsx("p", { className: "muted", children: selectedProduct.tagline })] })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Estrategia general de marketing" }), _jsx("textarea", { value: strategies[selectedProduct.id], onChange: (event) => updateStrategy(selectedProduct.id, event.target.value) })] })] }), _jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Reporte diario de tareas realizadas" }), _jsx("span", { children: formatDateInput(selectedReportDate) })] }), _jsxs("label", { className: "form-field sales-date-field", children: [_jsx("span", { children: "Fecha del reporte" }), _jsx("input", { type: "date", value: selectedReportDate, max: today, onChange: (event) => setSelectedReportDate(event.target.value) })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Bitacora diaria" }), _jsx("textarea", { value: selectedDailyReport, placeholder: selectedProduct.defaultDailyReport, onChange: (event) => updateDailyReport(selectedProduct.id, selectedReportDate, event.target.value) })] }), _jsx("div", { className: "sales-report-list", children: selectedCompletedTasks.length === 0 ? (_jsx("p", { className: "centered-inline-message sales-empty-report", children: "No hay tareas realizadas registradas para este producto." })) : (selectedCompletedTasks.map((task) => (_jsxs("div", { className: "sales-report-entry", children: [_jsx("strong", { children: task.task }), _jsx("span", { children: task.channel }), _jsx("small", { children: formatDateInput(task.dueDate) })] }, task.id)))) })] })] })] }));
 }
