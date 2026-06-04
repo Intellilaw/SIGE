@@ -1590,6 +1590,8 @@ export function mapFinanceRecord(record: {
   pctTaxCompliance: number;
   clientCommissionRecipient: string | null;
   closingCommissionRecipient: string | null;
+  highCollectionProbability: boolean;
+  lowCollectionProbability: boolean;
   milestone: string | null;
   concluded: boolean;
   financeComments: string | null;
@@ -1632,6 +1634,8 @@ export function mapFinanceRecord(record: {
     pctTaxCompliance: record.pctTaxCompliance,
     clientCommissionRecipient: record.clientCommissionRecipient ?? undefined,
     closingCommissionRecipient: record.closingCommissionRecipient ?? undefined,
+    highCollectionProbability: record.highCollectionProbability,
+    lowCollectionProbability: record.lowCollectionProbability,
     milestone: record.milestone ?? undefined,
     concluded: record.concluded,
     financeComments: record.financeComments ?? undefined,

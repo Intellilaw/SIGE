@@ -112,7 +112,7 @@ aws secretsmanager put-secret-value --secret-id $secretId --secret-string ($secr
 npm.cmd run aws:verify-runtime --workspace @sige/api -- `
   --app-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:sige-prod-api-config-ALU8io" `
   --rds-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:rds!db-4d317298-c0ba-44a8-97f0-02ab35a3dc75-ZkgZoU" `
-  --api-base-url "https://api.pruebasb.online"
+  --api-base-url "https://www.intellilaw.ai"
 ```
 
 For a full login smoke test, set these only in the shell session before running the command:
@@ -130,7 +130,7 @@ If the command runs from inside the AWS VPC or from a runner with network access
 npm.cmd run aws:verify-runtime --workspace @sige/api -- `
   --app-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:sige-prod-api-config-ALU8io" `
   --rds-secret-id "arn:aws:secretsmanager:us-east-1:110661052936:secret:rds!db-4d317298-c0ba-44a8-97f0-02ab35a3dc75-ZkgZoU" `
-  --api-base-url "https://api.pruebasb.online" `
+  --api-base-url "https://www.intellilaw.ai" `
   --direct-db
 ```
 

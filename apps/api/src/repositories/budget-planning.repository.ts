@@ -35,13 +35,42 @@ function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
 }
 
-function calculateExpectedIncomeFromFinance(records: Array<{
+function calculateDueTodayMxn(record: {
   conceptFeesMxn: Prisma.Decimal;
   previousPaymentsMxn: Prisma.Decimal;
+  paidThisMonthMxn: Prisma.Decimal;
+  payment2Mxn: Prisma.Decimal;
+  payment3Mxn: Prisma.Decimal;
+}) {
+  return (
+    Number(record.conceptFeesMxn || 0) -
+    Number(record.previousPaymentsMxn || 0) -
+    Number(record.paidThisMonthMxn || 0) -
+    Number(record.payment2Mxn || 0) -
+    Number(record.payment3Mxn || 0)
+  );
+}
+
+function calculateExpectedIncomeBreakdownFromFinance(records: Array<{
+  conceptFeesMxn: Prisma.Decimal;
+  previousPaymentsMxn: Prisma.Decimal;
+  paidThisMonthMxn: Prisma.Decimal;
+  payment2Mxn: Prisma.Decimal;
+  payment3Mxn: Prisma.Decimal;
+  highCollectionProbability: boolean;
+  lowCollectionProbability: boolean;
 }>) {
   return records.reduce(
-    (sum, record) => sum + Number(record.conceptFeesMxn || 0) - Number(record.previousPaymentsMxn || 0),
-    0
+    (totals, record) => {
+      const dueTodayMxn = calculateDueTodayMxn(record);
+
+      return {
+        total: totals.total + dueTodayMxn,
+        highProbability: totals.highProbability + (record.highCollectionProbability ? dueTodayMxn : 0),
+        lowProbability: totals.lowProbability + (record.lowCollectionProbability ? dueTodayMxn : 0)
+      };
+    },
+    { total: 0, highProbability: 0, lowProbability: 0 }
   );
 }
 
@@ -83,10 +112,12 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       })
     ]);
 
+    const expectedIncome = calculateExpectedIncomeBreakdownFromFinance(financeRecords);
+
     return {
       plan: {
         ...plan,
-        expectedIncomeMxn: calculateExpectedIncomeFromFinance(financeRecords)
+        expectedIncomeMxn: expectedIncome.total
       },
       financeRecords: financeRecords.map(mapFinanceRecord),
       generalExpenses: generalExpenses.map(mapGeneralExpense)
@@ -130,13 +161,19 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       where: { year, month },
       select: {
         conceptFeesMxn: true,
-        previousPaymentsMxn: true
+        previousPaymentsMxn: true,
+        paidThisMonthMxn: true,
+        payment2Mxn: true,
+        payment3Mxn: true,
+        highCollectionProbability: true,
+        lowCollectionProbability: true
       }
     });
+    const expectedIncome = calculateExpectedIncomeBreakdownFromFinance(financeRecords);
 
     return {
       ...mapBudgetPlan(plan),
-      expectedIncomeMxn: calculateExpectedIncomeFromFinance(financeRecords)
+      expectedIncomeMxn: expectedIncome.total
     };
   }
 
@@ -241,7 +278,8 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       })
     ]);
 
-    const expectedIncomeMxn = calculateExpectedIncomeFromFinance(financeRecords);
+    const expectedIncome = calculateExpectedIncomeBreakdownFromFinance(financeRecords);
+    const expectedIncomeMxn = expectedIncome.total;
     const expectedExpenseMxn = Number(plan?.expectedExpenseMxn ?? 0);
     const actualIncomeMxn = financeRecords.reduce(
       (sum, record) =>
@@ -252,7 +290,7 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       0
     );
     const actualExpenseMxn = generalExpenses.reduce((sum, expense) => sum + Number(expense.amountMxn || 0), 0);
-    const expectedResultMxn = expectedIncomeMxn - expectedExpenseMxn;
+    const expectedResultMxn = expectedIncome.highProbability - expectedExpenseMxn;
     const actualResultMxn = actualIncomeMxn - actualExpenseMxn;
 
     const snapshot = await this.prisma.budgetPlanSnapshot.create({

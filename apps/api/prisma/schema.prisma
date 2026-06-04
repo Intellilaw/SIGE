@@ -786,6 +786,8 @@ model FinanceRecord {
   pctTaxCompliance           Int          @default(0)
   clientCommissionRecipient  String?
   closingCommissionRecipient String?
+  highCollectionProbability  Boolean      @default(false)
+  lowCollectionProbability   Boolean      @default(false)
   milestone                  String?
   concluded                  Boolean      @default(false)
   financeComments            String?

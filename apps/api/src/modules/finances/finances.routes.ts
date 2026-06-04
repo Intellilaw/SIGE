@@ -53,6 +53,8 @@ const financeRecordFieldsSchema = z.object({
   pctTaxCompliance: z.coerce.number().int().min(0).max(100).optional(),
   clientCommissionRecipient: z.string().nullable().optional(),
   closingCommissionRecipient: z.string().nullable().optional(),
+  highCollectionProbability: z.boolean().optional(),
+  lowCollectionProbability: z.boolean().optional(),
   milestone: z.string().nullable().optional(),
   concluded: z.boolean().optional(),
   financeComments: z.string().nullable().optional()

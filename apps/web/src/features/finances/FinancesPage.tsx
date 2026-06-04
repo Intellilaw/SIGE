@@ -54,6 +54,8 @@ type FinanceRecordPatchPayload = {
   pctTaxCompliance?: number;
   clientCommissionRecipient?: string | null;
   closingCommissionRecipient?: string | null;
+  highCollectionProbability?: boolean;
+  lowCollectionProbability?: boolean;
   milestone?: string | null;
   concluded?: boolean;
   financeComments?: string | null;
@@ -81,6 +83,8 @@ const MONTHLY_COLUMN_WIDTHS = [
   "180px",
   "180px",
   "160px",
+  "150px",
+  "150px",
   "170px",
   "190px",
   "220px",
@@ -509,19 +513,25 @@ function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
         const stats = calculateFinanceStats(record);
         return {
           income: acc.income + stats.totalPaidMxn,
-          netRemainingExpectedThisMonth: acc.netRemainingExpectedThisMonth + stats.dueTodayMxn
+          netRemainingExpectedThisMonth: acc.netRemainingExpectedThisMonth + stats.dueTodayMxn,
+          highCollectionProbability: acc.highCollectionProbability + (record.highCollectionProbability ? stats.dueTodayMxn : 0),
+          lowCollectionProbability: acc.lowCollectionProbability + (record.lowCollectionProbability ? stats.dueTodayMxn : 0)
         };
       },
       {
         income: 0,
-        netRemainingExpectedThisMonth: 0
+        netRemainingExpectedThisMonth: 0,
+        highCollectionProbability: 0,
+        lowCollectionProbability: 0
       }
     );
   }, [records]);
 
   const cards = [
     { label: "Ingresos cobrados", value: totals.income, accent: "finance-card-green" },
-    { label: "Remanente neto esperado este mes", value: totals.netRemainingExpectedThisMonth, accent: "finance-card-red" }
+    { label: "Cuentas por cobrar totales de este mes", value: totals.netRemainingExpectedThisMonth, accent: "finance-card-red" },
+    { label: "Honorarios con altas probabilidades de cobro", value: totals.highCollectionProbability, accent: "finance-card-blue" },
+    { label: "Honorarios con bajas probabilidades de cobro", value: totals.lowCollectionProbability, accent: "finance-card-orange" }
   ];
 
   return (
@@ -1074,6 +1084,21 @@ export function FinancesPage() {
     }
   }
 
+  function setCollectionProbability(record: FinanceRecord, probability: "high" | "low", checked: boolean) {
+    const patch: FinanceRecordPatchPayload = probability === "high"
+      ? {
+          highCollectionProbability: checked,
+          lowCollectionProbability: checked ? false : record.lowCollectionProbability
+        }
+      : {
+          highCollectionProbability: checked ? false : record.highCollectionProbability,
+          lowCollectionProbability: checked
+        };
+
+    updateRecordLocal(record.id, patch);
+    void persistRecordPatch(record.id, patch);
+  }
+
   async function handleMatterNextPaymentDateChange(matterId: string, value: string) {
     if (!canWriteFinances) {
       return;
@@ -1331,6 +1356,8 @@ export function FinancesPage() {
           <th>Pagado este mes</th>
           <th>Fecha Pago Real</th>
           <th>Adeudado hoy</th>
+          <th>Alta probabilidad de cobro</th>
+          <th>Baja probabilidad de cobro</th>
           <th>Honorarios netos</th>
           <th>Comision cliente 20%</th>
           <th>Para quien</th>
@@ -1429,6 +1456,20 @@ export function FinancesPage() {
                     </div>
                   </td>
                   <td><CurrencyInput className={stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""} value={stats.dueTodayMxn} readOnly /></td>
+                  <td className="finance-cell-checkbox">
+                    <input
+                      checked={record.highCollectionProbability}
+                      onChange={(event) => setCollectionProbability(record, "high", event.target.checked)}
+                      type="checkbox"
+                    />
+                  </td>
+                  <td className="finance-cell-checkbox">
+                    <input
+                      checked={record.lowCollectionProbability}
+                      onChange={(event) => setCollectionProbability(record, "low", event.target.checked)}
+                      type="checkbox"
+                    />
+                  </td>
                   <td><CurrencyInput className="finance-cell-positive" value={stats.netFeesMxn} readOnly /></td>
                   <td>{formatCurrency(stats.clientCommissionMxn)}</td>
                   <td>
@@ -1476,7 +1517,7 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={44}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={46}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
@@ -1489,6 +1530,8 @@ export function FinancesPage() {
               <td>{formatCurrency(totals.totalPaidMxn)}</td>
               <td />
               <td>{formatCurrency(totals.dueTodayMxn)}</td>
+              <td />
+              <td />
               <td>{formatCurrency(totals.netFeesMxn)}</td>
               <td>{formatCurrency(totals.clientCommissionMxn)}</td>
               <td />

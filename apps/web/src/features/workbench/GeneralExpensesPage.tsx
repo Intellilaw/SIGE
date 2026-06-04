@@ -621,6 +621,12 @@ function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayl
   return next;
 }
 
+function getApprovedByEmrtPatch(approvedByEmrt: boolean): GeneralExpensePatchPayload {
+  return approvedByEmrt
+    ? { approvedByEmrt }
+    : { approvedByEmrt, paidByEmrtAt: null };
+}
+
 function applyPayrollLocalPatch(
   entry: GeneralExpensePayrollEntry,
   patch: PayrollLocalPatchPayload
@@ -1195,6 +1201,10 @@ export function GeneralExpensesPage() {
 
   const emrtDailyTotals = useMemo(() => {
     const grouped = records.reduce<Record<string, { total: number; items: GeneralExpense[] }>>((accumulator, expense) => {
+      if (!expense.approvedByEmrt) {
+        return accumulator;
+      }
+
       const key = toDateInput(expense.paidByEmrtAt);
       if (!key) {
         return accumulator;
@@ -1929,12 +1939,15 @@ export function GeneralExpensesPage() {
                                 <input
                                   type="checkbox"
                                   checked={expense.approvedByEmrt}
-                                  onChange={(event) => void persistExpensePatch(expense.id, { approvedByEmrt: event.target.checked })}
+                                  onChange={(event) => {
+                                    const patch = getApprovedByEmrtPatch(event.target.checked);
+                                    void persistExpensePatch(expense.id, { approvedByEmrt: event.target.checked }, patch);
+                                  }}
                                   disabled={!canApprove}
                                 />
                               </td>
                               <td>
-                                {expense.paymentMethod === "Efectivo" ? (
+                                {expense.paymentMethod === "Efectivo" && expense.approvedByEmrt ? (
                                   <div className="general-expense-date-stack">
                                     <input
                                       className="general-expense-input"

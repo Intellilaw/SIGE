@@ -8,6 +8,12 @@ const tenantScopedDatamodelModels = Prisma.dmmf.datamodel.models.filter((model) 
   model.fields.some((field) => field.name === "organizationId")
 );
 const tenantScopedModels = new Set(tenantScopedDatamodelModels.map((model) => model.name));
+const tenantScopedRelationFieldsByModel = new Map(
+  tenantScopedDatamodelModels.map((model) => [
+    model.name,
+    new Set(model.fields.filter((field) => field.kind === "object").map((field) => field.name))
+  ])
+);
 
 type PrismaQueryArgs = {
   where?: unknown;
@@ -18,6 +24,25 @@ type PrismaQueryArgs = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn(record: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function usesNestedRelationData(data: Record<string, unknown>, model?: string) {
+  if (!model) {
+    return false;
+  }
+
+  const relationFields = tenantScopedRelationFieldsByModel.get(model);
+  if (!relationFields) {
+    return false;
+  }
+
+  return Object.entries(data).some(([key, value]) =>
+    key !== "organization" && relationFields.has(key) && value !== null && value !== undefined
+  );
 }
 
 function withTenantWhere(where: unknown, organizationId: string, uniqueWhere = false) {
@@ -40,12 +65,30 @@ function withTenantWhere(where: unknown, organizationId: string, uniqueWhere = f
   };
 }
 
-function withTenantData(data: unknown, organizationId: string): unknown {
+function withTenantData(data: unknown, organizationId: string, model?: string, allowRelationConnect = false): unknown {
   if (Array.isArray(data)) {
-    return data.map((entry) => withTenantData(entry, organizationId));
+    return data.map((entry) => withTenantData(entry, organizationId, model, allowRelationConnect));
   }
 
   if (!isRecord(data)) {
+    return data;
+  }
+
+  if (hasOwn(data, "organization")) {
+    return data;
+  }
+
+  if (allowRelationConnect && usesNestedRelationData(data, model)) {
+    const explicitOrganizationId = typeof data.organizationId === "string" ? data.organizationId : organizationId;
+    const { organizationId: _organizationId, ...rest } = data;
+
+    return {
+      ...rest,
+      organization: { connect: { id: explicitOrganizationId } }
+    };
+  }
+
+  if (hasOwn(data, "organizationId")) {
     return data;
   }
 
@@ -91,7 +134,7 @@ function createPrismaClient() {
           }
 
           if (operation === "create") {
-            scopedArgs.data = withTenantData(scopedArgs.data, organizationId);
+            scopedArgs.data = withTenantData(scopedArgs.data, organizationId, model, true);
           }
 
           if (operation === "createMany") {
@@ -99,8 +142,7 @@ function createPrismaClient() {
           }
 
           if (operation === "upsert") {
-            scopedArgs.create = withTenantData(scopedArgs.create, organizationId);
-            scopedArgs.update = withTenantData(scopedArgs.update, organizationId);
+            scopedArgs.create = withTenantData(scopedArgs.create, organizationId, model, true);
           }
 
           return query(scopedArgs as typeof args);

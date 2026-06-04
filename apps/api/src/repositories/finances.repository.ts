@@ -29,6 +29,60 @@ type PercentagePayload = Pick<
 >;
 
 const VALID_CONTRACT_STATUS = new Set<ContractSignedStatus>(["YES", "NO", "NOT_REQUIRED"]);
+const FINANCE_RECORD_BASE_SELECT = {
+  id: true,
+  year: true,
+  month: true,
+  clientNumber: true,
+  clientName: true,
+  quoteNumber: true,
+  matterType: true,
+  subject: true,
+  contractSignedStatus: true,
+  responsibleTeam: true,
+  totalMatterMxn: true,
+  workingConcepts: true,
+  conceptFeesMxn: true,
+  previousPaymentsMxn: true,
+  nextPaymentDate: true,
+  nextPaymentNotes: true,
+  paidThisMonthMxn: true,
+  payment2Mxn: true,
+  payment3Mxn: true,
+  paymentDate1: true,
+  paymentDate2: true,
+  paymentDate3: true,
+  expenseNotes1: true,
+  expenseNotes2: true,
+  expenseNotes3: true,
+  expenseAmount1Mxn: true,
+  expenseAmount2Mxn: true,
+  expenseAmount3Mxn: true,
+  pctLitigation: true,
+  pctCorporateLabor: true,
+  pctSettlements: true,
+  pctFinancialLaw: true,
+  pctTaxCompliance: true,
+  clientCommissionRecipient: true,
+  closingCommissionRecipient: true,
+  milestone: true,
+  concluded: true,
+  financeComments: true,
+  createdAt: true,
+  updatedAt: true
+} satisfies Prisma.FinanceRecordSelect;
+const FINANCE_RECORD_WITH_COLLECTION_PROBABILITY_SELECT = {
+  ...FINANCE_RECORD_BASE_SELECT,
+  highCollectionProbability: true,
+  lowCollectionProbability: true
+} satisfies Prisma.FinanceRecordSelect;
+
+type FinanceRecordMapInput = Parameters<typeof mapFinanceRecord>[0];
+type FinanceRecordMapInputWithOptionalCollectionProbability = Omit<
+  FinanceRecordMapInput,
+  "highCollectionProbability" | "lowCollectionProbability"
+> &
+  Partial<Pick<FinanceRecordMapInput, "highCollectionProbability" | "lowCollectionProbability">>;
 
 function normalizeOptionalText(value?: string | null) {
   if (typeof value !== "string") {
@@ -105,6 +159,30 @@ function toDateKey(value?: string | Date | null) {
 
 function toDecimal(value?: number | null) {
   return new Prisma.Decimal(value ?? 0);
+}
+
+function getFinanceRecordSelect(includeCollectionProbability: boolean) {
+  return includeCollectionProbability
+    ? FINANCE_RECORD_WITH_COLLECTION_PROBABILITY_SELECT
+    : FINANCE_RECORD_BASE_SELECT;
+}
+
+function mapFinanceRecordWithCollectionDefaults(record: FinanceRecordMapInputWithOptionalCollectionProbability) {
+  return mapFinanceRecord({
+    ...record,
+    highCollectionProbability: record.highCollectionProbability ?? false,
+    lowCollectionProbability: record.lowCollectionProbability ?? false
+  });
+}
+
+function getCollectionProbabilityCreateData(payload: FinanceRecordWriteRecord) {
+  return {
+    highCollectionProbability: payload.highCollectionProbability === true,
+    lowCollectionProbability: payload.highCollectionProbability === true ? false : payload.lowCollectionProbability === true
+  } satisfies Pick<
+    Prisma.FinanceRecordUncheckedCreateInput,
+    "highCollectionProbability" | "lowCollectionProbability"
+  >;
 }
 
 function getDefaultPercentages(team?: FinanceRecord["responsibleTeam"] | null): PercentagePayload {
@@ -274,66 +352,79 @@ function buildMatterMirrorPayload(matter: FinanceMatterProjection): FinanceRecor
 }
 
 export class PrismaFinanceRepository implements FinanceRepository {
+  private collectionProbabilityColumnsAvailable?: Promise<boolean>;
+
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async listRecords(year: number, month: number) {
-    await this.syncRecordsWithMatters(year, month);
+    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    await this.syncRecordsWithMatters(year, month, includeCollectionProbability);
 
     const records = await this.prisma.financeRecord.findMany({
       where: { year, month },
-      orderBy: [{ createdAt: "asc" }, { clientNumber: "asc" }]
+      orderBy: [{ createdAt: "asc" }, { clientNumber: "asc" }],
+      select: getFinanceRecordSelect(includeCollectionProbability)
     });
 
-    return records.map(mapFinanceRecord);
+    return records.map(mapFinanceRecordWithCollectionDefaults);
   }
 
   public async createRecord(year: number, month: number, payload: FinanceRecordWriteRecord = {}) {
+    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    const data: Prisma.FinanceRecordUncheckedCreateInput = {
+      year,
+      month,
+      clientNumber: normalizeOptionalText(payload.clientNumber),
+      clientName: normalizeRequiredText(payload.clientName),
+      quoteNumber: normalizeOptionalText(payload.quoteNumber),
+      matterType: payload.matterType ?? "ONE_TIME",
+      subject: normalizeRequiredText(payload.subject),
+      contractSignedStatus: normalizeContractSignedStatus(payload.contractSignedStatus),
+      responsibleTeam: payload.responsibleTeam ?? null,
+      totalMatterMxn: toDecimal(payload.totalMatterMxn),
+      workingConcepts: normalizeOptionalText(payload.workingConcepts),
+      conceptFeesMxn: toDecimal(payload.conceptFeesMxn),
+      previousPaymentsMxn: toDecimal(payload.previousPaymentsMxn),
+      nextPaymentDate: parseDateValue(payload.nextPaymentDate),
+      nextPaymentNotes: normalizeOptionalText(payload.nextPaymentNotes),
+      paidThisMonthMxn: toDecimal(payload.paidThisMonthMxn),
+      payment2Mxn: toDecimal(payload.payment2Mxn),
+      payment3Mxn: toDecimal(payload.payment3Mxn),
+      paymentDate1: parseDateValue(payload.paymentDate1),
+      paymentDate2: parseDateValue(payload.paymentDate2),
+      paymentDate3: parseDateValue(payload.paymentDate3),
+      expenseNotes1: normalizeOptionalText(payload.expenseNotes1),
+      expenseNotes2: normalizeOptionalText(payload.expenseNotes2),
+      expenseNotes3: normalizeOptionalText(payload.expenseNotes3),
+      expenseAmount1Mxn: toDecimal(payload.expenseAmount1Mxn),
+      expenseAmount2Mxn: toDecimal(payload.expenseAmount2Mxn),
+      expenseAmount3Mxn: toDecimal(payload.expenseAmount3Mxn),
+      pctLitigation: payload.pctLitigation ?? 0,
+      pctCorporateLabor: payload.pctCorporateLabor ?? 0,
+      pctSettlements: payload.pctSettlements ?? 0,
+      pctFinancialLaw: payload.pctFinancialLaw ?? 0,
+      pctTaxCompliance: payload.pctTaxCompliance ?? 0,
+      clientCommissionRecipient: normalizeOptionalText(payload.clientCommissionRecipient),
+      closingCommissionRecipient: normalizeOptionalText(payload.closingCommissionRecipient),
+      milestone: normalizeOptionalText(payload.milestone),
+      concluded: payload.concluded ?? false,
+      financeComments: normalizeOptionalText(payload.financeComments)
+    };
+
+    if (includeCollectionProbability) {
+      Object.assign(data, getCollectionProbabilityCreateData(payload));
+    }
+
     const record = await this.prisma.financeRecord.create({
-      data: {
-        year,
-        month,
-        clientNumber: normalizeOptionalText(payload.clientNumber),
-        clientName: normalizeRequiredText(payload.clientName),
-        quoteNumber: normalizeOptionalText(payload.quoteNumber),
-        matterType: payload.matterType ?? "ONE_TIME",
-        subject: normalizeRequiredText(payload.subject),
-        contractSignedStatus: normalizeContractSignedStatus(payload.contractSignedStatus),
-        responsibleTeam: payload.responsibleTeam ?? null,
-        totalMatterMxn: toDecimal(payload.totalMatterMxn),
-        workingConcepts: normalizeOptionalText(payload.workingConcepts),
-        conceptFeesMxn: toDecimal(payload.conceptFeesMxn),
-        previousPaymentsMxn: toDecimal(payload.previousPaymentsMxn),
-        nextPaymentDate: parseDateValue(payload.nextPaymentDate),
-        nextPaymentNotes: normalizeOptionalText(payload.nextPaymentNotes),
-        paidThisMonthMxn: toDecimal(payload.paidThisMonthMxn),
-        payment2Mxn: toDecimal(payload.payment2Mxn),
-        payment3Mxn: toDecimal(payload.payment3Mxn),
-        paymentDate1: parseDateValue(payload.paymentDate1),
-        paymentDate2: parseDateValue(payload.paymentDate2),
-        paymentDate3: parseDateValue(payload.paymentDate3),
-        expenseNotes1: normalizeOptionalText(payload.expenseNotes1),
-        expenseNotes2: normalizeOptionalText(payload.expenseNotes2),
-        expenseNotes3: normalizeOptionalText(payload.expenseNotes3),
-        expenseAmount1Mxn: toDecimal(payload.expenseAmount1Mxn),
-        expenseAmount2Mxn: toDecimal(payload.expenseAmount2Mxn),
-        expenseAmount3Mxn: toDecimal(payload.expenseAmount3Mxn),
-        pctLitigation: payload.pctLitigation ?? 0,
-        pctCorporateLabor: payload.pctCorporateLabor ?? 0,
-        pctSettlements: payload.pctSettlements ?? 0,
-        pctFinancialLaw: payload.pctFinancialLaw ?? 0,
-        pctTaxCompliance: payload.pctTaxCompliance ?? 0,
-        clientCommissionRecipient: normalizeOptionalText(payload.clientCommissionRecipient),
-        closingCommissionRecipient: normalizeOptionalText(payload.closingCommissionRecipient),
-        milestone: normalizeOptionalText(payload.milestone),
-        concluded: payload.concluded ?? false,
-        financeComments: normalizeOptionalText(payload.financeComments)
-      }
+      data,
+      select: getFinanceRecordSelect(includeCollectionProbability)
     });
 
-    return mapFinanceRecord(record);
+    return mapFinanceRecordWithCollectionDefaults(record);
   }
 
   public async updateRecord(recordId: string, payload: FinanceRecordWriteRecord) {
+    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
     const currentRecord = await this.findRecordOrThrow(this.prisma, recordId);
 
     const data: Prisma.FinanceRecordUncheckedUpdateInput = {};
@@ -434,6 +525,22 @@ export class PrismaFinanceRepository implements FinanceRepository {
     if (hasOwn(payload, "closingCommissionRecipient")) {
       data.closingCommissionRecipient = normalizeOptionalText(payload.closingCommissionRecipient);
     }
+    if (includeCollectionProbability) {
+      if (hasOwn(payload, "highCollectionProbability") && payload.highCollectionProbability) {
+        data.highCollectionProbability = true;
+        data.lowCollectionProbability = false;
+      } else if (hasOwn(payload, "lowCollectionProbability") && payload.lowCollectionProbability) {
+        data.highCollectionProbability = false;
+        data.lowCollectionProbability = true;
+      } else {
+        if (hasOwn(payload, "highCollectionProbability")) {
+          data.highCollectionProbability = payload.highCollectionProbability ?? false;
+        }
+        if (hasOwn(payload, "lowCollectionProbability")) {
+          data.lowCollectionProbability = payload.lowCollectionProbability ?? false;
+        }
+      }
+    }
     if (hasOwn(payload, "milestone")) {
       data.milestone = normalizeOptionalText(payload.milestone);
     }
@@ -447,7 +554,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
     const record = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.financeRecord.update({
         where: { id: recordId },
-        data
+        data,
+        select: getFinanceRecordSelect(includeCollectionProbability)
       });
 
       if (hasOwn(payload, "closingCommissionRecipient")) {
@@ -461,13 +569,14 @@ export class PrismaFinanceRepository implements FinanceRepository {
       return updated;
     });
 
-    return mapFinanceRecord(record);
+    return mapFinanceRecordWithCollectionDefaults(record);
   }
 
   public async deleteRecord(recordId: string) {
     await this.findRecordOrThrow(this.prisma, recordId);
     await this.prisma.financeRecord.delete({
-      where: { id: recordId }
+      where: { id: recordId },
+      select: { id: true }
     });
   }
 
@@ -520,6 +629,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async copyToNextMonth(year: number, month: number) {
+    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
     const sourceRecords = await this.listRecords(year, month);
 
     let nextMonth = month + 1;
@@ -539,47 +649,54 @@ export class PrismaFinanceRepository implements FinanceRepository {
 
       for (const record of sourceRecords) {
         const totalPaidMxn = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+        const data: Prisma.FinanceRecordUncheckedCreateInput = {
+          year: nextYear,
+          month: nextMonth,
+          clientNumber: record.clientNumber ?? null,
+          clientName: record.clientName,
+          quoteNumber: record.quoteNumber ?? null,
+          matterType: record.matterType,
+          subject: record.subject,
+          contractSignedStatus: record.contractSignedStatus,
+          responsibleTeam: record.responsibleTeam ?? null,
+          totalMatterMxn: toDecimal(record.totalMatterMxn),
+          workingConcepts: normalizeOptionalText(record.workingConcepts),
+          conceptFeesMxn: toDecimal(record.conceptFeesMxn),
+          previousPaymentsMxn: toDecimal(record.previousPaymentsMxn + totalPaidMxn),
+          nextPaymentDate: parseDateValue(record.nextPaymentDate),
+          nextPaymentNotes: normalizeOptionalText(record.nextPaymentNotes),
+          paidThisMonthMxn: toDecimal(0),
+          payment2Mxn: toDecimal(0),
+          payment3Mxn: toDecimal(0),
+          paymentDate1: null,
+          paymentDate2: null,
+          paymentDate3: null,
+          expenseNotes1: null,
+          expenseNotes2: null,
+          expenseNotes3: null,
+          expenseAmount1Mxn: toDecimal(0),
+          expenseAmount2Mxn: toDecimal(0),
+          expenseAmount3Mxn: toDecimal(0),
+          pctLitigation: record.pctLitigation,
+          pctCorporateLabor: record.pctCorporateLabor,
+          pctSettlements: record.pctSettlements,
+          pctFinancialLaw: record.pctFinancialLaw,
+          pctTaxCompliance: record.pctTaxCompliance,
+          clientCommissionRecipient: normalizeOptionalText(record.clientCommissionRecipient),
+          closingCommissionRecipient: normalizeOptionalText(record.closingCommissionRecipient),
+          milestone: normalizeOptionalText(record.milestone),
+          concluded: record.concluded,
+          financeComments: normalizeOptionalText(record.financeComments)
+        };
+
+        if (includeCollectionProbability) {
+          data.highCollectionProbability = record.highCollectionProbability;
+          data.lowCollectionProbability = record.highCollectionProbability ? false : record.lowCollectionProbability;
+        }
 
         await tx.financeRecord.create({
-          data: {
-            year: nextYear,
-            month: nextMonth,
-            clientNumber: record.clientNumber ?? null,
-            clientName: record.clientName,
-            quoteNumber: record.quoteNumber ?? null,
-            matterType: record.matterType,
-            subject: record.subject,
-            contractSignedStatus: record.contractSignedStatus,
-            responsibleTeam: record.responsibleTeam ?? null,
-            totalMatterMxn: toDecimal(record.totalMatterMxn),
-            workingConcepts: normalizeOptionalText(record.workingConcepts),
-            conceptFeesMxn: toDecimal(record.conceptFeesMxn),
-            previousPaymentsMxn: toDecimal(record.previousPaymentsMxn + totalPaidMxn),
-            nextPaymentDate: parseDateValue(record.nextPaymentDate),
-            nextPaymentNotes: normalizeOptionalText(record.nextPaymentNotes),
-            paidThisMonthMxn: toDecimal(0),
-            payment2Mxn: toDecimal(0),
-            payment3Mxn: toDecimal(0),
-            paymentDate1: null,
-            paymentDate2: null,
-            paymentDate3: null,
-            expenseNotes1: null,
-            expenseNotes2: null,
-            expenseNotes3: null,
-            expenseAmount1Mxn: toDecimal(0),
-            expenseAmount2Mxn: toDecimal(0),
-            expenseAmount3Mxn: toDecimal(0),
-            pctLitigation: record.pctLitigation,
-            pctCorporateLabor: record.pctCorporateLabor,
-            pctSettlements: record.pctSettlements,
-            pctFinancialLaw: record.pctFinancialLaw,
-            pctTaxCompliance: record.pctTaxCompliance,
-            clientCommissionRecipient: normalizeOptionalText(record.clientCommissionRecipient),
-            closingCommissionRecipient: normalizeOptionalText(record.closingCommissionRecipient),
-            milestone: normalizeOptionalText(record.milestone),
-            concluded: record.concluded,
-            financeComments: normalizeOptionalText(record.financeComments)
-          }
+          data,
+          select: { id: true }
         });
       }
     });
@@ -592,6 +709,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async sendMatterToFinance(matterId: string, year: number, month: number) {
+    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
     const matter = await this.findMatterProjectionOrThrow(this.prisma, matterId);
     const matterPayload = buildMatterMirrorPayload(matter);
     const isRetainer = matter.matterType === "RETAINER";
@@ -612,10 +730,11 @@ export class PrismaFinanceRepository implements FinanceRepository {
             nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
             milestone: normalizeOptionalText(matterPayload.milestone),
             concluded: matterPayload.concluded ?? false
-          }
+          },
+          select: getFinanceRecordSelect(includeCollectionProbability)
         });
 
-        return mapFinanceRecord(record);
+        return mapFinanceRecordWithCollectionDefaults(record);
       }
     }
 
@@ -641,10 +760,11 @@ export class PrismaFinanceRepository implements FinanceRepository {
         closingCommissionRecipient: normalizeOptionalText(matterPayload.closingCommissionRecipient),
         milestone: normalizeOptionalText(matterPayload.milestone),
         concluded: matterPayload.concluded ?? false
-      }
+      },
+      select: getFinanceRecordSelect(includeCollectionProbability)
     });
 
-    return mapFinanceRecord(record);
+    return mapFinanceRecordWithCollectionDefaults(record);
   }
 
   public async listCommissionReceivers() {
@@ -656,11 +776,26 @@ export class PrismaFinanceRepository implements FinanceRepository {
     return records.map(mapCommissionReceiver);
   }
 
-  private async syncRecordsWithMatters(year: number, month: number) {
+  private async hasCollectionProbabilityColumns() {
+    this.collectionProbabilityColumnsAvailable ??= this.prisma
+      .$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'FinanceRecord'
+          AND column_name IN ('highCollectionProbability', 'lowCollectionProbability')
+      `
+      .then((rows) => rows.length === 2);
+
+    return this.collectionProbabilityColumnsAvailable;
+  }
+
+  private async syncRecordsWithMatters(year: number, month: number, includeCollectionProbability: boolean) {
     const [records, matters] = await Promise.all([
       this.prisma.financeRecord.findMany({
         where: { year, month },
-        orderBy: [{ createdAt: "asc" }]
+        orderBy: [{ createdAt: "asc" }],
+        select: getFinanceRecordSelect(includeCollectionProbability)
       }),
       this.prisma.matter.findMany({
         where: { deletedAt: null },
@@ -707,7 +842,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
     const updates: Array<{ id: string; data: Prisma.FinanceRecordUncheckedUpdateInput }> = [];
 
     records.forEach((record) => {
-      const mapped = mapFinanceRecord(record);
+      const mapped = mapFinanceRecordWithCollectionDefaults(record);
       const matchKey = getRecordMatchKey(mapped);
       if (!matchKey) {
         return;
@@ -775,7 +910,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
       updates.map((update) =>
         this.prisma.financeRecord.update({
           where: { id: update.id },
-          data: update.data
+          data: update.data,
+          select: { id: true }
         })
       )
     );
@@ -793,7 +929,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
             equals: normalizedQuoteNumber,
             mode: "insensitive"
           }
-        }
+        },
+        select: { id: true }
       });
     }
 
@@ -809,13 +946,20 @@ export class PrismaFinanceRepository implements FinanceRepository {
           equals: normalizeRequiredText(matter.subject),
           mode: "insensitive"
         }
-      }
+      },
+      select: { id: true }
     });
   }
 
   private async findRecordOrThrow(prisma: PrismaExecutor, recordId: string) {
     const record = await prisma.financeRecord.findUnique({
-      where: { id: recordId }
+      where: { id: recordId },
+      select: {
+        id: true,
+        quoteNumber: true,
+        clientName: true,
+        subject: true
+      }
     });
 
     if (!record) {

@@ -711,6 +711,8 @@ export interface FinanceRecordWriteRecord {
   pctTaxCompliance?: number;
   clientCommissionRecipient?: string | null;
   closingCommissionRecipient?: string | null;
+  highCollectionProbability?: boolean;
+  lowCollectionProbability?: boolean;
   milestone?: string | null;
   concluded?: boolean;
   financeComments?: string | null;

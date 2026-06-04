@@ -3244,6 +3244,25 @@ textarea {
   background: #eef4fb;
 }
 
+.general-expense-table thead th:first-child,
+.general-expense-table .general-expense-row-index {
+  position: sticky;
+  left: 0;
+  min-width: 64px;
+  width: 64px;
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
+}
+
+.general-expense-table thead th:first-child {
+  z-index: 5;
+  background: #eef4fb;
+}
+
+.general-expense-table .general-expense-row-index {
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.96);
+}
+
 .general-expense-payroll-stack {
   display: grid;
   gap: 18px;
@@ -3439,6 +3458,10 @@ textarea {
 }
 
 .general-expense-row-danger td {
+  background: #ffcdd2;
+}
+
+.general-expense-row-danger .general-expense-row-index {
   background: #ffcdd2;
 }
 
@@ -5387,7 +5410,7 @@ textarea {
 
 .finance-summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 280px));
+  grid-template-columns: repeat(4, minmax(210px, 1fr));
   justify-content: center;
   gap: 12px;
   margin-top: 18px;
@@ -8320,6 +8343,10 @@ textarea {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.budget-income-reported-field {
+  grid-column: 1 / -1;
 }
 
 .budget-expected-field,

@@ -386,10 +386,11 @@ function startApi() {
 }
 
 async function main() {
+  let rdsTunnelConfig: RdsTunnelConfig | null = null;
   let tunnelProcess: ChildProcess | null = null;
 
   if (shouldUseRdsTunnel()) {
-    const rdsTunnelConfig = getRdsTunnelConfig();
+    rdsTunnelConfig = getRdsTunnelConfig();
     const runtimeSecret = await getRuntimeSecret(rdsTunnelConfig);
     tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
     applyRuntimeSecretEnvironment(runtimeSecret);
@@ -420,6 +421,24 @@ async function main() {
           console.warn(`[dev] Local PostgreSQL is down. Restarting ${target.host}:${target.port}...`);
           await ensureLocalPostgres(pgCtlPath, target.host, target.port);
         }
+      })().catch((error: unknown) => {
+        console.error(error);
+      });
+    }, 5000).unref();
+  }
+
+  if (rdsTunnelConfig) {
+    setInterval(() => {
+      void (async () => {
+        if (await canConnect(rdsTunnelConfig.localHost, rdsTunnelConfig.localPort)) {
+          return;
+        }
+
+        console.warn(
+          `[dev] AWS RDS tunnel is down. Restarting ${rdsTunnelConfig.localHost}:${rdsTunnelConfig.localPort}...`
+        );
+        tunnelProcess?.kill();
+        tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
       })().catch((error: unknown) => {
         console.error(error);
       });

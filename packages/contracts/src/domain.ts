@@ -945,6 +945,8 @@ export interface FinanceRecord {
   pctTaxCompliance: number;
   clientCommissionRecipient?: string;
   closingCommissionRecipient?: string;
+  highCollectionProbability: boolean;
+  lowCollectionProbability: boolean;
   milestone?: string;
   concluded: boolean;
   financeComments?: string;

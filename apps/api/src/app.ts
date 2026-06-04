@@ -226,7 +226,7 @@ export async function buildApp() {
     externalContracts: new PrismaExternalContractsRepository(prisma),
     finances: new ResilientFinanceRepository(
       new PrismaFinanceRepository(prisma),
-      env.APP_ENV === "development",
+      env.APP_ENV === "development" && process.env.SIGE_USE_RDS_TUNNEL !== "true",
       app.log
     ),
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
