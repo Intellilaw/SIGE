@@ -30,20 +30,19 @@ export const TASK_MODULES: TaskModuleDefinition[] = [
       track("jueces-magistrados", "4. Hablar con jueces y magistrados"),
       track("publicaciones", "14. Publicaciones"),
       track("esperar-resolucion", "15. Esperar resolucion"),
-      track("albacea", "16. Fechas de aceptacion del cargo de albacea"),
       track("apelaciones-preventiva", "9. Apelaciones de tramitacion preventiva"),
-      track("archivo-judicial", "17. Expedientes devueltos del Archivo Judicial"),
+      track("archivo-judicial", "16. Expedientes devueltos del Archivo Judicial"),
       track("sentencias", "5. Sentencias pendientes"),
       track("copias", "11. Copias pendientes"),
       track("oficios", "12. Oficios y exhortos pendientes"),
-      track("devoluciones", "18. Devoluciones de documentos pendientes"),
+      track("devoluciones", "17. Devoluciones de documentos pendientes"),
       track("amparos", "10. Apelaciones, recursos y amparos pendientes de ser radicados"),
       track("notificaciones", "8. Notificaciones y emplazamientos pendientes"),
-      track("escaneados", "19. Expedientes que deben ser escaneados"),
+      track("escaneados", "18. Expedientes que deben ser escaneados"),
       track("pruebas", "13. Pruebas pendientes"),
-      track("delegados", "20. Asuntos delegados en equipo de derecho corporativo-laboral"),
-      track("terceros-ajenos", "21. Dar seguimiento a acciones de terceros"),
-      track("otros-tramites", "22. Otros tramites")
+      track("delegados", "19. Asuntos delegados en equipo de derecho corporativo-laboral"),
+      track("terceros-ajenos", "20. Dar seguimiento a acciones de terceros"),
+      track("otros-tramites", "21. Otros tramites")
     ]
   },
   {

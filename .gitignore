@@ -14,6 +14,7 @@ coverage/
 *Copia en conflicto*
 *.log
 apps/api/.cache/
+apps/api/.tmp/
 apps/web/.vite/
 apps/mobile/.expo/
 apps/mobile/builds/

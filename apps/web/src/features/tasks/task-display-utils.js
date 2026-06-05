@@ -66,7 +66,6 @@ export function isNeverTermTable(table) {
         || table?.slug === "copias"
         || table?.slug === "publicaciones"
         || table?.slug === "esperar-resolucion"
-        || table?.slug === "albacea"
         || table?.slug === "archivo-judicial"
         || table?.slug === "devoluciones"
         || table?.slug === "escaneados"

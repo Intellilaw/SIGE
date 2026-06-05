@@ -143,7 +143,10 @@ function isLinkedVerificationComplete(term) {
     return term ? isVerificationComplete(term) : false;
 }
 function isLinkedTermTableEnabled(table) {
-    return !table || usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
+    if (!table) {
+        return false;
+    }
+    return usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
 }
 function isLitigationWritingTable(table) {
     return table?.slug === LITIGATION_WRITINGS_TABLE_SLUG;
@@ -392,7 +395,7 @@ export function TasksTeamPage() {
         const termIds = new Set();
         trackingRecords.forEach((record) => {
             const table = resolveRecordTable(tableLookup, record);
-            if (record.deletedAt || isCompletedTrackingRecord(table, record) || !isTrackingTermEnabled(record, table)) {
+            if (!table || record.deletedAt || isCompletedTrackingRecord(table, record) || !isTrackingTermEnabled(record, table)) {
                 return;
             }
             recordIds.add(record.id);
@@ -418,6 +421,7 @@ export function TasksTeamPage() {
         return trackingRecords
             .filter((record) => !record.deletedAt)
             .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
+            .filter(({ table }) => Boolean(table))
             .filter(({ record, table }) => matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? []))
             .filter(({ record, table }) => belongsToTimeframe({
             state: isCompletedTrackingRecord(table, record) ? "closed" : "open",

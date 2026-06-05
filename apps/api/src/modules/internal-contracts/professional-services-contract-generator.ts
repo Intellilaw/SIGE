@@ -626,6 +626,11 @@ type XmlMatch = {
   index: number;
 };
 
+type TemplateParagraphLine = {
+  text: string;
+  bold?: boolean;
+};
+
 function escapeXml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -641,36 +646,48 @@ function collectXmlMatches(xml: string, pattern: RegExp): XmlMatch[] {
   }));
 }
 
+function normalizeTemplateLines(lines: string | TemplateParagraphLine | Array<string | TemplateParagraphLine>) {
+  const values = Array.isArray(lines) ? lines : [lines];
+  return values.map((value) =>
+    typeof value === "string"
+      ? { text: value, bold: false }
+      : { text: value.text, bold: Boolean(value.bold) }
+  );
+}
+
 function createTemplateParagraphXml(
-  text: string,
+  line: string | TemplateParagraphLine,
   options: {
     align?: "center" | "left" | "right";
     bold?: boolean;
   } = {}
 ) {
+  const normalizedLine = typeof line === "string"
+    ? { text: line, bold: false }
+    : { text: line.text, bold: Boolean(line.bold) };
   const paragraphProperties = options.align
-    ? `<w:pPr><w:jc w:val="${options.align}"/></w:pPr>`
+    ? `<w:pPr><w:jc w:val="${options.align}"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>`
     : "";
   const runProperties = [
     '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>',
-    options.bold ? "<w:b/>" : "",
+    options.bold || normalizedLine.bold ? "<w:b/>" : "",
     '<w:sz w:val="24"/>',
     '<w:szCs w:val="24"/>'
   ].filter(Boolean).join("");
 
-  return `<w:p>${paragraphProperties}<w:r><w:rPr>${runProperties}</w:rPr><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+  return `<w:p>${paragraphProperties}<w:r><w:rPr>${runProperties}</w:rPr><w:t xml:space="preserve">${escapeXml(normalizedLine.text)}</w:t></w:r></w:p>`;
 }
 
 function replaceTemplateCellContent(
   cellXml: string,
-  lines: string | string[],
+  lines: string | TemplateParagraphLine | Array<string | TemplateParagraphLine>,
   options: {
     align?: "center" | "left" | "right";
     bold?: boolean;
   } = {}
 ) {
   const cellProperties = cellXml.match(/<w:tcPr\b[\s\S]*?<\/w:tcPr>/)?.[0] ?? "";
-  const paragraphs = (Array.isArray(lines) ? lines : [lines])
+  const paragraphs = normalizeTemplateLines(lines)
     .map((line) => createTemplateParagraphXml(line, options))
     .join("");
 
@@ -680,7 +697,7 @@ function replaceTemplateCellContent(
 function replaceTemplateRowCell(
   rowXml: string,
   cellIndex: number,
-  lines: string | string[],
+  lines: string | TemplateParagraphLine | Array<string | TemplateParagraphLine>,
   options: {
     align?: "center" | "left" | "right";
     bold?: boolean;
@@ -703,7 +720,7 @@ function replaceTemplateTableRowCell(
   tableXml: string,
   rowIndex: number,
   cellIndex: number,
-  lines: string | string[],
+  lines: string | TemplateParagraphLine | Array<string | TemplateParagraphLine>,
   options: {
     align?: "center" | "left" | "right";
     bold?: boolean;
@@ -807,6 +824,16 @@ function fillSpanishProfessionalServicesTemplateXml(documentXml: string, input: 
   const signerTitle = fields.clientKind === "PERSONA_MORAL"
     ? `Representante legal de ${input.clientName}`
     : "Cliente";
+  const rcSignatureLines: TemplateParagraphLine[] = [
+    { text: "____________________________________" },
+    { text: RC_REPRESENTATIVE.toUpperCase(), bold: true },
+    { text: "Apoderado legal de Rusconi Consulting" }
+  ];
+  const clientSignatureLines: TemplateParagraphLine[] = [
+    { text: "____________________________________" },
+    { text: signerName.toUpperCase(), bold: true },
+    { text: signerTitle }
+  ];
   const paymentMomentLines = input.paymentMilestones.length > 0
     ? input.paymentMilestones.map((milestone) => `- ${milestone.label}`)
     : ["- Sin momento de pago especificado en la cotizacion."];
@@ -869,13 +896,10 @@ function fillSpanishProfessionalServicesTemplateXml(documentXml: string, input: 
     );
   });
 
-  nextXml = replaceTemplateTable(nextXml, 7, (tableXml) =>
-    replaceTemplateTableRowCell(tableXml, 0, 1, [
-      "____________________________________",
-      signerName.toUpperCase(),
-      signerTitle
-    ], { align: "center" })
-  );
+  nextXml = replaceTemplateTable(nextXml, 7, (tableXml) => {
+    const withRcSignature = replaceTemplateTableRowCell(tableXml, 0, 0, rcSignatureLines, { align: "center" });
+    return replaceTemplateTableRowCell(withRcSignature, 0, 1, clientSignatureLines, { align: "center" });
+  });
 
   return nextXml;
 }
@@ -889,6 +913,16 @@ function fillEnglishProfessionalServicesTemplateXml(documentXml: string, input: 
   const signerTitle = fields.clientKind === "PERSONA_MORAL"
     ? `Legal representative of ${input.clientName}`
     : "Client";
+  const rcSignatureLines: TemplateParagraphLine[] = [
+    { text: "____________________________________" },
+    { text: RC_REPRESENTATIVE.toUpperCase(), bold: true },
+    { text: "Attorney-in-fact of Rusconi Consulting" }
+  ];
+  const clientSignatureLines: TemplateParagraphLine[] = [
+    { text: "____________________________________" },
+    { text: signerName.toUpperCase(), bold: true },
+    { text: signerTitle }
+  ];
   const paymentMomentLines = input.paymentMilestones.length > 0
     ? input.paymentMilestones.map((milestone) => `- ${milestone.label}`)
     : ["- No payment time specified in the quotation."];
@@ -953,13 +987,10 @@ function fillEnglishProfessionalServicesTemplateXml(documentXml: string, input: 
     );
   });
 
-  nextXml = replaceTemplateTable(nextXml, 7, (tableXml) =>
-    replaceTemplateTableRowCell(tableXml, 0, 1, [
-      "____________________________________",
-      signerName.toUpperCase(),
-      signerTitle
-    ], { align: "center" })
-  );
+  nextXml = replaceTemplateTable(nextXml, 7, (tableXml) => {
+    const withRcSignature = replaceTemplateTableRowCell(tableXml, 0, 0, rcSignatureLines, { align: "center" });
+    return replaceTemplateTableRowCell(withRcSignature, 0, 1, clientSignatureLines, { align: "center" });
+  });
 
   return nextXml;
 }

@@ -87,22 +87,12 @@ const litigationTables: LegacyTaskTableConfig[] = [
   table({ slug: "pruebas", sourceTable: "pruebas_pendientes", title: "13. Pruebas pendientes", dateLabel: "Fecha en la que la prueba debe ser presentada", responsibleOptions: ["LAMR", "MEOO"], restrictResponsibleOptions: true }),
   table({ slug: "publicaciones", sourceTable: "publicaciones", title: "14. Publicaciones", dateLabel: "Fecha de la publicacion", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
   table({ slug: "esperar-resolucion", sourceTable: "esperar_resolucion", title: "15. Esperar resolucion", dateLabel: "Fecha esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
-  table({
-    slug: "albacea",
-    sourceTable: "fechas_aceptacion_albacea",
-    title: "16. Fechas de aceptacion del cargo de albacea",
-    tabs: statusTabs("1. Pendientes", "2. Sucesiones finalizadas"),
-    dateLabel: "Fecha en que se acepto el cargo",
-    responsibleOptions: ["LAMR"],
-    restrictResponsibleOptions: true,
-    fixedResponsible: "LAMR"
-  }),
-  table({ slug: "archivo-judicial", sourceTable: "expedientes_devueltos_archivo", title: "17. Expedientes devueltos del Archivo Judicial", dateLabel: "Fecha esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
-  table({ slug: "devoluciones", sourceTable: "devoluciones_documentos_pendientes", title: "18. Devoluciones de documentos", tabs: statusTabs("1. Pendientes", "2. Devueltos / Concluidos"), responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
-  table({ slug: "escaneados", sourceTable: "expedientes_escaneados", title: "19. Expedientes a escanear", tabs: statusTabs("1. Pendientes", "2. Escaneados / Concluidos"), responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
-  table({ slug: "delegados", sourceTable: "asuntos_delegados_corporativo", title: "20. Asuntos delegados Corporativo-Laboral", tabs: statusTabs("1. Pendientes", "2. Concluidos"), responsibleOptions: ["LAMR"], restrictResponsibleOptions: true, fixedResponsible: "LAMR" }),
-  table({ slug: "terceros-ajenos", sourceTable: "seguimiento_terceros_ajenos", title: "21. Dar seguimiento a acciones de terceros", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR", "MEOO"], restrictResponsibleOptions: true }),
-  table({ slug: "otros-tramites", sourceTable: "otros_tramites", title: "22. Otros tramites", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true })
+  table({ slug: "archivo-judicial", sourceTable: "expedientes_devueltos_archivo", title: "16. Expedientes devueltos del Archivo Judicial", dateLabel: "Fecha esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+  table({ slug: "devoluciones", sourceTable: "devoluciones_documentos_pendientes", title: "17. Devoluciones de documentos", tabs: statusTabs("1. Pendientes", "2. Devueltos / Concluidos"), responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+  table({ slug: "escaneados", sourceTable: "expedientes_escaneados", title: "18. Expedientes a escanear", tabs: statusTabs("1. Pendientes", "2. Escaneados / Concluidos"), responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true }),
+  table({ slug: "delegados", sourceTable: "asuntos_delegados_corporativo", title: "19. Asuntos delegados Corporativo-Laboral", tabs: statusTabs("1. Pendientes", "2. Concluidos"), responsibleOptions: ["LAMR"], restrictResponsibleOptions: true, fixedResponsible: "LAMR" }),
+  table({ slug: "terceros-ajenos", sourceTable: "seguimiento_terceros_ajenos", title: "20. Dar seguimiento a acciones de terceros", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR", "MEOO"], restrictResponsibleOptions: true }),
+  table({ slug: "otros-tramites", sourceTable: "otros_tramites", title: "21. Otros tramites", dateLabel: "Fecha Esperada", responsibleOptions: ["LAMR", "IAMP", "MAVH", "MVSE"], restrictResponsibleOptions: true })
 ];
 
 litigationTables.forEach((entry) => {

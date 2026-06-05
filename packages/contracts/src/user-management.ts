@@ -386,6 +386,7 @@ export function derivePermissions(input: {
     permissions.add("commissions:all:read");
     permissions.add("commissions:exclusions:write");
     permissions.add("internal-contracts:read");
+    permissions.add("internal-contracts:write");
     permissions.add("internal-contract-templates:read");
   }
 

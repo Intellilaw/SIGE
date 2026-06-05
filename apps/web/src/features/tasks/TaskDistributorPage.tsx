@@ -572,7 +572,7 @@ export function TaskDistributorPage() {
       const record = resolveHistoryRecord(item, targetTable, index, usedIds);
       const table = record ? resolveRecordTable(record) : findLegacyTableByAnyName(moduleConfig, targetTable);
 
-      return Boolean(record && !record.deletedAt && !isCompletedRecord(table, record));
+      return Boolean(table && record && !record.deletedAt && !isCompletedRecord(table, record));
     });
   }
 
@@ -588,7 +588,7 @@ export function TaskDistributorPage() {
         const record = resolveHistoryRecord(item, targetTable, index, usedIds);
         const table = record ? resolveRecordTable(record) : findLegacyTableByAnyName(moduleConfig, targetTable);
 
-        return record && !record.deletedAt && !isCompletedRecord(table, record) ? record : null;
+        return table && record && !record.deletedAt && !isCompletedRecord(table, record) ? record : null;
       })
       .filter((record): record is TaskTrackingRecord => Boolean(record));
   }
@@ -725,7 +725,7 @@ export function TaskDistributorPage() {
     const virtualHistory = trackingRecords
       .filter((record) => {
         const table = resolveRecordTable(record);
-        return !historyRecordIds.has(record.id) && !record.deletedAt && !isCompletedRecord(table, record);
+        return Boolean(table) && !historyRecordIds.has(record.id) && !record.deletedAt && !isCompletedRecord(table, record);
       })
       .map((record) => makeVirtualHistory(record, resolveRecordTable(record)));
 
@@ -763,6 +763,9 @@ export function TaskDistributorPage() {
     return trackingRecords
       .reduce<RecycleTaskRow[]>((rows, record) => {
         const table = resolveRecordTable(record);
+        if (!table) {
+          return rows;
+        }
         const reason: RecycleTaskRow["reason"] | null = record.deletedAt ? "deleted" : isCompletedRecord(table, record) ? "completed" : null;
         const date = getRecycleDate(record);
 

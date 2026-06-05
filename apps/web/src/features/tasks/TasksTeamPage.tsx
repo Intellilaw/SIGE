@@ -215,7 +215,11 @@ function isLinkedVerificationComplete(term: TaskTerm | undefined) {
 }
 
 function isLinkedTermTableEnabled(table: LegacyTaskTableConfig | undefined) {
-  return !table || usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
+  if (!table) {
+    return false;
+  }
+
+  return usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
 }
 
 function isLitigationWritingTable(table: LegacyTaskTableConfig | undefined) {
@@ -550,7 +554,7 @@ export function TasksTeamPage() {
 
     trackingRecords.forEach((record) => {
         const table = resolveRecordTable(tableLookup, record);
-        if (record.deletedAt || isCompletedTrackingRecord(table, record) || !isTrackingTermEnabled(record, table)) {
+        if (!table || record.deletedAt || isCompletedTrackingRecord(table, record) || !isTrackingTermEnabled(record, table)) {
           return;
         }
 
@@ -586,6 +590,7 @@ export function TasksTeamPage() {
     return trackingRecords
       .filter((record) => !record.deletedAt)
       .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
+      .filter(({ table }) => Boolean(table))
       .filter(({ record, table }) =>
         matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? [])
       )

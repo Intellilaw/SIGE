@@ -971,7 +971,7 @@ export function InternalContractsPage() {
           ) : (
             <div className="centered-inline-message">
               {isTemplateSection
-                ? "Tu perfil puede ver y descargar machotes, pero solo el superadmin puede cargar nuevos archivos."
+                ? "Tu perfil puede ver y descargar machotes, pero solo el superadmin puede cargar o borrar machotes."
                 : "Tu perfil puede consultar contratos, pero no cargar nuevos archivos."}
             </div>
           )}
