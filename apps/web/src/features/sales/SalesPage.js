@@ -4,6 +4,7 @@ import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
 import minkaLogo from "../../assets/legalflow-minka-logo.png";
 import rematesLogo from "../../assets/legalflow-remates-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
+import { useAuth } from "../auth/AuthContext";
 const SALES_PRODUCTS = [
     {
         id: "start",
@@ -59,126 +60,30 @@ const SALES_TIMEFRAMES = [
     { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
+const LEGALFLOW_SALES_START_DATE = "2026-06-08";
+const LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS = 20;
 const SALES_TASK_SEEDS = [
     {
-        id: "start-argumentario",
-        productId: "start",
-        responsibleId: "IR",
-        task: "Actualizar argumento central de campana y piezas de primer contacto",
-        channel: "Contenido",
-        dueOffset: 0,
-        status: "pendiente",
-        priority: "alta"
-    },
-    {
-        id: "start-prospectos",
-        productId: "start",
-        responsibleId: "IR",
-        task: "Revisar prospectos calificados y asignar llamadas comerciales",
-        channel: "Pipeline",
-        dueOffset: 1,
-        status: "en_proceso",
-        priority: "media"
-    },
-    {
-        id: "start-reporte",
-        productId: "start",
-        responsibleId: "IR",
-        task: "Cerrar reporte de contactos iniciales de la semana",
-        channel: "Reporte",
-        dueOffset: -1,
-        status: "concluida",
-        priority: "normal"
-    },
-    {
-        id: "pld-listado",
-        productId: "pld",
-        responsibleId: "IR",
-        task: "Preparar listado de prospectos regulados para Intellilaw PLD",
-        channel: "Prospeccion",
-        dueOffset: 0,
-        status: "pendiente",
-        priority: "alta"
-    },
-    {
-        id: "pld-demo",
-        productId: "pld",
-        responsibleId: "IR",
-        task: "Actualizar guion de demostracion y preguntas frecuentes",
-        channel: "Demo",
-        dueOffset: 2,
-        status: "pendiente",
-        priority: "media"
-    },
-    {
-        id: "pld-material",
-        productId: "pld",
-        responsibleId: "IR",
-        task: "Publicar pieza educativa sobre obligaciones PLD",
-        channel: "Contenido",
-        dueOffset: 5,
-        status: "pendiente",
-        priority: "normal"
-    },
-    {
-        id: "remates-inventario",
+        id: "legalflow-remates-reporte-diario",
+        company: "LegalFlow",
         productId: "remates",
         responsibleId: "IR",
-        task: "Validar inventario comercial y fichas disponibles",
-        channel: "Inventario",
-        dueOffset: 1,
-        status: "pendiente",
-        priority: "alta"
+        task: "Publicar reporte diario de tareas realizadas de Remates by LegalFlow",
+        channel: "Reporte diario",
+        periodicity: "Cada dos dias habiles, alternando con Start by LegalFlow",
+        priority: "alta",
+        firstDueDate: LEGALFLOW_SALES_START_DATE
     },
     {
-        id: "remates-seguimiento",
-        productId: "remates",
+        id: "legalflow-start-reporte-diario",
+        company: "LegalFlow",
+        productId: "start",
         responsibleId: "IR",
-        task: "Definir lista corta de inversionistas para seguimiento",
-        channel: "Relaciones",
-        dueOffset: 3,
-        status: "pendiente",
-        priority: "media"
-    },
-    {
-        id: "remates-resumen",
-        productId: "remates",
-        responsibleId: "IR",
-        task: "Consolidar aprendizajes de mensajes publicados",
-        channel: "Reporte",
-        dueOffset: -2,
-        status: "concluida",
-        priority: "normal"
-    },
-    {
-        id: "minka-casos-uso",
-        productId: "minka",
-        responsibleId: "IR",
-        task: "Definir casos de uso prioritarios y mensajes para Minka",
-        channel: "Producto",
-        dueOffset: 0,
-        status: "pendiente",
-        priority: "alta"
-    },
-    {
-        id: "minka-demo",
-        productId: "minka",
-        responsibleId: "IR",
-        task: "Preparar demo comercial con flujo de analisis contractual",
-        channel: "Demo",
-        dueOffset: 2,
-        status: "pendiente",
-        priority: "media"
-    },
-    {
-        id: "minka-reporte",
-        productId: "minka",
-        responsibleId: "IR",
-        task: "Documentar aprendizajes de conversaciones con usuarios juridicos",
-        channel: "Reporte",
-        dueOffset: -1,
-        status: "concluida",
-        priority: "normal"
+        task: "Publicar reporte diario de tareas realizadas de Start by LegalFlow",
+        channel: "Reporte diario",
+        periodicity: "Cada dos dias habiles, alternando con Remates by LegalFlow",
+        priority: "alta",
+        firstDueDate: addBusinessDays(LEGALFLOW_SALES_START_DATE, 1)
     }
 ];
 const DEFAULT_STRATEGIES = SALES_PRODUCTS.reduce((defaults, product) => {
@@ -190,19 +95,71 @@ const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
     lookup[product.id] = product;
     return lookup;
 }, {});
+const SALES_RESPONSIBLE_BY_ID = SALES_RESPONSIBLES.reduce((lookup, responsible) => {
+    lookup[responsible.id] = responsible;
+    return lookup;
+}, {});
 function getLocalDateInput(offset = 0) {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + offset);
+    return toDateInput(date);
+}
+function parseDateInput(value) {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setHours(12, 0, 0, 0);
+    return date;
+}
+function toDateInput(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 function formatDateInput(value) {
-    const [year, month, day] = value.split("-").map(Number);
-    const date = new Date(year, month - 1, day);
+    const date = parseDateInput(value);
     return new Intl.DateTimeFormat("es-MX", {
         day: "2-digit",
         month: "short"
     }).format(date);
+}
+function isBusinessDay(date) {
+    const day = date.getDay();
+    return day !== 0 && day !== 6;
+}
+function addBusinessDays(value, days) {
+    const date = parseDateInput(value);
+    let remainingDays = days;
+    while (remainingDays > 0) {
+        date.setDate(date.getDate() + 1);
+        if (isBusinessDay(date)) {
+            remainingDays -= 1;
+        }
+    }
+    return toDateInput(date);
+}
+function getSalesTaskHorizonEnd(todayInput) {
+    const anchorDate = todayInput > LEGALFLOW_SALES_START_DATE ? todayInput : LEGALFLOW_SALES_START_DATE;
+    return addBusinessDays(anchorDate, LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS);
+}
+function buildLegalFlowSalesTasks(todayInput = getLocalDateInput()) {
+    const tasks = [];
+    const endDate = getSalesTaskHorizonEnd(todayInput);
+    const cursor = parseDateInput(LEGALFLOW_SALES_START_DATE);
+    let businessDayIndex = 0;
+    while (toDateInput(cursor) <= endDate) {
+        if (isBusinessDay(cursor)) {
+            const dueDate = toDateInput(cursor);
+            const definition = SALES_TASK_SEEDS[businessDayIndex % SALES_TASK_SEEDS.length];
+            tasks.push({
+                ...definition,
+                id: `${definition.id}-${dueDate}`,
+                dueDate,
+                status: "pendiente"
+            });
+            businessDayIndex += 1;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return tasks;
 }
 function readStoredTextMap(storageKey, defaults) {
     if (typeof window === "undefined") {
@@ -311,7 +268,11 @@ function getPriorityLabel(priority) {
     }
     return "Normal";
 }
+function canViewSalesSuperadminSummary(user) {
+    return Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN" || user?.permissions?.includes("*"));
+}
 export function SalesPage() {
+    const { user } = useAuth();
     const [selectedProductId, setSelectedProductId] = useState("start");
     const [selectedReportDate, setSelectedReportDate] = useState(getLocalDateInput);
     const [expandedView, setExpandedView] = useState({
@@ -320,13 +281,13 @@ export function SalesPage() {
     });
     const [strategies, setStrategies] = useState(() => readStoredTextMap("sige-sales-strategies", DEFAULT_STRATEGIES));
     const [dailyReports, setDailyReports] = useState(() => readStoredDailyReportStore(DAILY_REPORT_STORAGE_KEY));
-    const salesTasks = useMemo(() => SALES_TASK_SEEDS.map((task) => ({
-        ...task,
-        dueDate: getLocalDateInput(task.dueOffset)
-    })), []);
+    const salesTasks = useMemo(() => buildLegalFlowSalesTasks(), []);
     const selectedProduct = SALES_PRODUCT_BY_ID[selectedProductId];
     const today = getLocalDateInput();
     const openTaskCount = salesTasks.filter((task) => task.status !== "concluida").length;
+    const salesPeriodicities = [...new Set(SALES_TASK_SEEDS.map((task) => task.periodicity))];
+    const dashboardProductCount = new Set(SALES_TASK_SEEDS.map((task) => task.productId)).size;
+    const canViewSuperadminSummary = canViewSalesSuperadminSummary(user);
     const selectedProductTasks = salesTasks.filter((task) => task.productId === selectedProductId);
     const selectedCompletedTasks = selectedProductTasks.filter((task) => task.status === "concluida" && task.dueDate === selectedReportDate);
     const selectedDailyReport = dailyReports[selectedProduct.id]?.[selectedReportDate] ?? "";
@@ -369,7 +330,11 @@ export function SalesPage() {
                                                                 const highlighted = task.status !== "concluida" && task.dueDate <= today;
                                                                 return (_jsxs("tr", { className: highlighted ? "tasks-dashboard-row-overdue" : undefined, children: [_jsx("td", { children: _jsxs("span", { className: "sales-product-cell", children: [_jsx("span", { className: "sales-product-dot", style: { background: product.accentColor } }), product.name] }) }), _jsx("td", { className: highlighted ? "tasks-dashboard-title-overdue" : undefined, children: task.task }), _jsx("td", { children: task.channel }), _jsx("td", { children: _jsx("span", { className: `sales-priority-pill is-${task.priority}`, children: getPriorityLabel(task.priority) }) }), _jsx("td", { children: formatDateInput(task.dueDate) }), _jsx("td", { children: _jsx("span", { className: `tasks-dashboard-type-pill ${task.status === "concluida" ? "is-completed" : highlighted ? "is-overdue" : "is-pending"}`, children: getStatusLabel(task.status) }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => setSelectedProductId(task.productId), children: "Ver producto" }) })] }, task.id));
                                                             })) })] }) })] })) : null] }, responsible.id));
-                        }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Productos" }), _jsxs("span", { children: [SALES_PRODUCTS.length, " productos"] })] }), _jsx("div", { className: "sales-product-grid", children: SALES_PRODUCTS.map((product) => {
+                        }) })] }), canViewSuperadminSummary ? (_jsxs("section", { className: "panel sales-superadmin-panel", "aria-label": "Consulta superadmin de tareas de ventas", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Consulta superadmin" }), _jsx("h2", { children: "Tareas reflejadas en dashboard" })] }), _jsxs("span", { children: [SALES_TASK_SEEDS.length, " tareas configuradas"] })] }), _jsxs("div", { className: "sales-superadmin-metrics", children: [_jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Empresa" }), _jsx("strong", { children: "LegalFlow" })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Responsable" }), _jsx("strong", { children: "Itari Romero (IR)" })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Productos activos" }), _jsx("strong", { children: dashboardProductCount })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Periodicidades" }), _jsx("strong", { children: salesPeriodicities.join(" / ") })] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table sales-superadmin-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Empresa" }), _jsx("th", { children: "Producto" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Periodicidad" }), _jsx("th", { children: "Responsable" }), _jsx("th", { children: "Inicio en dashboard" }), _jsx("th", { children: "Prioridad" }), _jsx("th", { children: "Canal" })] }) }), _jsx("tbody", { children: SALES_TASK_SEEDS.map((task) => {
+                                        const product = SALES_PRODUCT_BY_ID[task.productId];
+                                        const responsible = SALES_RESPONSIBLE_BY_ID[task.responsibleId];
+                                        return (_jsxs("tr", { children: [_jsx("td", { children: task.company }), _jsx("td", { children: _jsxs("span", { className: "sales-product-cell", children: [_jsx("span", { className: "sales-product-dot", style: { background: product.accentColor } }), product.name] }) }), _jsx("td", { children: task.task }), _jsx("td", { children: _jsx("span", { className: "sales-periodicity-pill", children: task.periodicity }) }), _jsx("td", { children: responsible ? `${responsible.name} (${responsible.id})` : task.responsibleId }), _jsx("td", { children: formatDateInput(task.firstDueDate) }), _jsx("td", { children: getPriorityLabel(task.priority) }), _jsx("td", { children: task.channel })] }, `summary-${task.id}`));
+                                    }) })] }) })] })) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Productos" }), _jsxs("span", { children: [SALES_PRODUCTS.length, " productos"] })] }), _jsx("div", { className: "sales-product-grid", children: SALES_PRODUCTS.map((product) => {
                             const productOpenTasks = salesTasks.filter((task) => task.productId === product.id && task.status !== "concluida").length;
                             const isSelected = selectedProductId === product.id;
                             return (_jsxs("button", { type: "button", className: `sales-product-card ${isSelected ? "is-selected" : ""}`, "aria-pressed": isSelected, onClick: () => setSelectedProductId(product.id), children: [_jsx("span", { className: "sales-product-logo-shell", children: product.logoSrc ? (_jsx("img", { src: product.logoSrc, alt: product.logoAlt })) : (_jsx("span", { className: "sales-product-monogram", style: { color: product.accentColor }, children: product.initials })) }), _jsxs("span", { className: "sales-product-card-copy", children: [_jsx("strong", { children: product.name }), _jsx("span", { children: product.tagline }), _jsxs("span", { className: "sales-product-task-summary", children: [productOpenTasks, " tareas abiertas"] })] })] }, product.id));

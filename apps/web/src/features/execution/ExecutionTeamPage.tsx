@@ -821,7 +821,6 @@ export function ExecutionTeamWorkspace({
       } catch (error) {
         if (!isCancelled) {
           setHolidayDateKeysByAuthority({});
-          setErrorMessage(toErrorMessage(error));
         }
       }
     }

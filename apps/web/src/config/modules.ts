@@ -103,7 +103,7 @@ export const appModules: AppModuleDefinition[] = [
     description: "Productos comerciales, estrategia general de marketing y reporte diario de tareas de venta.",
     phase: "Operativo",
     available: true,
-    coverage: ["Productos", "Estrategia de marketing", "Reporte diario", "Dashboard de tareas de IR"]
+    coverage: ["Productos", "Estrategia de marketing", "Reporte diario", "Dashboard de tareas de IR", "Consulta superadmin"]
   },
   {
     id: "finances",

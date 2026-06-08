@@ -4,10 +4,9 @@ import { ORGANIZATION_SLUGS } from "@sige/contracts";
 import { useAuth } from "../auth/AuthContext";
 
 const DOCS_BASE_PATH = "/docs/lineamientos-manuales-internos";
-const MANIFEST_URL = `${DOCS_BASE_PATH}/manifest.json`;
+const LEGALFLOW_DOCS_BASE_PATH = `${DOCS_BASE_PATH}/legalflow`;
 const VIRGIN_LIBRARY_ORGANIZATION_SLUGS = new Set<string>([
-  ORGANIZATION_SLUGS.INTELLILAW,
-  ORGANIZATION_SLUGS.LEGALFLOW
+  ORGANIZATION_SLUGS.INTELLILAW
 ]);
 
 type InternalDocument = {
@@ -17,8 +16,8 @@ type InternalDocument = {
 
 type ManifestPayload = InternalDocument[] | { documents?: InternalDocument[] };
 
-function documentHref(file: string) {
-  return `${DOCS_BASE_PATH}/${encodeURIComponent(file)}`;
+function documentHref(basePath: string, file: string) {
+  return `${basePath}/${encodeURIComponent(file)}`;
 }
 
 function readManifestDocuments(payload: ManifestPayload): InternalDocument[] {
@@ -36,6 +35,14 @@ function shouldShowVirginLibrary(organizationSlug?: string) {
   return Boolean(organizationSlug && VIRGIN_LIBRARY_ORGANIZATION_SLUGS.has(organizationSlug));
 }
 
+function resolveDocsBasePath(organizationSlug?: string) {
+  if (organizationSlug === ORGANIZATION_SLUGS.LEGALFLOW) {
+    return LEGALFLOW_DOCS_BASE_PATH;
+  }
+
+  return DOCS_BASE_PATH;
+}
+
 export function GuidelinesManualsPage() {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<InternalDocument[]>([]);
@@ -43,6 +50,7 @@ export function GuidelinesManualsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const showVirginLibrary = shouldShowVirginLibrary(user?.organizationSlug);
+  const docsBasePath = resolveDocsBasePath(user?.organizationSlug);
 
   useEffect(() => {
     let active = true;
@@ -57,7 +65,7 @@ export function GuidelinesManualsPage() {
       }
 
       try {
-        const response = await fetch(MANIFEST_URL, { cache: "no-store" });
+        const response = await fetch(`${docsBasePath}/manifest.json`, { cache: "no-store" });
 
         if (!response.ok) {
           throw new Error("Manifest unavailable");
@@ -68,7 +76,9 @@ export function GuidelinesManualsPage() {
 
         if (active) {
           setDocuments(nextDocuments);
-          setSelectedFile((current) => current || (nextDocuments[0]?.file ?? ""));
+          setSelectedFile((current) =>
+            nextDocuments.some((document) => document.file === current) ? current : (nextDocuments[0]?.file ?? "")
+          );
           setError("");
         }
       } catch {
@@ -87,7 +97,7 @@ export function GuidelinesManualsPage() {
     return () => {
       active = false;
     };
-  }, [showVirginLibrary]);
+  }, [docsBasePath, showVirginLibrary]);
 
   const activeDocument = useMemo(
     () => documents.find((document) => document.file === selectedFile) ?? documents[0],
@@ -136,7 +146,11 @@ export function GuidelinesManualsPage() {
           </section>
 
           <section className="internal-doc-reader" aria-label={activeDocument.title}>
-            <iframe className="internal-doc-frame" src={documentHref(activeDocument.file)} title={activeDocument.title} />
+            <iframe
+              className="internal-doc-frame"
+              src={documentHref(docsBasePath, activeDocument.file)}
+              title={activeDocument.title}
+            />
           </section>
         </>
       ) : null}

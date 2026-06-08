@@ -4,11 +4,13 @@ import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
 import minkaLogo from "../../assets/legalflow-minka-logo.png";
 import rematesLogo from "../../assets/legalflow-remates-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
+import { useAuth } from "../auth/AuthContext";
 
 type SalesProductId = "start" | "pld" | "remates" | "minka";
 type SalesTimeframe = "anteriores" | "hoy" | "manana" | "posteriores";
 type SalesTaskStatus = "pendiente" | "en_proceso" | "concluida";
 type SalesTaskPriority = "alta" | "media" | "normal";
+type SalesCompany = "LegalFlow";
 
 interface SalesProduct {
   id: SalesProductId;
@@ -29,17 +31,19 @@ interface SalesResponsible {
 
 interface SalesTaskSeed {
   id: string;
+  company: SalesCompany;
   productId: SalesProductId;
   responsibleId: string;
   task: string;
   channel: string;
-  dueOffset: number;
-  status: SalesTaskStatus;
+  periodicity: string;
   priority: SalesTaskPriority;
+  firstDueDate: string;
 }
 
-interface SalesTask extends Omit<SalesTaskSeed, "dueOffset"> {
+interface SalesTask extends Omit<SalesTaskSeed, "firstDueDate"> {
   dueDate: string;
+  status: SalesTaskStatus;
 }
 
 type SalesDailyReportStore = Record<SalesProductId, Record<string, string>>;
@@ -110,126 +114,31 @@ const SALES_TIMEFRAMES: Array<{ id: SalesTimeframe; label: string; colorClass: s
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 
+const LEGALFLOW_SALES_START_DATE = "2026-06-08";
+const LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS = 20;
+
 const SALES_TASK_SEEDS: SalesTaskSeed[] = [
   {
-    id: "start-argumentario",
-    productId: "start",
-    responsibleId: "IR",
-    task: "Actualizar argumento central de campana y piezas de primer contacto",
-    channel: "Contenido",
-    dueOffset: 0,
-    status: "pendiente",
-    priority: "alta"
-  },
-  {
-    id: "start-prospectos",
-    productId: "start",
-    responsibleId: "IR",
-    task: "Revisar prospectos calificados y asignar llamadas comerciales",
-    channel: "Pipeline",
-    dueOffset: 1,
-    status: "en_proceso",
-    priority: "media"
-  },
-  {
-    id: "start-reporte",
-    productId: "start",
-    responsibleId: "IR",
-    task: "Cerrar reporte de contactos iniciales de la semana",
-    channel: "Reporte",
-    dueOffset: -1,
-    status: "concluida",
-    priority: "normal"
-  },
-  {
-    id: "pld-listado",
-    productId: "pld",
-    responsibleId: "IR",
-    task: "Preparar listado de prospectos regulados para Intellilaw PLD",
-    channel: "Prospeccion",
-    dueOffset: 0,
-    status: "pendiente",
-    priority: "alta"
-  },
-  {
-    id: "pld-demo",
-    productId: "pld",
-    responsibleId: "IR",
-    task: "Actualizar guion de demostracion y preguntas frecuentes",
-    channel: "Demo",
-    dueOffset: 2,
-    status: "pendiente",
-    priority: "media"
-  },
-  {
-    id: "pld-material",
-    productId: "pld",
-    responsibleId: "IR",
-    task: "Publicar pieza educativa sobre obligaciones PLD",
-    channel: "Contenido",
-    dueOffset: 5,
-    status: "pendiente",
-    priority: "normal"
-  },
-  {
-    id: "remates-inventario",
+    id: "legalflow-remates-reporte-diario",
+    company: "LegalFlow",
     productId: "remates",
     responsibleId: "IR",
-    task: "Validar inventario comercial y fichas disponibles",
-    channel: "Inventario",
-    dueOffset: 1,
-    status: "pendiente",
-    priority: "alta"
+    task: "Publicar reporte diario de tareas realizadas de Remates by LegalFlow",
+    channel: "Reporte diario",
+    periodicity: "Cada dos dias habiles, alternando con Start by LegalFlow",
+    priority: "alta",
+    firstDueDate: LEGALFLOW_SALES_START_DATE
   },
   {
-    id: "remates-seguimiento",
-    productId: "remates",
+    id: "legalflow-start-reporte-diario",
+    company: "LegalFlow",
+    productId: "start",
     responsibleId: "IR",
-    task: "Definir lista corta de inversionistas para seguimiento",
-    channel: "Relaciones",
-    dueOffset: 3,
-    status: "pendiente",
-    priority: "media"
-  },
-  {
-    id: "remates-resumen",
-    productId: "remates",
-    responsibleId: "IR",
-    task: "Consolidar aprendizajes de mensajes publicados",
-    channel: "Reporte",
-    dueOffset: -2,
-    status: "concluida",
-    priority: "normal"
-  },
-  {
-    id: "minka-casos-uso",
-    productId: "minka",
-    responsibleId: "IR",
-    task: "Definir casos de uso prioritarios y mensajes para Minka",
-    channel: "Producto",
-    dueOffset: 0,
-    status: "pendiente",
-    priority: "alta"
-  },
-  {
-    id: "minka-demo",
-    productId: "minka",
-    responsibleId: "IR",
-    task: "Preparar demo comercial con flujo de analisis contractual",
-    channel: "Demo",
-    dueOffset: 2,
-    status: "pendiente",
-    priority: "media"
-  },
-  {
-    id: "minka-reporte",
-    productId: "minka",
-    responsibleId: "IR",
-    task: "Documentar aprendizajes de conversaciones con usuarios juridicos",
-    channel: "Reporte",
-    dueOffset: -1,
-    status: "concluida",
-    priority: "normal"
+    task: "Publicar reporte diario de tareas realizadas de Start by LegalFlow",
+    channel: "Reporte diario",
+    periodicity: "Cada dos dias habiles, alternando con Remates by LegalFlow",
+    priority: "alta",
+    firstDueDate: addBusinessDays(LEGALFLOW_SALES_START_DATE, 1)
   }
 ];
 
@@ -245,22 +154,89 @@ const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
   return lookup;
 }, {} as Record<SalesProductId, SalesProduct>);
 
+const SALES_RESPONSIBLE_BY_ID = SALES_RESPONSIBLES.reduce((lookup, responsible) => {
+  lookup[responsible.id] = responsible;
+  return lookup;
+}, {} as Record<string, SalesResponsible>);
+
 function getLocalDateInput(offset = 0) {
   const date = new Date();
   date.setHours(12, 0, 0, 0);
   date.setDate(date.getDate() + offset);
 
+  return toDateInput(date);
+}
+
+function parseDateInput(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setHours(12, 0, 0, 0);
+
+  return date;
+}
+
+function toDateInput(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function formatDateInput(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
+  const date = parseDateInput(value);
 
   return new Intl.DateTimeFormat("es-MX", {
     day: "2-digit",
     month: "short"
   }).format(date);
+}
+
+function isBusinessDay(date: Date) {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+}
+
+function addBusinessDays(value: string, days: number) {
+  const date = parseDateInput(value);
+  let remainingDays = days;
+
+  while (remainingDays > 0) {
+    date.setDate(date.getDate() + 1);
+    if (isBusinessDay(date)) {
+      remainingDays -= 1;
+    }
+  }
+
+  return toDateInput(date);
+}
+
+function getSalesTaskHorizonEnd(todayInput: string) {
+  const anchorDate = todayInput > LEGALFLOW_SALES_START_DATE ? todayInput : LEGALFLOW_SALES_START_DATE;
+  return addBusinessDays(anchorDate, LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS);
+}
+
+function buildLegalFlowSalesTasks(todayInput = getLocalDateInput()) {
+  const tasks: SalesTask[] = [];
+  const endDate = getSalesTaskHorizonEnd(todayInput);
+  const cursor = parseDateInput(LEGALFLOW_SALES_START_DATE);
+  let businessDayIndex = 0;
+
+  while (toDateInput(cursor) <= endDate) {
+    if (isBusinessDay(cursor)) {
+      const dueDate = toDateInput(cursor);
+      const definition = SALES_TASK_SEEDS[businessDayIndex % SALES_TASK_SEEDS.length];
+
+      tasks.push({
+        ...definition,
+        id: `${definition.id}-${dueDate}`,
+        dueDate,
+        status: "pendiente"
+      });
+
+      businessDayIndex += 1;
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return tasks;
 }
 
 function readStoredTextMap(storageKey: string, defaults: Record<SalesProductId, string>) {
@@ -394,7 +370,16 @@ function getPriorityLabel(priority: SalesTaskPriority) {
   return "Normal";
 }
 
+function canViewSalesSuperadminSummary(user?: {
+  role?: string;
+  legacyRole?: string;
+  permissions?: string[];
+} | null) {
+  return Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN" || user?.permissions?.includes("*"));
+}
+
 export function SalesPage() {
+  const { user } = useAuth();
   const [selectedProductId, setSelectedProductId] = useState<SalesProductId>("start");
   const [selectedReportDate, setSelectedReportDate] = useState(getLocalDateInput);
   const [expandedView, setExpandedView] = useState<{ responsibleId: string; timeframe: SalesTimeframe } | null>({
@@ -405,17 +390,16 @@ export function SalesPage() {
   const [dailyReports, setDailyReports] = useState(() => readStoredDailyReportStore(DAILY_REPORT_STORAGE_KEY));
 
   const salesTasks = useMemo<SalesTask[]>(
-    () =>
-      SALES_TASK_SEEDS.map((task) => ({
-        ...task,
-        dueDate: getLocalDateInput(task.dueOffset)
-      })),
+    () => buildLegalFlowSalesTasks(),
     []
   );
 
   const selectedProduct = SALES_PRODUCT_BY_ID[selectedProductId];
   const today = getLocalDateInput();
   const openTaskCount = salesTasks.filter((task) => task.status !== "concluida").length;
+  const salesPeriodicities = [...new Set(SALES_TASK_SEEDS.map((task) => task.periodicity))];
+  const dashboardProductCount = new Set(SALES_TASK_SEEDS.map((task) => task.productId)).size;
+  const canViewSuperadminSummary = canViewSalesSuperadminSummary(user);
   const selectedProductTasks = salesTasks.filter((task) => task.productId === selectedProductId);
   const selectedCompletedTasks = selectedProductTasks.filter(
     (task) => task.status === "concluida" && task.dueDate === selectedReportDate
@@ -578,6 +562,80 @@ export function SalesPage() {
           })}
         </div>
       </section>
+
+      {canViewSuperadminSummary ? (
+        <section className="panel sales-superadmin-panel" aria-label="Consulta superadmin de tareas de ventas">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Consulta superadmin</p>
+              <h2>Tareas reflejadas en dashboard</h2>
+            </div>
+            <span>{SALES_TASK_SEEDS.length} tareas configuradas</span>
+          </div>
+
+          <div className="sales-superadmin-metrics">
+            <div className="sales-superadmin-metric">
+              <span>Empresa</span>
+              <strong>LegalFlow</strong>
+            </div>
+            <div className="sales-superadmin-metric">
+              <span>Responsable</span>
+              <strong>Itari Romero (IR)</strong>
+            </div>
+            <div className="sales-superadmin-metric">
+              <span>Productos activos</span>
+              <strong>{dashboardProductCount}</strong>
+            </div>
+            <div className="sales-superadmin-metric">
+              <span>Periodicidades</span>
+              <strong>{salesPeriodicities.join(" / ")}</strong>
+            </div>
+          </div>
+
+          <div className="table-scroll">
+            <table className="data-table sales-superadmin-table">
+              <thead>
+                <tr>
+                  <th>Empresa</th>
+                  <th>Producto</th>
+                  <th>Tarea</th>
+                  <th>Periodicidad</th>
+                  <th>Responsable</th>
+                  <th>Inicio en dashboard</th>
+                  <th>Prioridad</th>
+                  <th>Canal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {SALES_TASK_SEEDS.map((task) => {
+                  const product = SALES_PRODUCT_BY_ID[task.productId];
+                  const responsible = SALES_RESPONSIBLE_BY_ID[task.responsibleId];
+
+                  return (
+                    <tr key={`summary-${task.id}`}>
+                      <td>{task.company}</td>
+                      <td>
+                        <span className="sales-product-cell">
+                          <span className="sales-product-dot" style={{ background: product.accentColor }} />
+                          {product.name}
+                        </span>
+                      </td>
+                      <td>{task.task}</td>
+                      <td>
+                        <span className="sales-periodicity-pill">{task.periodicity}</span>
+                      </td>
+                      <td>{responsible ? `${responsible.name} (${responsible.id})` : task.responsibleId}</td>
+                      <td>{formatDateInput(task.firstDueDate)}</td>
+                      <td>{getPriorityLabel(task.priority)}</td>
+                      <td>{task.channel}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="panel">
         <div className="panel-header">

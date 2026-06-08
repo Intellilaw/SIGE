@@ -567,7 +567,6 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             catch (error) {
                 if (!isCancelled) {
                     setHolidayDateKeysByAuthority({});
-                    setErrorMessage(toErrorMessage(error));
                 }
             }
         }

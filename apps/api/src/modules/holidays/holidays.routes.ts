@@ -10,7 +10,10 @@ const HOLIDAY_AUTHORITY_SHORT_NAMES = HOLIDAY_AUTHORITIES.map((authority) => aut
   ...HolidayAuthorityShortName[]
 ];
 
-const authorityShortNameSchema = z.enum(HOLIDAY_AUTHORITY_SHORT_NAMES);
+const authorityShortNameSchema = z.preprocess(
+  (value) => (value === "PJCDMX" ? "TSJCDMX" : value),
+  z.enum(HOLIDAY_AUTHORITY_SHORT_NAMES)
+);
 
 const querySchema = z.object({
   year: z.coerce.number().int().min(1900).max(2100).optional(),

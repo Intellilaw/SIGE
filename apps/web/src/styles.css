@@ -4431,6 +4431,68 @@ textarea {
   color: #0f766e;
 }
 
+.sales-superadmin-panel {
+  display: grid;
+  gap: 16px;
+  border-color: rgba(29, 78, 216, 0.18);
+}
+
+.sales-superadmin-panel .panel-header {
+  margin-bottom: 0;
+}
+
+.sales-superadmin-panel h2,
+.sales-superadmin-panel .eyebrow {
+  margin: 0;
+}
+
+.sales-superadmin-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.sales-superadmin-metric {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.sales-superadmin-metric span {
+  color: #52606d;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sales-superadmin-metric strong {
+  color: #102a43;
+  font-size: 1rem;
+}
+
+.sales-superadmin-table {
+  min-width: 1040px;
+  background: #fff;
+}
+
+.sales-superadmin-table td {
+  vertical-align: top;
+}
+
+.sales-periodicity-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(29, 78, 216, 0.1);
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .sales-product-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
