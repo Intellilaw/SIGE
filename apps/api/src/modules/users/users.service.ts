@@ -22,6 +22,11 @@ function normalizeEditableUsername(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeEmail(value?: string | null) {
+  const email = value?.trim().toLowerCase();
+  return email || undefined;
+}
+
 function normalizeTeamLabel(value: string) {
   return value
     .normalize("NFD")
@@ -40,6 +45,10 @@ function buildTeamKeyBase(label: string) {
     .replace(/^_+|_+$/g, "") || "EQUIPO";
 }
 
+function getComparableTeamAssignment(team?: Team | null, legacyTeam?: string | null) {
+  return team ? `key:${team}` : `label:${normalizeTeamLabel(legacyTeam ?? "")}`;
+}
+
 export class UsersService {
   public constructor(private readonly repository: UsersRepository) {}
 
@@ -50,7 +59,7 @@ export class UsersService {
   public async listTeamShortNames(team: Team) {
     const users = await this.repository.list();
     const shortNames = users
-      .filter((user) => user.isActive && user.team === team)
+      .filter((user) => user.isActive && (user.team === team || user.secondaryTeam === team))
       .map((user) => normalizeShortName(user.shortName))
       .filter((shortName): shortName is string => Boolean(shortName));
 
@@ -63,20 +72,37 @@ export class UsersService {
       throw new AppError(400, "INVALID_USERNAME", "Username is required.");
     }
 
+    const email = normalizeEmail(payload.email) ?? buildLegacyEmail(username);
     const legacyRole = payload.legacyRole ?? "INTRANET";
     const requestedLegacyTeam = payload.legacyTeam?.trim() || undefined;
     const managedTeam = requestedLegacyTeam
       ? await this.resolveManagedTeamByLabel(requestedLegacyTeam)
       : undefined;
+    const requestedSecondaryLegacyTeam = payload.secondaryLegacyTeam?.trim() || undefined;
+    const managedSecondaryTeam = requestedSecondaryLegacyTeam
+      ? await this.resolveManagedTeamByLabel(requestedSecondaryLegacyTeam)
+      : undefined;
     const legacyTeam = managedTeam?.label ?? requestedLegacyTeam;
+    const secondaryLegacyTeam = managedSecondaryTeam?.label ?? requestedSecondaryLegacyTeam;
     const specificRole = payload.specificRole?.trim() || undefined;
+    const secondarySpecificRole = secondaryLegacyTeam ? payload.secondarySpecificRole?.trim() || undefined : undefined;
     const team = managedTeam?.key;
-    const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole });
-    const permissions = derivePermissions({ legacyRole, team, legacyTeam, specificRole });
+    const secondaryTeam = managedSecondaryTeam?.key;
+    this.assertDistinctTeams(team, legacyTeam, secondaryTeam, secondaryLegacyTeam);
+    const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole, secondarySpecificRole });
+    const permissions = derivePermissions({
+      legacyRole,
+      team,
+      legacyTeam,
+      secondaryTeam,
+      secondaryLegacyTeam,
+      specificRole,
+      secondarySpecificRole
+    });
     assertStrongPassword(payload.password);
 
     return this.repository.create({
-      email: buildLegacyEmail(username),
+      email,
       username,
       displayName: payload.displayName?.trim() || buildDisplayName(username),
       shortName: normalizeShortName(payload.shortName),
@@ -84,8 +110,12 @@ export class UsersService {
       legacyRole,
       team,
       legacyTeam,
+      secondaryTeam,
+      secondaryLegacyTeam,
       specificRole,
+      secondarySpecificRole,
       permissions,
+      isExternal: payload.isExternal ?? false,
       passwordHash: hashPassword(payload.password)
     });
   }
@@ -103,21 +133,45 @@ export class UsersService {
     const managedTeam = payload.legacyTeam === undefined || !requestedLegacyTeam
       ? undefined
       : await this.resolveManagedTeamByLabel(requestedLegacyTeam);
+    const requestedSecondaryLegacyTeam = payload.secondaryLegacyTeam === undefined
+      ? currentUser.secondaryLegacyTeam
+      : payload.secondaryLegacyTeam?.trim() || undefined;
+    const managedSecondaryTeam = payload.secondaryLegacyTeam === undefined || !requestedSecondaryLegacyTeam
+      ? undefined
+      : await this.resolveManagedTeamByLabel(requestedSecondaryLegacyTeam);
     const legacyTeam = managedTeam?.label ?? requestedLegacyTeam;
+    const secondaryLegacyTeam = managedSecondaryTeam?.label ?? requestedSecondaryLegacyTeam;
     const specificRole = payload.specificRole === undefined
       ? currentUser.specificRole
       : payload.specificRole?.trim() || undefined;
+    const requestedSecondarySpecificRole = payload.secondarySpecificRole === undefined
+      ? currentUser.secondarySpecificRole
+      : payload.secondarySpecificRole?.trim() || undefined;
+    const secondarySpecificRole = secondaryLegacyTeam ? requestedSecondarySpecificRole : undefined;
     const username = payload.username === undefined
       ? undefined
       : normalizeEditableUsername(payload.username);
     const displayName = payload.displayName === undefined
       ? undefined
       : normalizeEditableUsername(payload.displayName);
+    const email = payload.email === undefined ? undefined : normalizeEmail(payload.email);
     const team = payload.legacyTeam === undefined
       ? currentUser.team
       : managedTeam?.key;
-    const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole });
-    const permissions = derivePermissions({ legacyRole, team, legacyTeam, specificRole });
+    const secondaryTeam = payload.secondaryLegacyTeam === undefined
+      ? currentUser.secondaryTeam
+      : managedSecondaryTeam?.key;
+    this.assertDistinctTeams(team, legacyTeam, secondaryTeam, secondaryLegacyTeam);
+    const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole, secondarySpecificRole });
+    const permissions = derivePermissions({
+      legacyRole,
+      team,
+      legacyTeam,
+      secondaryTeam,
+      secondaryLegacyTeam,
+      specificRole,
+      secondarySpecificRole
+    });
     const nextPassword = payload.password?.trim();
 
     if (payload.username !== undefined && !username) {
@@ -134,6 +188,7 @@ export class UsersService {
 
     return this.repository.update(userId, {
       username,
+      email,
       displayName,
       passwordHash: nextPassword ? hashPassword(nextPassword) : undefined,
       shortName: payload.shortName === undefined ? undefined : normalizeShortName(payload.shortName) ?? null,
@@ -141,8 +196,12 @@ export class UsersService {
       legacyRole,
       team,
       legacyTeam: legacyTeam ?? null,
+      secondaryTeam: secondaryTeam ?? null,
+      secondaryLegacyTeam: secondaryLegacyTeam ?? null,
       specificRole: specificRole ?? null,
+      secondarySpecificRole: secondarySpecificRole ?? null,
       permissions,
+      isExternal: payload.isExternal,
       isActive: payload.isActive,
       passwordResetRequired: nextPassword ? false : undefined,
       emailConfirmedAt: nextPassword
@@ -244,6 +303,23 @@ export class UsersService {
     }
 
     return key;
+  }
+
+  private assertDistinctTeams(
+    team?: Team | null,
+    legacyTeam?: string | null,
+    secondaryTeam?: Team | null,
+    secondaryLegacyTeam?: string | null
+  ) {
+    if ((!team && !legacyTeam) || (!secondaryTeam && !secondaryLegacyTeam)) {
+      return;
+    }
+
+    const primary = getComparableTeamAssignment(team, legacyTeam);
+    const secondary = getComparableTeamAssignment(secondaryTeam, secondaryLegacyTeam);
+    if (primary === secondary) {
+      throw new AppError(400, "DUPLICATED_USER_TEAM", "El segundo equipo debe ser distinto del equipo principal.");
+    }
   }
 
   private async resolveManagedTeamByLabel(label: string) {

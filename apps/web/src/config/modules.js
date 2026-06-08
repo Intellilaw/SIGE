@@ -320,13 +320,23 @@ export function canAccessExternalContracts(user) {
     if (!user) {
         return false;
     }
-    const normalizedTeam = normalizeIdentity(user.legacyTeam);
-    const normalizedRole = normalizeIdentity(user.specificRole);
+    const normalizedTeams = [
+        normalizeIdentity(user.legacyTeam),
+        normalizeIdentity(user.secondaryLegacyTeam)
+    ];
+    const normalizedRoles = [
+        normalizeIdentity(user.specificRole),
+        normalizeIdentity(user.secondarySpecificRole)
+    ];
     const hasAdministrativeAccess = user.role === "SUPERADMIN"
         || user.legacyRole === "SUPERADMIN"
-        || normalizedRole === "direccion general"
+        || normalizedRoles.includes("direccion general")
         || Boolean(user.permissions?.includes("*"));
-    return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+    return hasAdministrativeAccess
+        || user.team === "SETTLEMENTS"
+        || user.secondaryTeam === "SETTLEMENTS"
+        || normalizedTeams.includes("convenios")
+        || normalizedRoles.some((role) => role.includes("convenios"));
 }
 export function isAlwaysEnabledModule(moduleId) {
     return ALWAYS_ENABLED_MODULE_IDS.has(moduleId);

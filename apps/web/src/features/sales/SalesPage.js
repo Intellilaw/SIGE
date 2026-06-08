@@ -1,104 +1,33 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { LEGALFLOW_SALES_PRODUCTS } from "@sige/contracts";
 import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
 import minkaLogo from "../../assets/legalflow-minka-logo.png";
 import rematesLogo from "../../assets/legalflow-remates-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
+import { apiGet, apiPatch } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
-const SALES_PRODUCTS = [
-    {
-        id: "start",
-        name: "Start",
-        tagline: "Producto de apertura para nuevos clientes de LegalFlow.",
-        initials: "ST",
-        accentColor: "#2563eb",
-        logoSrc: startLogo,
-        logoAlt: "Start by LegalFlow",
-        defaultStrategy: "Delimitar el mensaje de entrada de Start: explicar el beneficio concreto, el tipo de cliente ideal, los canales prioritarios y la oferta inicial que debe convertirse en llamada comercial.",
-        defaultDailyReport: "Registrar contactos realizados, piezas publicadas, respuestas recibidas, siguientes acciones y bloqueos detectados durante el dia."
-    },
-    {
-        id: "pld",
-        name: "Intellilaw PLD",
-        tagline: "Solucion para cumplimiento, prevencion y control operativo PLD.",
-        initials: "PLD",
-        accentColor: "#2563eb",
-        logoSrc: intellilawPldLogo,
-        logoAlt: "Intellilaw PLD by LegalFlow",
-        defaultStrategy: "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion de Intellilaw PLD.",
-        defaultDailyReport: "Registrar prospectos contactados, demostraciones agendadas, preguntas recurrentes, materiales enviados y acuerdos de seguimiento."
-    },
-    {
-        id: "remates",
-        name: "Remates",
-        tagline: "Oferta comercial enfocada en oportunidades inmobiliarias y seguimiento juridico.",
-        initials: "RM",
-        accentColor: "#1d4ed8",
-        logoSrc: rematesLogo,
-        logoAlt: "Remates Inmobiliarios Mexico by LegalFlow",
-        defaultStrategy: "Delimitar inventario objetivo, perfil de inversionista, mensajes de oportunidad, reglas de calificacion de leads y cadencia de seguimiento.",
-        defaultDailyReport: "Registrar propiedades revisadas, leads calificados, llamadas realizadas, dudas legales y proximas tareas comerciales."
-    },
-    {
-        id: "minka",
-        name: "Minka",
-        tagline: "Inteligencia contractual con IA para abogados y equipos legales.",
-        initials: "MK",
-        accentColor: "#6d28d9",
-        logoSrc: minkaLogo,
-        logoAlt: "Minka by LegalFlow",
-        defaultStrategy: "Delimitar casos de uso contractuales, promesas de eficiencia, perfil de usuarios juridicos, mensajes de confianza y secuencia de demostracion para Minka.",
-        defaultDailyReport: "Registrar despachos y equipos legales contactados, demos agendadas, contratos analizados, dudas sobre IA y siguientes acciones comerciales."
-    }
-];
-const SALES_RESPONSIBLES = [
-    { id: "IR", name: "Itari Romero" }
-];
+const SALES_PRODUCT_LOGOS = {
+    start: startLogo,
+    pld: intellilawPldLogo,
+    remates: rematesLogo,
+    minka: minkaLogo
+};
+const SALES_PRODUCTS = LEGALFLOW_SALES_PRODUCTS.map((product) => ({
+    ...product,
+    logoSrc: SALES_PRODUCT_LOGOS[product.id]
+}));
+const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
+    lookup[product.id] = product;
+    return lookup;
+}, {});
 const SALES_TIMEFRAMES = [
     { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
     { id: "hoy", label: "Tareas hoy", colorClass: "is-today" },
     { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
-const LEGALFLOW_SALES_START_DATE = "2026-06-08";
-const LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS = 20;
-const SALES_TASK_SEEDS = [
-    {
-        id: "legalflow-remates-reporte-diario",
-        company: "LegalFlow",
-        productId: "remates",
-        responsibleId: "IR",
-        task: "Publicar reporte diario de tareas realizadas de Remates by LegalFlow",
-        channel: "Reporte diario",
-        periodicity: "Cada dos dias habiles, alternando con Start by LegalFlow",
-        priority: "alta",
-        firstDueDate: LEGALFLOW_SALES_START_DATE
-    },
-    {
-        id: "legalflow-start-reporte-diario",
-        company: "LegalFlow",
-        productId: "start",
-        responsibleId: "IR",
-        task: "Publicar reporte diario de tareas realizadas de Start by LegalFlow",
-        channel: "Reporte diario",
-        periodicity: "Cada dos dias habiles, alternando con Remates by LegalFlow",
-        priority: "alta",
-        firstDueDate: addBusinessDays(LEGALFLOW_SALES_START_DATE, 1)
-    }
-];
-const DEFAULT_STRATEGIES = SALES_PRODUCTS.reduce((defaults, product) => {
-    defaults[product.id] = product.defaultStrategy;
-    return defaults;
-}, {});
-const DAILY_REPORT_STORAGE_KEY = "sige-sales-daily-reports";
-const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
-    lookup[product.id] = product;
-    return lookup;
-}, {});
-const SALES_RESPONSIBLE_BY_ID = SALES_RESPONSIBLES.reduce((lookup, responsible) => {
-    lookup[responsible.id] = responsible;
-    return lookup;
-}, {});
+const SAVE_DEBOUNCE_MS = 650;
 function getLocalDateInput(offset = 0) {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
@@ -120,117 +49,6 @@ function formatDateInput(value) {
         day: "2-digit",
         month: "short"
     }).format(date);
-}
-function isBusinessDay(date) {
-    const day = date.getDay();
-    return day !== 0 && day !== 6;
-}
-function addBusinessDays(value, days) {
-    const date = parseDateInput(value);
-    let remainingDays = days;
-    while (remainingDays > 0) {
-        date.setDate(date.getDate() + 1);
-        if (isBusinessDay(date)) {
-            remainingDays -= 1;
-        }
-    }
-    return toDateInput(date);
-}
-function getSalesTaskHorizonEnd(todayInput) {
-    const anchorDate = todayInput > LEGALFLOW_SALES_START_DATE ? todayInput : LEGALFLOW_SALES_START_DATE;
-    return addBusinessDays(anchorDate, LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS);
-}
-function buildLegalFlowSalesTasks(todayInput = getLocalDateInput()) {
-    const tasks = [];
-    const endDate = getSalesTaskHorizonEnd(todayInput);
-    const cursor = parseDateInput(LEGALFLOW_SALES_START_DATE);
-    let businessDayIndex = 0;
-    while (toDateInput(cursor) <= endDate) {
-        if (isBusinessDay(cursor)) {
-            const dueDate = toDateInput(cursor);
-            const definition = SALES_TASK_SEEDS[businessDayIndex % SALES_TASK_SEEDS.length];
-            tasks.push({
-                ...definition,
-                id: `${definition.id}-${dueDate}`,
-                dueDate,
-                status: "pendiente"
-            });
-            businessDayIndex += 1;
-        }
-        cursor.setDate(cursor.getDate() + 1);
-    }
-    return tasks;
-}
-function readStoredTextMap(storageKey, defaults) {
-    if (typeof window === "undefined") {
-        return defaults;
-    }
-    try {
-        const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}");
-        return SALES_PRODUCTS.reduce((result, product) => {
-            result[product.id] = stored[product.id] ?? defaults[product.id];
-            return result;
-        }, {});
-    }
-    catch {
-        return defaults;
-    }
-}
-function buildDefaultDailyReportStore(date = getLocalDateInput()) {
-    return SALES_PRODUCTS.reduce((defaults, product) => {
-        defaults[product.id] = {
-            [date]: product.defaultDailyReport
-        };
-        return defaults;
-    }, {});
-}
-function readStoredDailyReportStore(storageKey) {
-    const fallback = buildDefaultDailyReportStore();
-    if (typeof window === "undefined") {
-        return fallback;
-    }
-    try {
-        const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}");
-        return SALES_PRODUCTS.reduce((result, product) => {
-            const storedProductReports = stored[product.id];
-            if (typeof storedProductReports === "string") {
-                result[product.id] = {
-                    [getLocalDateInput()]: storedProductReports
-                };
-                return result;
-            }
-            result[product.id] = {
-                ...(fallback[product.id] ?? {}),
-                ...(storedProductReports ?? {})
-            };
-            return result;
-        }, {});
-    }
-    catch {
-        return fallback;
-    }
-}
-function writeStoredDailyReportStore(storageKey, value) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    try {
-        window.localStorage.setItem(storageKey, JSON.stringify(value));
-    }
-    catch {
-        // Local persistence is a convenience layer; the screen remains usable if storage is blocked.
-    }
-}
-function writeStoredTextMap(storageKey, value) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    try {
-        window.localStorage.setItem(storageKey, JSON.stringify(value));
-    }
-    catch {
-        // Local persistence is a convenience layer; the screen remains usable if storage is blocked.
-    }
 }
 function belongsToTimeframe(task, timeframe) {
     const today = getLocalDateInput();
@@ -271,6 +89,41 @@ function getPriorityLabel(priority) {
 function canViewSalesSuperadminSummary(user) {
     return Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN" || user?.permissions?.includes("*"));
 }
+function buildEmptyDailyReportStore() {
+    return SALES_PRODUCTS.reduce((store, product) => {
+        store[product.id] = {};
+        return store;
+    }, {});
+}
+function buildPendingStrategy(productId, content) {
+    return {
+        id: `pending-${productId}`,
+        productId,
+        content,
+        updatedAt: new Date().toISOString()
+    };
+}
+function applyStrategy(overview, strategy) {
+    return {
+        ...overview,
+        strategies: {
+            ...overview.strategies,
+            [strategy.productId]: strategy
+        }
+    };
+}
+function applyDailyReport(overview, report) {
+    return {
+        ...overview,
+        dailyReports: {
+            ...overview.dailyReports,
+            [report.productId]: {
+                ...(overview.dailyReports[report.productId] ?? {}),
+                [report.reportDate]: report.content
+            }
+        }
+    };
+}
 export function SalesPage() {
     const { user } = useAuth();
     const [selectedProductId, setSelectedProductId] = useState("start");
@@ -279,47 +132,142 @@ export function SalesPage() {
         responsibleId: "IR",
         timeframe: "hoy"
     });
-    const [strategies, setStrategies] = useState(() => readStoredTextMap("sige-sales-strategies", DEFAULT_STRATEGIES));
-    const [dailyReports, setDailyReports] = useState(() => readStoredDailyReportStore(DAILY_REPORT_STORAGE_KEY));
-    const salesTasks = useMemo(() => buildLegalFlowSalesTasks(), []);
+    const [overview, setOverview] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState(null);
+    const [savingMessage, setSavingMessage] = useState(null);
+    const strategyTimers = useRef({});
+    const reportTimers = useRef({});
+    useEffect(() => {
+        let mounted = true;
+        async function loadOverview() {
+            setLoading(true);
+            setErrorMessage(null);
+            try {
+                const loaded = await apiGet("/sales/overview");
+                if (mounted) {
+                    setOverview({
+                        ...loaded,
+                        dailyReports: {
+                            ...buildEmptyDailyReportStore(),
+                            ...loaded.dailyReports
+                        }
+                    });
+                }
+            }
+            catch (error) {
+                if (mounted) {
+                    setErrorMessage(error instanceof Error ? error.message : "No se pudo cargar ventas.");
+                }
+            }
+            finally {
+                if (mounted) {
+                    setLoading(false);
+                }
+            }
+        }
+        void loadOverview();
+        return () => {
+            mounted = false;
+        };
+    }, []);
+    useEffect(() => () => {
+        Object.values(strategyTimers.current).forEach((timer) => {
+            if (timer) {
+                window.clearTimeout(timer);
+            }
+        });
+        Object.values(reportTimers.current).forEach((timer) => window.clearTimeout(timer));
+    }, []);
     const selectedProduct = SALES_PRODUCT_BY_ID[selectedProductId];
     const today = getLocalDateInput();
+    const salesTasks = overview?.tasks ?? [];
+    const salesResponsibles = overview?.responsibles ?? [];
+    const taskSeeds = overview?.taskSeeds ?? [];
+    const strategies = overview?.strategies ?? SALES_PRODUCTS.reduce((result, product) => {
+        result[product.id] = buildPendingStrategy(product.id, product.defaultStrategy);
+        return result;
+    }, {});
+    const dailyReports = overview?.dailyReports ?? buildEmptyDailyReportStore();
     const openTaskCount = salesTasks.filter((task) => task.status !== "concluida").length;
-    const salesPeriodicities = [...new Set(SALES_TASK_SEEDS.map((task) => task.periodicity))];
-    const dashboardProductCount = new Set(SALES_TASK_SEEDS.map((task) => task.productId)).size;
+    const salesPeriodicities = [...new Set(taskSeeds.map((task) => task.periodicity))];
+    const dashboardProductCount = new Set(taskSeeds.map((task) => task.productId)).size;
     const canViewSuperadminSummary = canViewSalesSuperadminSummary(user);
     const selectedProductTasks = salesTasks.filter((task) => task.productId === selectedProductId);
     const selectedCompletedTasks = selectedProductTasks.filter((task) => task.status === "concluida" && task.dueDate === selectedReportDate);
     const selectedDailyReport = dailyReports[selectedProduct.id]?.[selectedReportDate] ?? "";
+    const selectedStrategy = strategies[selectedProduct.id]?.content ?? selectedProduct.defaultStrategy;
+    const responsibleById = useMemo(() => new Map(salesResponsibles.map((responsible) => [responsible.id, responsible])), [salesResponsibles]);
+    function updateOverviewWithStrategy(productId, content) {
+        setOverview((current) => current ? applyStrategy(current, {
+            ...(current.strategies[productId] ?? buildPendingStrategy(productId, content)),
+            content
+        }) : current);
+    }
+    function updateOverviewWithDailyReport(productId, date, content) {
+        setOverview((current) => current ? {
+            ...current,
+            dailyReports: {
+                ...current.dailyReports,
+                [productId]: {
+                    ...(current.dailyReports[productId] ?? {}),
+                    [date]: content
+                }
+            }
+        } : current);
+    }
+    async function persistStrategy(productId, content) {
+        setSavingMessage("Guardando estrategia...");
+        try {
+            const saved = await apiPatch(`/sales/strategies/${productId}`, { content });
+            setOverview((current) => current ? applyStrategy(current, saved) : current);
+            setSavingMessage(null);
+        }
+        catch (error) {
+            setSavingMessage(null);
+            setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar la estrategia.");
+        }
+    }
+    async function persistDailyReport(productId, date, content) {
+        setSavingMessage("Guardando reporte diario...");
+        try {
+            const saved = await apiPatch(`/sales/daily-reports/${productId}/${date}`, { content });
+            setOverview((current) => current ? applyDailyReport(current, saved) : current);
+            setSavingMessage(null);
+        }
+        catch (error) {
+            setSavingMessage(null);
+            setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar el reporte diario.");
+        }
+    }
     function updateStrategy(productId, value) {
-        setStrategies((current) => {
-            const next = { ...current, [productId]: value };
-            writeStoredTextMap("sige-sales-strategies", next);
-            return next;
-        });
+        updateOverviewWithStrategy(productId, value);
+        if (strategyTimers.current[productId]) {
+            window.clearTimeout(strategyTimers.current[productId]);
+        }
+        strategyTimers.current[productId] = window.setTimeout(() => {
+            void persistStrategy(productId, value);
+        }, SAVE_DEBOUNCE_MS);
     }
     function updateDailyReport(productId, date, value) {
-        setDailyReports((current) => {
-            const next = {
-                ...current,
-                [productId]: {
-                    ...(current[productId] ?? {}),
-                    [date]: value
-                }
-            };
-            writeStoredDailyReportStore(DAILY_REPORT_STORAGE_KEY, next);
-            return next;
-        });
+        const key = `${productId}-${date}`;
+        updateOverviewWithDailyReport(productId, date, value);
+        if (reportTimers.current[key]) {
+            window.clearTimeout(reportTimers.current[key]);
+        }
+        reportTimers.current[key] = window.setTimeout(() => {
+            void persistDailyReport(productId, date, value);
+        }, SAVE_DEBOUNCE_MS);
     }
-    function buildRows(responsible, timeframe) {
+    function buildRows(responsibleId, timeframe) {
         return salesTasks
-            .filter((task) => task.responsibleId === responsible.id)
+            .filter((task) => task.responsibleId === responsibleId)
             .filter((task) => belongsToTimeframe(task, timeframe))
             .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
     }
-    return (_jsxs("section", { className: "page-stack sales-page", children: [_jsxs("header", { className: "hero module-hero sales-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon sales-hero-icon", "aria-hidden": "true", children: "Ventas" }), _jsx("div", { children: _jsx("h2", { children: "Ventas" }) })] }), _jsx("p", { className: "muted", children: "Productos comerciales, estrategia de marketing y reporte diario con tablero unico de Itari Romero." })] }), _jsxs("section", { className: "panel sales-dashboard-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Dashboard comercial" }), _jsxs("span", { children: [openTaskCount, " tareas abiertas"] })] }), _jsx("div", { className: "tasks-team-member-list sales-dashboard-list", children: SALES_RESPONSIBLES.map((responsible) => {
+    return (_jsxs("section", { className: "page-stack sales-page", children: [_jsxs("header", { className: "hero module-hero sales-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon sales-hero-icon", "aria-hidden": "true", children: "Ventas" }), _jsx("div", { children: _jsx("h2", { children: "Ventas" }) })] }), _jsx("p", { className: "muted", children: "Productos comerciales, estrategia de marketing y reporte diario con tablero unico de Itari Romero." })] }), errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, savingMessage ? _jsx("div", { className: "message-banner message-success", children: savingMessage }) : null, _jsxs("section", { className: "panel sales-dashboard-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Dashboard comercial" }), _jsx("span", { children: loading ? "Cargando..." : `${openTaskCount} tareas abiertas` })] }), _jsx("div", { className: "tasks-team-member-list sales-dashboard-list", children: salesResponsibles.map((responsible) => {
                             const isExpanded = expandedView?.responsibleId === responsible.id;
-                            const rows = isExpanded && expandedView ? buildRows(responsible, expandedView.timeframe) : [];
+                            const rows = isExpanded && expandedView ? buildRows(responsible.id, expandedView.timeframe) : [];
                             return (_jsxs("article", { className: "tasks-team-member-card sales-responsible-card", children: [_jsxs("div", { className: "tasks-team-member-head", children: [_jsx("h3", { children: responsible.name }), _jsx("span", { children: responsible.id })] }), _jsx("div", { className: "tasks-team-timeframes", children: SALES_TIMEFRAMES.map((timeframe) => {
                                             const isActive = expandedView?.responsibleId === responsible.id && expandedView.timeframe === timeframe.id;
                                             return (_jsx("button", { type: "button", className: `tasks-team-timeframe-button ${timeframe.colorClass} ${isActive ? "is-active" : ""}`, onClick: () => setExpandedView((current) => current?.responsibleId === responsible.id && current?.timeframe === timeframe.id
@@ -330,13 +278,13 @@ export function SalesPage() {
                                                                 const highlighted = task.status !== "concluida" && task.dueDate <= today;
                                                                 return (_jsxs("tr", { className: highlighted ? "tasks-dashboard-row-overdue" : undefined, children: [_jsx("td", { children: _jsxs("span", { className: "sales-product-cell", children: [_jsx("span", { className: "sales-product-dot", style: { background: product.accentColor } }), product.name] }) }), _jsx("td", { className: highlighted ? "tasks-dashboard-title-overdue" : undefined, children: task.task }), _jsx("td", { children: task.channel }), _jsx("td", { children: _jsx("span", { className: `sales-priority-pill is-${task.priority}`, children: getPriorityLabel(task.priority) }) }), _jsx("td", { children: formatDateInput(task.dueDate) }), _jsx("td", { children: _jsx("span", { className: `tasks-dashboard-type-pill ${task.status === "concluida" ? "is-completed" : highlighted ? "is-overdue" : "is-pending"}`, children: getStatusLabel(task.status) }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => setSelectedProductId(task.productId), children: "Ver producto" }) })] }, task.id));
                                                             })) })] }) })] })) : null] }, responsible.id));
-                        }) })] }), canViewSuperadminSummary ? (_jsxs("section", { className: "panel sales-superadmin-panel", "aria-label": "Consulta superadmin de tareas de ventas", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Consulta superadmin" }), _jsx("h2", { children: "Tareas reflejadas en dashboard" })] }), _jsxs("span", { children: [SALES_TASK_SEEDS.length, " tareas configuradas"] })] }), _jsxs("div", { className: "sales-superadmin-metrics", children: [_jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Empresa" }), _jsx("strong", { children: "LegalFlow" })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Responsable" }), _jsx("strong", { children: "Itari Romero (IR)" })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Productos activos" }), _jsx("strong", { children: dashboardProductCount })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Periodicidades" }), _jsx("strong", { children: salesPeriodicities.join(" / ") })] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table sales-superadmin-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Empresa" }), _jsx("th", { children: "Producto" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Periodicidad" }), _jsx("th", { children: "Responsable" }), _jsx("th", { children: "Inicio en dashboard" }), _jsx("th", { children: "Prioridad" }), _jsx("th", { children: "Canal" })] }) }), _jsx("tbody", { children: SALES_TASK_SEEDS.map((task) => {
+                        }) })] }), canViewSuperadminSummary ? (_jsxs("section", { className: "panel sales-superadmin-panel", "aria-label": "Consulta superadmin de tareas de ventas", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Consulta superadmin" }), _jsx("h2", { children: "Tareas reflejadas en dashboard" })] }), _jsxs("span", { children: [taskSeeds.length, " tareas configuradas"] })] }), _jsxs("div", { className: "sales-superadmin-metrics", children: [_jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Responsable" }), _jsx("strong", { children: "Itari Romero (IR)" })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Productos activos" }), _jsx("strong", { children: dashboardProductCount })] }), _jsxs("div", { className: "sales-superadmin-metric", children: [_jsx("span", { children: "Periodicidades" }), _jsx("strong", { children: salesPeriodicities.join(" / ") })] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table sales-superadmin-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Empresa" }), _jsx("th", { children: "Producto" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Periodicidad" }), _jsx("th", { children: "Responsable" }), _jsx("th", { children: "Inicio en dashboard" }), _jsx("th", { children: "Prioridad" }), _jsx("th", { children: "Canal" })] }) }), _jsx("tbody", { children: taskSeeds.map((task) => {
                                         const product = SALES_PRODUCT_BY_ID[task.productId];
-                                        const responsible = SALES_RESPONSIBLE_BY_ID[task.responsibleId];
+                                        const responsible = responsibleById.get(task.responsibleId);
                                         return (_jsxs("tr", { children: [_jsx("td", { children: task.company }), _jsx("td", { children: _jsxs("span", { className: "sales-product-cell", children: [_jsx("span", { className: "sales-product-dot", style: { background: product.accentColor } }), product.name] }) }), _jsx("td", { children: task.task }), _jsx("td", { children: _jsx("span", { className: "sales-periodicity-pill", children: task.periodicity }) }), _jsx("td", { children: responsible ? `${responsible.name} (${responsible.id})` : task.responsibleId }), _jsx("td", { children: formatDateInput(task.firstDueDate) }), _jsx("td", { children: getPriorityLabel(task.priority) }), _jsx("td", { children: task.channel })] }, `summary-${task.id}`));
                                     }) })] }) })] })) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Productos" }), _jsxs("span", { children: [SALES_PRODUCTS.length, " productos"] })] }), _jsx("div", { className: "sales-product-grid", children: SALES_PRODUCTS.map((product) => {
                             const productOpenTasks = salesTasks.filter((task) => task.productId === product.id && task.status !== "concluida").length;
                             const isSelected = selectedProductId === product.id;
                             return (_jsxs("button", { type: "button", className: `sales-product-card ${isSelected ? "is-selected" : ""}`, "aria-pressed": isSelected, onClick: () => setSelectedProductId(product.id), children: [_jsx("span", { className: "sales-product-logo-shell", children: product.logoSrc ? (_jsx("img", { src: product.logoSrc, alt: product.logoAlt })) : (_jsx("span", { className: "sales-product-monogram", style: { color: product.accentColor }, children: product.initials })) }), _jsxs("span", { className: "sales-product-card-copy", children: [_jsx("strong", { children: product.name }), _jsx("span", { children: product.tagline }), _jsxs("span", { className: "sales-product-task-summary", children: [productOpenTasks, " tareas abiertas"] })] })] }, product.id));
-                        }) })] }), _jsxs("section", { className: "sales-product-detail-grid", "aria-label": `Detalle de ${selectedProduct.name}`, children: [_jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "sales-selected-product-head", children: [_jsx("span", { className: "sales-selected-product-logo", style: { borderColor: selectedProduct.accentColor }, children: selectedProduct.logoSrc ? (_jsx("img", { src: selectedProduct.logoSrc, alt: selectedProduct.logoAlt })) : (_jsx("span", { style: { color: selectedProduct.accentColor }, children: selectedProduct.initials })) }), _jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Producto" }), _jsx("h2", { children: selectedProduct.name }), _jsx("p", { className: "muted", children: selectedProduct.tagline })] })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Estrategia general de marketing" }), _jsx("textarea", { value: strategies[selectedProduct.id], onChange: (event) => updateStrategy(selectedProduct.id, event.target.value) })] })] }), _jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Reporte diario de tareas realizadas" }), _jsx("span", { children: formatDateInput(selectedReportDate) })] }), _jsxs("label", { className: "form-field sales-date-field", children: [_jsx("span", { children: "Fecha del reporte" }), _jsx("input", { type: "date", value: selectedReportDate, max: today, onChange: (event) => setSelectedReportDate(event.target.value) })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Bitacora diaria" }), _jsx("textarea", { value: selectedDailyReport, placeholder: selectedProduct.defaultDailyReport, onChange: (event) => updateDailyReport(selectedProduct.id, selectedReportDate, event.target.value) })] }), _jsx("div", { className: "sales-report-list", children: selectedCompletedTasks.length === 0 ? (_jsx("p", { className: "centered-inline-message sales-empty-report", children: "No hay tareas realizadas registradas para este producto." })) : (selectedCompletedTasks.map((task) => (_jsxs("div", { className: "sales-report-entry", children: [_jsx("strong", { children: task.task }), _jsx("span", { children: task.channel }), _jsx("small", { children: formatDateInput(task.dueDate) })] }, task.id)))) })] })] })] }));
+                        }) })] }), _jsxs("section", { className: "sales-product-detail-grid", "aria-label": `Detalle de ${selectedProduct.name}`, children: [_jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "sales-selected-product-head", children: [_jsx("span", { className: "sales-selected-product-logo", style: { borderColor: selectedProduct.accentColor }, children: selectedProduct.logoSrc ? (_jsx("img", { src: selectedProduct.logoSrc, alt: selectedProduct.logoAlt })) : (_jsx("span", { style: { color: selectedProduct.accentColor }, children: selectedProduct.initials })) }), _jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Producto" }), _jsx("h2", { children: selectedProduct.name }), _jsx("p", { className: "muted", children: selectedProduct.tagline })] })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Estrategia general de marketing" }), _jsx("textarea", { value: selectedStrategy, onChange: (event) => updateStrategy(selectedProduct.id, event.target.value) })] })] }), _jsxs("article", { className: "panel sales-product-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Reporte diario de tareas realizadas" }), _jsx("span", { children: formatDateInput(selectedReportDate) })] }), _jsxs("label", { className: "form-field sales-date-field", children: [_jsx("span", { children: "Fecha del reporte" }), _jsx("input", { type: "date", value: selectedReportDate, max: today, onChange: (event) => setSelectedReportDate(event.target.value) })] }), _jsxs("label", { className: "form-field sales-copy-field", children: [_jsx("span", { children: "Bitacora diaria" }), _jsx("textarea", { value: selectedDailyReport, placeholder: selectedProduct.defaultDailyReport, onChange: (event) => updateDailyReport(selectedProduct.id, selectedReportDate, event.target.value) })] }), _jsx("div", { className: "sales-report-list", children: selectedCompletedTasks.length === 0 ? (_jsx("p", { className: "centered-inline-message sales-empty-report", children: "No hay tareas realizadas registradas para este producto." })) : (selectedCompletedTasks.map((task) => (_jsxs("div", { className: "sales-report-entry", children: [_jsx("strong", { children: task.task }), _jsx("span", { children: task.channel }), _jsx("small", { children: formatDateInput(task.dueDate) })] }, task.id)))) })] })] })] }));
 }

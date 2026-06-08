@@ -251,7 +251,12 @@ function isSuperadmin(actor: GeneralExpenseActor) {
 }
 
 function isFinance(actor: GeneralExpenseActor) {
-  return actor.team === "FINANCE" || normalizeComparableText(actor.legacyTeam) === "finanzas";
+  return actor.team === "FINANCE" ||
+    actor.secondaryTeam === "FINANCE" ||
+    normalizeComparableText(actor.legacyTeam) === "finanzas" ||
+    normalizeComparableText(actor.secondaryLegacyTeam) === "finanzas" ||
+    normalizeComparableText(actor.specificRole) === "finanzas" ||
+    normalizeComparableText(actor.secondarySpecificRole) === "finanzas";
 }
 
 function isAraceliLozano(actor: GeneralExpenseActor) {
@@ -275,7 +280,11 @@ function isEduardoRusconi(actor: GeneralExpenseActor) {
 function canReviewJnls(actor: GeneralExpenseActor) {
   return !isSuperadmin(actor) && (
     actor.team === "AUDIT" ||
-    normalizeComparableText(actor.legacyTeam) === "auditoria"
+    actor.secondaryTeam === "AUDIT" ||
+    normalizeComparableText(actor.legacyTeam) === "auditoria" ||
+    normalizeComparableText(actor.secondaryLegacyTeam) === "auditoria" ||
+    normalizeComparableText(actor.specificRole) === "auditor" ||
+    normalizeComparableText(actor.secondarySpecificRole) === "auditor"
   );
 }
 

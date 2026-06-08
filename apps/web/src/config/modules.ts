@@ -20,7 +20,10 @@ export interface AppModuleAccessUser {
   shortName?: string;
   team?: string;
   legacyTeam?: string;
+  secondaryTeam?: string;
+  secondaryLegacyTeam?: string;
   specificRole?: string;
+  secondarySpecificRole?: string;
   permissions?: string[];
 }
 
@@ -355,15 +358,25 @@ export function canAccessExternalContracts(user?: AppModuleAccessUser | null) {
     return false;
   }
 
-  const normalizedTeam = normalizeIdentity(user.legacyTeam);
-  const normalizedRole = normalizeIdentity(user.specificRole);
+  const normalizedTeams = [
+    normalizeIdentity(user.legacyTeam),
+    normalizeIdentity(user.secondaryLegacyTeam)
+  ];
+  const normalizedRoles = [
+    normalizeIdentity(user.specificRole),
+    normalizeIdentity(user.secondarySpecificRole)
+  ];
   const hasAdministrativeAccess =
     user.role === "SUPERADMIN"
     || user.legacyRole === "SUPERADMIN"
-    || normalizedRole === "direccion general"
+    || normalizedRoles.includes("direccion general")
     || Boolean(user.permissions?.includes("*"));
 
-  return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+  return hasAdministrativeAccess
+    || user.team === "SETTLEMENTS"
+    || user.secondaryTeam === "SETTLEMENTS"
+    || normalizedTeams.includes("convenios")
+    || normalizedRoles.some((role) => role.includes("convenios"));
 }
 
 export function isAlwaysEnabledModule(moduleId: string) {

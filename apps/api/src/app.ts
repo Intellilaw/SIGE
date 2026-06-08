@@ -28,6 +28,7 @@ import { LeadsService } from "./modules/leads/leads.service";
 import { MattersService } from "./modules/matters/matters.service";
 import { ModuleSettingsService } from "./modules/module-settings/module-settings.service";
 import { QuotesService } from "./modules/quotes/quotes.service";
+import { SalesService } from "./modules/sales/sales.service";
 import { startTasksMaintenanceScheduler } from "./modules/tasks/tasks-maintenance.js";
 import { TasksService } from "./modules/tasks/tasks.service";
 import { UsersService } from "./modules/users/users.service";
@@ -51,6 +52,7 @@ import { quotesRoutes } from "./modules/quotes/quotes.routes";
 import { leadsRoutes } from "./modules/leads/leads.routes";
 import { mattersRoutes } from "./modules/matters/matters.routes";
 import { moduleSettingsRoutes } from "./modules/module-settings/module-settings.routes";
+import { salesRoutes } from "./modules/sales/sales.routes";
 import { tasksRoutes } from "./modules/tasks/tasks.routes";
 import { PrismaAuthRepository } from "./repositories/auth.repository";
 import { PrismaBudgetPlanningRepository } from "./repositories/budget-planning.repository";
@@ -89,6 +91,7 @@ import {
   ResilientQuotesRepository,
   ResilientTasksRepository
 } from "./repositories/resilient-business.repository";
+import { PrismaSalesRepository } from "./repositories/sales.repository";
 import { PrismaTasksRepository } from "./repositories/tasks.repository";
 import { PrismaUsersRepository } from "./repositories/users.repository";
 import type {
@@ -102,6 +105,7 @@ import type {
   LaborFilesRepository,
   MattersRepository,
   QuotesRepository,
+  SalesRepository,
   TasksRepository
 } from "./repositories/types";
 import { ACCESS_TOKEN_COOKIE_NAME } from "./core/auth/session-cookies";
@@ -131,6 +135,7 @@ declare module "fastify" {
       matters: MattersRepository;
       moduleSettings: PrismaModuleSettingsRepository;
       quotes: QuotesRepository;
+      sales: SalesRepository;
       tasks: TasksRepository;
       users: PrismaUsersRepository;
     };
@@ -153,6 +158,7 @@ declare module "fastify" {
       MattersService: typeof MattersService;
       ModuleSettingsService: typeof ModuleSettingsService;
       QuotesService: typeof QuotesService;
+      SalesService: typeof SalesService;
       TasksService: typeof TasksService;
       UsersService: typeof UsersService;
     };
@@ -252,6 +258,7 @@ export async function buildApp() {
       localBusinessStore ? new LocalQuotesRepository(localBusinessStore) : null,
       app.log
     ),
+    sales: new PrismaSalesRepository(prisma),
     tasks: new ResilientTasksRepository(
       new PrismaTasksRepository(prisma),
       localBusinessStore ? new LocalTasksRepository(localBusinessStore) : null,
@@ -278,6 +285,7 @@ export async function buildApp() {
     MattersService,
     ModuleSettingsService,
     QuotesService,
+    SalesService,
     TasksService,
     UsersService
   });
@@ -330,6 +338,7 @@ export async function buildApp() {
     await api.register(leadsRoutes);
     await api.register(mattersRoutes);
     await api.register(moduleSettingsRoutes);
+    await api.register(salesRoutes);
     await api.register(tasksRoutes);
   }, { prefix: "/api/v1" });
 

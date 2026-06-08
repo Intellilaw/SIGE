@@ -1,111 +1,45 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  LEGALFLOW_SALES_PRODUCTS,
+  type SalesDailyReport,
+  type SalesDailyReportStore,
+  type SalesOverview,
+  type SalesProduct,
+  type SalesProductId,
+  type SalesStrategy,
+  type SalesTask,
+  type SalesTaskPriority,
+  type SalesTaskStatus,
+  type SalesTimeframe
+} from "@sige/contracts";
 
 import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
 import minkaLogo from "../../assets/legalflow-minka-logo.png";
 import rematesLogo from "../../assets/legalflow-remates-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
+import { apiGet, apiPatch } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 
-type SalesProductId = "start" | "pld" | "remates" | "minka";
-type SalesTimeframe = "anteriores" | "hoy" | "manana" | "posteriores";
-type SalesTaskStatus = "pendiente" | "en_proceso" | "concluida";
-type SalesTaskPriority = "alta" | "media" | "normal";
-type SalesCompany = "LegalFlow";
-
-interface SalesProduct {
-  id: SalesProductId;
-  name: string;
-  tagline: string;
-  initials: string;
-  accentColor: string;
+type SalesProductView = SalesProduct & {
   logoSrc?: string;
-  logoAlt: string;
-  defaultStrategy: string;
-  defaultDailyReport: string;
-}
+};
 
-interface SalesResponsible {
-  id: string;
-  name: string;
-}
+const SALES_PRODUCT_LOGOS: Partial<Record<SalesProductId, string>> = {
+  start: startLogo,
+  pld: intellilawPldLogo,
+  remates: rematesLogo,
+  minka: minkaLogo
+};
 
-interface SalesTaskSeed {
-  id: string;
-  company: SalesCompany;
-  productId: SalesProductId;
-  responsibleId: string;
-  task: string;
-  channel: string;
-  periodicity: string;
-  priority: SalesTaskPriority;
-  firstDueDate: string;
-}
+const SALES_PRODUCTS: SalesProductView[] = LEGALFLOW_SALES_PRODUCTS.map((product) => ({
+  ...product,
+  logoSrc: SALES_PRODUCT_LOGOS[product.id]
+}));
 
-interface SalesTask extends Omit<SalesTaskSeed, "firstDueDate"> {
-  dueDate: string;
-  status: SalesTaskStatus;
-}
-
-type SalesDailyReportStore = Record<SalesProductId, Record<string, string>>;
-
-const SALES_PRODUCTS: SalesProduct[] = [
-  {
-    id: "start",
-    name: "Start",
-    tagline: "Producto de apertura para nuevos clientes de LegalFlow.",
-    initials: "ST",
-    accentColor: "#2563eb",
-    logoSrc: startLogo,
-    logoAlt: "Start by LegalFlow",
-    defaultStrategy:
-      "Delimitar el mensaje de entrada de Start: explicar el beneficio concreto, el tipo de cliente ideal, los canales prioritarios y la oferta inicial que debe convertirse en llamada comercial.",
-    defaultDailyReport:
-      "Registrar contactos realizados, piezas publicadas, respuestas recibidas, siguientes acciones y bloqueos detectados durante el dia."
-  },
-  {
-    id: "pld",
-    name: "Intellilaw PLD",
-    tagline: "Solucion para cumplimiento, prevencion y control operativo PLD.",
-    initials: "PLD",
-    accentColor: "#2563eb",
-    logoSrc: intellilawPldLogo,
-    logoAlt: "Intellilaw PLD by LegalFlow",
-    defaultStrategy:
-      "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion de Intellilaw PLD.",
-    defaultDailyReport:
-      "Registrar prospectos contactados, demostraciones agendadas, preguntas recurrentes, materiales enviados y acuerdos de seguimiento."
-  },
-  {
-    id: "remates",
-    name: "Remates",
-    tagline: "Oferta comercial enfocada en oportunidades inmobiliarias y seguimiento juridico.",
-    initials: "RM",
-    accentColor: "#1d4ed8",
-    logoSrc: rematesLogo,
-    logoAlt: "Remates Inmobiliarios Mexico by LegalFlow",
-    defaultStrategy:
-      "Delimitar inventario objetivo, perfil de inversionista, mensajes de oportunidad, reglas de calificacion de leads y cadencia de seguimiento.",
-    defaultDailyReport:
-      "Registrar propiedades revisadas, leads calificados, llamadas realizadas, dudas legales y proximas tareas comerciales."
-  },
-  {
-    id: "minka",
-    name: "Minka",
-    tagline: "Inteligencia contractual con IA para abogados y equipos legales.",
-    initials: "MK",
-    accentColor: "#6d28d9",
-    logoSrc: minkaLogo,
-    logoAlt: "Minka by LegalFlow",
-    defaultStrategy:
-      "Delimitar casos de uso contractuales, promesas de eficiencia, perfil de usuarios juridicos, mensajes de confianza y secuencia de demostracion para Minka.",
-    defaultDailyReport:
-      "Registrar despachos y equipos legales contactados, demos agendadas, contratos analizados, dudas sobre IA y siguientes acciones comerciales."
-  }
-];
-
-const SALES_RESPONSIBLES: SalesResponsible[] = [
-  { id: "IR", name: "Itari Romero" }
-];
+const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
+  lookup[product.id] = product;
+  return lookup;
+}, {} as Record<SalesProductId, SalesProductView>);
 
 const SALES_TIMEFRAMES: Array<{ id: SalesTimeframe; label: string; colorClass: string }> = [
   { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
@@ -114,50 +48,7 @@ const SALES_TIMEFRAMES: Array<{ id: SalesTimeframe; label: string; colorClass: s
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 
-const LEGALFLOW_SALES_START_DATE = "2026-06-08";
-const LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS = 20;
-
-const SALES_TASK_SEEDS: SalesTaskSeed[] = [
-  {
-    id: "legalflow-remates-reporte-diario",
-    company: "LegalFlow",
-    productId: "remates",
-    responsibleId: "IR",
-    task: "Publicar reporte diario de tareas realizadas de Remates by LegalFlow",
-    channel: "Reporte diario",
-    periodicity: "Cada dos dias habiles, alternando con Start by LegalFlow",
-    priority: "alta",
-    firstDueDate: LEGALFLOW_SALES_START_DATE
-  },
-  {
-    id: "legalflow-start-reporte-diario",
-    company: "LegalFlow",
-    productId: "start",
-    responsibleId: "IR",
-    task: "Publicar reporte diario de tareas realizadas de Start by LegalFlow",
-    channel: "Reporte diario",
-    periodicity: "Cada dos dias habiles, alternando con Remates by LegalFlow",
-    priority: "alta",
-    firstDueDate: addBusinessDays(LEGALFLOW_SALES_START_DATE, 1)
-  }
-];
-
-const DEFAULT_STRATEGIES = SALES_PRODUCTS.reduce((defaults, product) => {
-  defaults[product.id] = product.defaultStrategy;
-  return defaults;
-}, {} as Record<SalesProductId, string>);
-
-const DAILY_REPORT_STORAGE_KEY = "sige-sales-daily-reports";
-
-const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
-  lookup[product.id] = product;
-  return lookup;
-}, {} as Record<SalesProductId, SalesProduct>);
-
-const SALES_RESPONSIBLE_BY_ID = SALES_RESPONSIBLES.reduce((lookup, responsible) => {
-  lookup[responsible.id] = responsible;
-  return lookup;
-}, {} as Record<string, SalesResponsible>);
+const SAVE_DEBOUNCE_MS = 650;
 
 function getLocalDateInput(offset = 0) {
   const date = new Date();
@@ -186,140 +77,6 @@ function formatDateInput(value: string) {
     day: "2-digit",
     month: "short"
   }).format(date);
-}
-
-function isBusinessDay(date: Date) {
-  const day = date.getDay();
-  return day !== 0 && day !== 6;
-}
-
-function addBusinessDays(value: string, days: number) {
-  const date = parseDateInput(value);
-  let remainingDays = days;
-
-  while (remainingDays > 0) {
-    date.setDate(date.getDate() + 1);
-    if (isBusinessDay(date)) {
-      remainingDays -= 1;
-    }
-  }
-
-  return toDateInput(date);
-}
-
-function getSalesTaskHorizonEnd(todayInput: string) {
-  const anchorDate = todayInput > LEGALFLOW_SALES_START_DATE ? todayInput : LEGALFLOW_SALES_START_DATE;
-  return addBusinessDays(anchorDate, LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS);
-}
-
-function buildLegalFlowSalesTasks(todayInput = getLocalDateInput()) {
-  const tasks: SalesTask[] = [];
-  const endDate = getSalesTaskHorizonEnd(todayInput);
-  const cursor = parseDateInput(LEGALFLOW_SALES_START_DATE);
-  let businessDayIndex = 0;
-
-  while (toDateInput(cursor) <= endDate) {
-    if (isBusinessDay(cursor)) {
-      const dueDate = toDateInput(cursor);
-      const definition = SALES_TASK_SEEDS[businessDayIndex % SALES_TASK_SEEDS.length];
-
-      tasks.push({
-        ...definition,
-        id: `${definition.id}-${dueDate}`,
-        dueDate,
-        status: "pendiente"
-      });
-
-      businessDayIndex += 1;
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return tasks;
-}
-
-function readStoredTextMap(storageKey: string, defaults: Record<SalesProductId, string>) {
-  if (typeof window === "undefined") {
-    return defaults;
-  }
-
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}") as Partial<Record<SalesProductId, string>>;
-
-    return SALES_PRODUCTS.reduce((result, product) => {
-      result[product.id] = stored[product.id] ?? defaults[product.id];
-      return result;
-    }, {} as Record<SalesProductId, string>);
-  } catch {
-    return defaults;
-  }
-}
-
-function buildDefaultDailyReportStore(date = getLocalDateInput()) {
-  return SALES_PRODUCTS.reduce((defaults, product) => {
-    defaults[product.id] = {
-      [date]: product.defaultDailyReport
-    };
-    return defaults;
-  }, {} as SalesDailyReportStore);
-}
-
-function readStoredDailyReportStore(storageKey: string) {
-  const fallback = buildDefaultDailyReportStore();
-
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}") as Partial<
-      Record<SalesProductId, string | Record<string, string>>
-    >;
-
-    return SALES_PRODUCTS.reduce((result, product) => {
-      const storedProductReports = stored[product.id];
-
-      if (typeof storedProductReports === "string") {
-        result[product.id] = {
-          [getLocalDateInput()]: storedProductReports
-        };
-        return result;
-      }
-
-      result[product.id] = {
-        ...(fallback[product.id] ?? {}),
-        ...(storedProductReports ?? {})
-      };
-      return result;
-    }, {} as SalesDailyReportStore);
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStoredDailyReportStore(storageKey: string, value: SalesDailyReportStore) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(value));
-  } catch {
-    // Local persistence is a convenience layer; the screen remains usable if storage is blocked.
-  }
-}
-
-function writeStoredTextMap(storageKey: string, value: Record<SalesProductId, string>) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(value));
-  } catch {
-    // Local persistence is a convenience layer; the screen remains usable if storage is blocked.
-  }
 }
 
 function belongsToTimeframe(task: SalesTask, timeframe: SalesTimeframe) {
@@ -378,6 +135,45 @@ function canViewSalesSuperadminSummary(user?: {
   return Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN" || user?.permissions?.includes("*"));
 }
 
+function buildEmptyDailyReportStore() {
+  return SALES_PRODUCTS.reduce((store, product) => {
+    store[product.id] = {};
+    return store;
+  }, {} as SalesDailyReportStore);
+}
+
+function buildPendingStrategy(productId: SalesProductId, content: string): SalesStrategy {
+  return {
+    id: `pending-${productId}`,
+    productId,
+    content,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function applyStrategy(overview: SalesOverview, strategy: SalesStrategy): SalesOverview {
+  return {
+    ...overview,
+    strategies: {
+      ...overview.strategies,
+      [strategy.productId]: strategy
+    }
+  };
+}
+
+function applyDailyReport(overview: SalesOverview, report: SalesDailyReport): SalesOverview {
+  return {
+    ...overview,
+    dailyReports: {
+      ...overview.dailyReports,
+      [report.productId]: {
+        ...(overview.dailyReports[report.productId] ?? {}),
+        [report.reportDate]: report.content
+      }
+    }
+  };
+}
+
 export function SalesPage() {
   const { user } = useAuth();
   const [selectedProductId, setSelectedProductId] = useState<SalesProductId>("start");
@@ -386,51 +182,149 @@ export function SalesPage() {
     responsibleId: "IR",
     timeframe: "hoy"
   });
-  const [strategies, setStrategies] = useState(() => readStoredTextMap("sige-sales-strategies", DEFAULT_STRATEGIES));
-  const [dailyReports, setDailyReports] = useState(() => readStoredDailyReportStore(DAILY_REPORT_STORAGE_KEY));
+  const [overview, setOverview] = useState<SalesOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [savingMessage, setSavingMessage] = useState<string | null>(null);
+  const strategyTimers = useRef<Partial<Record<SalesProductId, number>>>({});
+  const reportTimers = useRef<Record<string, number>>({});
 
-  const salesTasks = useMemo<SalesTask[]>(
-    () => buildLegalFlowSalesTasks(),
-    []
-  );
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadOverview() {
+      setLoading(true);
+      setErrorMessage(null);
+
+      try {
+        const loaded = await apiGet<SalesOverview>("/sales/overview");
+        if (mounted) {
+          setOverview({
+            ...loaded,
+            dailyReports: {
+              ...buildEmptyDailyReportStore(),
+              ...loaded.dailyReports
+            }
+          });
+        }
+      } catch (error) {
+        if (mounted) {
+          setErrorMessage(error instanceof Error ? error.message : "No se pudo cargar ventas.");
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadOverview();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => () => {
+    Object.values(strategyTimers.current).forEach((timer) => {
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    });
+    Object.values(reportTimers.current).forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   const selectedProduct = SALES_PRODUCT_BY_ID[selectedProductId];
   const today = getLocalDateInput();
+  const salesTasks = overview?.tasks ?? [];
+  const salesResponsibles = overview?.responsibles ?? [];
+  const taskSeeds = overview?.taskSeeds ?? [];
+  const strategies = overview?.strategies ?? SALES_PRODUCTS.reduce((result, product) => {
+    result[product.id] = buildPendingStrategy(product.id, product.defaultStrategy);
+    return result;
+  }, {} as SalesOverview["strategies"]);
+  const dailyReports = overview?.dailyReports ?? buildEmptyDailyReportStore();
   const openTaskCount = salesTasks.filter((task) => task.status !== "concluida").length;
-  const salesPeriodicities = [...new Set(SALES_TASK_SEEDS.map((task) => task.periodicity))];
-  const dashboardProductCount = new Set(SALES_TASK_SEEDS.map((task) => task.productId)).size;
+  const salesPeriodicities = [...new Set(taskSeeds.map((task) => task.periodicity))];
+  const dashboardProductCount = new Set(taskSeeds.map((task) => task.productId)).size;
   const canViewSuperadminSummary = canViewSalesSuperadminSummary(user);
   const selectedProductTasks = salesTasks.filter((task) => task.productId === selectedProductId);
   const selectedCompletedTasks = selectedProductTasks.filter(
     (task) => task.status === "concluida" && task.dueDate === selectedReportDate
   );
   const selectedDailyReport = dailyReports[selectedProduct.id]?.[selectedReportDate] ?? "";
+  const selectedStrategy = strategies[selectedProduct.id]?.content ?? selectedProduct.defaultStrategy;
+
+  const responsibleById = useMemo(() => new Map(salesResponsibles.map((responsible) => [responsible.id, responsible])), [salesResponsibles]);
+
+  function updateOverviewWithStrategy(productId: SalesProductId, content: string) {
+    setOverview((current) => current ? applyStrategy(current, {
+      ...(current.strategies[productId] ?? buildPendingStrategy(productId, content)),
+      content
+    }) : current);
+  }
+
+  function updateOverviewWithDailyReport(productId: SalesProductId, date: string, content: string) {
+    setOverview((current) => current ? {
+      ...current,
+      dailyReports: {
+        ...current.dailyReports,
+        [productId]: {
+          ...(current.dailyReports[productId] ?? {}),
+          [date]: content
+        }
+      }
+    } : current);
+  }
+
+  async function persistStrategy(productId: SalesProductId, content: string) {
+    setSavingMessage("Guardando estrategia...");
+    try {
+      const saved = await apiPatch<SalesStrategy>(`/sales/strategies/${productId}`, { content });
+      setOverview((current) => current ? applyStrategy(current, saved) : current);
+      setSavingMessage(null);
+    } catch (error) {
+      setSavingMessage(null);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar la estrategia.");
+    }
+  }
+
+  async function persistDailyReport(productId: SalesProductId, date: string, content: string) {
+    setSavingMessage("Guardando reporte diario...");
+    try {
+      const saved = await apiPatch<SalesDailyReport>(`/sales/daily-reports/${productId}/${date}`, { content });
+      setOverview((current) => current ? applyDailyReport(current, saved) : current);
+      setSavingMessage(null);
+    } catch (error) {
+      setSavingMessage(null);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar el reporte diario.");
+    }
+  }
 
   function updateStrategy(productId: SalesProductId, value: string) {
-    setStrategies((current) => {
-      const next = { ...current, [productId]: value };
-      writeStoredTextMap("sige-sales-strategies", next);
-      return next;
-    });
+    updateOverviewWithStrategy(productId, value);
+    if (strategyTimers.current[productId]) {
+      window.clearTimeout(strategyTimers.current[productId]);
+    }
+    strategyTimers.current[productId] = window.setTimeout(() => {
+      void persistStrategy(productId, value);
+    }, SAVE_DEBOUNCE_MS);
   }
 
   function updateDailyReport(productId: SalesProductId, date: string, value: string) {
-    setDailyReports((current) => {
-      const next = {
-        ...current,
-        [productId]: {
-          ...(current[productId] ?? {}),
-          [date]: value
-        }
-      };
-      writeStoredDailyReportStore(DAILY_REPORT_STORAGE_KEY, next);
-      return next;
-    });
+    const key = `${productId}-${date}`;
+    updateOverviewWithDailyReport(productId, date, value);
+    if (reportTimers.current[key]) {
+      window.clearTimeout(reportTimers.current[key]);
+    }
+    reportTimers.current[key] = window.setTimeout(() => {
+      void persistDailyReport(productId, date, value);
+    }, SAVE_DEBOUNCE_MS);
   }
 
-  function buildRows(responsible: SalesResponsible, timeframe: SalesTimeframe) {
+  function buildRows(responsibleId: string, timeframe: SalesTimeframe) {
     return salesTasks
-      .filter((task) => task.responsibleId === responsible.id)
+      .filter((task) => task.responsibleId === responsibleId)
       .filter((task) => belongsToTimeframe(task, timeframe))
       .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
   }
@@ -451,16 +345,19 @@ export function SalesPage() {
         </p>
       </header>
 
+      {errorMessage ? <div className="message-banner message-error">{errorMessage}</div> : null}
+      {savingMessage ? <div className="message-banner message-success">{savingMessage}</div> : null}
+
       <section className="panel sales-dashboard-panel">
         <div className="panel-header">
           <h2>Dashboard comercial</h2>
-          <span>{openTaskCount} tareas abiertas</span>
+          <span>{loading ? "Cargando..." : `${openTaskCount} tareas abiertas`}</span>
         </div>
 
         <div className="tasks-team-member-list sales-dashboard-list">
-          {SALES_RESPONSIBLES.map((responsible) => {
+          {salesResponsibles.map((responsible) => {
             const isExpanded = expandedView?.responsibleId === responsible.id;
-            const rows = isExpanded && expandedView ? buildRows(responsible, expandedView.timeframe) : [];
+            const rows = isExpanded && expandedView ? buildRows(responsible.id, expandedView.timeframe) : [];
 
             return (
               <article key={responsible.id} className="tasks-team-member-card sales-responsible-card">
@@ -570,14 +467,10 @@ export function SalesPage() {
               <p className="eyebrow">Consulta superadmin</p>
               <h2>Tareas reflejadas en dashboard</h2>
             </div>
-            <span>{SALES_TASK_SEEDS.length} tareas configuradas</span>
+            <span>{taskSeeds.length} tareas configuradas</span>
           </div>
 
           <div className="sales-superadmin-metrics">
-            <div className="sales-superadmin-metric">
-              <span>Empresa</span>
-              <strong>LegalFlow</strong>
-            </div>
             <div className="sales-superadmin-metric">
               <span>Responsable</span>
               <strong>Itari Romero (IR)</strong>
@@ -607,9 +500,9 @@ export function SalesPage() {
                 </tr>
               </thead>
               <tbody>
-                {SALES_TASK_SEEDS.map((task) => {
+                {taskSeeds.map((task) => {
                   const product = SALES_PRODUCT_BY_ID[task.productId];
-                  const responsible = SALES_RESPONSIBLE_BY_ID[task.responsibleId];
+                  const responsible = responsibleById.get(task.responsibleId);
 
                   return (
                     <tr key={`summary-${task.id}`}>
@@ -696,7 +589,7 @@ export function SalesPage() {
           <label className="form-field sales-copy-field">
             <span>Estrategia general de marketing</span>
             <textarea
-              value={strategies[selectedProduct.id]}
+              value={selectedStrategy}
               onChange={(event) => updateStrategy(selectedProduct.id, event.target.value)}
             />
           </label>

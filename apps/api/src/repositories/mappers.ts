@@ -212,7 +212,10 @@ export function mapUser(record: {
   legacyRole: string;
   team: string | null;
   legacyTeam: string | null;
+  secondaryTeam: string | null;
+  secondaryLegacyTeam: string | null;
   specificRole: string | null;
+  secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
   isActive: boolean;
   passwordResetRequired: boolean;
@@ -233,12 +236,18 @@ export function mapUser(record: {
     legacyRole: record.legacyRole as AuthUser["legacyRole"],
     team: (record.team ?? undefined) as AuthUser["team"],
     legacyTeam: record.legacyTeam ?? undefined,
+    secondaryTeam: (record.secondaryTeam ?? undefined) as AuthUser["secondaryTeam"],
+    secondaryLegacyTeam: record.secondaryLegacyTeam ?? undefined,
     specificRole: record.specificRole ?? undefined,
+    secondarySpecificRole: record.secondarySpecificRole ?? undefined,
     permissions: deriveEffectivePermissions({
       legacyRole: record.legacyRole as AuthUser["legacyRole"],
       team: (record.team ?? undefined) as AuthUser["team"],
       legacyTeam: record.legacyTeam,
+      secondaryTeam: (record.secondaryTeam ?? undefined) as AuthUser["secondaryTeam"],
+      secondaryLegacyTeam: record.secondaryLegacyTeam,
       specificRole: record.specificRole,
+      secondarySpecificRole: record.secondarySpecificRole,
       permissions: Array.isArray(record.permissions)
         ? record.permissions.filter((permission): permission is string => typeof permission === "string")
         : []
@@ -258,7 +267,10 @@ export function mapStoredUser(record: {
   legacyRole: string;
   team: string | null;
   legacyTeam: string | null;
+  secondaryTeam: string | null;
+  secondaryLegacyTeam: string | null;
   specificRole: string | null;
+  secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
   isActive: boolean;
   passwordResetRequired: boolean;
@@ -280,8 +292,12 @@ export function mapManagedUser(record: {
   legacyRole: string;
   team: string | null;
   legacyTeam: string | null;
+  secondaryTeam: string | null;
+  secondaryLegacyTeam: string | null;
   specificRole: string | null;
+  secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
+  isExternal: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
   createdAt: Date;
@@ -291,6 +307,7 @@ export function mapManagedUser(record: {
 }): ManagedUser {
   return {
     ...mapUser(record),
+    isExternal: record.isExternal,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     lastLoginAt: record.lastLoginAt?.toISOString(),

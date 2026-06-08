@@ -18,7 +18,7 @@ const generatedPrismaClientPath = path.join(repoRoot, "node_modules", ".prisma",
 const execFileAsync = promisify(execFile);
 const SESSION_MANAGER_PLUGIN_BIN = "C:\\Program Files\\Amazon\\SessionManagerPlugin\\bin";
 const DEFAULT_RDS_TUNNEL_LOCAL_HOST = "127.0.0.1";
-const DEFAULT_RDS_TUNNEL_LOCAL_PORT = 15433;
+const DEFAULT_RDS_TUNNEL_LOCAL_PORT = 15432;
 const DEFAULT_RDS_TUNNEL_REMOTE_PORT = 5432;
 
 type RuntimeSecret = {

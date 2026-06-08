@@ -671,6 +671,7 @@ export function ExecutionTeamWorkspace({
   const [clientSearch, setClientSearch] = useState("");
   const [panelMatter, setPanelMatter] = useState<Matter | null>(null);
   const [panelMode, setPanelMode] = useState<"create" | "history" | null>(null);
+  const [generatingRiMatterIds, setGeneratingRiMatterIds] = useState<Set<string>>(() => new Set());
 
   const module = useMemo(
     () => findExecutionModuleDescriptorBySlug(taskModules, slug),
@@ -916,6 +917,24 @@ export function ExecutionTeamWorkspace({
         : null,
       notes: normalizeText(matter.notes) ? matter.notes ?? null : null
     });
+  }
+
+  async function handleGenerateRiInput(matterId: string) {
+    setGeneratingRiMatterIds((current) => new Set(current).add(matterId));
+    setErrorMessage(null);
+
+    try {
+      const updated = await apiPost<Matter>(`/matters/${matterId}/generate-ri-input`, {});
+      setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setGeneratingRiMatterIds((current) => {
+        const next = new Set(current);
+        next.delete(matterId);
+        return next;
+      });
+    }
   }
 
   async function handleToggleConcluded(matterId: string, concluded: boolean) {
@@ -1331,13 +1350,27 @@ export function ExecutionTeamWorkspace({
                             />
                           </td>
                           <td>
-                            <textarea
-                              className="lead-cell-input execution-textarea"
-                              value={matter.executionPrompt || ""}
-                              onChange={(event) => handleLocalChange(matter.id, "executionPrompt", event.target.value)}
-                              onBlur={() => handleBlur(matter.id)}
-                              placeholder="Prompt operativo..."
-                            />
+                            <div className="execution-ri-input-cell">
+                              <textarea
+                                className="lead-cell-input execution-textarea"
+                                value={matter.executionPrompt || ""}
+                                onChange={(event) => handleLocalChange(matter.id, "executionPrompt", event.target.value)}
+                                onBlur={() => handleBlur(matter.id)}
+                                placeholder="Prompt operativo..."
+                              />
+                              <button
+                                type="button"
+                                className="secondary-button execution-ri-generate-button"
+                                disabled={
+                                  generatingRiMatterIds.has(matter.id) ||
+                                  !normalizeText(matter.internalTelegramGroupId)
+                                }
+                                onClick={() => void handleGenerateRiInput(matter.id)}
+                                title="Generar Input de RI con RI-001"
+                              >
+                                {generatingRiMatterIds.has(matter.id) ? "Generando..." : "Generar RI"}
+                              </button>
+                            </div>
                           </td>
                           <td>
                             <input className="lead-cell-input matter-cell-readonly" value={matter.milestone || ""} readOnly />

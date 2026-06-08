@@ -55,7 +55,7 @@ function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function getTelegramGroupIdCandidates(groupId: string) {
+export function getTelegramGroupIdCandidates(groupId: string) {
   const normalized = normalizeOptionalText(groupId);
   if (!normalized) {
     return [];

@@ -52,7 +52,9 @@ async function requireHolidayWriteAccess(request: FastifyRequest) {
     user.role === "SUPERADMIN" ||
     user.legacyRole === "SUPERADMIN" ||
     user.team === "ADMIN_OPERATIONS" ||
-    normalizeComparableText(user.legacyTeam) === "servicios administrativos"
+    user.secondaryTeam === "ADMIN_OPERATIONS" ||
+    normalizeComparableText(user.legacyTeam) === "servicios administrativos" ||
+    normalizeComparableText(user.secondaryLegacyTeam) === "servicios administrativos"
   ) {
     return;
   }

@@ -1,6 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
 import {
+  buildLegalFlowSalesTasks,
   deriveEffectivePermissions,
+  LEGALFLOW_SALES_PRODUCTS,
+  LEGALFLOW_SALES_START_DATE,
   type KpiIncident,
   type KpiMetric,
   type KpiMetricStatus,
@@ -21,6 +24,7 @@ const PREVENTION_TABLE_ALIASES = ["desahogo-prevenciones", "desahogo_prevencione
 const TEAM_LABELS: Record<string, string> = {
   ADMIN: "Direccion general",
   CLIENT_RELATIONS: "Comunicacion con cliente",
+  SALES: "Ventas",
   FINANCE: "Finanzas",
   LITIGATION: "Litigio",
   CORPORATE_LABOR: "Corporativo y laboral",
@@ -39,6 +43,7 @@ const TEAM_ORDER = [
   "TAX_COMPLIANCE",
   "AUDIT",
   "CLIENT_RELATIONS",
+  "SALES",
   "FINANCE",
   "ADMIN_OPERATIONS",
   "ADMIN",
@@ -75,7 +80,10 @@ interface UserRecord {
   role: string;
   team: string | null;
   legacyTeam: string | null;
+  secondaryTeam: string | null;
+  secondaryLegacyTeam: string | null;
   specificRole: string | null;
+  secondarySpecificRole: string | null;
   isActive: boolean;
 }
 
@@ -146,6 +154,15 @@ interface GlobalVacationDayRecord {
   vacationDates: unknown;
 }
 
+interface SalesDailyReportRecord {
+  id: string;
+  productId: string;
+  reportDate: Date;
+  content: string;
+  submittedAt: Date | null;
+  updatedAt: Date;
+}
+
 interface PeriodContext {
   startKey: string;
   endKey: string;
@@ -184,6 +201,7 @@ interface KpiUserConfig {
     aliases: string[];
     trackingRecords: TrackingRecord[];
     terms: TermRecord[];
+    salesDailyReports: SalesDailyReportRecord[];
     period: PeriodContext;
   }) => KpiMetric[];
 }
@@ -452,7 +470,8 @@ function buildUserAliases(user: UserRecord, config: KpiUserConfig) {
     user.shortName ?? "",
     user.displayName,
     user.username,
-    user.specificRole ?? ""
+    user.specificRole ?? "",
+    user.secondarySpecificRole ?? ""
   ].map((value) => value.trim()).filter(Boolean)));
 }
 
@@ -461,16 +480,18 @@ function isExcludedFromKpis(user: UserRecord) {
   const username = normalizeText(user.username);
   const displayName = normalizeText(user.displayName);
   const specificRole = normalizeText(user.specificRole);
+  const secondarySpecificRole = normalizeText(user.secondarySpecificRole);
 
   return KPI_EXCLUDED_SHORT_NAMES.has(shortName)
     || KPI_EXCLUDED_USERNAME_KEYS.has(username)
     || KPI_EXCLUDED_DISPLAY_NAME_KEYS.has(displayName)
     || specificRole === "direccion general"
+    || secondarySpecificRole === "direccion general"
     || user.role === "SUPERADMIN";
 }
 
-function getTeamLabel(user: UserRecord, teamLabelByKey: Map<string, string>) {
-  return (user.team ? teamLabelByKey.get(user.team) ?? TEAM_LABELS[user.team] : undefined) ?? user.legacyTeam ?? "Sin equipo";
+function getTeamLabelFromAssignment(team: string | null | undefined, legacyTeam: string | null | undefined, teamLabelByKey: Map<string, string>) {
+  return (team ? teamLabelByKey.get(team) ?? TEAM_LABELS[team] : undefined) ?? legacyTeam ?? "Sin equipo";
 }
 
 function getTeamKeyFromLabel(label?: string | null, teamLabelByKey?: Map<string, string>) {
@@ -490,12 +511,46 @@ function getTeamKeyFromLabel(label?: string | null, teamLabelByKey?: Map<string,
   return matched?.[0] ?? normalized.toUpperCase().replace(/\s+/g, "_");
 }
 
-function getAccessTeamKey(accessScope: KpiAccessScope, teamLabelByKey: Map<string, string>) {
-  return accessScope.team ?? getTeamKeyFromLabel(accessScope.legacyTeam, teamLabelByKey);
-}
-
 function getUserTeamKey(user: KpiUserSummary, teamLabelByKey?: Map<string, string>) {
   return user.team ?? getTeamKeyFromLabel(user.teamLabel, teamLabelByKey) ?? "UNASSIGNED";
+}
+
+function getUserTeamAssignments(user: UserRecord, teamLabelByKey: Map<string, string>) {
+  const assignments = [
+    {
+      teamKey: user.team ?? getTeamKeyFromLabel(user.legacyTeam, teamLabelByKey) ?? "UNASSIGNED",
+      teamLabel: getTeamLabelFromAssignment(user.team, user.legacyTeam, teamLabelByKey),
+      specificRole: user.specificRole ?? undefined
+    },
+    {
+      teamKey: user.secondaryTeam ?? getTeamKeyFromLabel(user.secondaryLegacyTeam, teamLabelByKey),
+      teamLabel: user.secondaryTeam || user.secondaryLegacyTeam
+        ? getTeamLabelFromAssignment(user.secondaryTeam, user.secondaryLegacyTeam, teamLabelByKey)
+        : undefined,
+      specificRole: user.secondarySpecificRole ?? undefined
+    }
+  ];
+  const seen = new Set<string>();
+
+  return assignments.filter((assignment): assignment is {
+    teamKey: string;
+    teamLabel: string;
+    specificRole: string | undefined;
+  } => {
+    if (!assignment.teamKey || !assignment.teamLabel || seen.has(assignment.teamKey)) {
+      return false;
+    }
+
+    seen.add(assignment.teamKey);
+    return true;
+  });
+}
+
+function getAccessTeamKeys(accessScope: KpiAccessScope, teamLabelByKey: Map<string, string>) {
+  return Array.from(new Set([
+    accessScope.team ?? getTeamKeyFromLabel(accessScope.legacyTeam, teamLabelByKey),
+    accessScope.secondaryTeam ?? getTeamKeyFromLabel(accessScope.secondaryLegacyTeam, teamLabelByKey)
+  ].filter((teamKey): teamKey is string => Boolean(teamKey))));
 }
 
 function isGlobalKpiViewer(accessScope: KpiAccessScope) {
@@ -503,7 +558,10 @@ function isGlobalKpiViewer(accessScope: KpiAccessScope) {
     legacyRole: accessScope.legacyRole,
     team: accessScope.team,
     legacyTeam: accessScope.legacyTeam,
+    secondaryTeam: accessScope.secondaryTeam,
+    secondaryLegacyTeam: accessScope.secondaryLegacyTeam,
     specificRole: accessScope.specificRole,
+    secondarySpecificRole: accessScope.secondarySpecificRole,
     permissions: accessScope.permissions
   }).includes("*");
 }
@@ -893,6 +951,74 @@ function buildDeadlineMetric(input: {
   } satisfies KpiMetric;
 }
 
+function buildSalesDailyReportMetric(input: {
+  salesDailyReports: SalesDailyReportRecord[];
+  period: PeriodContext;
+}) {
+  const productById = new Map(LEGALFLOW_SALES_PRODUCTS.map((product) => [product.id, product]));
+  const expectedTasks = buildLegalFlowSalesTasks(input.period.cutoffKey)
+    .filter((task) => task.responsibleId === "IR")
+    .filter((task) => isDateInRange(task.dueDate, input.period.startKey, input.period.cutoffKey))
+    .filter((task) => task.dueDate >= LEGALFLOW_SALES_START_DATE);
+  const reportByProductAndDate = new Map(
+    input.salesDailyReports
+      .filter((report) => report.content.trim().length > 0)
+      .map((report) => [`${report.productId}:${toDateKey(report.reportDate)}`, report])
+  );
+  const submittedCount = expectedTasks.filter((task) => reportByProductAndDate.has(`${task.productId}:${task.dueDate}`)).length;
+  const target = expectedTasks.length;
+  const progressPct = target > 0 ? clampProgress((submittedCount / target) * 100) : 100;
+  const status: KpiMetricStatus = submittedCount >= target
+    ? "met"
+    : input.period.periodComplete
+      ? "missed"
+      : "warning";
+
+  const dailyBreakdown = expectedTasks.map((task) => {
+    const product = productById.get(task.productId);
+    const report = reportByProductAndDate.get(`${task.productId}:${task.dueDate}`);
+    const value = report ? 1 : 0;
+    const dayStatus: KpiMetricStatus = value >= 1
+      ? "met"
+      : task.dueDate === input.period.todayKey && !input.period.periodComplete
+        ? "warning"
+        : "missed";
+
+    return {
+      date: task.dueDate,
+      status: dayStatus,
+      value,
+      target: 1,
+      unit: "reportes",
+      actualLabel: report ? "1 reporte guardado" : "0 reportes guardados",
+      targetLabel: `1 reporte de actividad de ${product?.name ?? task.productId}`,
+      helper: report
+        ? `Reporte guardado en el modulo de Ventas para ${product?.name ?? task.productId}.`
+        : `No se encontro reporte guardado en Ventas para ${product?.name ?? task.productId}.`,
+      incidents: []
+    } satisfies KpiMetric["dailyBreakdown"][number];
+  });
+
+  return {
+    id: "ijrr-reporte-actividad-diario-ventas",
+    label: "Reporte diario de actividad en Ventas",
+    description: "Se debe enviar el reporte de actividad diario en el modulo de Ventas.",
+    kind: "production",
+    status,
+    value: submittedCount,
+    target,
+    unit: "reportes",
+    progressPct,
+    targetLabel: `${target} reportes esperados al corte`,
+    actualLabel: `${submittedCount} reportes guardados`,
+    helper: "Se verifica automaticamente la bitacora diaria guardada en RDS desde el modulo de Ventas.",
+    sourceDescription: "Modulo de Ventas: reportes diarios de actividad.",
+    sourceTables: ["sales_daily_reports"],
+    incidents: [],
+    dailyBreakdown
+  } satisfies KpiMetric;
+}
+
 const KPI_USER_CONFIGS: KpiUserConfig[] = [
   {
     key: "MEOO",
@@ -1037,6 +1163,16 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         sourceTables: ["desahogo_prevenciones"]
       })
     ]
+  },
+  {
+    key: "IJRR",
+    aliases: ["IJRR", "IR", "Itari Romero", "Itari Jhoana Romero Romero", "Ventas"],
+    buildMetrics: ({ salesDailyReports, period }) => [
+      buildSalesDailyReportMetric({
+        salesDailyReports,
+        period
+      })
+    ]
   }
 ];
 
@@ -1060,7 +1196,7 @@ export class PrismaKpisRepository implements KpisRepository {
     const todayKey = toDateKey(new Date());
     const cutoffKey = getCutoffKey(startKey, endKey, todayKey);
 
-    const [users, userTeams, trackingRecords, terms, holidays, vacationEvents, globalVacationDays] = await Promise.all([
+    const [users, userTeams, trackingRecords, terms, salesDailyReports, holidays, vacationEvents, globalVacationDays] = await Promise.all([
       this.prisma.user.findMany({
         where: { isActive: true },
         orderBy: [{ legacyTeam: "asc" }, { team: "asc" }, { displayName: "asc" }]
@@ -1084,6 +1220,15 @@ export class PrismaKpisRepository implements KpisRepository {
           deletedAt: null
         },
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
+      }),
+      this.prisma.salesDailyReport.findMany({
+        where: {
+          reportDate: {
+            gte: dateFromKey(startKey),
+            lte: dateFromKey(endKey)
+          }
+        },
+        orderBy: [{ reportDate: "asc" }, { productId: "asc" }]
       }),
       this.prisma.holiday.findMany({
         select: {
@@ -1161,9 +1306,8 @@ export class PrismaKpisRepository implements KpisRepository {
     };
 
     const userSummaries = (users as UserRecord[])
-      .filter((user) => !user.team || activeTeamKeys.has(user.team))
       .filter((user) => !isExcludedFromKpis(user))
-      .map<KpiUserSummary>((user) => {
+      .flatMap<KpiUserSummary>((user) => {
         const config = findConfigForUser(user);
         const aliases = config ? buildUserAliases(user, config) : [];
         const vacationKeys = new Set([
@@ -1177,21 +1321,24 @@ export class PrismaKpisRepository implements KpisRepository {
               aliases,
               trackingRecords: trackingRecords as TrackingRecord[],
               terms: terms as TermRecord[],
+              salesDailyReports: salesDailyReports as SalesDailyReportRecord[],
               period: userPeriod
             })
           : [];
 
-        return {
+        return getUserTeamAssignments(user, teamLabelByKey)
+          .filter((assignment) => assignment.teamKey === "UNASSIGNED" || activeTeamKeys.has(assignment.teamKey))
+          .map((assignment) => ({
           userId: user.id,
           username: user.username,
           displayName: user.displayName,
           shortName: user.shortName ?? undefined,
-          team: (user.team ?? undefined) as Team | undefined,
-          teamLabel: getTeamLabel(user, teamLabelByKey),
-          specificRole: user.specificRole ?? undefined,
+            team: assignment.teamKey === "UNASSIGNED" ? undefined : assignment.teamKey as Team,
+            teamLabel: assignment.teamLabel,
+            specificRole: assignment.specificRole,
           configured: Boolean(config),
           metrics
-        };
+          }));
       });
 
     const visibleTeams = this.filterTeamsByAccessScope(activeTeamCatalog, accessScope, teamLabelByKey);
@@ -1209,7 +1356,7 @@ export class PrismaKpisRepository implements KpisRepository {
       cutoffDate: cutoffKey,
       businessDaysInPeriod,
       businessDaysElapsed,
-      sourceNote: "Los KPI's se alimentan automaticamente desde usuarios, tablas de seguimiento, terminos, dias inhabiles y vacaciones registradas; no reciben captura manual.",
+      sourceNote: "Los KPI's se alimentan automaticamente desde usuarios, tablas de seguimiento, terminos, reportes de ventas en RDS, dias inhabiles y vacaciones registradas; no reciben captura manual.",
       teams: this.groupUsersByTeam(visibleUserSummaries, visibleTeams, teamLabelByKey)
     };
   }
@@ -1223,12 +1370,12 @@ export class PrismaKpisRepository implements KpisRepository {
       return teams;
     }
 
-    const teamKey = getAccessTeamKey(accessScope, teamLabelByKey);
-    if (!teamKey) {
+    const teamKeys = getAccessTeamKeys(accessScope, teamLabelByKey);
+    if (teamKeys.length === 0) {
       return [];
     }
 
-    return teams.filter((team) => team.key === teamKey);
+    return teams.filter((team) => teamKeys.includes(team.key));
   }
 
   private filterUsersByAccessScope(
@@ -1240,12 +1387,12 @@ export class PrismaKpisRepository implements KpisRepository {
       return users;
     }
 
-    const teamKey = getAccessTeamKey(accessScope, teamLabelByKey);
-    if (!teamKey) {
+    const teamKeys = getAccessTeamKeys(accessScope, teamLabelByKey);
+    if (teamKeys.length === 0) {
       return [];
     }
 
-    return users.filter((user) => getUserTeamKey(user, teamLabelByKey) === teamKey);
+    return users.filter((user) => teamKeys.includes(getUserTeamKey(user, teamLabelByKey)));
   }
 
   private groupUsersByTeam(

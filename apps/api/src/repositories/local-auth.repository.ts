@@ -329,12 +329,18 @@ export class LocalAuthRepository implements AuthRepository {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
       permissions: deriveEffectivePermissions({
         legacyRole: user.legacyRole,
         team: user.team,
         legacyTeam: user.legacyTeam,
+        secondaryTeam: user.secondaryTeam,
+        secondaryLegacyTeam: user.secondaryLegacyTeam,
         specificRole: user.specificRole,
+        secondarySpecificRole: user.secondarySpecificRole,
         permissions: user.permissions
       }),
       isActive: user.isActive,

@@ -3,7 +3,10 @@ export interface PermissionUser {
   legacyRole?: string;
   team?: string;
   legacyTeam?: string;
+  secondaryTeam?: string;
+  secondaryLegacyTeam?: string;
   specificRole?: string;
+  secondarySpecificRole?: string;
   permissions?: string[];
 }
 
@@ -100,15 +103,25 @@ function isSettlementsTeamUser(user: PermissionUser | null | undefined) {
     return false;
   }
 
-  const normalizedTeam = normalizeAccessText(user.legacyTeam);
-  const normalizedRole = normalizeAccessText(user.specificRole);
+  const normalizedTeams = [
+    normalizeAccessText(user.legacyTeam),
+    normalizeAccessText(user.secondaryLegacyTeam)
+  ];
+  const normalizedRoles = [
+    normalizeAccessText(user.specificRole),
+    normalizeAccessText(user.secondarySpecificRole)
+  ];
   const hasAdministrativeAccess =
     user.role === "SUPERADMIN"
     || user.legacyRole === "SUPERADMIN"
-    || normalizedRole === "direccion general"
+    || normalizedRoles.includes("direccion general")
     || Boolean(user.permissions?.includes("*"));
 
-  return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+  return hasAdministrativeAccess
+    || user.team === "SETTLEMENTS"
+    || user.secondaryTeam === "SETTLEMENTS"
+    || normalizedTeams.includes("convenios")
+    || normalizedRoles.some((role) => role.includes("convenios"));
 }
 
 export function canReadModule(user: PermissionUser | null | undefined, moduleId: string) {

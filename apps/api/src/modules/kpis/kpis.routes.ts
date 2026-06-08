@@ -20,11 +20,14 @@ export const kpisRoutes: FastifyPluginAsync = async (app) => {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
       permissions: user.permissions
     });
 
-    if (!permissions.includes("*") && !user.team && !user.legacyTeam) {
+    if (!permissions.includes("*") && !user.team && !user.legacyTeam && !user.secondaryTeam && !user.secondaryLegacyTeam) {
       throw new app.errors.AppError(403, "FORBIDDEN", "This user does not belong to a KPI team.");
     }
 
@@ -33,7 +36,10 @@ export const kpisRoutes: FastifyPluginAsync = async (app) => {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
       permissions
     });
   });

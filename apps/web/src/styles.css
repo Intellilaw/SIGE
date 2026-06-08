@@ -3769,6 +3769,19 @@ textarea {
   font-family: inherit;
 }
 
+.execution-ri-input-cell {
+  display: grid;
+  gap: 8px;
+  min-width: 260px;
+}
+
+.execution-ri-generate-button {
+  width: 100%;
+  min-height: 34px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
 .execution-authority-select {
   min-width: 180px;
   font-weight: 800;

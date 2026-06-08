@@ -80,13 +80,23 @@ function isSettlementsTeamUser(user) {
     if (!user) {
         return false;
     }
-    const normalizedTeam = normalizeAccessText(user.legacyTeam);
-    const normalizedRole = normalizeAccessText(user.specificRole);
+    const normalizedTeams = [
+        normalizeAccessText(user.legacyTeam),
+        normalizeAccessText(user.secondaryLegacyTeam)
+    ];
+    const normalizedRoles = [
+        normalizeAccessText(user.specificRole),
+        normalizeAccessText(user.secondarySpecificRole)
+    ];
     const hasAdministrativeAccess = user.role === "SUPERADMIN"
         || user.legacyRole === "SUPERADMIN"
-        || normalizedRole === "direccion general"
+        || normalizedRoles.includes("direccion general")
         || Boolean(user.permissions?.includes("*"));
-    return hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+    return hasAdministrativeAccess
+        || user.team === "SETTLEMENTS"
+        || user.secondaryTeam === "SETTLEMENTS"
+        || normalizedTeams.includes("convenios")
+        || normalizedRoles.some((role) => role.includes("convenios"));
 }
 export function canReadModule(user, moduleId) {
     const rule = MODULE_ACCESS[moduleId];

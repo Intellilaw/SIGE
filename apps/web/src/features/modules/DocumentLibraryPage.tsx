@@ -35,8 +35,7 @@ const KIND_LABELS: Record<DocumentKind, string> = {
 };
 
 const VIRGIN_LIBRARY_ORGANIZATION_SLUGS = new Set<string>([
-  ORGANIZATION_SLUGS.INTELLILAW,
-  ORGANIZATION_SLUGS.LEGALFLOW
+  ORGANIZATION_SLUGS.INTELLILAW
 ]);
 
 function shouldShowVirginLibrary(organizationSlug?: string) {

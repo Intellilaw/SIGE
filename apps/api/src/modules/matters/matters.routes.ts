@@ -1,8 +1,16 @@
-import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { EXECUTION_HOLIDAY_AUTHORITIES, deriveEffectivePermissions } from "@sige/contracts";
+import {
+  EXECUTION_HOLIDAY_AUTHORITIES,
+  deriveEffectivePermissions,
+  type Matter,
+  type TaskItem,
+  type TaskTerm,
+  type TaskTrackingRecord
+} from "@sige/contracts";
 
 import { getSessionUser, requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
+import { generateMatterRiInput, type RiMatterTaskContext } from "./matter-ri-input-generator";
 import { enrichMatterTelegramGroupName } from "./telegram-group-name-resolver";
 
 const teamSchema = z.enum([
@@ -75,6 +83,13 @@ const executionPermissionByTeam = {
 
 type ExecutionTeam = keyof typeof executionPermissionByTeam;
 const EXECUTION_ALL_PERMISSION = "execution:all";
+const executionModuleByTeam: Partial<Record<ExecutionTeam, string>> = {
+  LITIGATION: "litigation",
+  CORPORATE_LABOR: "corporate-labor",
+  SETTLEMENTS: "settlements",
+  FINANCIAL_LAW: "financial-law",
+  TAX_COMPLIANCE: "tax-compliance"
+};
 
 function isFinanceNextPaymentDatePatch(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -128,7 +143,10 @@ function getEffectivePermissionsForRequest(request: FastifyRequest) {
     legacyRole: user.legacyRole,
     team: user.team,
     legacyTeam: user.legacyTeam,
+    secondaryTeam: user.secondaryTeam,
+    secondaryLegacyTeam: user.secondaryLegacyTeam,
     specificRole: user.specificRole,
+    secondarySpecificRole: user.secondarySpecificRole,
     permissions: user.permissions
   });
 }
@@ -139,14 +157,93 @@ function getExecutionReadableTeams(request: FastifyRequest, permissions: string[
   }
 
   const user = getSessionUser(request);
-  const team = user.team as ExecutionTeam | undefined;
-  const permission = team ? executionPermissionByTeam[team] : undefined;
+  const teams = [user.team, user.secondaryTeam]
+    .filter((team): team is ExecutionTeam => isExecutionTeam(team));
+  const readableTeams = teams.filter((team) => {
+    const permission = executionPermissionByTeam[team];
+    return Boolean(permission && permissions.includes(permission));
+  });
 
-  return permission && permissions.includes(permission) ? [team] : [];
+  return Array.from(new Set(readableTeams));
 }
 
 function canReadAllMatters(permissions: string[]) {
   return permissions.includes("*") || permissions.includes("matters:read") || permissions.includes("matters:write");
+}
+
+function buildMatterMatchKeys(matter: Matter) {
+  return new Set([
+    matter.id,
+    matter.matterNumber,
+    matter.matterIdentifier
+  ].map((value) => (value ?? "").trim()).filter(Boolean));
+}
+
+function matchesMatter(keys: Set<string>, ...values: Array<string | null | undefined>) {
+  return values.some((value) => {
+    const normalized = (value ?? "").trim();
+    return normalized.length > 0 && keys.has(normalized);
+  });
+}
+
+function taskItemToRiTask(task: TaskItem): RiMatterTaskContext {
+  return {
+    source: `Tareas activas / ${task.moduleId}`,
+    subject: task.subject,
+    responsible: task.responsible,
+    dueDate: task.dueDate,
+    status: task.state
+  };
+}
+
+function trackingRecordToRiTask(task: TaskTrackingRecord): RiMatterTaskContext {
+  return {
+    source: `Seguimiento / ${task.sourceTable || task.tableCode}`,
+    subject: task.subject || task.taskName,
+    responsible: task.responsible,
+    dueDate: task.dueDate ?? task.termDate,
+    status: task.status
+  };
+}
+
+function termToRiTask(task: TaskTerm): RiMatterTaskContext {
+  return {
+    source: `Terminos / ${task.sourceTable || task.moduleId}`,
+    subject: task.pendingTaskLabel || task.eventName || task.subject,
+    responsible: task.responsible,
+    dueDate: task.dueDate ?? task.termDate,
+    status: task.status
+  };
+}
+
+async function listRiTaskContext(app: FastifyInstance, matter: Matter) {
+  const moduleId = matter.executionLinkedModule ??
+    (isExecutionTeam(matter.responsibleTeam) ? executionModuleByTeam[matter.responsibleTeam] : undefined);
+  if (!moduleId) {
+    return [];
+  }
+
+  const keys = buildMatterMatchKeys(matter);
+  const [taskItems, trackingRecords, terms] = await Promise.all([
+    app.repositories.tasks.listTasks(moduleId),
+    app.repositories.tasks.listTrackingRecords({ moduleId }),
+    app.repositories.tasks.listTerms(moduleId)
+  ]);
+
+  return [
+    ...taskItems
+      .filter((task) => task.state !== "COMPLETED")
+      .filter((task) => matchesMatter(keys, task.matterId, task.matterNumber))
+      .map(taskItemToRiTask),
+    ...trackingRecords
+      .filter((task) => task.status === "pendiente" && !task.deletedAt)
+      .filter((task) => matchesMatter(keys, task.matterId, task.matterNumber, task.matterIdentifier))
+      .map(trackingRecordToRiTask),
+    ...terms
+      .filter((task) => task.status === "pendiente" && !task.deletedAt)
+      .filter((task) => matchesMatter(keys, task.matterId, task.matterNumber, task.matterIdentifier))
+      .map(termToRiTask)
+  ].slice(0, 20);
 }
 
 export const mattersRoutes: FastifyPluginAsync = async (app) => {
@@ -219,6 +316,35 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
       logger: app.log
     });
     return service.update(params.matterId, payload);
+  });
+
+  app.post("/matters/:matterId/generate-ri-input", { preHandler: [requireAuth] }, async (request) => {
+    const params = matterIdParamsSchema.parse(request.params);
+    const permissions = getEffectivePermissionsForRequest(request);
+    const matterRecords = await service.list();
+    const currentMatter = matterRecords.find((matter) => matter.id === params.matterId);
+
+    if (!currentMatter) {
+      throw new app.errors.AppError(404, "MATTER_NOT_FOUND", "The requested matter does not exist.");
+    }
+
+    const canWriteMatters = permissions.includes("*") || permissions.includes("matters:write");
+    const canUpdateExecutionMatter = canAccessExecutionMatter({
+      permissions,
+      responsibleTeam: currentMatter.responsibleTeam
+    });
+
+    if (!canWriteMatters && !canUpdateExecutionMatter) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+
+    const tasks = await listRiTaskContext(app, currentMatter);
+    const executionPrompt = await generateMatterRiInput({
+      matter: currentMatter,
+      tasks
+    });
+
+    return service.update(params.matterId, { executionPrompt });
   });
 
   app.post("/matters/bulk-trash", { preHandler: writeGuards }, async (request, reply) => {

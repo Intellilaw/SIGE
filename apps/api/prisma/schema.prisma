@@ -44,6 +44,8 @@ model Organization {
   taskDistributionEvents           TaskDistributionEvent[]
   taskDistributionHistories        TaskDistributionHistory[]
   taskAdditionalTasks              TaskAdditionalTask[]
+  salesStrategies                  SalesStrategy[]
+  salesDailyReports                SalesDailyReport[]
   holidays                         Holiday[]
   laborFiles                       LaborFile[]
   laborFileDocuments               LaborFileDocument[]
@@ -67,8 +69,12 @@ model User {
   legacyRole            String
   team                  String?
   legacyTeam            String?
+  secondaryTeam         String?
+  secondaryLegacyTeam   String?
   specificRole          String?
+  secondarySpecificRole String?
   permissions           Json                 @default("[]")
+  isExternal            Boolean              @default(false)
   isActive              Boolean              @default(true)
   passwordResetRequired Boolean              @default(false)
   lastLoginAt           DateTime?
@@ -1003,6 +1009,39 @@ model TaskAdditionalTask {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, moduleId, status, dueDate])
+}
+
+model SalesStrategy {
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
+  productId       String
+  content         String       @db.Text
+  updatedByUserId String?
+  updatedByName   String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, productId])
+  @@index([organizationId, productId])
+}
+
+model SalesDailyReport {
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
+  productId       String
+  reportDate      DateTime     @db.Date
+  content         String       @db.Text
+  submittedAt     DateTime?
+  updatedByUserId String?
+  updatedByName   String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, productId, reportDate])
+  @@index([organizationId, reportDate])
+  @@index([organizationId, productId, reportDate])
 }
 
 model Holiday {

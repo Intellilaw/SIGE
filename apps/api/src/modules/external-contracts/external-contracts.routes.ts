@@ -131,15 +131,25 @@ function normalizeAccessText(value?: string | null) {
 
 async function requireSettlementsTeam(request: FastifyRequest) {
   const user = getSessionUser(request);
-  const normalizedTeam = normalizeAccessText(user.legacyTeam);
-  const normalizedRole = normalizeAccessText(user.specificRole);
+  const normalizedTeams = [
+    normalizeAccessText(user.legacyTeam),
+    normalizeAccessText(user.secondaryLegacyTeam)
+  ];
+  const normalizedRoles = [
+    normalizeAccessText(user.specificRole),
+    normalizeAccessText(user.secondarySpecificRole)
+  ];
   const hasAdministrativeAccess =
     user.role === "SUPERADMIN"
     || user.legacyRole === "SUPERADMIN"
-    || normalizedRole === "direccion general"
+    || normalizedRoles.includes("direccion general")
     || user.permissions.includes("*");
   const isSettlementsTeam =
-    hasAdministrativeAccess || user.team === "SETTLEMENTS" || normalizedTeam === "convenios" || normalizedRole.includes("convenios");
+    hasAdministrativeAccess ||
+    user.team === "SETTLEMENTS" ||
+    user.secondaryTeam === "SETTLEMENTS" ||
+    normalizedTeams.includes("convenios") ||
+    normalizedRoles.some((role) => role.includes("convenios"));
 
   if (!isSettlementsTeam) {
     throw new AppError(403, "EXTERNAL_CONTRACTS_SETTLEMENTS_ONLY", "Solo el equipo de Convenios puede acceder a contratos externos.");

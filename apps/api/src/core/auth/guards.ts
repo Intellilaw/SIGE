@@ -34,7 +34,8 @@ export function requireTeams(allowedTeams: Team[]) {
       return;
     }
 
-    if (!user.team || !allowedTeams.includes(user.team)) {
+    const userTeams = [user.team, user.secondaryTeam].filter((team): team is Team => Boolean(team));
+    if (!userTeams.some((team) => allowedTeams.includes(team))) {
       throw new AppError(403, "FORBIDDEN", "This team cannot access the requested module.");
     }
   };
@@ -47,7 +48,10 @@ export function requireAnyPermissions(allowedPermissions: string[]) {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
       permissions: user.permissions
     });
 

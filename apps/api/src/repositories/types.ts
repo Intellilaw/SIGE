@@ -46,6 +46,10 @@ import type {
   ProfessionalServicesContractFieldValues,
   Quote,
   QuoteTemplate,
+  SalesDailyReport,
+  SalesOverview,
+  SalesProductId,
+  SalesStrategy,
   SystemModuleSetting,
   TaskAdditionalTask,
   TaskDistributionEvent,
@@ -92,13 +96,18 @@ export interface CreateManagedUserRecord {
   legacyRole: AuthUser["legacyRole"];
   team?: AuthUser["team"] | null;
   legacyTeam?: string;
+  secondaryTeam?: AuthUser["secondaryTeam"] | null;
+  secondaryLegacyTeam?: string;
   specificRole?: string;
+  secondarySpecificRole?: string;
   permissions: string[];
+  isExternal?: boolean;
   passwordHash: string;
 }
 
 export interface UpdateManagedUserRecord {
   username?: string;
+  email?: string;
   displayName?: string;
   passwordHash?: string;
   shortName?: string | null;
@@ -106,8 +115,12 @@ export interface UpdateManagedUserRecord {
   legacyRole?: AuthUser["legacyRole"];
   team?: AuthUser["team"] | null;
   legacyTeam?: string | null;
+  secondaryTeam?: AuthUser["secondaryTeam"] | null;
+  secondaryLegacyTeam?: string | null;
   specificRole?: string | null;
+  secondarySpecificRole?: string | null;
   permissions?: string[];
+  isExternal?: boolean;
   isActive?: boolean;
   passwordResetRequired?: boolean;
   emailConfirmedAt?: string | null;
@@ -618,7 +631,7 @@ export interface GeneralExpensePayrollUpdateRecord {
 
 export interface GeneralExpenseActor extends Pick<
   AuthUser,
-  "email" | "username" | "displayName" | "shortName" | "role" | "legacyRole" | "team" | "legacyTeam" | "specificRole" | "permissions"
+  "email" | "username" | "displayName" | "shortName" | "role" | "legacyRole" | "team" | "legacyTeam" | "secondaryTeam" | "secondaryLegacyTeam" | "specificRole" | "secondarySpecificRole" | "permissions"
 > {}
 
 export interface GeneralExpensesRepository {
@@ -771,12 +784,29 @@ export interface CommissionsRepository {
 
 export interface KpiAccessScope extends Pick<
   AuthUser,
-  "role" | "legacyRole" | "team" | "legacyTeam" | "specificRole" | "permissions"
+  "role" | "legacyRole" | "team" | "legacyTeam" | "secondaryTeam" | "secondaryLegacyTeam" | "specificRole" | "secondarySpecificRole" | "permissions"
 > {}
 
 export interface KpisRepository {
   getOverview(year: number, month: number, accessScope: KpiAccessScope): Promise<KpiOverview>;
   getPeriodOverview(startDate: string, endDate: string, accessScope: KpiAccessScope): Promise<KpiOverview>;
+}
+
+export interface SalesWriteActor {
+  userId?: string;
+  displayName?: string;
+}
+
+export interface SalesRepository {
+  getOverview(): Promise<SalesOverview>;
+  listDailyReports(startDate: string, endDate: string): Promise<SalesDailyReport[]>;
+  upsertStrategy(productId: SalesProductId, content: string, actor: SalesWriteActor): Promise<SalesStrategy>;
+  upsertDailyReport(
+    productId: SalesProductId,
+    reportDate: string,
+    content: string,
+    actor: SalesWriteActor
+  ): Promise<SalesDailyReport>;
 }
 
 export interface TasksRepository {

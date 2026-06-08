@@ -23,7 +23,10 @@ interface SessionUser {
   legacyRole: string;
   team?: string;
   legacyTeam?: string;
+  secondaryTeam?: string;
+  secondaryLegacyTeam?: string;
   specificRole?: string;
+  secondarySpecificRole?: string;
   shortName?: string;
   permissions: string[];
   isActive: boolean;

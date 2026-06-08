@@ -119,8 +119,12 @@ export class PrismaUsersRepository implements UsersRepository {
           legacyRole: payload.legacyRole,
           team: payload.team ?? null,
           legacyTeam: payload.legacyTeam ?? null,
+          secondaryTeam: payload.secondaryTeam ?? null,
+          secondaryLegacyTeam: payload.secondaryLegacyTeam ?? null,
           specificRole: payload.specificRole ?? null,
+          secondarySpecificRole: payload.secondarySpecificRole ?? null,
           permissions: payload.permissions,
+          isExternal: payload.isExternal ?? false,
           passwordHash: payload.passwordHash,
           isActive: true,
           passwordResetRequired: false,
@@ -144,6 +148,7 @@ export class PrismaUsersRepository implements UsersRepository {
         where: { id: userId },
         data: {
           username: payload.username,
+          email: payload.email,
           displayName: payload.displayName,
           passwordHash: payload.passwordHash,
           shortName: payload.shortName === undefined ? undefined : payload.shortName,
@@ -151,8 +156,12 @@ export class PrismaUsersRepository implements UsersRepository {
           legacyRole: payload.legacyRole,
           team: payload.team === undefined ? undefined : payload.team,
           legacyTeam: payload.legacyTeam === undefined ? undefined : payload.legacyTeam,
+          secondaryTeam: payload.secondaryTeam === undefined ? undefined : payload.secondaryTeam,
+          secondaryLegacyTeam: payload.secondaryLegacyTeam === undefined ? undefined : payload.secondaryLegacyTeam,
           specificRole: payload.specificRole === undefined ? undefined : payload.specificRole,
+          secondarySpecificRole: payload.secondarySpecificRole === undefined ? undefined : payload.secondarySpecificRole,
           permissions: payload.permissions,
+          isExternal: payload.isExternal,
           isActive: payload.isActive,
           passwordResetRequired: payload.passwordResetRequired,
           emailConfirmedAt: payload.emailConfirmedAt === undefined
@@ -225,19 +234,33 @@ export class PrismaUsersRepository implements UsersRepository {
       this.prisma.user.findMany({
         where: {
           isActive: true,
-          team: {
-            not: null
-          }
+          OR: [
+            { team: { not: null } },
+            { secondaryTeam: { not: null } }
+          ]
         },
         select: {
+          id: true,
+          secondaryTeam: true,
           team: true
         }
       })
     ]);
     const countByTeam = new Map<string, number>();
+    const countedMemberships = new Set<string>();
     for (const activeUser of activeUsers) {
-      if (activeUser.team) {
-        countByTeam.set(activeUser.team, (countByTeam.get(activeUser.team) ?? 0) + 1);
+      for (const team of [activeUser.team, activeUser.secondaryTeam]) {
+        if (!team) {
+          continue;
+        }
+
+        const membershipKey = `${activeUser.id}:${team}`;
+        if (countedMemberships.has(membershipKey)) {
+          continue;
+        }
+
+        countedMemberships.add(membershipKey);
+        countByTeam.set(team, (countByTeam.get(team) ?? 0) + 1);
       }
     }
 
@@ -323,6 +346,10 @@ export class PrismaUsersRepository implements UsersRepository {
           where: { team: currentTeam.key },
           data: { legacyTeam: nextLabel }
         });
+        await tx.user.updateMany({
+          where: { secondaryTeam: currentTeam.key },
+          data: { secondaryLegacyTeam: nextLabel }
+        });
         await tx.laborFile.updateMany({
           where: { team: currentTeam.key },
           data: { legacyTeam: nextLabel }
@@ -339,7 +366,10 @@ export class PrismaUsersRepository implements UsersRepository {
     const memberCount = await this.prisma.user.count({
       where: {
         isActive: true,
-        team: record.key
+        OR: [
+          { team: record.key },
+          { secondaryTeam: record.key }
+        ]
       }
     });
 

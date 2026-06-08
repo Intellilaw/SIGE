@@ -10,8 +10,7 @@ const KIND_LABELS = {
     file: "Archivo"
 };
 const VIRGIN_LIBRARY_ORGANIZATION_SLUGS = new Set([
-    ORGANIZATION_SLUGS.INTELLILAW,
-    ORGANIZATION_SLUGS.LEGALFLOW
+    ORGANIZATION_SLUGS.INTELLILAW
 ]);
 function shouldShowVirginLibrary(organizationSlug) {
     return Boolean(organizationSlug && VIRGIN_LIBRARY_ORGANIZATION_SLUGS.has(organizationSlug));

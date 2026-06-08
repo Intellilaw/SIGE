@@ -119,9 +119,10 @@ export class PrismaTasksRepository implements TasksRepository {
       this.prisma.user.findMany({
         where: {
           isActive: true,
-          team: {
-            not: null
-          }
+          OR: [
+            { team: { not: null } },
+            { secondaryTeam: { not: null } }
+          ]
         },
         select: {
           id: true,
@@ -129,7 +130,9 @@ export class PrismaTasksRepository implements TasksRepository {
           displayName: true,
           shortName: true,
           team: true,
-          specificRole: true
+          secondaryTeam: true,
+          specificRole: true,
+          secondarySpecificRole: true
         }
       })
     ]);
@@ -140,26 +143,35 @@ export class PrismaTasksRepository implements TasksRepository {
 
     const membersByTeam = new Map<string, TaskModuleMember[]>();
     for (const user of activeUsers) {
-      if (!user.team) {
-        continue;
-      }
-
       const aliases = Array.from(new Set([
         user.shortName ?? "",
         user.displayName,
         user.username,
-        user.specificRole ?? ""
+        user.specificRole ?? "",
+        user.secondarySpecificRole ?? ""
       ].map((alias) => alias.trim()).filter(Boolean)));
-      const member: TaskModuleMember = {
-        id: user.shortName?.trim() || user.username || user.id,
-        userId: user.id,
-        name: user.displayName,
-        aliases,
-        shortName: user.shortName ?? undefined,
-        specificRole: user.specificRole ?? undefined
-      };
+      const teamAssignments = [
+        { team: user.team, specificRole: user.specificRole },
+        { team: user.secondaryTeam, specificRole: user.secondarySpecificRole }
+      ];
+      const addedTeams = new Set<string>();
+      for (const assignment of teamAssignments) {
+        if (!assignment.team || addedTeams.has(assignment.team)) {
+          continue;
+        }
 
-      membersByTeam.set(user.team, [...(membersByTeam.get(user.team) ?? []), member]);
+        addedTeams.add(assignment.team);
+        const member: TaskModuleMember = {
+          id: user.shortName?.trim() || user.username || user.id,
+          userId: user.id,
+          name: user.displayName,
+          aliases,
+          shortName: user.shortName ?? undefined,
+          specificRole: assignment.specificRole ?? undefined
+        };
+
+        membersByTeam.set(assignment.team, [...(membersByTeam.get(assignment.team) ?? []), member]);
+      }
     }
 
     for (const members of membersByTeam.values()) {

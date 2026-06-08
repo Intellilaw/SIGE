@@ -9,21 +9,29 @@ const teamSchema = z.string().min(1);
 const createUserSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(10).max(128),
+  email: z.string().email().optional(),
   displayName: z.string().min(1).optional(),
   shortName: z.string().max(10).optional(),
   legacyRole: z.enum(["SUPERADMIN", "INTRANET", "PUBLIC"]).optional(),
   legacyTeam: z.string().optional(),
-  specificRole: z.string().optional()
+  secondaryLegacyTeam: z.string().optional(),
+  specificRole: z.string().optional(),
+  secondarySpecificRole: z.string().optional(),
+  isExternal: z.boolean().optional()
 });
 
 const updateUserSchema = z.object({
   username: z.string().min(1).optional(),
+  email: z.string().email().optional(),
   displayName: z.string().min(1).optional(),
   password: z.string().min(10).max(128).optional(),
   shortName: z.string().max(10).nullable().optional(),
   legacyRole: z.enum(["SUPERADMIN", "INTRANET", "PUBLIC"]).optional(),
   legacyTeam: z.string().nullable().optional(),
+  secondaryLegacyTeam: z.string().nullable().optional(),
   specificRole: z.string().nullable().optional(),
+  secondarySpecificRole: z.string().nullable().optional(),
+  isExternal: z.boolean().optional(),
   isActive: z.boolean().optional()
 });
 

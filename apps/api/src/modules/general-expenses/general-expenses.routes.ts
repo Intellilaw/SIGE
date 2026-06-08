@@ -93,7 +93,12 @@ function normalizeComparableText(value?: string | null) {
 }
 
 function isFinanceUser(user: ReturnType<typeof getSessionUser>) {
-  return user.team === "FINANCE" || normalizeComparableText(user.legacyTeam) === "finanzas";
+  return user.team === "FINANCE" ||
+    user.secondaryTeam === "FINANCE" ||
+    normalizeComparableText(user.legacyTeam) === "finanzas" ||
+    normalizeComparableText(user.secondaryLegacyTeam) === "finanzas" ||
+    normalizeComparableText(user.specificRole) === "finanzas" ||
+    normalizeComparableText(user.secondarySpecificRole) === "finanzas";
 }
 
 function isAraceliLozano(user: ReturnType<typeof getSessionUser>) {
@@ -118,7 +123,10 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
       permissions: user.permissions
     });
     const isStampOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "payrollStampedByAraceli");
@@ -154,7 +162,11 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
       legacyRole: user.legacyRole,
       team: user.team,
       legacyTeam: user.legacyTeam,
-      specificRole: user.specificRole
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
+      specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
+      permissions: user.permissions
     });
 
     if (isJnlsApprovalOnlyPatch) {

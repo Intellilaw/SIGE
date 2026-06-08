@@ -95,7 +95,10 @@ export interface AuthUser {
   legacyRole: LegacyAccessRole;
   team?: Team;
   legacyTeam?: string;
+  secondaryTeam?: Team;
+  secondaryLegacyTeam?: string;
   specificRole?: string;
+  secondarySpecificRole?: string;
   permissions: string[];
   isActive: boolean;
   passwordResetRequired: boolean;

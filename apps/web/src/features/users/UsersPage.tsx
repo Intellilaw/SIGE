@@ -15,10 +15,14 @@ type FlashState =
 interface UserFormState {
   displayName: string;
   username: string;
+  email: string;
   password: string;
   shortName: string;
   legacyTeam: string;
+  secondaryLegacyTeam: string;
   specificRole: string;
+  secondarySpecificRole: string;
+  isExternal: boolean;
   isActive: boolean;
 }
 
@@ -30,10 +34,14 @@ interface TeamFormState {
 const EMPTY_FORM: UserFormState = {
   displayName: "",
   username: "",
+  email: "",
   password: "",
   shortName: "",
   legacyTeam: "",
+  secondaryLegacyTeam: "",
   specificRole: "",
+  secondarySpecificRole: "",
+  isExternal: false,
   isActive: true
 };
 
@@ -223,26 +231,39 @@ export function UsersPage() {
     [rows]
   );
 
-  const teamOptionsForUserForm = useMemo(
+  const primaryTeamOptionsForUserForm = useMemo(
     () => teams.filter((team) => team.isActive || team.label === form.legacyTeam),
     [form.legacyTeam, teams]
   );
+  const secondaryTeamOptionsForUserForm = useMemo(
+    () => teams.filter((team) =>
+      (team.isActive || team.label === form.secondaryLegacyTeam) && team.label !== form.legacyTeam
+    ),
+    [form.legacyTeam, form.secondaryLegacyTeam, teams]
+  );
 
   useEffect(() => {
-    if (loadingTeams || !form.legacyTeam) {
+    if (loadingTeams) {
       return;
     }
 
-    if (teams.some((team) => team.label === form.legacyTeam)) {
-      return;
-    }
+    setForm((current) => {
+      const hasPrimaryTeam = !current.legacyTeam || teams.some((team) => team.label === current.legacyTeam);
+      const hasSecondaryTeam = !current.secondaryLegacyTeam || teams.some((team) => team.label === current.secondaryLegacyTeam);
+      const shouldClearSecondaryRole = !current.secondaryLegacyTeam && current.secondarySpecificRole;
 
-    setForm((current) => (
-      current.legacyTeam === form.legacyTeam
-        ? { ...current, legacyTeam: "" }
-        : current
-    ));
-  }, [form.legacyTeam, loadingTeams, teams]);
+      if (hasPrimaryTeam && hasSecondaryTeam && !shouldClearSecondaryRole) {
+        return current;
+      }
+
+      return {
+        ...current,
+        legacyTeam: hasPrimaryTeam ? current.legacyTeam : "",
+        secondaryLegacyTeam: hasSecondaryTeam ? current.secondaryLegacyTeam : "",
+        secondarySpecificRole: hasSecondaryTeam && current.secondaryLegacyTeam ? current.secondarySpecificRole : ""
+      };
+    });
+  }, [loadingTeams, teams]);
 
   function resetForm() {
     setIsEditing(false);
@@ -264,10 +285,14 @@ export function UsersPage() {
     setForm({
       displayName: target.displayName,
       username: target.username,
+      email: target.email,
       password: "",
       shortName: target.shortName ?? "",
       legacyTeam: target.legacyTeam ?? "",
+      secondaryLegacyTeam: target.secondaryLegacyTeam ?? "",
       specificRole: target.specificRole ?? "",
+      secondarySpecificRole: target.secondarySpecificRole ?? "",
+      isExternal: target.isExternal,
       isActive: target.isActive
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -288,6 +313,7 @@ export function UsersPage() {
     setFlash(null);
     const trimmedDisplayName = form.displayName.trim();
     const trimmedUsername = form.username.trim();
+    const trimmedEmail = form.email.trim();
     const trimmedPassword = form.password.trim();
 
     if (!trimmedDisplayName) {
@@ -311,11 +337,27 @@ export function UsersPage() {
     }
 
     const selectedTeam = form.legacyTeam.trim();
+    const selectedSecondaryTeam = form.secondaryLegacyTeam.trim();
+    const selectedSpecificRole = form.specificRole.trim();
+    const selectedSecondarySpecificRole = selectedSecondaryTeam ? form.secondarySpecificRole.trim() : "";
     if (selectedTeam && !teams.some((team) => team.label === selectedTeam && team.isActive)) {
       setFlash({
         tone: "error",
         text: "El equipo seleccionado no existe o esta desactivado para esta empresa."
       });
+      return;
+    }
+
+    if (selectedSecondaryTeam && !teams.some((team) => team.label === selectedSecondaryTeam && team.isActive)) {
+      setFlash({
+        tone: "error",
+        text: "El segundo equipo seleccionado no existe o esta desactivado para esta empresa."
+      });
+      return;
+    }
+
+    if (selectedTeam && selectedSecondaryTeam && selectedTeam === selectedSecondaryTeam) {
+      setFlash({ tone: "error", text: "El segundo equipo debe ser distinto del equipo principal." });
       return;
     }
 
@@ -325,22 +367,30 @@ export function UsersPage() {
       if (isEditing && editingUserId) {
         await apiPatch<ManagedUser>(`/users/${editingUserId}`, {
           username: trimmedUsername,
+          email: trimmedEmail || undefined,
           displayName: trimmedDisplayName,
           password: trimmedPassword || undefined,
           shortName: form.shortName.trim() || null,
           legacyTeam: selectedTeam || null,
-          specificRole: form.specificRole || null,
+          secondaryLegacyTeam: selectedSecondaryTeam || null,
+          specificRole: selectedSpecificRole || null,
+          secondarySpecificRole: selectedSecondarySpecificRole || null,
+          isExternal: form.isExternal,
           isActive: form.isActive
         });
         setFlash({ tone: "success", text: "Usuario actualizado correctamente." });
       } else {
         await apiPost<ManagedUser>("/users", {
           username: trimmedUsername,
+          email: trimmedEmail || undefined,
           displayName: trimmedDisplayName,
           password: trimmedPassword,
           shortName: form.shortName.trim() || undefined,
           legacyTeam: selectedTeam || undefined,
-          specificRole: form.specificRole || undefined
+          secondaryLegacyTeam: selectedSecondaryTeam || undefined,
+          specificRole: selectedSpecificRole || undefined,
+          secondarySpecificRole: selectedSecondarySpecificRole || undefined,
+          isExternal: form.isExternal
         });
         setFlash({ tone: "success", text: `Usuario "${trimmedUsername}" creado y autorizado correctamente.` });
       }
@@ -556,6 +606,17 @@ export function UsersPage() {
             </label>
 
             <label className="form-field">
+              <span>Correo electronico</span>
+              <input
+                autoComplete="email"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                placeholder="Ej. usuario@empresa.com"
+                type="email"
+              />
+            </label>
+
+            <label className="form-field">
               <span>Nombre corto</span>
               <input
                 value={form.shortName}
@@ -591,20 +652,29 @@ export function UsersPage() {
 
           <div className="users-form-grid users-form-grid-secondary">
             <label className="form-field">
-              <span>Equipo</span>
+              <span>Equipo principal</span>
               <select
-                disabled={loadingTeams || teamOptionsForUserForm.length === 0}
+                disabled={loadingTeams || primaryTeamOptionsForUserForm.length === 0}
                 value={form.legacyTeam}
-                onChange={(event) => setForm((current) => ({ ...current, legacyTeam: event.target.value }))}
+                onChange={(event) => setForm((current) => {
+                  const legacyTeam = event.target.value;
+                  const duplicateSecondaryTeam = legacyTeam && current.secondaryLegacyTeam === legacyTeam;
+                  return {
+                    ...current,
+                    legacyTeam,
+                    secondaryLegacyTeam: duplicateSecondaryTeam ? "" : current.secondaryLegacyTeam,
+                    secondarySpecificRole: duplicateSecondaryTeam ? "" : current.secondarySpecificRole
+                  };
+                })}
               >
                 <option value="">
                   {loadingTeams
                     ? "Cargando equipos..."
-                    : teamOptionsForUserForm.length === 0
+                    : primaryTeamOptionsForUserForm.length === 0
                       ? "Sin equipos registrados"
                       : "-- Seleccionar equipo --"}
                 </option>
-                {teamOptionsForUserForm.map((team) => (
+                {primaryTeamOptionsForUserForm.map((team) => (
                   <option key={team.key} value={team.label}>
                     {team.isActive ? team.label : `${team.label} (inactivo)`}
                   </option>
@@ -613,7 +683,7 @@ export function UsersPage() {
             </label>
 
             <label className="form-field">
-              <span>Rol especifico</span>
+              <span>Rol principal</span>
               <select
                 value={form.specificRole}
                 onChange={(event) => setForm((current) => ({ ...current, specificRole: event.target.value }))}
@@ -625,6 +695,60 @@ export function UsersPage() {
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="form-field">
+              <span>Segundo equipo</span>
+              <select
+                disabled={loadingTeams || secondaryTeamOptionsForUserForm.length === 0}
+                value={form.secondaryLegacyTeam}
+                onChange={(event) => setForm((current) => ({
+                  ...current,
+                  secondaryLegacyTeam: event.target.value,
+                  secondarySpecificRole: event.target.value ? current.secondarySpecificRole : ""
+                }))}
+              >
+                <option value="">
+                  {loadingTeams
+                    ? "Cargando equipos..."
+                    : secondaryTeamOptionsForUserForm.length === 0
+                      ? "Sin otro equipo disponible"
+                      : "-- Sin segundo equipo --"}
+                </option>
+                {secondaryTeamOptionsForUserForm.map((team) => (
+                  <option key={team.key} value={team.label}>
+                    {team.isActive ? team.label : `${team.label} (inactivo)`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="form-field">
+              <span>Segundo rol</span>
+              <select
+                disabled={!form.secondaryLegacyTeam}
+                value={form.secondarySpecificRole}
+                onChange={(event) => setForm((current) => ({ ...current, secondarySpecificRole: event.target.value }))}
+              >
+                <option value="">-- Seleccionar segundo rol --</option>
+                {SPECIFIC_ROLE_OPTIONS.map((specificRole) => (
+                  <option key={specificRole} value={specificRole}>
+                    {specificRole}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="form-field checkbox-field">
+              <span>Tipo de usuario</span>
+              <label className="checkbox-row">
+                <input
+                  checked={form.isExternal}
+                  onChange={(event) => setForm((current) => ({ ...current, isExternal: event.target.checked }))}
+                  type="checkbox"
+                />
+                <span>{form.isExternal ? "Usuario externo" : "Usuario interno"}</span>
+              </label>
             </label>
 
             <label className="form-field checkbox-field">
@@ -804,11 +928,15 @@ export function UsersPage() {
               <tr>
                 <th>Nombre completo</th>
                 <th>Nombre de usuario en el sistema</th>
+                <th>Correo electronico</th>
                 <th>Nombre corto</th>
                 <th>Tipo de acceso</th>
+                <th>Tipo de usuario</th>
                 <th>Rol sistema</th>
-                <th>Equipo</th>
-                <th>Rol especifico</th>
+                <th>Equipo principal</th>
+                <th>Rol principal</th>
+                <th>Segundo equipo</th>
+                <th>Segundo rol</th>
                 <th>Onboarding</th>
                 <th>Ultimo acceso</th>
                 <th>Creado</th>
@@ -818,11 +946,11 @@ export function UsersPage() {
             <tbody>
               {loadingUsers ? (
                 <tr>
-                  <td colSpan={11}>Cargando usuarios...</td>
+                  <td colSpan={15}>Cargando usuarios...</td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>No hay usuarios registrados.</td>
+                  <td colSpan={15}>No hay usuarios registrados.</td>
                 </tr>
               ) : (
                 rows.map((entry) => (
@@ -833,15 +961,23 @@ export function UsersPage() {
                       </div>
                     </td>
                     <td>{entry.username}</td>
+                    <td>{entry.email}</td>
                     <td>{entry.shortName ?? "-"}</td>
                     <td>
                       <span className={`status-pill ${entry.legacyRole === "SUPERADMIN" ? "status-live" : "status-migration"}`}>
                         {getLegacyRoleLabel(entry.legacyRole)}
                       </span>
                     </td>
+                    <td>
+                      <span className={`status-pill ${entry.isExternal ? "status-migration" : "status-live"}`}>
+                        {entry.isExternal ? "Externo" : "Interno"}
+                      </span>
+                    </td>
                     <td>{getSystemRoleLabel(entry.role)}</td>
                     <td>{entry.legacyTeam ?? "-"}</td>
                     <td>{entry.specificRole ?? "-"}</td>
+                    <td>{entry.secondaryLegacyTeam ?? "-"}</td>
+                    <td>{entry.secondarySpecificRole ?? "-"}</td>
                     <td>
                       <span className={`status-pill ${entry.passwordResetRequired ? "status-warning" : "status-live"}`}>
                         {entry.passwordResetRequired ? "Pendiente" : "Listo"}

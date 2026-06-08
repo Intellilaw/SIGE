@@ -174,7 +174,12 @@ function getTodayInput() {
     return `${year}-${month}-${day}`;
 }
 function isFinanceUser(input) {
-    return input.team === "FINANCE" || normalizeComparableText(input.legacyTeam) === "finanzas";
+    return input.team === "FINANCE" ||
+        input.secondaryTeam === "FINANCE" ||
+        normalizeComparableText(input.legacyTeam) === "finanzas" ||
+        normalizeComparableText(input.secondaryLegacyTeam) === "finanzas" ||
+        normalizeComparableText(input.specificRole) === "finanzas" ||
+        normalizeComparableText(input.secondarySpecificRole) === "finanzas";
 }
 function isAraceliLozano(input) {
     const normalizedEmail = normalizeComparableText(input.email);
@@ -192,7 +197,11 @@ function canReviewJnls(input) {
     return (input.role !== "SUPERADMIN" &&
         input.legacyRole !== "SUPERADMIN" &&
         (input.team === "AUDIT" ||
-            normalizeComparableText(input.legacyTeam) === "auditoria") &&
+            input.secondaryTeam === "AUDIT" ||
+            normalizeComparableText(input.legacyTeam) === "auditoria" ||
+            normalizeComparableText(input.secondaryLegacyTeam) === "auditoria" ||
+            normalizeComparableText(input.specificRole) === "auditor" ||
+            normalizeComparableText(input.secondarySpecificRole) === "auditor") &&
         Boolean(input.permissions?.includes("general-expenses:jnls-approval:write")));
 }
 function getIvaAmount(expense) {
@@ -481,15 +490,30 @@ export function GeneralExpensesPage() {
         displayName: user.displayName,
         email: user.email,
         team: user.team,
-        legacyTeam: user.legacyTeam
+        legacyTeam: user.legacyTeam,
+        secondaryTeam: user.secondaryTeam,
+        secondaryLegacyTeam: user.secondaryLegacyTeam,
+        specificRole: user.specificRole,
+        secondarySpecificRole: user.secondarySpecificRole
     }));
-    const canPay = Boolean(user && isFinanceUser({ team: user.team, legacyTeam: user.legacyTeam }));
+    const canPay = Boolean(user && isFinanceUser({
+        team: user.team,
+        legacyTeam: user.legacyTeam,
+        secondaryTeam: user.secondaryTeam,
+        secondaryLegacyTeam: user.secondaryLegacyTeam,
+        specificRole: user.specificRole,
+        secondarySpecificRole: user.secondarySpecificRole
+    }));
     const canEditEmrtDate = Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
     const canReviewJnlsFlag = Boolean(user && canReviewJnls({
         role: user.role,
         legacyRole: user.legacyRole,
         team: user.team,
         legacyTeam: user.legacyTeam,
+        secondaryTeam: user.secondaryTeam,
+        secondaryLegacyTeam: user.secondaryLegacyTeam,
+        specificRole: user.specificRole,
+        secondarySpecificRole: user.secondarySpecificRole,
         permissions: user.permissions
     }));
     async function loadRecords() {
