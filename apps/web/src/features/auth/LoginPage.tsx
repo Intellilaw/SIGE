@@ -139,7 +139,7 @@ function getSafeRedirectTarget(value: string | null) {
     return value;
   }
 
-  if (value === "/app/brief-manager") {
+  if (value === "/app" || value.startsWith("/app/")) {
     return value;
   }
 

@@ -63,8 +63,24 @@ type HolidayGuideItem = {
   authorities: string[];
 };
 
+type FlashMessage = {
+  tone: "success" | "error";
+  text: string;
+};
+
+type PromotionCommandResult = {
+  status: "completed";
+  messageText: string;
+  groupId: string;
+  groupName?: string | null;
+};
+
 function normalize(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
 
 function normalizeResponsibleOption(value?: string | null) {
@@ -379,6 +395,8 @@ export function TaskDistributorPage() {
   const [holidayGuideError, setHolidayGuideError] = useState<string | null>(null);
   const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
   const [dateEditedHistorySortKeys, setDateEditedHistorySortKeys] = useState<Record<string, string>>({});
+  const [promotionFlash, setPromotionFlash] = useState<FlashMessage | null>(null);
+  const [sendingPromotionRecordIds, setSendingPromotionRecordIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
 
   async function loadDistributor() {
@@ -1052,6 +1070,59 @@ export function TaskDistributorPage() {
     );
   }
 
+  async function handleGenerateWriting(
+    record: TaskTrackingRecord,
+    table: LegacyTaskTableConfig | undefined,
+    taskName: string
+  ) {
+    if (table?.slug !== "escritos") {
+      return;
+    }
+
+    const matterId = normalize(record.matterId);
+    const normalizedTaskName = normalize(taskName || record.taskName || record.eventName);
+
+    if (!matterId) {
+      setPromotionFlash({
+        tone: "error",
+        text: "No se encontro el asunto vinculado a esta tarea."
+      });
+      return;
+    }
+
+    if (!normalizedTaskName) {
+      setPromotionFlash({
+        tone: "error",
+        text: "La tarea necesita nombre para generar el escrito."
+      });
+      return;
+    }
+
+    setPromotionFlash(null);
+    setSendingPromotionRecordIds((current) => new Set(current).add(record.id));
+
+    try {
+      await apiPost<PromotionCommandResult>(`/matters/${encodeURIComponent(matterId)}/send-promotion-command`, {
+        taskName: normalizedTaskName
+      });
+      setPromotionFlash({
+        tone: "success",
+        text: "Promoción enviada a Telegram"
+      });
+    } catch (error) {
+      setPromotionFlash({
+        tone: "error",
+        text: toErrorMessage(error)
+      });
+    } finally {
+      setSendingPromotionRecordIds((current) => {
+        const next = new Set(current);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  }
+
   async function handleMoveToTab(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined, tab: LegacyTaskTab) {
     if (!table) {
       return;
@@ -1185,6 +1256,12 @@ export function TaskDistributorPage() {
               </div>
             </div>
 
+            {promotionFlash ? (
+              <div className={`message-banner ${promotionFlash.tone === "success" ? "message-success" : "message-error"}`}>
+                {promotionFlash.text}
+              </div>
+            ) : null}
+
             <div className="table-scroll tasks-legacy-table-wrap">
               <table className="data-table tasks-legacy-table tasks-distributor-active-table">
                 <thead>
@@ -1261,6 +1338,16 @@ export function TaskDistributorPage() {
                                           <button type="button" className="secondary-button tasks-distributor-small-button" onClick={() => navigate(`/app/tasks/${moduleConfig.slug}/${table.slug}`)}>
                                             Ir a tabla de seguimiento
                                           </button>
+                                          {table.slug === "escritos" ? (
+                                            <button
+                                              type="button"
+                                              className="secondary-button tasks-distributor-small-button"
+                                              onClick={() => void handleGenerateWriting(record, table, taskName)}
+                                              disabled={sendingPromotionRecordIds.has(record.id)}
+                                            >
+                                              {sendingPromotionRecordIds.has(record.id) ? "Generando..." : "Generar escrito"}
+                                            </button>
+                                          ) : null}
                                           <strong>{table.title}</strong>
                                         </div>
                                       ) : null}

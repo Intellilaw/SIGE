@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LEGALFLOW_SALES_PRODUCTS } from "@sige/contracts";
 import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
 import minkaLogo from "../../assets/legalflow-minka-logo.png";
-import rematesLogo from "../../assets/legalflow-remates-logo.png";
+import rematesLogo from "../../assets/legalflow-subastas-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
 import { apiGet, apiPatch } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -24,7 +24,7 @@ const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
 const SALES_TIMEFRAMES = [
     { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
     { id: "hoy", label: "Tareas hoy", colorClass: "is-today" },
-    { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
+    { id: "manana", label: "Tareas mañana", colorClass: "is-tomorrow" },
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const SAVE_DEBOUNCE_MS = 650;

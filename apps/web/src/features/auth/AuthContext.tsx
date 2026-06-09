@@ -50,6 +50,7 @@ interface AuthContextValue {
   login: (identifier: string, password: string, organizationSlug?: string) => Promise<void>;
   requestPasswordReset: (identifier: string, organizationSlug?: string) => Promise<PasswordResetRequestResponse>;
   completePasswordReset: (token: string, password: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -123,6 +124,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(response.user);
   }
 
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const response = await apiPost<LoginResponse>("/auth/me/password", { currentPassword, newPassword });
+    persistSession(response);
+    setUser(response.user);
+  }
+
   function logout() {
     void apiPost<void>("/auth/logout", {}).catch(() => undefined);
     clearAuthTokens();
@@ -130,7 +137,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }
 
   const value = useMemo(
-    () => ({ user, loading, login, requestPasswordReset, completePasswordReset, logout }),
+    () => ({ user, loading, login, requestPasswordReset, completePasswordReset, changePassword, logout }),
     [user, loading]
   );
 

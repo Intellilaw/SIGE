@@ -678,6 +678,16 @@ export const EXECUTION_HOLIDAY_AUTHORITIES = [
 
 export type ExecutionHolidayAuthorityShortName = typeof EXECUTION_HOLIDAY_AUTHORITIES[number];
 
+export const MATTER_PROMOTION_COMMANDS = [
+  "/promociongeneral",
+  "/promocioncivil",
+  "/promocionadministrativa",
+  "/promocionamparo",
+  "/promocionpenal"
+] as const;
+
+export type MatterPromotionCommand = typeof MATTER_PROMOTION_COMMANDS[number];
+
 export interface HolidayAuthority {
   shortName: HolidayAuthorityShortName;
   name: string;
@@ -844,6 +854,9 @@ export interface Matter {
   executionLinkedModule?: string;
   executionLinkedAt?: string;
   executionPrompt?: string;
+  expirationDate?: string;
+  expirationRiOutput?: string;
+  promotionCommand?: MatterPromotionCommand;
   holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName;
   internalTelegramGroupId?: string;
   internalTelegramGroupName?: string;

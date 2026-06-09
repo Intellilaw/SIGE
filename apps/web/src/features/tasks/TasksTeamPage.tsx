@@ -43,7 +43,7 @@ interface VerificationColumn {
 const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: string }> = [
   { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
   { id: "hoy", label: "Tareas hoy", colorClass: "is-today" },
-  { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
+  { id: "manana", label: "Tareas mañana", colorClass: "is-tomorrow" },
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const SETTLEMENTS_MODULE_ID = "settlements";
@@ -789,7 +789,7 @@ export function TasksTeamPage() {
           <span>{dashboardMembers.length} integrantes</span>
         </div>
         <p className="muted tasks-team-board-copy">
-          Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, manana y posteriores. El rojo indica
+          Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, mañana y posteriores. El rojo indica
           faltantes, terminos sin verificacion o fechas vencidas.
         </p>
 

@@ -4,12 +4,21 @@ import {
   type KpiMetricStatus,
   type LegacyTaskStatus,
   type ManagedUser,
+  type TaskAdditionalTask,
   type TaskModuleDefinition,
   type TaskTerm,
   type TaskTrackingRecord
 } from "@sige/contracts";
 
-import type { KpiAccessScope, KpisRepository, MattersRepository, TasksRepository, UsersRepository } from "../../repositories/types";
+import type {
+  GeneralSupervisionObservationActor,
+  GeneralSupervisionPreferencesRepository,
+  KpiAccessScope,
+  KpisRepository,
+  MattersRepository,
+  TasksRepository,
+  UsersRepository
+} from "../../repositories/types";
 
 type SupervisionBucketKey = "today" | "tomorrow" | "restOfWeek";
 type TaskSummaryKey = "today" | "overdue";
@@ -35,6 +44,7 @@ interface SupervisionUserReference {
   shortName?: string;
   teamLabel: string;
   specificRole?: string;
+  isSynthetic?: boolean;
 }
 
 interface SupervisionTaskCandidate {
@@ -50,6 +60,14 @@ interface SupervisionTaskCandidate {
   statusLabel: string;
   sourceLabel: string;
   originPath: string;
+}
+
+interface SupervisionCompletedTaskCandidate {
+  id: string;
+  moduleId: string;
+  moduleLabel: string;
+  responsible: string;
+  completedDate: string;
 }
 
 interface SupervisionTermCandidate {
@@ -78,9 +96,13 @@ interface SupervisionTaskDashboardLink {
 
 interface GroupedUserTaskSummary extends SupervisionUserReference {
   total: number;
+  completedThisMonth: number;
   today: number;
   overdue: number;
-  monthlyKpiMisses: number;
+  kpiMetDays: number;
+  kpiMissedDays: number;
+  isObserved: boolean;
+  canToggleObservation: boolean;
   dashboardLinks: SupervisionTaskDashboardLink[];
 }
 
@@ -118,6 +140,7 @@ const TASK_MODULE_SLUGS: Record<string, string> = {
 };
 
 const OPEN_LEGACY_STATUSES: LegacyTaskStatus[] = ["pendiente"];
+const CLOSED_LEGACY_STATUSES: LegacyTaskStatus[] = ["presentado", "concluida"];
 const KPI_ALERT_STATUSES: KpiMetricStatus[] = ["missed", "warning"];
 const TASK_VERIFICATION_COLUMNS: Record<string, Array<{ key: string; label: string }>> = {
   litigation: [
@@ -260,6 +283,18 @@ function statusLabel(status: LegacyTaskStatus) {
   return "Pendiente";
 }
 
+function isClosedLegacyTask(status: LegacyTaskStatus) {
+  return CLOSED_LEGACY_STATUSES.includes(status);
+}
+
+function getCompletionDateKey(value: { completedAt?: string; updatedAt: string }) {
+  return toDateKey(value.completedAt || value.updatedAt);
+}
+
+function isInDateRange(dateKey: string, startDate: string, endDate: string) {
+  return Boolean(dateKey) && dateKey >= startDate && dateKey <= endDate;
+}
+
 function getTaskModuleDefinitions(modules: TaskModuleDefinition[]) {
   const definitions = new Map<string, TaskModuleDefinition>();
   [...TASK_MODULES, ...modules].forEach((module) => definitions.set(module.id, module));
@@ -331,12 +366,27 @@ function userReferenceFromManagedUser(user: ManagedUser): SupervisionUserReferen
   };
 }
 
-function buildUserDirectory(users: ManagedUser[]) {
+function addUserAliases(
+  aliasLookup: Map<string, SupervisionUserReference>,
+  user: SupervisionUserReference,
+  aliases: Array<string | undefined | null>
+) {
+  aliases.forEach((alias) => {
+    const key = normalizeKey(alias);
+    if (key && !aliasLookup.has(key)) {
+      aliasLookup.set(key, user);
+    }
+  });
+}
+
+function buildUserDirectory(users: ManagedUser[], modules: TaskModuleDefinition[] = []) {
   const aliasLookup = new Map<string, SupervisionUserReference>();
+  const referenceByUserId = new Map<string, SupervisionUserReference>();
   const activeUsers = users.filter((user) => user.isActive);
 
   activeUsers.forEach((user) => {
     const reference = userReferenceFromManagedUser(user);
+    referenceByUserId.set(user.id, reference);
     const emailLocalPart = user.email.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user.email;
     const aliases = [
       user.shortName,
@@ -347,11 +397,27 @@ function buildUserDirectory(users: ManagedUser[]) {
       emailLocalPart
     ];
 
-    aliases.forEach((alias) => {
-      const key = normalizeKey(alias);
-      if (key && !aliasLookup.has(key)) {
-        aliasLookup.set(key, reference);
+    addUserAliases(aliasLookup, reference, aliases);
+  });
+
+  modules.forEach((module) => {
+    (module.members ?? []).forEach((member) => {
+      const reference = referenceByUserId.get(member.userId)
+        ?? aliasLookup.get(normalizeKey(member.shortName))
+        ?? aliasLookup.get(normalizeKey(member.id))
+        ?? aliasLookup.get(normalizeKey(member.name));
+
+      if (!reference) {
+        return;
       }
+
+      addUserAliases(aliasLookup, reference, [
+        member.id,
+        member.name,
+        member.shortName,
+        member.specificRole,
+        ...member.aliases
+      ]);
     });
   });
 
@@ -364,7 +430,8 @@ function fallbackUserReference(responsible: string): SupervisionUserReference {
     userId: `responsible:${normalizeKey(label) || "unassigned"}`,
     displayName: label,
     shortName: label.length <= 12 ? label.toUpperCase() : undefined,
-    teamLabel: "Sin equipo"
+    teamLabel: "Sin equipo",
+    isSynthetic: true
   };
 }
 
@@ -390,12 +457,16 @@ function isDateInRange(dateKey: string, range: DateRange | KpiDateRange) {
   return Boolean(dateKey) && dateKey >= range.startDate && dateKey <= range.endDate;
 }
 
-function getTaskSummaryKey(dateKey: string, todayKey: string): TaskSummaryKey | undefined {
-  if (!dateKey || dateKey < todayKey) {
-    return "overdue";
+function getTaskSummaryKeys(dateKey: string, todayKey: string): TaskSummaryKey[] {
+  if (!dateKey) {
+    return ["today"];
   }
 
-  return dateKey === todayKey ? "today" : undefined;
+  if (dateKey < todayKey) {
+    return ["today", "overdue"];
+  }
+
+  return dateKey === todayKey ? ["today"] : [];
 }
 
 function sortTasks<T extends { dueDate?: string; termDate?: string; clientName: string; taskLabel?: string; termLabel?: string }>(items: T[]) {
@@ -413,7 +484,7 @@ function buildDashboardRanges(todayKey: string): DateRange[] {
 
   return [
     { key: "today", label: "Hoy", startDate: todayKey, endDate: todayKey },
-    { key: "tomorrow", label: "Manana", startDate: tomorrowKey, endDate: tomorrowKey },
+    { key: "tomorrow", label: "Mañana", startDate: tomorrowKey, endDate: tomorrowKey },
     {
       key: "restOfWeek",
       label: "Resto de la semana natural",
@@ -444,33 +515,62 @@ function getUserDashboardPath(moduleId: string, user: SupervisionUserReference) 
   return `${basePath}?member=${encodeURIComponent(user.shortName)}&timeframe=hoy`;
 }
 
+function getObservationState(user: SupervisionUserReference, observedUserPreferences: Map<string, boolean>) {
+  if (user.isSynthetic) {
+    return {
+      isObserved: false,
+      canToggleObservation: false
+    };
+  }
+
+  return {
+    isObserved: observedUserPreferences.get(user.userId) ?? true,
+    canToggleObservation: true
+  };
+}
+
 function buildTaskOverviewByUser(
   todayKey: string,
   tasks: SupervisionTaskCandidate[],
+  completedTasks: SupervisionCompletedTaskCandidate[],
   aliasLookup: Map<string, SupervisionUserReference>,
-  monthlyKpiMissesByUser: Map<string, { user: SupervisionUserReference; total: number }>
+  monthlyKpiDaysByUser: Map<string, { user: SupervisionUserReference; metDays: number; missedDays: number }>,
+  observedUserPreferences: Map<string, boolean>
 ) {
   const groups = new Map<
     string,
     GroupedUserTaskSummary & { linkLookup: Map<string, SupervisionTaskDashboardLink> }
   >();
 
-  sortTasks(tasks).forEach((task) => {
-    const summaryKey = getTaskSummaryKey(task.dueDate, todayKey);
-    if (!summaryKey) {
-      return;
-    }
+  function getOrCreateGroup(user: SupervisionUserReference) {
+    const observationState = getObservationState(user, observedUserPreferences);
+    const group = groups.get(user.userId) ?? {
+      ...user,
+      total: 0,
+      completedThisMonth: 0,
+      today: 0,
+      overdue: 0,
+      kpiMetDays: 0,
+      kpiMissedDays: 0,
+      ...observationState,
+      dashboardLinks: [],
+      linkLookup: new Map<string, SupervisionTaskDashboardLink>()
+    };
 
+    group.isObserved = observationState.isObserved;
+    group.canToggleObservation = observationState.canToggleObservation;
+    groups.set(user.userId, group);
+    return group;
+  }
+
+  sortTasks(completedTasks.map((task) => ({
+    ...task,
+    dueDate: task.completedDate,
+    clientName: "",
+    taskLabel: task.id
+  }))).forEach((task) => {
     resolveResponsibleUsers(task.responsible, aliasLookup).forEach((user) => {
-      const group = groups.get(user.userId) ?? {
-        ...user,
-        total: 0,
-        today: 0,
-        overdue: 0,
-        monthlyKpiMisses: 0,
-        dashboardLinks: [],
-        linkLookup: new Map<string, SupervisionTaskDashboardLink>()
-      };
+      const group = getOrCreateGroup(user);
       const link = group.linkLookup.get(task.moduleId) ?? {
         moduleId: task.moduleId,
         label: task.moduleLabel,
@@ -480,27 +580,45 @@ function buildTaskOverviewByUser(
         overdue: 0
       };
 
-      group[summaryKey] += 1;
-      group.total += 1;
-      link[summaryKey] += 1;
+      group.completedThisMonth += 1;
+      group.total = group.completedThisMonth;
       link.total += 1;
       group.linkLookup.set(task.moduleId, link);
       groups.set(user.userId, group);
     });
   });
 
-  monthlyKpiMissesByUser.forEach((kpiSummary, userId) => {
-    const group = groups.get(userId) ?? {
-      ...kpiSummary.user,
-      total: 0,
-      today: 0,
-      overdue: 0,
-      monthlyKpiMisses: 0,
-      dashboardLinks: [],
-      linkLookup: new Map<string, SupervisionTaskDashboardLink>()
-    };
+  sortTasks(tasks).forEach((task) => {
+    const summaryKeys = getTaskSummaryKeys(task.dueDate, todayKey);
+    if (summaryKeys.length === 0) {
+      return;
+    }
 
-    group.monthlyKpiMisses = kpiSummary.total;
+    resolveResponsibleUsers(task.responsible, aliasLookup).forEach((user) => {
+      const group = getOrCreateGroup(user);
+      const link = group.linkLookup.get(task.moduleId) ?? {
+        moduleId: task.moduleId,
+        label: task.moduleLabel,
+        path: getUserDashboardPath(task.moduleId, user),
+        total: 0,
+        today: 0,
+        overdue: 0
+      };
+
+      summaryKeys.forEach((summaryKey) => {
+        group[summaryKey] += 1;
+        link[summaryKey] += 1;
+      });
+      link.total += 1;
+      group.linkLookup.set(task.moduleId, link);
+      groups.set(user.userId, group);
+    });
+  });
+
+  monthlyKpiDaysByUser.forEach((kpiSummary, userId) => {
+    const group = getOrCreateGroup(kpiSummary.user);
+    group.kpiMetDays = kpiSummary.metDays;
+    group.kpiMissedDays = kpiSummary.missedDays;
     groups.set(userId, group);
   });
 
@@ -510,15 +628,18 @@ function buildTaskOverviewByUser(
       dashboardLinks: Array.from(linkLookup.values()).sort((left, right) => left.label.localeCompare(right.label))
     }))
     .sort((left, right) =>
-      (right.total + right.monthlyKpiMisses) - (left.total + left.monthlyKpiMisses)
+      (right.today + right.overdue + right.kpiMissedDays + right.completedThisMonth)
+        - (left.today + left.overdue + left.kpiMissedDays + left.completedThisMonth)
       || left.displayName.localeCompare(right.displayName)
     );
 
   return {
     todayTotal: users.reduce((total, user) => total + user.today, 0),
     overdueTotal: users.reduce((total, user) => total + user.overdue, 0),
-    monthlyKpiMissesTotal: users.reduce((total, user) => total + user.monthlyKpiMisses, 0),
-    total: users.reduce((total, user) => total + user.total, 0),
+    completedThisMonthTotal: users.reduce((total, user) => total + user.completedThisMonth, 0),
+    kpiMetDaysTotal: users.reduce((total, user) => total + user.kpiMetDays, 0),
+    kpiMissedDaysTotal: users.reduce((total, user) => total + user.kpiMissedDays, 0),
+    total: users.reduce((total, user) => total + user.completedThisMonth, 0),
     users
   };
 }
@@ -577,18 +698,24 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
   };
 }
 
-function buildMonthlyKpiMissesByUser(overview: Awaited<ReturnType<KpisRepository["getPeriodOverview"]>>) {
-  const users = new Map<string, { user: SupervisionUserReference; total: number }>();
+function buildMonthlyKpiDaysByUser(overview: Awaited<ReturnType<KpisRepository["getPeriodOverview"]>>) {
+  const users = new Map<string, { user: SupervisionUserReference; metDays: number; missedDays: number }>();
 
   overview.teams.forEach((team) => {
     team.users.forEach((user) => {
-      const total = user.metrics.reduce(
-        (metricTotal, metric) =>
-          metricTotal + metric.dailyBreakdown.filter((day) => day.status === "missed").length,
-        0
-      );
+      const statusesByDate = new Map<string, KpiMetricStatus[]>();
 
-      if (total === 0) {
+      user.metrics.forEach((metric) => {
+        metric.dailyBreakdown.forEach((day) => {
+          statusesByDate.set(day.date, [...(statusesByDate.get(day.date) ?? []), day.status]);
+        });
+      });
+
+      const days = Array.from(statusesByDate.values());
+      const metDays = days.filter((statuses) => statuses.length > 0 && statuses.every((status) => status === "met")).length;
+      const missedDays = days.filter((statuses) => statuses.includes("missed")).length;
+
+      if (metDays === 0 && missedDays === 0) {
         return;
       }
 
@@ -600,7 +727,8 @@ function buildMonthlyKpiMissesByUser(overview: Awaited<ReturnType<KpisRepository
           teamLabel: user.teamLabel,
           specificRole: user.specificRole
         },
-        total
+        metDays,
+        missedDays
       });
     });
   });
@@ -611,6 +739,7 @@ function buildMonthlyKpiMissesByUser(overview: Awaited<ReturnType<KpisRepository
 function buildTaskCandidates(input: {
   trackingRecords: TaskTrackingRecord[];
   terms: TaskTerm[];
+  additionalTasks: TaskAdditionalTask[];
   moduleDefinitions: Map<string, TaskModuleDefinition>;
   todayKey: string;
 }) {
@@ -682,6 +811,114 @@ function buildTaskCandidates(input: {
             originPath: getModulePath(term.moduleId, "/distribuidor")
           });
         });
+    });
+
+  input.additionalTasks
+    .filter((task) => task.status === "pendiente" && !task.deletedAt)
+    .forEach((task) => {
+      const module = input.moduleDefinitions.get(task.moduleId);
+
+      candidates.push({
+        id: `additional:${task.id}`,
+        moduleId: task.moduleId,
+        moduleLabel: getModuleLabel(module, task.moduleId),
+        teamLabel: getTeamLabelFromModule(module, task.moduleId),
+        taskLabel: task.task,
+        clientName: "-",
+        subject: "-",
+        responsible: [task.responsible, task.responsible2].filter(Boolean).join("/"),
+        dueDate: toDateKey(task.dueDate),
+        statusLabel: "Pendiente",
+        sourceLabel: "Tareas adicionales",
+        originPath: getModulePath(task.moduleId, "/adicionales")
+      });
+    });
+
+  return candidates;
+}
+
+function buildCompletedTaskCandidates(input: {
+  trackingRecords: TaskTrackingRecord[];
+  terms: TaskTerm[];
+  additionalTasks: TaskAdditionalTask[];
+  moduleDefinitions: Map<string, TaskModuleDefinition>;
+  currentMonthStart: string;
+  currentMonthEnd: string;
+}) {
+  const candidates: SupervisionCompletedTaskCandidate[] = [];
+  const managerRecordIds = new Set<string>();
+  const managerTermIds = new Set<string>();
+
+  input.trackingRecords
+    .filter((record) => !record.deletedAt && isTrackingTermEnabledForDashboard(record))
+    .forEach((record) => {
+      managerRecordIds.add(record.id);
+      if (record.termId) {
+        managerTermIds.add(record.termId);
+      }
+    });
+
+  input.trackingRecords
+    .filter((record) => isClosedLegacyTask(record.status) && !record.deletedAt)
+    .forEach((record) => {
+      const completedDate = getCompletionDateKey(record);
+      if (!isInDateRange(completedDate, input.currentMonthStart, input.currentMonthEnd)) {
+        return;
+      }
+
+      const module = input.moduleDefinitions.get(record.moduleId);
+      candidates.push({
+        id: `tracking:${record.id}`,
+        moduleId: record.moduleId,
+        moduleLabel: getModuleLabel(module, record.moduleId),
+        responsible: record.responsible,
+        completedDate
+      });
+    });
+
+  input.terms
+    .filter((term) => !term.deletedAt)
+    .filter((term) =>
+      term.sourceRecordId
+        ? managerRecordIds.has(term.sourceRecordId)
+        : managerTermIds.has(term.id)
+    )
+    .forEach((term) => {
+      const completedDate = toDateKey(term.updatedAt);
+      if (!isInDateRange(completedDate, input.currentMonthStart, input.currentMonthEnd)) {
+        return;
+      }
+
+      const module = input.moduleDefinitions.get(term.moduleId);
+      (TASK_VERIFICATION_COLUMNS[term.moduleId] ?? [])
+        .filter((column) => isVerificationValueComplete(term.verification[column.key]))
+        .forEach((column) => {
+          candidates.push({
+            id: `term-verification:${term.id}:${column.key}`,
+            moduleId: term.moduleId,
+            moduleLabel: getModuleLabel(module, term.moduleId),
+            responsible: getVerificationResponsible(column),
+            completedDate
+          });
+        });
+    });
+
+  input.additionalTasks
+    .filter((task) => task.status === "concluida" && !task.deletedAt)
+    .forEach((task) => {
+      const completedDate = toDateKey(task.updatedAt);
+      if (!isInDateRange(completedDate, input.currentMonthStart, input.currentMonthEnd)) {
+        return;
+      }
+
+      const module = input.moduleDefinitions.get(task.moduleId);
+      candidates.push({
+        id: `additional:${task.id}`,
+        moduleId: task.moduleId,
+        moduleLabel: getModuleLabel(module, task.moduleId),
+        responsible: [task.responsible, task.responsible2].filter(Boolean).join("/"),
+        completedDate
+      });
     });
 
   return candidates;
@@ -771,8 +1008,13 @@ export class GeneralSupervisionService {
       matters: MattersRepository;
       users: UsersRepository;
       kpis: KpisRepository;
+      supervisionPreferences: GeneralSupervisionPreferencesRepository;
     }
   ) {}
+
+  public async setObservedUser(userId: string, isObserved: boolean, actor: GeneralSupervisionObservationActor) {
+    return this.repositories.supervisionPreferences.setObservedUser(userId, isObserved, actor);
+  }
 
   public async getOverview() {
     const todayKey = getCurrentDateKey();
@@ -783,10 +1025,11 @@ export class GeneralSupervisionService {
     const currentMonthStart = getMonthStartKey(todayKey);
     const currentMonthEnd = getMonthEndKey(todayKey);
 
-    const [storedModules, trackingRecords, users] = await Promise.all([
+    const [storedModules, trackingRecords, users, observedUserSettings] = await Promise.all([
       this.repositories.tasks.listModules(),
       this.repositories.tasks.listTrackingRecords({ includeDeleted: false }),
-      this.repositories.users.list()
+      this.repositories.users.list(),
+      this.repositories.supervisionPreferences.listObservedUsers()
     ]);
 
     const moduleDefinitions = getTaskModuleDefinitions(storedModules);
@@ -795,14 +1038,28 @@ export class GeneralSupervisionService {
     const termsByModule = await Promise.all(
       moduleIds.map((moduleId) => this.repositories.tasks.listTerms(moduleId))
     );
+    const additionalTasksByModule = await Promise.all(
+      moduleIds.map((moduleId) => this.repositories.tasks.listAdditionalTasks(moduleId))
+    );
 
     const allTerms = termsByModule.flat();
-    const { aliasLookup } = buildUserDirectory(users);
+    const allAdditionalTasks = additionalTasksByModule.flat();
+    const { aliasLookup } = buildUserDirectory(users, Array.from(moduleDefinitions.values()));
+    const observedUserPreferences = new Map(observedUserSettings.map((setting) => [setting.userId, setting.isObserved]));
     const taskCandidates = buildTaskCandidates({
       trackingRecords,
       terms: allTerms,
+      additionalTasks: allAdditionalTasks,
       moduleDefinitions,
       todayKey
+    });
+    const completedTaskCandidates = buildCompletedTaskCandidates({
+      trackingRecords,
+      terms: allTerms,
+      additionalTasks: allAdditionalTasks,
+      moduleDefinitions,
+      currentMonthStart,
+      currentMonthEnd
     });
     const termCandidates = buildTermCandidates({
       terms: allTerms,
@@ -823,8 +1080,15 @@ export class GeneralSupervisionService {
       this.repositories.kpis.getPeriodOverview(currentMonthStart, currentMonthEnd, kpiAccessScope)
     ]);
 
-    const monthlyKpiMissesByUser = buildMonthlyKpiMissesByUser(currentMonthKpiOverview);
-    const taskOverview = buildTaskOverviewByUser(todayKey, taskCandidates, aliasLookup, monthlyKpiMissesByUser);
+    const monthlyKpiDaysByUser = buildMonthlyKpiDaysByUser(currentMonthKpiOverview);
+    const taskOverview = buildTaskOverviewByUser(
+      todayKey,
+      taskCandidates,
+      completedTaskCandidates,
+      aliasLookup,
+      monthlyKpiDaysByUser,
+      observedUserPreferences
+    );
     const termBuckets = dashboardRanges.map((range) => {
       const teams = groupTermsByTeam(range, termCandidates);
       return {
@@ -849,7 +1113,7 @@ export class GeneralSupervisionService {
         tasks: taskOverview.total,
         terms: termBuckets.reduce((total, bucket) => total + bucket.total, 0),
         kpiAlerts: kpiPeriods.reduce((total, period) => total + period.totalMetrics, 0),
-        monthlyKpiMisses: taskOverview.monthlyKpiMissesTotal
+        monthlyKpiMisses: taskOverview.kpiMissedDaysTotal
       }
     };
   }

@@ -32,6 +32,11 @@ const passwordResetCompleteSchema = z.object({
   password: z.string().min(10).max(128)
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(10).max(128)
+});
+
 function canOpenBriefManager(user: { permissions: string[] }) {
   return user.permissions.includes("*")
     || user.permissions.includes("brief-manager:read")
@@ -138,6 +143,22 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   app.get("/auth/me", { preHandler: [requireAuth] }, async (request) => {
     const user = getSessionUser(request);
     return service.getProfile(user.id);
+  });
+
+  app.post("/auth/me/password", { preHandler: [requireAuth] }, async (request, reply) => {
+    const payload = changePasswordSchema.parse(request.body);
+    const user = getSessionUser(request);
+    const session = await service.changeCurrentUserPassword(
+      app,
+      user.id,
+      payload.currentPassword,
+      payload.newPassword
+    );
+    setAuthCookies(reply, app.config, session.tokens);
+
+    return {
+      user: session.user
+    };
   });
 
   app.get("/auth/sso/manager-de-escritos", { preHandler: [requireAuth] }, async (request) => {

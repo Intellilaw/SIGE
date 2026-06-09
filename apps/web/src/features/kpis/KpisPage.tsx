@@ -194,6 +194,107 @@ function KpiDailyMetricTable(props: { metric: KpiMetric }) {
   );
 }
 
+function KpiDefinitionList(props: { metrics: KpiMetric[] }) {
+  return (
+    <section className="kpis-user-section">
+      <div className="kpis-user-section-head">
+        <h4>KPI's definidos</h4>
+        <span>{props.metrics.length}</span>
+      </div>
+      <div className="kpis-definition-list">
+        {props.metrics.map((metric) => (
+          <div className="kpis-definition-item" key={`${metric.id}-definition`}>
+            <strong>{metric.label}</strong>
+            <p>{metric.description}</p>
+            <small>{metric.targetLabel}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function KpiResultGroup(props: {
+  emptyText: string;
+  metrics: KpiMetric[];
+  title: string;
+  tone: "met" | "warning" | "missed" | "not-configured";
+}) {
+  return (
+    <div className={`kpis-result-group is-${props.tone}`}>
+      <div className="kpis-result-group-head">
+        <h5>{props.title}</h5>
+        <span>{props.metrics.length}</span>
+      </div>
+      <div className="kpis-result-list">
+        {props.metrics.length === 0 ? <div className="kpis-result-empty">{props.emptyText}</div> : null}
+        {props.metrics.map((metric) => (
+          <div className="kpis-result-row" key={`${metric.id}-result`}>
+            <div>
+              <strong>{metric.label}</strong>
+              <span>{metric.actualLabel}</span>
+            </div>
+            <KpiStatusBadge status={metric.status} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KpiResultSummary(props: { metrics: KpiMetric[] }) {
+  const metMetrics = props.metrics.filter((metric) => metric.status === "met");
+  const missedMetrics = props.metrics.filter((metric) => metric.status === "missed");
+  const warningMetrics = props.metrics.filter((metric) => metric.status === "warning");
+  const unconfiguredMetrics = props.metrics.filter((metric) => metric.status === "not-configured");
+
+  return (
+    <section className="kpis-user-section">
+      <div className="kpis-user-section-head">
+        <h4>Cumplimiento al corte</h4>
+        <span>{metMetrics.length} de {props.metrics.length}</span>
+      </div>
+      <div className="kpis-results-grid">
+        <KpiResultGroup
+          emptyText="Sin KPI's cumplidos al corte."
+          metrics={metMetrics}
+          title="Cumplidos"
+          tone="met"
+        />
+        <KpiResultGroup
+          emptyText="Sin KPI's incumplidos."
+          metrics={missedMetrics}
+          title="No cumplidos"
+          tone="missed"
+        />
+        <KpiResultGroup
+          emptyText="Sin KPI's en observacion."
+          metrics={warningMetrics}
+          title="En observacion"
+          tone="warning"
+        />
+        {unconfiguredMetrics.length > 0 ? (
+          <KpiResultGroup
+            emptyText="Sin KPI's pendientes."
+            metrics={unconfiguredMetrics}
+            title="Sin configurar"
+            tone="not-configured"
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function KpiUserSummarySections(props: { metrics: KpiMetric[] }) {
+  return (
+    <>
+      <KpiDefinitionList metrics={props.metrics} />
+      <KpiResultSummary metrics={props.metrics} />
+    </>
+  );
+}
+
 function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolean }) {
   if (props.loading) {
     return (
@@ -215,8 +316,8 @@ function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolea
     <section className="panel kpis-team-panel">
       <div className="panel-header">
         <div>
-          <h2>{props.team.teamLabel}</h2>
-          <p className="muted">Usuarios activos del sistema agrupados por equipo de trabajo.</p>
+          <h2>Vista mensual - {props.team.teamLabel}</h2>
+          <p className="muted">KPI's definidos y cumplimiento mensual por usuario.</p>
         </div>
         <span>{props.team.users.length} usuarios</span>
       </div>
@@ -241,10 +342,19 @@ function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolea
             </header>
 
             {user.configured ? (
-              <div className="kpis-metric-list">
-                {user.metrics.map((metric) => (
-                  <KpiMetricRow key={metric.id} metric={metric} />
-                ))}
+              <div className="kpis-user-sections">
+                <KpiUserSummarySections metrics={user.metrics} />
+                <section className="kpis-user-section">
+                  <div className="kpis-user-section-head">
+                    <h4>Detalle mensual</h4>
+                    <span>{user.metrics.length} KPI's</span>
+                  </div>
+                  <div className="kpis-metric-list">
+                    {user.metrics.map((metric) => (
+                      <KpiMetricRow key={metric.id} metric={metric} />
+                    ))}
+                  </div>
+                </section>
               </div>
             ) : (
               <div className="kpis-empty-user">
@@ -280,7 +390,7 @@ function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: b
     <section className="panel kpis-team-panel">
       <div className="panel-header">
         <div>
-          <h2>Detalle diario - {props.team.teamLabel}</h2>
+          <h2>Vista diaria - {props.team.teamLabel}</h2>
           <p className="muted">Cumplimiento diario calculado desde seguimiento, terminos, dias inhabiles y vacaciones.</p>
         </div>
         <span>{props.team.users.length} usuarios</span>
@@ -306,10 +416,19 @@ function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: b
             </header>
 
             {user.configured ? (
-              <div className="kpis-daily-metric-list">
-                {user.metrics.map((metric) => (
-                  <KpiDailyMetricTable key={metric.id} metric={metric} />
-                ))}
+              <div className="kpis-user-sections">
+                <KpiUserSummarySections metrics={user.metrics} />
+                <section className="kpis-user-section">
+                  <div className="kpis-user-section-head">
+                    <h4>Detalle diario</h4>
+                    <span>{user.metrics.length} KPI's</span>
+                  </div>
+                  <div className="kpis-daily-metric-list">
+                    {user.metrics.map((metric) => (
+                      <KpiDailyMetricTable key={metric.id} metric={metric} />
+                    ))}
+                  </div>
+                </section>
               </div>
             ) : (
               <div className="kpis-empty-user">No hay KPI's definidos para desglosar por dia.</div>
@@ -366,9 +485,23 @@ export function KpisPage() {
     const users = teams.reduce((sum, team) => sum + team.users.length, 0);
     const configuredUsers = teams.reduce((sum, team) => sum + team.users.filter((user) => user.configured).length, 0);
     const metrics = teams.reduce((sum, team) => sum + team.configuredMetricsCount, 0);
+    const met = teams.reduce(
+      (sum, team) => sum + team.users.reduce(
+        (userSum, user) => userSum + user.metrics.filter((metric) => metric.status === "met").length,
+        0
+      ),
+      0
+    );
+    const warning = teams.reduce(
+      (sum, team) => sum + team.users.reduce(
+        (userSum, user) => userSum + user.metrics.filter((metric) => metric.status === "warning").length,
+        0
+      ),
+      0
+    );
     const missed = teams.reduce((sum, team) => sum + team.missedMetricsCount, 0);
 
-    return { users, configuredUsers, metrics, missed };
+    return { users, configuredUsers, metrics, met, warning, missed };
   }, [overview]);
 
   const yearOptions = Array.from({ length: 7 }, (_, index) => currentPeriod.year - 3 + index);
@@ -446,11 +579,19 @@ export function KpisPage() {
               <strong>{totals.configuredUsers}</strong>
             </div>
             <div>
-              <span>Indicadores activos</span>
+              <span>KPI's definidos</span>
               <strong>{totals.metrics}</strong>
             </div>
+            <div>
+              <span>Cumplidos</span>
+              <strong>{totals.met}</strong>
+            </div>
+            <div className={totals.warning > 0 ? "is-warning" : ""}>
+              <span>En observacion</span>
+              <strong>{totals.warning}</strong>
+            </div>
             <div className={totals.missed > 0 ? "is-alert" : ""}>
-              <span>Fuera de meta</span>
+              <span>No cumplidos</span>
               <strong>{totals.missed}</strong>
             </div>
             <div>

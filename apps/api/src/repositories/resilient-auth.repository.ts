@@ -47,6 +47,13 @@ export class ResilientAuthRepository implements AuthRepository {
     );
   }
 
+  public findStoredUserById(userId: string) {
+    return this.withFallback(
+      () => this.primary.findStoredUserById(userId),
+      () => this.fallback?.findStoredUserById(userId) ?? Promise.resolve(null)
+    );
+  }
+
   public updateLastLoginAt(userId: string) {
     return this.withFallback(
       () => this.primary.updateLastLoginAt(userId),

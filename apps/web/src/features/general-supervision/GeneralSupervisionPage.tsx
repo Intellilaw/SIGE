@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import type { KpiMetric } from "@sige/contracts";
 
-import { apiGet } from "../../api/http-client";
+import { apiGet, apiPatch } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 
@@ -37,10 +37,21 @@ interface SupervisionTaskUserSummary {
   teamLabel: string;
   specificRole?: string;
   total: number;
+  completedThisMonth?: number;
   today: number;
   overdue: number;
-  monthlyKpiMisses: number;
+  monthlyKpiMisses?: number;
+  kpiMetDays?: number;
+  kpiMissedDays?: number;
+  isObserved?: boolean;
+  canToggleObservation?: boolean;
+  isSynthetic?: boolean;
   dashboardLinks: SupervisionTaskDashboardLink[];
+}
+
+interface SupervisionObservationSetting {
+  userId: string;
+  isObserved: boolean;
 }
 
 interface SupervisionTeamGroup {
@@ -53,7 +64,10 @@ interface SupervisionTeamGroup {
 interface SupervisionTaskOverview {
   todayTotal: number;
   overdueTotal: number;
-  monthlyKpiMissesTotal: number;
+  completedThisMonthTotal?: number;
+  monthlyKpiMissesTotal?: number;
+  kpiMetDaysTotal?: number;
+  kpiMissedDaysTotal?: number;
   total: number;
   users: SupervisionTaskUserSummary[];
 }
@@ -164,69 +178,203 @@ function formatTaskCount(value: number) {
   return `${value} ${value === 1 ? "tarea" : "tareas"}`;
 }
 
-function TaskOverviewPanel({ overview }: { overview: SupervisionTaskOverview }) {
+function isAutomaticUnobservedUser(user: SupervisionTaskUserSummary) {
+  return user.isSynthetic ?? user.userId.startsWith("responsible:");
+}
+
+function canToggleUserObservation(user: SupervisionTaskUserSummary) {
+  return user.canToggleObservation ?? !isAutomaticUnobservedUser(user);
+}
+
+function isObservedTaskUser(user: SupervisionTaskUserSummary) {
+  return user.isObserved ?? canToggleUserObservation(user);
+}
+
+function getCompletedThisMonth(user: SupervisionTaskUserSummary) {
+  return user.completedThisMonth ?? user.total;
+}
+
+function getKpiMetDays(user: SupervisionTaskUserSummary) {
+  return user.kpiMetDays ?? 0;
+}
+
+function getKpiMissedDays(user: SupervisionTaskUserSummary) {
+  return user.kpiMissedDays ?? user.monthlyKpiMisses ?? 0;
+}
+
+function getCompletedThisMonthTotal(overview: SupervisionTaskOverview) {
+  return overview.completedThisMonthTotal ?? overview.total;
+}
+
+function getKpiMetDaysTotal(overview: SupervisionTaskOverview) {
+  return overview.kpiMetDaysTotal ?? 0;
+}
+
+function getKpiMissedDaysTotal(overview: SupervisionTaskOverview) {
+  return overview.kpiMissedDaysTotal ?? overview.monthlyKpiMissesTotal ?? 0;
+}
+
+function TaskUserRow(props: {
+  user: SupervisionTaskUserSummary;
+  muted?: boolean;
+  saving: boolean;
+  onToggleObserved: (userId: string, isObserved: boolean) => void;
+}) {
+  const { user, muted = false, saving, onToggleObserved } = props;
+  const canToggle = canToggleUserObservation(user);
+  const isObserved = isObservedTaskUser(user);
+  const completedThisMonth = getCompletedThisMonth(user);
+  const kpiMetDays = getKpiMetDays(user);
+  const kpiMissedDays = getKpiMissedDays(user);
+
+  return (
+    <section className={`supervision-task-user-row ${muted ? "is-muted" : ""}`}>
+      <div className="supervision-task-user-main">
+        <h4>{user.displayName}</h4>
+        <span>{user.shortName ?? user.teamLabel}</span>
+      </div>
+
+      <label className={`supervision-observe-toggle ${canToggle ? "" : "is-locked"}`}>
+        {canToggle ? (
+          <input
+            type="checkbox"
+            checked={isObserved}
+            disabled={saving}
+            onChange={(event) => onToggleObserved(user.userId, event.currentTarget.checked)}
+          />
+        ) : null}
+        <span>{canToggle ? "Observar" : "Automatico abajo"}</span>
+      </label>
+
+      <div className="supervision-task-counts" aria-label={`${user.displayName}: ${formatTaskCount(completedThisMonth)} realizadas este mes, ${formatTaskCount(user.today)} para hoy incluyendo vencidas, ${formatTaskCount(user.overdue)} vencidas, ${kpiMetDays} días KPI cumplidos y ${kpiMissedDays} días KPI incumplidos`}>
+        <span className="is-total">
+          <strong>{completedThisMonth}</strong>
+          Realizadas mes
+        </span>
+        <span>
+          <strong>{user.today}</strong>
+          Hoy + vencidas
+        </span>
+        <span className="is-overdue">
+          <strong>{user.overdue}</strong>
+          Vencidas
+        </span>
+        <span className="is-kpi-met">
+          <strong>{kpiMetDays}</strong>
+          Días KPI cumplidos
+        </span>
+        <span className="is-kpi-missed">
+          <strong>{kpiMissedDays}</strong>
+          Días KPI incumplidos
+        </span>
+      </div>
+
+      <div className="supervision-task-link-list">
+        {user.dashboardLinks.length > 0 ? (
+          user.dashboardLinks.map((link) => (
+            <Link key={link.moduleId} className="secondary-button supervision-task-dashboard-link" to={link.path}>
+              {user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label}
+            </Link>
+          ))
+        ) : (
+          <Link className="secondary-button supervision-task-dashboard-link" to="/app/kpis">
+            Ir a KPI's
+          </Link>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TaskOverviewPanel(props: {
+  overview: SupervisionTaskOverview;
+  savingObservedUserId: string;
+  onToggleObserved: (userId: string, isObserved: boolean) => void;
+}) {
+  const { overview, savingObservedUserId, onToggleObserved } = props;
+  const [showUnobserved, setShowUnobserved] = useState(false);
+  const observedUsers = overview.users.filter(isObservedTaskUser);
+  const unobservedUsers = overview.users.filter((user) => !isObservedTaskUser(user));
+  const completedThisMonthTotal = getCompletedThisMonthTotal(overview);
+  const kpiMetDaysTotal = getKpiMetDaysTotal(overview);
+  const kpiMissedDaysTotal = getKpiMissedDaysTotal(overview);
+
   return (
     <article className="supervision-task-overview">
       <header className="supervision-task-overview-head">
         <div className="supervision-task-stat is-total">
-          <span>Total critico</span>
-          <strong>{overview.total}</strong>
+          <span>Realizadas este mes</span>
+          <strong>{completedThisMonthTotal}</strong>
         </div>
         <div className="supervision-task-stat is-today">
-          <span>Para hoy</span>
+          <span>Para hoy incl. vencidas</span>
           <strong>{overview.todayTotal}</strong>
         </div>
         <div className="supervision-task-stat is-overdue">
-          <span>Vencidas / sin fecha</span>
+          <span>Vencidas</span>
           <strong>{overview.overdueTotal}</strong>
         </div>
-        <div className="supervision-task-stat is-kpi-month">
-          <span>KPI's incumplidos este mes</span>
-          <strong>{overview.monthlyKpiMissesTotal}</strong>
+        <div className="supervision-task-stat is-kpi-met">
+          <span>Días KPI cumplidos</span>
+          <strong>{kpiMetDaysTotal}</strong>
+        </div>
+        <div className="supervision-task-stat is-kpi-missed">
+          <span>Días KPI incumplidos</span>
+          <strong>{kpiMissedDaysTotal}</strong>
         </div>
       </header>
 
-      <div className="supervision-task-user-list">
-        {overview.users.length === 0 ? (
-          <EmptyState>Sin tareas urgentes por usuario.</EmptyState>
-        ) : (
-          overview.users.map((user) => (
-            <section key={user.userId} className="supervision-task-user-row">
-              <div className="supervision-task-user-main">
-                <h4>{user.displayName}</h4>
-                <span>{user.shortName ?? user.teamLabel}</span>
-              </div>
+      <section className="supervision-observed-panel is-primary">
+        <header className="supervision-observed-panel-head">
+          <div>
+            <h3>Personas que observo</h3>
+            <span>{observedUsers.length} personas</span>
+          </div>
+        </header>
+        <div className="supervision-task-user-list">
+          {observedUsers.length === 0 ? (
+            <EmptyState>Sin personas observadas con alertas.</EmptyState>
+          ) : (
+            observedUsers.map((user) => (
+              <TaskUserRow
+                key={user.userId}
+                user={user}
+                saving={savingObservedUserId === user.userId}
+                onToggleObserved={onToggleObserved}
+              />
+            ))
+          )}
+        </div>
+      </section>
 
-              <div className="supervision-task-counts" aria-label={`${user.displayName}: ${formatTaskCount(user.total)} criticas, ${formatTaskCount(user.today)} para hoy, ${formatTaskCount(user.overdue)} vencidas y ${user.monthlyKpiMisses} KPI's incumplidos este mes`}>
-                <span className="is-total">
-                  <strong>{user.total}</strong>
-                  Total
-                </span>
-                <span>
-                  <strong>{user.today}</strong>
-                  Hoy
-                </span>
-                <span className="is-overdue">
-                  <strong>{user.overdue}</strong>
-                  Vencidas
-                </span>
-                <span className="is-kpi-month">
-                  <strong>{user.monthlyKpiMisses}</strong>
-                  KPI mes
-                </span>
-              </div>
-
-              <div className="supervision-task-link-list">
-                {user.dashboardLinks.map((link) => (
-                  <Link key={link.moduleId} className="secondary-button supervision-task-dashboard-link" to={link.path}>
-                    {user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label}
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ))
-        )}
-      </div>
+      <section className="supervision-observed-panel is-secondary">
+        <header className="supervision-observed-panel-head">
+          <div>
+            <h3>Personas que no observo</h3>
+            <span>{unobservedUsers.length} personas</span>
+          </div>
+          <button type="button" className="secondary-button" onClick={() => setShowUnobserved((current) => !current)}>
+            {showUnobserved ? "Ocultar" : "Mostrar"}
+          </button>
+        </header>
+        {showUnobserved ? (
+          <div className="supervision-task-user-list is-muted">
+            {unobservedUsers.length === 0 ? (
+              <EmptyState>Sin personas fuera de observacion.</EmptyState>
+            ) : (
+              unobservedUsers.map((user) => (
+                <TaskUserRow
+                  key={user.userId}
+                  user={user}
+                  muted
+                  saving={savingObservedUserId === user.userId}
+                  onToggleObserved={onToggleObserved}
+                />
+              ))
+            )}
+          </div>
+        ) : null}
+      </section>
     </article>
   );
 }
@@ -343,6 +491,7 @@ export function GeneralSupervisionPage() {
   const [overview, setOverview] = useState<GeneralSupervisionOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [savingObservedUserId, setSavingObservedUserId] = useState("");
 
   useEffect(() => {
     if (!canAccess) {
@@ -379,15 +528,58 @@ export function GeneralSupervisionPage() {
     };
   }, [canAccess]);
 
+  async function handleToggleObserved(userId: string, isObserved: boolean) {
+    if (!overview) {
+      return;
+    }
+
+    const previousOverview = overview;
+    setSavingObservedUserId(userId);
+    setErrorMessage("");
+    setOverview({
+      ...overview,
+      taskOverview: {
+        ...overview.taskOverview,
+        users: overview.taskOverview.users.map((taskUser) =>
+          taskUser.userId === userId ? { ...taskUser, isObserved, canToggleObservation: true } : taskUser
+        )
+      }
+    });
+
+    try {
+      const saved = await apiPatch<SupervisionObservationSetting>(
+        "/general-supervision/observed-users",
+        { userId, isObserved }
+      );
+      setOverview((current) => current ? {
+        ...current,
+        taskOverview: {
+          ...current.taskOverview,
+          users: current.taskOverview.users.map((taskUser) =>
+            taskUser.userId === userId || taskUser.userId === saved.userId
+              ? { ...taskUser, userId: saved.userId, isObserved: saved.isObserved, canToggleObservation: true }
+              : taskUser
+          )
+        }
+      } : current);
+    } catch (error) {
+      setOverview(previousOverview);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar la preferencia de observacion.");
+    } finally {
+      setSavingObservedUserId("");
+    }
+  }
+
   const summaryCards = useMemo(() => {
     if (!overview) {
       return [];
     }
 
     return [
-      { label: "Tareas para hoy", value: overview.taskOverview.todayTotal, tone: "tasks" },
-      { label: "Vencidas / sin fecha", value: overview.taskOverview.overdueTotal, tone: "overdue" },
-      { label: "KPI's incumplidos este mes", value: overview.taskOverview.monthlyKpiMissesTotal, tone: "kpi-month" },
+      { label: "Realizadas este mes", value: getCompletedThisMonthTotal(overview.taskOverview), tone: "tasks" },
+      { label: "Para hoy incl. vencidas", value: overview.taskOverview.todayTotal, tone: "tasks" },
+      { label: "Tareas vencidas", value: overview.taskOverview.overdueTotal, tone: "overdue" },
+      { label: "Días KPI incumplidos", value: getKpiMissedDaysTotal(overview.taskOverview), tone: "kpi-month" },
       { label: "Terminos abiertos", value: overview.summary.terms, tone: "terms" },
       { label: "KPI's fuera de meta", value: overview.summary.kpiAlerts, tone: "kpis" }
     ];
@@ -433,10 +625,14 @@ export function GeneralSupervisionPage() {
             <div className="panel-header">
               <h2>Tareas por usuario</h2>
               <span>
-                {overview.taskOverview.total} criticas: {overview.taskOverview.todayTotal} hoy / {overview.taskOverview.overdueTotal} vencidas o sin fecha / {overview.taskOverview.monthlyKpiMissesTotal} KPI's mes
+                {getCompletedThisMonthTotal(overview.taskOverview)} realizadas este mes / {overview.taskOverview.todayTotal} hoy incl. vencidas / {overview.taskOverview.overdueTotal} vencidas / {getKpiMissedDaysTotal(overview.taskOverview)} días KPI incumplidos
               </span>
             </div>
-            <TaskOverviewPanel overview={overview.taskOverview} />
+            <TaskOverviewPanel
+              overview={overview.taskOverview}
+              savingObservedUserId={savingObservedUserId}
+              onToggleObserved={handleToggleObserved}
+            />
           </section>
 
           <section className="panel supervision-panel">

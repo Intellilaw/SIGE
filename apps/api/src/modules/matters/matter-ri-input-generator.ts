@@ -39,8 +39,32 @@ type TelegramContext = {
 };
 
 const RI_001_CONNECTION_ID = "RI-001";
+const RI_004_CONNECTION_ID = "RI-004";
+const CADUCIDAD_NOT_APPLICABLE_TEXT = "En este procedimiento no opera la caducidad";
 const MAX_TELEGRAM_CONTEXT_CHARS = 12000;
 const MAX_RI_INPUT_CHARS = 900;
+const MAX_RI_EXPIRATION_OUTPUT_CHARS = 240;
+const ISO_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const RI_EXPIRATION_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: {
+      type: "string",
+      enum: ["date", "not_applicable", "missing_context"]
+    },
+    expirationDate: {
+      type: ["string", "null"],
+      pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    message: {
+      type: ["string", "null"],
+      maxLength: MAX_RI_EXPIRATION_OUTPUT_CHARS
+    }
+  },
+  required: ["status", "expirationDate", "message"]
+} as const;
 
 function normalizeText(value?: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -223,16 +247,159 @@ function buildMissingContextInput(telegramContext: TelegramContext) {
   );
 }
 
-function extractChatCompletionText(payload: unknown) {
-  const content = (payload as {
-    choices?: Array<{
-      message?: {
-        content?: unknown;
-      };
-    }>;
-  }).choices?.[0]?.message?.content;
+function buildMissingContextExpiration(telegramContext: TelegramContext) {
+  const groupName = telegramContext.groupName ? ` (${telegramContext.groupName})` : "";
+  const lastSeen = telegramContext.lastSeenAt ? ` Ultimo registro del bot: ${telegramContext.lastSeenAt}.` : "";
 
-  return typeof content === "string" ? content.trim() : "";
+  return {
+    expirationDate: null,
+    expirationRiOutput: truncate(
+      `RI-004: Falta contexto operativo suficiente del grupo de Telegram${groupName} para calcular la caducidad sin inventar fechas.${lastSeen}`,
+      MAX_RI_EXPIRATION_OUTPUT_CHARS
+    )
+  };
+}
+
+function extractResponsesText(payload: unknown) {
+  const direct = (payload as { output_text?: unknown }).output_text;
+  if (typeof direct === "string") {
+    return direct.trim();
+  }
+
+  const output = (payload as {
+    output?: Array<{
+      content?: Array<{
+        text?: unknown;
+      }>;
+    }>;
+  }).output;
+
+  if (!Array.isArray(output)) {
+    return "";
+  }
+
+  return output
+    .flatMap((entry) => entry.content ?? [])
+    .map((entry) => (typeof entry.text === "string" ? entry.text : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+async function readOpenAiError(response: Response) {
+  const rawBody = await response.text();
+
+  try {
+    const payload = JSON.parse(rawBody) as {
+      error?: {
+        message?: string;
+      };
+    };
+
+    return payload.error;
+  } catch {
+    return undefined;
+  }
+}
+
+async function throwRusconiOpenAiResponseError(response: Response) {
+  const openAiError = await readOpenAiError(response);
+  const providerMessage = openAiError?.message ? ` OpenAI respondio: ${openAiError.message}` : "";
+
+  if (response.status === 401 || response.status === 403) {
+    throw new AppError(
+      502,
+      "RUSCONI_INTELLIGENCE_OPENAI_AUTH_FAILED",
+      `OpenAI rechazo la credencial configurada. Revisa OPENAI_API_KEY.${providerMessage}`
+    );
+  }
+
+  if (response.status === 400 || response.status === 404) {
+    throw new AppError(
+      502,
+      "RUSCONI_INTELLIGENCE_OPENAI_REQUEST_FAILED",
+      `OpenAI no acepto la configuracion de Rusconi Intelligence. Revisa OPENAI_RUSCONI_INTELLIGENCE_MODEL y OPENAI_BASE_URL.${providerMessage}`
+    );
+  }
+
+  if (response.status === 429) {
+    throw new AppError(
+      502,
+      "RUSCONI_INTELLIGENCE_OPENAI_RATE_LIMITED",
+      `OpenAI limito la solicitud o la cuenta no tiene cuota disponible.${providerMessage}`
+    );
+  }
+
+  throw new AppError(
+    502,
+    "RUSCONI_INTELLIGENCE_OPENAI_FAILED",
+    `OpenAI no pudo generar la salida de Rusconi Intelligence.${providerMessage}`
+  );
+}
+
+function parseJsonObject(text: string) {
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fencedMatch?.[1] ?? text).trim();
+
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseExpirationResult(text: string) {
+  const normalized = normalizeText(text);
+  const parsed = parseJsonObject(normalized);
+
+  if (parsed) {
+    const status = normalizeText(parsed.status).toLowerCase();
+    const expirationDate = normalizeText(parsed.expirationDate ?? parsed.fechaCaducidad ?? parsed.date);
+    const message = normalizeText(parsed.message ?? parsed.output ?? parsed.text ?? parsed.expirationRiOutput);
+
+    if (status !== "not_applicable" && ISO_DATE_ONLY_PATTERN.test(expirationDate)) {
+      return {
+        expirationDate,
+        expirationRiOutput: null
+      };
+    }
+
+    if (status === "not_applicable" || message === CADUCIDAD_NOT_APPLICABLE_TEXT) {
+      return {
+        expirationDate: null,
+        expirationRiOutput: CADUCIDAD_NOT_APPLICABLE_TEXT
+      };
+    }
+
+    if (message) {
+      return {
+        expirationDate: null,
+        expirationRiOutput: truncate(message, MAX_RI_EXPIRATION_OUTPUT_CHARS)
+      };
+    }
+  }
+
+  if (ISO_DATE_ONLY_PATTERN.test(normalized)) {
+    return {
+      expirationDate: normalized,
+      expirationRiOutput: null
+    };
+  }
+
+  if (normalized.includes(CADUCIDAD_NOT_APPLICABLE_TEXT)) {
+    return {
+      expirationDate: null,
+      expirationRiOutput: CADUCIDAD_NOT_APPLICABLE_TEXT
+    };
+  }
+
+  return {
+    expirationDate: null,
+    expirationRiOutput: truncate(normalized, MAX_RI_EXPIRATION_OUTPUT_CHARS)
+  };
 }
 
 async function requestRusconiIntelligenceInput(params: {
@@ -253,7 +420,7 @@ async function requestRusconiIntelligenceInput(params: {
   const timeout = setTimeout(() => controller.abort(), env.OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${env.OPENAI_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
+    const response = await fetch(`${env.OPENAI_BASE_URL.replace(/\/$/, "")}/responses`, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -262,8 +429,8 @@ async function requestRusconiIntelligenceInput(params: {
       },
       body: JSON.stringify({
         model: env.OPENAI_RUSCONI_INTELLIGENCE_MODEL,
-        temperature: 0.1,
-        messages: [
+        max_output_tokens: 900,
+        input: [
           {
             role: "system",
             content:
@@ -272,26 +439,31 @@ async function requestRusconiIntelligenceInput(params: {
           {
             role: "user",
             content: [
-              `Prompt ${RI_001_CONNECTION_ID}: ${params.prompt}`,
-              "",
-              "Datos visibles del asunto y tareas vigentes:",
-              JSON.stringify(buildMatterPayload(params.matter, params.tasks), null, 2),
-              "",
-              "Contexto disponible del grupo de Telegram:",
-              JSON.stringify(params.telegramContext, null, 2),
-              "",
-              "Devuelve solo el texto final para la columna Input de RI. Maximo 900 caracteres."
-            ].join("\n")
+              {
+                type: "input_text",
+                text: [
+                  `Prompt ${RI_001_CONNECTION_ID}: ${params.prompt}`,
+                  "",
+                  "Datos visibles del asunto y tareas vigentes:",
+                  JSON.stringify(buildMatterPayload(params.matter, params.tasks), null, 2),
+                  "",
+                  "Contexto disponible del grupo de Telegram:",
+                  JSON.stringify(params.telegramContext, null, 2),
+                  "",
+                  "Devuelve solo el texto final para la columna Input de RI. Maximo 900 caracteres."
+                ].join("\n")
+              }
+            ]
           }
         ]
       })
     });
 
     if (!response.ok) {
-      throw new AppError(502, "RUSCONI_INTELLIGENCE_OPENAI_FAILED", "OpenAI no pudo generar el Input de RI.");
+      await throwRusconiOpenAiResponseError(response);
     }
 
-    const text = extractChatCompletionText(await response.json() as unknown);
+    const text = extractResponsesText(await response.json() as unknown);
     if (!text) {
       throw new AppError(502, "RUSCONI_INTELLIGENCE_EMPTY", "Rusconi Intelligence no genero contenido.");
     }
@@ -307,6 +479,99 @@ async function requestRusconiIntelligenceInput(params: {
     }
 
     throw new AppError(502, "RUSCONI_INTELLIGENCE_FAILED", "No se pudo generar el Input de RI.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requestRusconiIntelligenceExpiration(params: {
+  prompt: string;
+  matter: Matter;
+  tasks: RiMatterTaskContext[];
+  telegramContext: TelegramContext;
+}) {
+  if (!env.OPENAI_API_KEY) {
+    throw new AppError(
+      503,
+      "RUSCONI_INTELLIGENCE_NOT_CONFIGURED",
+      "Rusconi Intelligence no esta conectado a OpenAI. Falta configurar OPENAI_API_KEY en el runtime de la API."
+    );
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${env.OPENAI_BASE_URL.replace(/\/$/, "")}/responses`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: env.OPENAI_RUSCONI_INTELLIGENCE_MODEL,
+        max_output_tokens: 320,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "ri_expiration_result",
+            strict: true,
+            schema: RI_EXPIRATION_JSON_SCHEMA
+          }
+        },
+        input: [
+          {
+            role: "system",
+            content:
+              "Eres Rusconi Intelligence dentro de SIGE. Responde en espanol y devuelve solo JSON valido para una celda de Caducidad. No inventes hechos, fechas ni instancias. Si la caducidad no opera, usa exactamente el texto indicado por el prompt."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: [
+                  `Prompt ${RI_004_CONNECTION_ID}: ${params.prompt}`,
+                  "",
+                  "Datos visibles del asunto y tareas vigentes:",
+                  JSON.stringify(buildMatterPayload(params.matter, params.tasks), null, 2),
+                  "",
+                  "Contexto disponible del grupo de Telegram:",
+                  JSON.stringify(params.telegramContext, null, 2),
+                  "",
+                  "Devuelve solo uno de estos JSON:",
+                  "{\"status\":\"date\",\"expirationDate\":\"YYYY-MM-DD\",\"message\":null}",
+                  `{\"status\":\"not_applicable\",\"expirationDate\":null,\"message\":\"${CADUCIDAD_NOT_APPLICABLE_TEXT}\"}`,
+                  "{\"status\":\"missing_context\",\"expirationDate\":null,\"message\":\"RI-004: Falta contexto para calcular la caducidad sin inventar fechas.\"}"
+                ].join("\n")
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      await throwRusconiOpenAiResponseError(response);
+    }
+
+    const text = extractResponsesText(await response.json() as unknown);
+    if (!text) {
+      throw new AppError(502, "RUSCONI_INTELLIGENCE_EMPTY", "Rusconi Intelligence no genero contenido.");
+    }
+
+    return parseExpirationResult(text);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new AppError(504, "RUSCONI_INTELLIGENCE_TIMEOUT", "Rusconi Intelligence tardo demasiado en responder.");
+    }
+
+    throw new AppError(502, "RUSCONI_INTELLIGENCE_FAILED", "No se pudo generar la Caducidad RI.");
   } finally {
     clearTimeout(timeout);
   }
@@ -332,6 +597,33 @@ export async function generateMatterRiInput(params: {
   }
 
   return requestRusconiIntelligenceInput({
+    prompt: connection.prompt,
+    matter: params.matter,
+    tasks: params.tasks,
+    telegramContext
+  });
+}
+
+export async function generateMatterRiExpiration(params: {
+  matter: Matter;
+  tasks: RiMatterTaskContext[];
+}) {
+  const connection = findRusconiIntelligenceConnection(RI_004_CONNECTION_ID);
+  if (!connection) {
+    throw new AppError(500, "RUSCONI_INTELLIGENCE_PROMPT_MISSING", "No se encontro el prompt RI-004.");
+  }
+
+  const groupId = normalizeText(params.matter.internalTelegramGroupId);
+  if (!groupId) {
+    throw new AppError(400, "MATTER_TELEGRAM_GROUP_REQUIRED", "El asunto necesita ID de grupo interno de Telegram.");
+  }
+
+  const telegramContext = await fetchTelegramContext(groupId, params.matter.internalTelegramGroupName);
+  if (!telegramContext.hasOperationalContext) {
+    return buildMissingContextExpiration(telegramContext);
+  }
+
+  return requestRusconiIntelligenceExpiration({
     prompt: connection.prompt,
     matter: params.matter,
     tasks: params.tasks,

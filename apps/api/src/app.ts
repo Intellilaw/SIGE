@@ -62,6 +62,7 @@ import { PrismaDailyDocumentsRepository } from "./repositories/daily-documents.r
 import { PrismaDashboardRepository } from "./repositories/dashboard.repository";
 import { PrismaExternalContractsRepository } from "./repositories/external-contracts.repository";
 import { PrismaFinanceRepository } from "./repositories/finances.repository";
+import { PrismaGeneralSupervisionPreferencesRepository } from "./repositories/general-supervision-preferences.repository";
 import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses.repository";
 import { PrismaHolidaysRepository } from "./repositories/holidays.repository";
 import { PrismaInternalContractsRepository } from "./repositories/internal-contracts.repository";
@@ -114,6 +115,7 @@ declare module "fastify" {
       dashboard: PrismaDashboardRepository;
       externalContracts: ExternalContractsRepository;
       finances: FinanceRepository;
+      generalSupervisionPreferences: PrismaGeneralSupervisionPreferencesRepository;
       generalExpenses: PrismaGeneralExpensesRepository;
       holidays: HolidaysRepository;
       internalContracts: InternalContractsRepository;
@@ -219,6 +221,7 @@ export async function buildApp() {
       false,
       app.log
     ),
+    generalSupervisionPreferences: new PrismaGeneralSupervisionPreferencesRepository(prisma),
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
     holidays: new PrismaHolidaysRepository(prisma),
     internalContracts: new PrismaInternalContractsRepository(prisma),

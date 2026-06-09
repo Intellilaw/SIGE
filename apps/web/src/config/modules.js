@@ -1,5 +1,5 @@
 export const MODULE_ENABLEMENT_MODULE_ID = "module-enablement";
-const ALWAYS_ENABLED_MODULE_IDS = new Set(["users", MODULE_ENABLEMENT_MODULE_ID]);
+const ALWAYS_ENABLED_MODULE_IDS = new Set(["users", "my-account", MODULE_ENABLEMENT_MODULE_ID]);
 export const appModules = [
     {
         id: "clients",
@@ -268,6 +268,18 @@ export const appModules = [
         phase: "Operativo",
         available: true,
         coverage: ["Alta de usuarios", "Edicion de nombre corto, equipo y rol especifico", "Permisos y acceso por equipo y perfil"]
+    },
+    {
+        id: "my-account",
+        path: "/app/my-account",
+        label: "Mi cuenta",
+        shortLabel: "Mi cuenta",
+        icon: "\u{1F510}",
+        description: "Consulta de identidad de la sesion activa y cambio seguro de contrasena personal.",
+        phase: "Operativo",
+        available: true,
+        access: "all",
+        coverage: ["Datos de cuenta propia", "Cambio de contrasena con validacion actual", "Sesion renovada para el usuario logueado"]
     },
     {
         id: MODULE_ENABLEMENT_MODULE_ID,

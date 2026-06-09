@@ -15,6 +15,7 @@ import { InternalContractsPage } from "./features/modules/InternalContractsPage"
 import { LaborFilesPage } from "./features/modules/LaborFilesPage";
 import { ModuleAvailabilityProvider, useModuleAvailability } from "./features/modules/ModuleAvailabilityContext";
 import { ModuleEnablementPage } from "./features/modules/ModuleEnablementPage";
+import { MyAccountPage } from "./features/account/MyAccountPage";
 import { ThirdPartyDocumentsPage } from "./features/modules/ThirdPartyDocumentsPage";
 import { AppShell } from "./features/shell/AppShell";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
@@ -151,6 +152,7 @@ export default function App() {
             <Route path="guidelines-manuals" element={withEnabledModule("guidelines-manuals", <GuidelinesManualsPage />)} />
             <Route path="holidays" element={withEnabledModule("holidays", <HolidaysPage />)} />
             <Route path="users" element={<UsersPage />} />
+            <Route path="my-account" element={<MyAccountPage />} />
             <Route path="module-enablement" element={<ModuleEnablementPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

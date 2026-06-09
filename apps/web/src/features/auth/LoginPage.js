@@ -49,7 +49,7 @@ function getSafeRedirectTarget(value) {
     if (value === "/mobile" || value.startsWith("/mobile/")) {
         return value;
     }
-    if (value === "/app/brief-manager") {
+    if (value === "/app" || value.startsWith("/app/")) {
         return value;
     }
     return "/app";

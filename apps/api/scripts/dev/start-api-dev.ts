@@ -20,6 +20,7 @@ const SESSION_MANAGER_PLUGIN_BIN = "C:\\Program Files\\Amazon\\SessionManagerPlu
 const DEFAULT_RDS_TUNNEL_LOCAL_HOST = "127.0.0.1";
 const DEFAULT_RDS_TUNNEL_LOCAL_PORT = 15432;
 const DEFAULT_RDS_TUNNEL_REMOTE_PORT = 5432;
+const DEFAULT_LOCAL_POSTGRES_PORT = 5432;
 
 type RuntimeSecret = {
   DATABASE_URL?: string;
@@ -66,7 +67,13 @@ function getLocalDatabaseTarget() {
 }
 
 function shouldUseRdsTunnel() {
-  return true;
+  const value = (process.env.SIGE_USE_RDS_TUNNEL ?? "").trim().toLowerCase();
+  return value === "true" || value === "1" || value === "yes";
+}
+
+function isRdsTunnelRequired() {
+  const value = (process.env.SIGE_RDS_TUNNEL_REQUIRED ?? "").trim().toLowerCase();
+  return value === "true" || value === "1" || value === "yes";
 }
 
 function requireDevEnv(value: string | undefined, label: string) {
@@ -114,6 +121,12 @@ const RUNTIME_SECRET_ENV_KEYS = [
   "OPENAI_LABOR_CONTRACT_TIMEOUT_MS",
   "OPENAI_EXTERNAL_CONTRACT_MODEL",
   "OPENAI_EXTERNAL_CONTRACT_TIMEOUT_MS",
+  "OPENAI_RUSCONI_INTELLIGENCE_MODEL",
+  "OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS",
+  "INTELLILAW_BOT_API_URL",
+  "INTELLILAW_BOT_API_KEY",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS",
   "SSO_AUDIENCE",
   "SSO_ISSUER",
   "SSO_SECRET_KEY"
@@ -157,6 +170,30 @@ function toTunnelDatabaseUrl(databaseUrl: string, config: RdsTunnelConfig) {
   url.searchParams.set("connection_limit", process.env.SIGE_RDS_TUNNEL_CONNECTION_LIMIT ?? "1");
   url.searchParams.set("pool_timeout", process.env.SIGE_RDS_TUNNEL_POOL_TIMEOUT ?? "30");
   return url.toString();
+}
+
+function configureLocalDatabaseFallback(config: RdsTunnelConfig) {
+  if (process.env.SIGE_LOCAL_DATABASE_URL) {
+    process.env.DATABASE_URL = process.env.SIGE_LOCAL_DATABASE_URL;
+    return;
+  }
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    return;
+  }
+
+  const url = new URL(databaseUrl);
+  const isLoopbackHost = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  const port = Number(url.port || 5432);
+  if (isLoopbackHost && port === config.localPort) {
+    url.port = String(process.env.SIGE_LOCAL_POSTGRES_PORT ?? DEFAULT_LOCAL_POSTGRES_PORT);
+    url.searchParams.delete("sslmode");
+    url.searchParams.delete("connect_timeout");
+    url.searchParams.delete("connection_limit");
+    url.searchParams.delete("pool_timeout");
+    process.env.DATABASE_URL = url.toString();
+  }
 }
 
 function startSsmRdsTunnel(config: RdsTunnelConfig) {
@@ -390,16 +427,35 @@ async function main() {
   let tunnelProcess: ChildProcess | null = null;
 
   if (shouldUseRdsTunnel()) {
-    rdsTunnelConfig = getRdsTunnelConfig();
-    const runtimeSecret = await getRuntimeSecret(rdsTunnelConfig);
-    tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
-    applyRuntimeSecretEnvironment(runtimeSecret);
-    process.env.DATABASE_URL = toTunnelDatabaseUrl(
-      requireDevEnv(runtimeSecret.DATABASE_URL, "DATABASE_URL in SIGE_AWS_APP_SECRET_ID"),
-      rdsTunnelConfig
-    );
-    process.env.SIGE_SKIP_LOCAL_POSTGRES = "true";
-    console.log("[dev] API database points to AWS RDS through the local SSM tunnel.");
+    try {
+      rdsTunnelConfig = getRdsTunnelConfig();
+      const runtimeSecret = await getRuntimeSecret(rdsTunnelConfig);
+      tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
+      applyRuntimeSecretEnvironment(runtimeSecret);
+      process.env.DATABASE_URL = toTunnelDatabaseUrl(
+        requireDevEnv(runtimeSecret.DATABASE_URL, "DATABASE_URL in SIGE_AWS_APP_SECRET_ID"),
+        rdsTunnelConfig
+      );
+      process.env.SIGE_SKIP_LOCAL_POSTGRES = "true";
+      console.log("[dev] API database points to AWS RDS through the local SSM tunnel.");
+    } catch (error) {
+      const previousSkipLocalPostgres = process.env.SIGE_SKIP_LOCAL_POSTGRES;
+      if (rdsTunnelConfig) {
+        configureLocalDatabaseFallback(rdsTunnelConfig);
+      }
+      process.env.SIGE_SKIP_LOCAL_POSTGRES = "false";
+
+      if (isRdsTunnelRequired() || !getLocalDatabaseTarget()) {
+        process.env.SIGE_SKIP_LOCAL_POSTGRES = previousSkipLocalPostgres;
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[dev] AWS RDS tunnel unavailable; falling back to local DATABASE_URL. ${message}`);
+      rdsTunnelConfig = null;
+      tunnelProcess?.kill();
+      tunnelProcess = null;
+    }
   }
 
   const target = getLocalDatabaseTarget();

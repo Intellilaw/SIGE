@@ -16,6 +16,12 @@ type RuntimeSecret = {
   OPENAI_BASE_URL?: string;
   OPENAI_QUOTE_TRANSLATION_MODEL?: string;
   OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS?: string | number;
+  OPENAI_RUSCONI_INTELLIGENCE_MODEL?: string;
+  OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS?: string | number;
+  INTELLILAW_BOT_API_URL?: string;
+  INTELLILAW_BOT_API_KEY?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS?: string | number;
 };
 
 type RdsSecret = {
@@ -115,12 +121,32 @@ function assertSecretShape(secret: RuntimeSecret) {
     new URL(secret.OPENAI_BASE_URL);
   }
 
+  if (secret.INTELLILAW_BOT_API_URL) {
+    new URL(secret.INTELLILAW_BOT_API_URL);
+  }
+
   if (
     secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS !== undefined &&
     (!Number.isFinite(Number(secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS)) ||
       Number(secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS) <= 0)
   ) {
     throw new Error("OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS must be a positive number.");
+  }
+
+  if (
+    secret.OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS !== undefined &&
+    (!Number.isFinite(Number(secret.OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS)) ||
+      Number(secret.OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS) <= 0)
+  ) {
+    throw new Error("OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS must be a positive number.");
+  }
+
+  if (
+    secret.TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS !== undefined &&
+    (!Number.isFinite(Number(secret.TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS)) ||
+      Number(secret.TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS) <= 0)
+  ) {
+    throw new Error("TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS must be a positive number.");
   }
 }
 
@@ -129,7 +155,11 @@ function redactOpenAiConfig(secret: RuntimeSecret) {
     openAiConfigured: Boolean(secret.OPENAI_API_KEY),
     openAiBaseUrl: secret.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
     quoteTranslationModel: secret.OPENAI_QUOTE_TRANSLATION_MODEL ?? "gpt-4o-mini",
-    quoteTranslationTimeoutMs: secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS ?? 45000
+    quoteTranslationTimeoutMs: secret.OPENAI_QUOTE_TRANSLATION_TIMEOUT_MS ?? 45000,
+    rusconiIntelligenceModel: secret.OPENAI_RUSCONI_INTELLIGENCE_MODEL ?? "gpt-5.5",
+    rusconiIntelligenceTimeoutMs: secret.OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS ?? 60000,
+    telegramContextConfigured: Boolean(secret.INTELLILAW_BOT_API_URL || secret.TELEGRAM_BOT_TOKEN),
+    telegramLookupTimeoutMs: secret.TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS ?? 5000
   };
 }
 
@@ -172,6 +202,15 @@ async function verifyHealth(apiBaseUrl: string) {
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/health`);
   if (!response.ok) {
     throw new Error(`Health check failed with HTTP ${response.status}.`);
+  }
+
+  return (await response.json()) as Record<string, unknown>;
+}
+
+async function verifyRusconiIntelligenceHealth(apiBaseUrl: string) {
+  const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/health/rusconi-intelligence`);
+  if (!response.ok) {
+    throw new Error(`Rusconi Intelligence health check failed with HTTP ${response.status}.`);
   }
 
   return (await response.json()) as Record<string, unknown>;
@@ -276,6 +315,12 @@ async function main() {
     await runCheck(
       "API health endpoint",
       async () => verifyHealth(config.apiBaseUrl as string),
+      results
+    );
+
+    await runCheck(
+      "Rusconi Intelligence health endpoint",
+      async () => verifyRusconiIntelligenceHealth(config.apiBaseUrl as string),
       results
     );
 

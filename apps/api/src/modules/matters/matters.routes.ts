@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastif
 import { z } from "zod";
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
+  MATTER_PROMOTION_COMMANDS,
   deriveEffectivePermissions,
   type Matter,
   type TaskItem,
@@ -10,8 +11,9 @@ import {
 } from "@sige/contracts";
 
 import { getSessionUser, requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
-import { generateMatterRiInput, type RiMatterTaskContext } from "./matter-ri-input-generator";
+import { generateMatterRiExpiration, generateMatterRiInput, type RiMatterTaskContext } from "./matter-ri-input-generator";
 import { enrichMatterTelegramGroupName } from "./telegram-group-name-resolver";
+import { sendPromotionCommandToTelegram } from "./telegram-promotion-command-sender";
 
 const teamSchema = z.enum([
   "CLIENT_RELATIONS",
@@ -51,6 +53,9 @@ const matterSchema = z.object({
   executionLinkedModule: z.string().nullable().optional(),
   executionLinkedAt: z.string().nullable().optional(),
   executionPrompt: z.string().nullable().optional(),
+  expirationDate: z.string().nullable().optional(),
+  expirationRiOutput: z.string().nullable().optional(),
+  promotionCommand: z.enum(MATTER_PROMOTION_COMMANDS).nullable().optional(),
   holidayAuthorityShortName: executionHolidayAuthoritySchema.nullable().optional(),
   internalTelegramGroupId: z.string().nullable().optional(),
   internalTelegramGroupName: z.string().nullable().optional(),
@@ -71,6 +76,10 @@ const matterIdParamsSchema = z.object({
 
 const bulkTrashSchema = z.object({
   ids: z.array(z.string().min(1)).min(1)
+});
+
+const promotionCommandPayloadSchema = z.object({
+  taskName: z.string().trim().min(1)
 });
 
 const executionPermissionByTeam = {
@@ -107,6 +116,9 @@ function isExecutionMatterPatch(value: unknown) {
 
   const allowedKeys = new Set([
     "executionPrompt",
+    "expirationDate",
+    "expirationRiOutput",
+    "promotionCommand",
     "concluded",
     "notes",
     "holidayAuthorityShortName",
@@ -345,6 +357,63 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
     });
 
     return service.update(params.matterId, { executionPrompt });
+  });
+
+  app.post("/matters/:matterId/generate-ri-expiration", { preHandler: [requireAuth] }, async (request) => {
+    const params = matterIdParamsSchema.parse(request.params);
+    const permissions = getEffectivePermissionsForRequest(request);
+    const matterRecords = await service.list();
+    const currentMatter = matterRecords.find((matter) => matter.id === params.matterId);
+
+    if (!currentMatter) {
+      throw new app.errors.AppError(404, "MATTER_NOT_FOUND", "The requested matter does not exist.");
+    }
+
+    const canWriteMatters = permissions.includes("*") || permissions.includes("matters:write");
+    const canUpdateExecutionMatter = canAccessExecutionMatter({
+      permissions,
+      responsibleTeam: currentMatter.responsibleTeam
+    });
+
+    if (!canWriteMatters && !canUpdateExecutionMatter) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+
+    const tasks = await listRiTaskContext(app, currentMatter);
+    const expirationResult = await generateMatterRiExpiration({
+      matter: currentMatter,
+      tasks
+    });
+
+    return service.update(params.matterId, expirationResult);
+  });
+
+  app.post("/matters/:matterId/send-promotion-command", { preHandler: [requireAuth] }, async (request) => {
+    const params = matterIdParamsSchema.parse(request.params);
+    const payload = promotionCommandPayloadSchema.parse(request.body ?? {});
+    const permissions = getEffectivePermissionsForRequest(request);
+    const matterRecords = await service.list();
+    const currentMatter = matterRecords.find((matter) => matter.id === params.matterId);
+
+    if (!currentMatter) {
+      throw new app.errors.AppError(404, "MATTER_NOT_FOUND", "The requested matter does not exist.");
+    }
+
+    const canWriteMatters = permissions.includes("*") || permissions.includes("matters:write");
+    const canUpdateExecutionMatter = canAccessExecutionMatter({
+      permissions,
+      responsibleTeam: currentMatter.responsibleTeam
+    });
+
+    if (!canWriteMatters && !canUpdateExecutionMatter) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+
+    return sendPromotionCommandToTelegram({
+      matter: currentMatter,
+      taskName: payload.taskName,
+      logger: app.log
+    });
   });
 
   app.post("/matters/bulk-trash", { preHandler: writeGuards }, async (request, reply) => {

@@ -53,6 +53,7 @@ model Organization {
   laborGlobalVacationDays          LaborGlobalVacationDay[]
   userTeams                        UserTeam[]
   systemModuleSettings             SystemModuleSetting[]
+  generalSupervisionObservedUsers  GeneralSupervisionObservedUser[]
   auditLogs                        AuditLog[]
 
   @@index([isActive, name])
@@ -87,6 +88,7 @@ model User {
   passwordResetTokens   PasswordResetToken[]
   auditLogs             AuditLog[]
   laborFile             LaborFile?
+  generalSupervisionObservedSettings GeneralSupervisionObservedUser[]
   organization          Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, email])
@@ -126,6 +128,22 @@ model SystemModuleSetting {
 
   @@id([organizationId, moduleId])
   @@index([organizationId, isEnabled])
+}
+
+model GeneralSupervisionObservedUser {
+  organizationId  String       @default("org-rusconi")
+  userId          String
+  isObserved      Boolean      @default(true)
+  updatedByUserId String?
+  updatedByName   String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, userId])
+  @@index([organizationId, isObserved])
+  @@index([userId])
 }
 
 model LaborFile {
@@ -600,6 +618,9 @@ model Matter {
   executionLinkedModule     String?
   executionLinkedAt         DateTime?
   executionPrompt           String?
+  expirationDate            DateTime?
+  expirationRiOutput        String?
+  promotionCommand          String?
   holidayAuthorityShortName String?
   internalTelegramGroupId   String?
   internalTelegramGroupName String?

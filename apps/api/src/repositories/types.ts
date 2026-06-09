@@ -130,6 +130,7 @@ export interface UpdateManagedUserRecord {
 
 export interface AuthRepository {
   findStoredUserByIdentifier(identifier: string, organizationId?: string): Promise<StoredUser | null>;
+  findStoredUserById(userId: string): Promise<StoredUser | null>;
   findUserById(userId: string): Promise<AuthUser | null>;
   updateLastLoginAt(userId: string): Promise<void>;
   updatePassword(userId: string, passwordHash: string, options?: {
@@ -554,6 +555,9 @@ export interface MatterWriteRecord {
   executionLinkedModule?: string | null;
   executionLinkedAt?: string | null;
   executionPrompt?: string | null;
+  expirationDate?: string | null;
+  expirationRiOutput?: string | null;
+  promotionCommand?: Matter["promotionCommand"] | null;
   holidayAuthorityShortName?: Matter["holidayAuthorityShortName"] | null;
   internalTelegramGroupId?: string | null;
   internalTelegramGroupName?: string | null;
@@ -984,4 +988,31 @@ export interface ModuleSettingsActor {
 export interface ModuleSettingsRepository {
   list(): Promise<SystemModuleSetting[]>;
   setModuleEnabled(moduleId: string, isEnabled: boolean, actor: ModuleSettingsActor): Promise<SystemModuleSetting>;
+}
+
+export interface GeneralSupervisionObservationSetting {
+  organizationId: string;
+  userId: string;
+  isObserved: boolean;
+  updatedByUserId?: string;
+  updatedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeneralSupervisionObservationActor {
+  userId: string;
+  displayName?: string;
+  username?: string;
+  email?: string;
+  shortName?: string;
+}
+
+export interface GeneralSupervisionPreferencesRepository {
+  listObservedUsers(): Promise<GeneralSupervisionObservationSetting[]>;
+  setObservedUser(
+    observedUserId: string,
+    isObserved: boolean,
+    actor: GeneralSupervisionObservationActor
+  ): Promise<GeneralSupervisionObservationSetting>;
 }

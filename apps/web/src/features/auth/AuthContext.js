@@ -54,12 +54,17 @@ export function AuthProvider({ children }) {
         persistSession(response);
         setUser(response.user);
     }
+    async function changePassword(currentPassword, newPassword) {
+        const response = await apiPost("/auth/me/password", { currentPassword, newPassword });
+        persistSession(response);
+        setUser(response.user);
+    }
     function logout() {
         void apiPost("/auth/logout", {}).catch(() => undefined);
         clearAuthTokens();
         setUser(null);
     }
-    const value = useMemo(() => ({ user, loading, login, requestPasswordReset, completePasswordReset, logout }), [user, loading]);
+    const value = useMemo(() => ({ user, loading, login, requestPasswordReset, completePasswordReset, changePassword, logout }), [user, loading]);
     return _jsx(AuthContext.Provider, { value: value, children: children });
 }
 export function useAuth() {

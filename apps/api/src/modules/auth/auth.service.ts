@@ -50,6 +50,47 @@ export class AuthService {
     return user;
   }
 
+  public async changeCurrentUserPassword(
+    app: FastifyInstance,
+    userId: string,
+    currentPassword: string,
+    newPassword: string
+  ) {
+    assertStrongPassword(newPassword);
+
+    const user = await this.repository.findStoredUserById(userId);
+    if (!user) {
+      throw new AppError(404, "USER_NOT_FOUND", "User profile was not found.");
+    }
+
+    if (!user.isActive) {
+      throw new AppError(403, "USER_INACTIVE", "This user account is inactive.");
+    }
+
+    if (!verifyPassword(currentPassword, user.passwordHash)) {
+      throw new AppError(400, "CURRENT_PASSWORD_INVALID", "La contrasena actual no es correcta.");
+    }
+
+    if (verifyPassword(newPassword, user.passwordHash)) {
+      throw new AppError(400, "PASSWORD_REUSED", "La nueva contrasena debe ser distinta a la actual.");
+    }
+
+    await this.repository.updatePassword(user.id, hashPassword(newPassword), {
+      emailConfirmedAt: new Date().toISOString(),
+      passwordResetRequired: false
+    });
+    await this.repository.revokeActivePasswordResetTokensForUser(user.id);
+    await this.repository.revokeRefreshTokensForUser(user.id);
+
+    const freshUser = await this.getProfile(user.id);
+    const tokens = await issueTokenPair(app, this.repository, freshUser);
+
+    return {
+      user: freshUser,
+      tokens
+    };
+  }
+
   public async requestPasswordReset(
     identifier: string,
     organizationId: string,

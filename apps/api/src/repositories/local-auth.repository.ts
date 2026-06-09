@@ -131,6 +131,11 @@ export class LocalAuthRepository implements AuthRepository {
     return user ? this.asAuthUser(user) : null;
   }
 
+  public async findStoredUserById(userId: string) {
+    const user = this.getState().users.find((candidate) => candidate.id === userId);
+    return user ? this.asStoredUser(user) : null;
+  }
+
   public async updateLastLoginAt(userId: string) {
     this.updateState((state) => {
       const user = state.users.find((candidate) => candidate.id === userId);

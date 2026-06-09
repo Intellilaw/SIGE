@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
+  MATTER_PROMOTION_COMMANDS,
   type Client,
   type ExecutionHolidayAuthorityShortName,
   type Holiday,
@@ -22,6 +23,9 @@ import { findExecutionModuleDescriptorBySlug } from "./execution-config";
 
 type MatterPatchPayload = {
   executionPrompt?: string | null;
+  expirationDate?: string | null;
+  expirationRiOutput?: string | null;
+  promotionCommand?: Matter["promotionCommand"] | null;
   holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName | null;
   internalTelegramGroupId?: string | null;
   concluded?: boolean;
@@ -62,7 +66,9 @@ const CHANNEL_LABELS: Record<string, string> = {
   PHONE: "Telefono"
 };
 const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "termino legacy", "distribucion legacy", "evento legacy"]);
+const CADUCIDAD_RI_CONNECTION_ID = "RI-004";
 const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
+const MATTER_PROMOTION_COMMAND_SET = new Set<string>(MATTER_PROMOTION_COMMANDS);
 const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME: Record<string, string> = {
   PJF: "PJF",
   PJCDMX: "TSJCDMX",
@@ -118,6 +124,8 @@ function matchesWordSearch(
       matter.specificProcess,
       matter.matterIdentifier,
       matter.executionPrompt,
+      getCaducidadColumnValue(matter),
+      matter.promotionCommand,
       matter.notes,
       matter.milestone,
       matter.holidayAuthorityShortName,
@@ -213,6 +221,10 @@ function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
 }
 
+function getCaducidadColumnValue(matter: Matter) {
+  return normalizeText(matter.expirationRiOutput) || toDateInput(matter.expirationDate);
+}
+
 function toLocalDateInput(value: Date) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -228,6 +240,13 @@ function getExecutionHolidayAuthority(value?: string | null) {
   const normalized = normalizeText(value);
   return EXECUTION_HOLIDAY_AUTHORITY_SET.has(normalized)
     ? (normalized as ExecutionHolidayAuthorityShortName)
+    : "";
+}
+
+function getMatterPromotionCommand(value?: string | null) {
+  const normalized = normalizeText(value);
+  return MATTER_PROMOTION_COMMAND_SET.has(normalized)
+    ? (normalized as Matter["promotionCommand"])
     : "";
 }
 
@@ -672,8 +691,10 @@ export function ExecutionTeamWorkspace({
   const [panelMatter, setPanelMatter] = useState<Matter | null>(null);
   const [panelMode, setPanelMode] = useState<"create" | "history" | null>(null);
   const [generatingRiMatterIds, setGeneratingRiMatterIds] = useState<Set<string>>(() => new Set());
+  const [generatingCaducidadRiMatterIds, setGeneratingCaducidadRiMatterIds] = useState<Set<string>>(() => new Set());
   const [dirtyMatterIds, setDirtyMatterIds] = useState<Set<string>>(() => new Set());
   const automaticRiAttemptKeysRef = useRef<Set<string>>(new Set());
+  const automaticCaducidadRiAttemptKeysRef = useRef<Set<string>>(new Set());
 
   const module = useMemo(
     () => findExecutionModuleDescriptorBySlug(taskModules, slug),
@@ -757,7 +778,9 @@ export function ExecutionTeamWorkspace({
         setDeletedMatters(sortDeletedMatters(teamDeleted));
         setDirtyMatterIds(new Set());
         setGeneratingRiMatterIds(new Set());
+        setGeneratingCaducidadRiMatterIds(new Set());
         automaticRiAttemptKeysRef.current.clear();
+        automaticCaducidadRiAttemptKeysRef.current.clear();
       } catch (error) {
         setErrorMessage(toErrorMessage(error));
       } finally {
@@ -890,6 +913,49 @@ export function ExecutionTeamWorkspace({
     void handleGenerateRiInput(candidate.id);
   }, [activeMatters, dirtyMatterIds, generatingRiMatterIds, legacyConfig, loading, module]);
 
+  useEffect(() => {
+    if (loading || !module || !legacyConfig || generatingRiMatterIds.size > 0 || generatingCaducidadRiMatterIds.size > 0) {
+      return;
+    }
+
+    const candidate = activeMatters.find((matter) => {
+      const telegramGroupId = normalizeText(matter.internalTelegramGroupId);
+      const caducidadValue = getCaducidadColumnValue(matter);
+      const attemptKey = [
+        matter.id,
+        telegramGroupId,
+        normalizeText(matter.subject),
+        normalizeText(matter.specificProcess)
+      ].join(":");
+
+      return Boolean(telegramGroupId)
+        && !caducidadValue
+        && !dirtyMatterIds.has(matter.id)
+        && !automaticCaducidadRiAttemptKeysRef.current.has(attemptKey);
+    });
+
+    if (!candidate) {
+      return;
+    }
+
+    const attemptKey = [
+      candidate.id,
+      normalizeText(candidate.internalTelegramGroupId),
+      normalizeText(candidate.subject),
+      normalizeText(candidate.specificProcess)
+    ].join(":");
+    automaticCaducidadRiAttemptKeysRef.current.add(attemptKey);
+    void handleGenerateRiExpiration(candidate.id);
+  }, [
+    activeMatters,
+    dirtyMatterIds,
+    generatingCaducidadRiMatterIds,
+    generatingRiMatterIds,
+    legacyConfig,
+    loading,
+    module
+  ]);
+
   if (loadingModules) {
     return <div className="centered-message">Cargando ejecucion...</div>;
   }
@@ -948,6 +1014,9 @@ export function ExecutionTeamWorkspace({
 
     void persistMatter(matterId, {
       executionPrompt: normalizeText(matter.executionPrompt) ? matter.executionPrompt ?? null : null,
+      expirationDate: normalizeText(matter.expirationDate) ? matter.expirationDate ?? null : null,
+      expirationRiOutput: normalizeText(matter.expirationRiOutput) ? matter.expirationRiOutput ?? null : null,
+      promotionCommand: normalizeText(matter.promotionCommand) ? matter.promotionCommand ?? null : null,
       internalTelegramGroupId: normalizeText(matter.internalTelegramGroupId)
         ? matter.internalTelegramGroupId ?? null
         : null,
@@ -973,6 +1042,24 @@ export function ExecutionTeamWorkspace({
     }
   }
 
+  async function handleGenerateRiExpiration(matterId: string) {
+    setGeneratingCaducidadRiMatterIds((current) => new Set(current).add(matterId));
+    setErrorMessage(null);
+
+    try {
+      const updated = await apiPost<Matter>(`/matters/${matterId}/generate-ri-expiration`, {});
+      setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setGeneratingCaducidadRiMatterIds((current) => {
+        const next = new Set(current);
+        next.delete(matterId);
+        return next;
+      });
+    }
+  }
+
   async function handleToggleConcluded(matterId: string, concluded: boolean) {
     updateMatterLocal(matterId, (matter) => {
       matter.concluded = concluded;
@@ -990,6 +1077,16 @@ export function ExecutionTeamWorkspace({
     });
 
     await persistMatter(matterId, { holidayAuthorityShortName });
+  }
+
+  async function handlePromotionCommandChange(matterId: string, value: string) {
+    const promotionCommand = getMatterPromotionCommand(value) || null;
+    updateMatterLocal(matterId, (matter) => {
+      matter.promotionCommand = promotionCommand ?? undefined;
+      return matter;
+    });
+
+    await persistMatter(matterId, { promotionCommand });
   }
 
   async function handleRestore(matterId: string) {
@@ -1215,6 +1312,13 @@ export function ExecutionTeamWorkspace({
                       <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
                     </span>
                   </th>
+                  <th>
+                    <span className="ri-table-column-label">
+                      Caducidad
+                      <RusconiIntelligenceBadge connectionId={CADUCIDAD_RI_CONNECTION_ID} label="Ejecucion / Caducidad" />
+                    </span>
+                  </th>
+                  <th>Comando promoción</th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
                   <th>Comentarios</th>
@@ -1223,13 +1327,13 @@ export function ExecutionTeamWorkspace({
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={19} className="centered-inline-message">
+                    <td colSpan={21} className="centered-inline-message">
                       Cargando ejecucion...
                     </td>
                   </tr>
                 ) : filteredMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={19} className="centered-inline-message">
+                    <td colSpan={21} className="centered-inline-message">
                       No hay asuntos del equipo en esta vista.
                     </td>
                   </tr>
@@ -1239,6 +1343,8 @@ export function ExecutionTeamWorkspace({
                       const clientNumber = getEffectiveClientNumber(matter, clients);
                       const matterTasks = getMatterTasks(matter, activeTaskMap);
                       const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
+                      const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
+                      const isGeneratingCaducidadRi = generatingCaducidadRiMatterIds.has(matter.id);
                       const rowClassName = validation.missing.length > 0 || validation.isOverdue
                         ? "execution-row-danger"
                         : validation.isNextBusinessDay
@@ -1402,6 +1508,47 @@ export function ExecutionTeamWorkspace({
                             </div>
                           </td>
                           <td>
+                            <div className="execution-caducidad-cell">
+                              {caducidadRiOutput ? (
+                                <div className="lead-cell-input matter-cell-readonly execution-caducidad-output" title={caducidadRiOutput}>
+                                  {caducidadRiOutput}
+                                </div>
+                              ) : (
+                                <input
+                                  className="lead-cell-input execution-date-input"
+                                  type="date"
+                                  value={toDateInput(matter.expirationDate)}
+                                  onChange={(event) => {
+                                    handleLocalChange(matter.id, "expirationDate", event.target.value);
+                                    if (normalizeText(matter.expirationRiOutput)) {
+                                      handleLocalChange(matter.id, "expirationRiOutput", "");
+                                    }
+                                  }}
+                                  onBlur={() => handleBlur(matter.id)}
+                                />
+                              )}
+                              {isGeneratingCaducidadRi ? (
+                                <span className="execution-ri-generation-status" role="status">
+                                  Calculando RI-004...
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td>
+                            <select
+                              className="lead-cell-input execution-promotion-select"
+                              value={getMatterPromotionCommand(matter.promotionCommand)}
+                              onChange={(event) => void handlePromotionCommandChange(matter.id, event.target.value)}
+                            >
+                              <option value="">Seleccionar...</option>
+                              {MATTER_PROMOTION_COMMANDS.map((command) => (
+                                <option key={command} value={command}>
+                                  {command}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
                             <input className="lead-cell-input matter-cell-readonly" value={matter.milestone || ""} readOnly />
                           </td>
                           <td className="matter-checkbox-cell">
@@ -1425,7 +1572,7 @@ export function ExecutionTeamWorkspace({
                     })}
 
                     <tr className="execution-table-note">
-                      <td colSpan={19}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
+                      <td colSpan={21}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
                     </tr>
                   </>
                 )}
@@ -1463,6 +1610,13 @@ export function ExecutionTeamWorkspace({
                       <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
                     </span>
                   </th>
+                  <th>
+                    <span className="ri-table-column-label">
+                      Caducidad
+                      <RusconiIntelligenceBadge connectionId={CADUCIDAD_RI_CONNECTION_ID} label="Ejecucion / Caducidad" />
+                    </span>
+                  </th>
+                  <th>Comando promoción</th>
                   <th>Hito conclusion</th>
                   <th>Concluyo?</th>
                   <th>Notas</th>
@@ -1472,13 +1626,13 @@ export function ExecutionTeamWorkspace({
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={13} className="centered-inline-message">
+                    <td colSpan={15} className="centered-inline-message">
                       Cargando papelera...
                     </td>
                   </tr>
                 ) : filteredDeletedMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="centered-inline-message">
+                    <td colSpan={15} className="centered-inline-message">
                       Papelera vacia.
                     </td>
                   </tr>
@@ -1521,6 +1675,8 @@ export function ExecutionTeamWorkspace({
                           )}
                         </td>
                         <td>{matter.executionPrompt || "-"}</td>
+                        <td>{getCaducidadColumnValue(matter) || "-"}</td>
+                        <td>{matter.promotionCommand || "-"}</td>
                         <td>{matter.milestone || "-"}</td>
                         <td>{matter.concluded ? "Si" : "No"}</td>
                         <td>{matter.notes || "-"}</td>

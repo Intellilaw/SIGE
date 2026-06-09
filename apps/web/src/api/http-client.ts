@@ -1,4 +1,5 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+const localApiPort = import.meta.env.VITE_LOCAL_API_PORT ?? "4000";
 
 function isLoopbackHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
@@ -8,10 +9,20 @@ function resolveApiBaseUrl(configuredBaseUrl?: string) {
   const browserHostname = window.location.hostname;
 
   if (configuredBaseUrl?.startsWith("/")) {
+    if (isLoopbackHost(browserHostname)) {
+      const loopbackHostname = browserHostname === "::1" || browserHostname === "[::1]" ? "[::1]" : browserHostname;
+      return `http://${loopbackHostname}:${localApiPort}${configuredBaseUrl}`.replace(/\/$/, "");
+    }
+
     return configuredBaseUrl;
   }
 
   if (!configuredBaseUrl) {
+    if (isLoopbackHost(browserHostname)) {
+      const loopbackHostname = browserHostname === "::1" || browserHostname === "[::1]" ? "[::1]" : browserHostname;
+      return `http://${loopbackHostname}:${localApiPort}/api/v1`;
+    }
+
     return "/api/v1";
   }
 

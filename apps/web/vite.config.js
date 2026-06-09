@@ -7,7 +7,7 @@ function normalizeProxyTarget(value) {
 }
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), "");
-    const apiProxyTarget = normalizeProxyTarget(env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:4000");
+    const apiProxyTarget = normalizeProxyTarget(env.VITE_API_PROXY_TARGET ?? "http://localhost:4000");
     const cacheDir = env.VITE_CACHE_DIR ?? path.join(os.tmpdir(), "sige-2-vite-web-cache");
     return {
         cacheDir,

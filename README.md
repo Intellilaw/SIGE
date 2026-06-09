@@ -92,6 +92,32 @@ npm run dev:api
 npm run dev:web
 ```
 
+8. For local verification, sign in through `/intranet-login?organization=rusconi-consulting`.
+   Seeded development databases include superadmin users with the seed password shown in `apps/api/prisma/seed.ts`.
+
+## Rusconi Intelligence
+
+Rusconi Intelligence runs from the backend so local and production use the same secured flow.
+
+Required runtime settings:
+
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`, normally `https://api.openai.com/v1`
+- `OPENAI_RUSCONI_INTELLIGENCE_MODEL`, default `gpt-5.5`
+- `OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS`
+- `INTELLILAW_BOT_API_URL` and, when required by the bot service, `INTELLILAW_BOT_API_KEY`
+- `TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS`
+
+Readiness check:
+
+```bash
+curl http://localhost:4000/api/v1/health/rusconi-intelligence
+```
+
+Protected app routes such as `/app/execution/litigio` are expected to redirect to the access page when there is no active session. In production this must remain protected; in local, log in with a seeded or migrated user before testing RI columns.
+
+For local API startup, `npm run dev:api` respects `SIGE_USE_RDS_TUNNEL`. If the RDS tunnel is requested but AWS SSM is unavailable, the dev script falls back to `SIGE_LOCAL_DATABASE_URL` unless `SIGE_RDS_TUNNEL_REQUIRED=true`.
+
 ## Security baseline
 
 - access and refresh JWT separation

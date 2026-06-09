@@ -17,7 +17,7 @@ export const OPENAI_FRONTIER_MODEL = {
   modelId: "gpt-5.5",
   policy: "Usar el modelo OpenAI de mayor capacidad disponible en la configuracion activa.",
   configurationKey: "OPENAI_RUSCONI_INTELLIGENCE_MODEL",
-  source: "Referencia vigente consultada en docs oficiales de OpenAI el 18/05/2026."
+  source: "Referencia vigente consultada en docs oficiales de OpenAI el 09/06/2026: GPT-5.5 aparece como modelo frontier recomendado."
 } as const;
 
 export const RUSCONI_INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
@@ -116,6 +116,30 @@ export const RUSCONI_INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
       "Tache rojo cuando no coincide, falta contrato, falta salario diario legible en el contrato/addendum o la nomina no esta vinculada al expediente."
     ],
     cadence: "Ajuste de prompt cuando direccion defina tolerancias o reglas especiales por tipo de contrato laboral."
+  },
+  {
+    id: "RI-004",
+    section: "Ejecucion",
+    surface: "Columna Caducidad",
+    status: "active",
+    promptName: "Caducidad procesal desde Telegram",
+    promptVersion: "v0.1",
+    prompt:
+      "Lee el contexto del grupo interno de Telegram vinculado al asunto y los datos visibles del asunto en Ejecucion. Determina si el procedimiento es un juicio civil, mercantil o familiar de primera instancia. Si lo es, identifica el ultimo impulso procesal real y calcula la fecha probable de caducidad sumando 4 meses naturales sin impulso procesal. Si el procedimiento no es civil, mercantil o familiar de primera instancia, o no esta en primera instancia, responde exactamente: En este procedimiento no opera la caducidad. No inventes fechas; si falta contexto suficiente para ubicar el ultimo impulso procesal, indica que falta contexto para calcular la caducidad.",
+    context: [
+      "ID y nombre del grupo interno de Telegram asociado al asunto.",
+      "Mensajes recientes e historico relevante del grupo interno de Telegram.",
+      "Materia, tipo de procedimiento, instancia, organo jurisdiccional y proceso especifico del asunto.",
+      "Ultimo impulso procesal identificado, fecha del impulso y fuente dentro del grupo de Telegram o SIGE.",
+      "Regla operativa: 4 meses naturales sin impulso procesal solo en juicios civiles, mercantiles y familiares de primera instancia."
+    ],
+    output: [
+      "Fecha probable de caducidad para la columna Caducidad cuando aplique.",
+      "Texto exacto: En este procedimiento no opera la caducidad cuando no aplique.",
+      "Advertencia breve cuando falte contexto para calcularla sin inventar fechas.",
+      "Referencia visual RI-004 en el encabezado de Caducidad."
+    ],
+    cadence: "Ajuste de prompt cuando direccion refine reglas de caducidad por materia, instancia o jurisdiccion."
   }
 ];
 

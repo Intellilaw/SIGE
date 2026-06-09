@@ -2167,6 +2167,71 @@ textarea {
   gap: 18px;
 }
 
+.my-account-grid {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.05fr);
+}
+
+.my-account-profile-panel,
+.my-account-security-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.my-account-identity {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 18px;
+  background: rgba(29, 78, 216, 0.04);
+}
+
+.my-account-identity strong {
+  color: #102a43;
+  font-size: 1.15rem;
+}
+
+.my-account-identity span {
+  color: #52606d;
+  overflow-wrap: anywhere;
+}
+
+.my-account-detail-list,
+.my-account-password-form {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.my-account-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(31, 41, 51, 0.08);
+}
+
+.my-account-detail-list > div:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.my-account-detail-list dt {
+  color: #52606d;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.my-account-detail-list dd {
+  margin: 0;
+  color: #102a43;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .compatibility-list {
   display: grid;
   gap: 14px;
@@ -3694,7 +3759,7 @@ textarea {
 }
 
 .execution-table {
-  min-width: 3400px;
+  min-width: 3750px;
 }
 
 .execution-table thead th {
@@ -3804,6 +3869,30 @@ textarea {
 
 .execution-telegram-name-input {
   min-width: 230px;
+}
+
+.execution-date-input {
+  min-width: 150px;
+}
+
+.execution-caducidad-cell {
+  display: grid;
+  gap: 8px;
+  min-width: 170px;
+}
+
+.execution-caducidad-output {
+  min-width: 220px;
+  max-width: 260px;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  white-space: normal;
+  line-height: 1.32;
+}
+
+.execution-promotion-select {
+  min-width: 220px;
 }
 
 .execution-table-note td {
@@ -6429,12 +6518,21 @@ textarea {
   border-color: rgba(190, 18, 60, 0.16);
 }
 
+.kpis-summary-grid div.is-warning {
+  background: #fff7ed;
+  border-color: rgba(180, 83, 9, 0.16);
+}
+
 .kpis-summary-grid span,
 .kpis-source-note,
 .kpis-sidebar-button span,
 .kpis-user-head p,
 .kpis-metric-row p,
 .kpis-metric-row small,
+.kpis-definition-item p,
+.kpis-definition-item small,
+.kpis-result-row span,
+.kpis-result-empty,
 .kpis-task-cell span {
   color: #64748b;
 }
@@ -6522,6 +6620,138 @@ textarea {
 
 .kpis-user-block.is-unconfigured::before {
   background: #94a3b8;
+}
+
+.kpis-user-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.kpis-user-section {
+  display: grid;
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(31, 41, 51, 0.1);
+}
+
+.kpis-user-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.kpis-user-section-head,
+.kpis-result-group-head,
+.kpis-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kpis-user-section-head h4,
+.kpis-result-group-head h5 {
+  margin: 0;
+  color: #102a43;
+}
+
+.kpis-user-section-head h4 {
+  font-size: 1rem;
+}
+
+.kpis-user-section-head > span,
+.kpis-result-group-head > span {
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.kpis-definition-list {
+  display: grid;
+  gap: 0;
+}
+
+.kpis-definition-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+}
+
+.kpis-definition-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.kpis-definition-item:last-child {
+  padding-bottom: 0;
+}
+
+.kpis-definition-item strong {
+  color: #102a43;
+}
+
+.kpis-definition-item p,
+.kpis-definition-item small {
+  margin: 0;
+}
+
+.kpis-results-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.kpis-result-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0 12px 14px;
+  border-left: 4px solid rgba(100, 116, 139, 0.26);
+}
+
+.kpis-result-group.is-met {
+  border-left-color: #0f766e;
+}
+
+.kpis-result-group.is-warning {
+  border-left-color: #b45309;
+}
+
+.kpis-result-group.is-missed {
+  border-left-color: #be123c;
+}
+
+.kpis-result-list {
+  display: grid;
+  gap: 0;
+}
+
+.kpis-result-row {
+  align-items: flex-start;
+  padding: 10px 0;
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+}
+
+.kpis-result-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.kpis-result-row:last-child {
+  padding-bottom: 0;
+}
+
+.kpis-result-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.kpis-result-row strong {
+  color: #102a43;
+}
+
+.kpis-result-empty {
+  font-weight: 700;
 }
 
 .kpis-user-head,
@@ -6837,13 +7067,13 @@ textarea {
 
 .supervision-task-overview {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   padding: 14px;
 }
 
 .supervision-task-overview-head {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -6867,6 +7097,14 @@ textarea {
   background: #f5f3ff;
 }
 
+.supervision-task-stat.is-kpi-met {
+  background: #ecfdf5;
+}
+
+.supervision-task-stat.is-kpi-missed {
+  background: #f5f3ff;
+}
+
 .supervision-task-stat span,
 .supervision-task-user-main span,
 .supervision-task-counts span {
@@ -6887,15 +7125,58 @@ textarea {
   padding-right: 2px;
 }
 
+.supervision-task-user-list.is-muted {
+  max-height: 360px;
+}
+
+.supervision-observed-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+}
+
+.supervision-observed-panel.is-primary {
+  border-color: rgba(29, 78, 216, 0.18);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
+}
+
+.supervision-observed-panel.is-secondary {
+  background: rgba(248, 250, 252, 0.68);
+  opacity: 0.82;
+}
+
+.supervision-observed-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.supervision-observed-panel-head h3 {
+  margin: 0;
+  color: #102a43;
+}
+
+.supervision-observed-panel-head span {
+  color: #64748b;
+}
+
 .supervision-task-user-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto auto;
+  grid-template-columns: minmax(160px, 1fr) auto minmax(430px, auto) auto;
   align-items: center;
   gap: 14px;
   border: 1px solid rgba(31, 41, 51, 0.08);
   border-radius: 8px;
   background: #fff;
   padding: 12px;
+}
+
+.supervision-task-user-row.is-muted {
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .supervision-task-user-main {
@@ -6909,9 +7190,29 @@ textarea {
   color: #102a43;
 }
 
+.supervision-observe-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #173f6b;
+  font-size: 0.82rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.supervision-observe-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #1d4ed8;
+}
+
+.supervision-observe-toggle.is-locked {
+  color: #94a3b8;
+}
+
 .supervision-task-counts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(72px, 1fr));
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
   gap: 8px;
 }
 
@@ -6942,6 +7243,14 @@ textarea {
 }
 
 .supervision-task-counts .is-kpi-month strong {
+  color: #7c3aed;
+}
+
+.supervision-task-counts .is-kpi-met strong {
+  color: #047857;
+}
+
+.supervision-task-counts .is-kpi-missed strong {
   color: #7c3aed;
 }
 
@@ -8240,6 +8549,7 @@ textarea {
   .commissions-group-grid,
   .commissions-snapshot-grid,
   .kpis-layout,
+  .kpis-results-grid,
   .supervision-bucket-grid,
   .supervision-kpi-grid,
   .ri-prompt-columns,
@@ -8343,6 +8653,11 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .kpis-result-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .commissions-team-breakdown-grid {
     grid-template-columns: 1fr;
   }
@@ -11055,7 +11370,9 @@ textarea {
   .labor-file-vacation-form,
   .labor-file-vacation-date-tools,
   .labor-file-vacation-date-row,
-  .labor-file-vacation-event {
+  .labor-file-vacation-event,
+  .my-account-grid,
+  .my-account-detail-list > div {
     grid-template-columns: 1fr;
   }
 
