@@ -15,7 +15,7 @@ const MODULE_ACCESS = {
         ]
     },
     tasks: { read: ["tasks:read"] },
-    finances: { read: ["finances:read", "finances:write"], write: ["finances:write"] },
+    finances: { read: ["finances:read", "finances:write", "finances:monthly:read"], write: ["finances:write"] },
     "budget-planning": {
         read: ["budget-planning:read", "budget-planning:write"],
         write: ["budget-planning:write"]

@@ -97,14 +97,15 @@ export const RUSCONI_INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
     surface: "Salario diario en Expedientes laborales y Gastos generales / 2. Nomina",
     status: "active",
     promptName: "Validacion de salario diario contra contrato laboral",
-    promptVersion: "v0.1",
+    promptVersion: "v0.2",
     prompt:
-      "Compara el salario diario capturado en el expediente laboral contra el salario vigente extraido del contrato laboral y sus addenda. Si el salario esta expresado como salario mensual bruto, toma el salario mensual mas reciente encontrado en contrato/addenda y conviertelo a salario diario dividiendolo entre 30. Cuando el mismo distintivo aparezca en Nomina, confirma adicionalmente que el salario diario de nomina coincide con el salario diario verificado de Expedientes Laborales. Si falta cualquier pieza de evidencia, marca la validacion como no coincidente.",
+      "Compara el salario diario capturado en el expediente laboral contra el salario diario ordinario bruto vigente extraido del contrato laboral y, especialmente, del addendum vigente mas reciente. Busca y lee de forma especifica expresiones como salario diario, salario diario ordinario, salario diario ordinario bruto o salario base diario; cuando el addendum vigente contenga un salario diario legible, esa cifra es la referencia principal y no debe descartarse porque el salario mensual no sea legible. Usa el salario mensual bruto solamente como respaldo cuando no exista salario diario legible, convirtiendolo a salario diario entre 30. Cuando el mismo distintivo aparezca en Nomina, confirma adicionalmente que el salario diario de nomina coincide con el salario diario verificado de Expedientes Laborales. Si falta cualquier pieza de evidencia, marca la validacion como no coincidente.",
     context: [
       "Salario diario capturado en Informacion general del expediente laboral.",
       "Contrato laboral cargado en Word o PDF firmado cuando exista.",
-      "Addenda laboral cargada en PDF cuando exista y pueda actualizar el salario contractual.",
-      "Salario mensual bruto mas reciente extraido de contrato/addenda y convertido a salario diario dividiendolo entre 30.",
+      "Addenda laboral vigente cargada en PDF cuando exista y pueda actualizar el salario contractual.",
+      "Salario diario ordinario bruto mas reciente extraido de contrato/addenda, con prioridad sobre el salario mensual.",
+      "Salario mensual bruto mas reciente extraido de contrato/addenda y convertido a salario diario dividiendolo entre 30 solo si no hay salario diario legible.",
       "Salario diario visible en Gastos generales / 2. Nomina cuando la fila esta vinculada a un expediente laboral.",
       "Nombre del colaborador, fecha de ingreso y metadatos del documento contractual."
     ],
@@ -112,7 +113,7 @@ export const RUSCONI_INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
       "Distintivo RI-003 visible en la tarjeta Salario diario.",
       "Distintivo RI-003 visible en el campo Salario diario de Nomina.",
       "Palomita verde cuando el salario diario coincide con el contrato laboral.",
-      "Tache rojo cuando no coincide, falta contrato, falta salario legible en el contrato o la nomina no esta vinculada al expediente."
+      "Tache rojo cuando no coincide, falta contrato, falta salario diario legible en el contrato/addendum o la nomina no esta vinculada al expediente."
     ],
     cadence: "Ajuste de prompt cuando direccion defina tolerancias o reglas especiales por tipo de contrato laboral."
   }

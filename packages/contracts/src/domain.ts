@@ -100,6 +100,7 @@ export interface AuthUser {
   specificRole?: string;
   secondarySpecificRole?: string;
   permissions: string[];
+  createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
 }
@@ -373,7 +374,7 @@ export interface ExternalContractRentIncreaseCalculation {
 }
 
 export type LaborFileStatus = "INCOMPLETE" | "COMPLETE";
-export type LaborEmploymentStatus = "ACTIVE" | "FORMER";
+export type LaborEmploymentStatus = "ACTIVE" | "FORMER" | "ARCHIVED";
 
 export type LaborFileDocumentType =
   | "EMPLOYMENT_CONTRACT"
@@ -878,6 +879,7 @@ export const COMMISSION_SECTIONS = [
   "Der Financiero (colaborador)",
   "Compliance Fiscal (lider)",
   "Compliance Fiscal (colaborador)",
+  "Ventas",
   "Comunicacion con cliente",
   "Finanzas",
   "Emilio Petith",
@@ -909,6 +911,7 @@ export interface FinanceRecordStats {
   taxCollaboratorCommissionMxn: number;
   clientRelationsCommissionMxn: number;
   financeCommissionMxn: number;
+  salesCommissionMxn: number;
   netProfitMxn: number;
 }
 
@@ -950,6 +953,7 @@ export interface FinanceRecord {
   closingCommissionRecipient?: string;
   highCollectionProbability: boolean;
   lowCollectionProbability: boolean;
+  salesCommissionMxn: number;
   milestone?: string;
   concluded: boolean;
   financeComments?: string;

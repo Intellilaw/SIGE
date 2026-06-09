@@ -23,6 +23,7 @@ interface UserFormState {
   specificRole: string;
   secondarySpecificRole: string;
   isExternal: boolean;
+  createLaborFile: boolean;
   isActive: boolean;
 }
 
@@ -42,6 +43,7 @@ const EMPTY_FORM: UserFormState = {
   specificRole: "",
   secondarySpecificRole: "",
   isExternal: false,
+  createLaborFile: true,
   isActive: true
 };
 
@@ -293,6 +295,7 @@ export function UsersPage() {
       specificRole: target.specificRole ?? "",
       secondarySpecificRole: target.secondarySpecificRole ?? "",
       isExternal: target.isExternal,
+      createLaborFile: target.createLaborFile ?? !target.isExternal,
       isActive: target.isActive
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -376,6 +379,7 @@ export function UsersPage() {
           specificRole: selectedSpecificRole || null,
           secondarySpecificRole: selectedSecondarySpecificRole || null,
           isExternal: form.isExternal,
+          createLaborFile: form.createLaborFile,
           isActive: form.isActive
         });
         setFlash({ tone: "success", text: "Usuario actualizado correctamente." });
@@ -390,7 +394,8 @@ export function UsersPage() {
           secondaryLegacyTeam: selectedSecondaryTeam || undefined,
           specificRole: selectedSpecificRole || undefined,
           secondarySpecificRole: selectedSecondarySpecificRole || undefined,
-          isExternal: form.isExternal
+          isExternal: form.isExternal,
+          createLaborFile: form.createLaborFile
         });
         setFlash({ tone: "success", text: `Usuario "${trimmedUsername}" creado y autorizado correctamente.` });
       }
@@ -473,6 +478,32 @@ export function UsersPage() {
       await apiPatch<ManagedTeam>(`/users/teams/${target.id}`, { isActive: true });
       setFlash({ tone: "success", text: `Equipo ${target.label} reactivado correctamente.` });
       await fetchTeams();
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setTeamActionId(null);
+    }
+  }
+
+  async function handleDeleteTeam(target: ManagedTeam) {
+    setFlash(null);
+
+    const memberWarning = target.memberCount > 0
+      ? ` Tiene ${target.memberCount} usuario(s) activo(s) asignado(s); si sigue asignado a cualquier usuario, el sistema bloqueara el borrado.`
+      : "";
+    if (!window.confirm(`Seguro que deseas borrar permanentemente el equipo ${target.label}?${memberWarning}`)) {
+      return;
+    }
+
+    setTeamActionId(target.id);
+
+    try {
+      await apiDelete(`/users/teams/${target.id}/permanent`);
+      setFlash({ tone: "success", text: `Equipo ${target.label} borrado correctamente.` });
+      if (editingTeamId === target.id) {
+        resetTeamForm();
+      }
+      await Promise.all([fetchTeams(), fetchUsers()]);
     } catch (error) {
       setFlash({ tone: "error", text: getErrorMessage(error) });
     } finally {
@@ -651,118 +682,143 @@ export function UsersPage() {
           </div>
 
           <div className="users-form-grid users-form-grid-secondary">
-            <label className="form-field">
-              <span>Equipo principal</span>
-              <select
-                disabled={loadingTeams || primaryTeamOptionsForUserForm.length === 0}
-                value={form.legacyTeam}
-                onChange={(event) => setForm((current) => {
-                  const legacyTeam = event.target.value;
-                  const duplicateSecondaryTeam = legacyTeam && current.secondaryLegacyTeam === legacyTeam;
-                  return {
+            <div className="users-form-field-stack">
+              <label className="form-field">
+                <span>Equipo principal</span>
+                <select
+                  disabled={loadingTeams || primaryTeamOptionsForUserForm.length === 0}
+                  value={form.legacyTeam}
+                  onChange={(event) => setForm((current) => {
+                    const legacyTeam = event.target.value;
+                    const duplicateSecondaryTeam = legacyTeam && current.secondaryLegacyTeam === legacyTeam;
+                    return {
+                      ...current,
+                      legacyTeam,
+                      secondaryLegacyTeam: duplicateSecondaryTeam ? "" : current.secondaryLegacyTeam,
+                      secondarySpecificRole: duplicateSecondaryTeam ? "" : current.secondarySpecificRole
+                    };
+                  })}
+                >
+                  <option value="">
+                    {loadingTeams
+                      ? "Cargando equipos..."
+                      : primaryTeamOptionsForUserForm.length === 0
+                        ? "Sin equipos registrados"
+                        : "-- Seleccionar equipo --"}
+                  </option>
+                  {primaryTeamOptionsForUserForm.map((team) => (
+                    <option key={team.key} value={team.label}>
+                      {team.isActive ? team.label : `${team.label} (inactivo)`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="form-field">
+                <span>Segundo equipo</span>
+                <select
+                  disabled={loadingTeams || secondaryTeamOptionsForUserForm.length === 0}
+                  value={form.secondaryLegacyTeam}
+                  onChange={(event) => setForm((current) => ({
                     ...current,
-                    legacyTeam,
-                    secondaryLegacyTeam: duplicateSecondaryTeam ? "" : current.secondaryLegacyTeam,
-                    secondarySpecificRole: duplicateSecondaryTeam ? "" : current.secondarySpecificRole
-                  };
-                })}
-              >
-                <option value="">
-                  {loadingTeams
-                    ? "Cargando equipos..."
-                    : primaryTeamOptionsForUserForm.length === 0
-                      ? "Sin equipos registrados"
-                      : "-- Seleccionar equipo --"}
-                </option>
-                {primaryTeamOptionsForUserForm.map((team) => (
-                  <option key={team.key} value={team.label}>
-                    {team.isActive ? team.label : `${team.label} (inactivo)`}
+                    secondaryLegacyTeam: event.target.value,
+                    secondarySpecificRole: event.target.value ? current.secondarySpecificRole : ""
+                  }))}
+                >
+                  <option value="">
+                    {loadingTeams
+                      ? "Cargando equipos..."
+                      : secondaryTeamOptionsForUserForm.length === 0
+                        ? "Sin otro equipo disponible"
+                        : "-- Sin segundo equipo --"}
                   </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="form-field">
-              <span>Rol principal</span>
-              <select
-                value={form.specificRole}
-                onChange={(event) => setForm((current) => ({ ...current, specificRole: event.target.value }))}
-              >
-                <option value="">-- Seleccionar rol --</option>
-                {SPECIFIC_ROLE_OPTIONS.map((specificRole) => (
-                  <option key={specificRole} value={specificRole}>
-                    {specificRole}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="form-field">
-              <span>Segundo equipo</span>
-              <select
-                disabled={loadingTeams || secondaryTeamOptionsForUserForm.length === 0}
-                value={form.secondaryLegacyTeam}
-                onChange={(event) => setForm((current) => ({
-                  ...current,
-                  secondaryLegacyTeam: event.target.value,
-                  secondarySpecificRole: event.target.value ? current.secondarySpecificRole : ""
-                }))}
-              >
-                <option value="">
-                  {loadingTeams
-                    ? "Cargando equipos..."
-                    : secondaryTeamOptionsForUserForm.length === 0
-                      ? "Sin otro equipo disponible"
-                      : "-- Sin segundo equipo --"}
-                </option>
-                {secondaryTeamOptionsForUserForm.map((team) => (
-                  <option key={team.key} value={team.label}>
-                    {team.isActive ? team.label : `${team.label} (inactivo)`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="form-field">
-              <span>Segundo rol</span>
-              <select
-                disabled={!form.secondaryLegacyTeam}
-                value={form.secondarySpecificRole}
-                onChange={(event) => setForm((current) => ({ ...current, secondarySpecificRole: event.target.value }))}
-              >
-                <option value="">-- Seleccionar segundo rol --</option>
-                {SPECIFIC_ROLE_OPTIONS.map((specificRole) => (
-                  <option key={specificRole} value={specificRole}>
-                    {specificRole}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="form-field checkbox-field">
-              <span>Tipo de usuario</span>
-              <label className="checkbox-row">
-                <input
-                  checked={form.isExternal}
-                  onChange={(event) => setForm((current) => ({ ...current, isExternal: event.target.checked }))}
-                  type="checkbox"
-                />
-                <span>{form.isExternal ? "Usuario externo" : "Usuario interno"}</span>
+                  {secondaryTeamOptionsForUserForm.map((team) => (
+                    <option key={team.key} value={team.label}>
+                      {team.isActive ? team.label : `${team.label} (inactivo)`}
+                    </option>
+                  ))}
+                </select>
               </label>
-            </label>
+            </div>
 
-            <label className="form-field checkbox-field">
-              <span>Estado</span>
-              <label className="checkbox-row">
-                <input
-                  checked={form.isActive}
-                  disabled={!isEditing}
-                  onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
-                  type="checkbox"
-                />
-                <span>{form.isActive ? "Activo" : "Inactivo"}</span>
+            <div className="users-form-field-stack">
+              <label className="form-field">
+                <span>Rol principal</span>
+                <select
+                  value={form.specificRole}
+                  onChange={(event) => setForm((current) => ({ ...current, specificRole: event.target.value }))}
+                >
+                  <option value="">-- Seleccionar rol --</option>
+                  {SPECIFIC_ROLE_OPTIONS.map((specificRole) => (
+                    <option key={specificRole} value={specificRole}>
+                      {specificRole}
+                    </option>
+                  ))}
+                </select>
               </label>
-            </label>
+
+              <label className="form-field">
+                <span>Segundo rol</span>
+                <select
+                  disabled={!form.secondaryLegacyTeam}
+                  value={form.secondarySpecificRole}
+                  onChange={(event) => setForm((current) => ({ ...current, secondarySpecificRole: event.target.value }))}
+                >
+                  <option value="">-- Seleccionar segundo rol --</option>
+                  {SPECIFIC_ROLE_OPTIONS.map((specificRole) => (
+                    <option key={specificRole} value={specificRole}>
+                      {specificRole}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="users-form-field-stack">
+              <label className="form-field checkbox-field">
+                <span>Tipo de usuario</span>
+                <label className="checkbox-row">
+                  <input
+                    checked={form.isExternal}
+                    onChange={(event) => {
+                      const isExternal = event.target.checked;
+                      setForm((current) => ({
+                        ...current,
+                        isExternal,
+                        createLaborFile: isExternal ? false : true
+                      }));
+                    }}
+                    type="checkbox"
+                  />
+                  <span>{form.isExternal ? "Usuario externo" : "Usuario interno"}</span>
+                </label>
+              </label>
+
+              <label className="form-field checkbox-field">
+                <span>Crear expediente laboral</span>
+                <label className="checkbox-row">
+                  <input
+                    checked={form.createLaborFile}
+                    onChange={(event) => setForm((current) => ({ ...current, createLaborFile: event.target.checked }))}
+                    type="checkbox"
+                  />
+                  <span>{form.createLaborFile ? "Si" : "No"}</span>
+                </label>
+              </label>
+
+              <label className="form-field checkbox-field">
+                <span>Estado</span>
+                <label className="checkbox-row">
+                  <input
+                    checked={form.isActive}
+                    disabled={!isEditing}
+                    onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
+                    type="checkbox"
+                  />
+                  <span>{form.isActive ? "Activo" : "Inactivo"}</span>
+                </label>
+              </label>
+            </div>
           </div>
 
           <div className="form-actions">
@@ -832,7 +888,7 @@ export function UsersPage() {
           </form>
         ) : (
           <div className="editing-banner">
-            Solo un superadmin puede crear, editar, reactivar o desactivar equipos y espacios de Ejecucion.
+            Solo un superadmin puede crear, editar, borrar, reactivar o desactivar equipos y espacios de Ejecucion.
           </div>
         )}
 
@@ -904,6 +960,15 @@ export function UsersPage() {
                             {teamActionId === team.id ? "Procesando..." : "Reactivar"}
                           </button>
                         )}
+                        <button
+                          className="danger-button"
+                          disabled={!canManageTeams || Boolean(teamActionId)}
+                          onClick={() => void handleDeleteTeam(team)}
+                          title="Borrar permanentemente el equipo"
+                          type="button"
+                        >
+                          {teamActionId === team.id ? "Procesando..." : "Borrar"}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -932,6 +997,7 @@ export function UsersPage() {
                 <th>Nombre corto</th>
                 <th>Tipo de acceso</th>
                 <th>Tipo de usuario</th>
+                <th>Expediente laboral</th>
                 <th>Rol sistema</th>
                 <th>Equipo principal</th>
                 <th>Rol principal</th>
@@ -946,11 +1012,11 @@ export function UsersPage() {
             <tbody>
               {loadingUsers ? (
                 <tr>
-                  <td colSpan={15}>Cargando usuarios...</td>
+                  <td colSpan={16}>Cargando usuarios...</td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={15}>No hay usuarios registrados.</td>
+                  <td colSpan={16}>No hay usuarios registrados.</td>
                 </tr>
               ) : (
                 rows.map((entry) => (
@@ -971,6 +1037,11 @@ export function UsersPage() {
                     <td>
                       <span className={`status-pill ${entry.isExternal ? "status-migration" : "status-live"}`}>
                         {entry.isExternal ? "Externo" : "Interno"}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`status-pill ${entry.createLaborFile ? "status-live" : "status-migration"}`}>
+                        {entry.createLaborFile ? "Si" : "No"}
                       </span>
                     </td>
                     <td>{getSystemRoleLabel(entry.role)}</td>

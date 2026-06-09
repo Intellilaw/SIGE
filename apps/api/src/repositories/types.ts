@@ -102,6 +102,7 @@ export interface CreateManagedUserRecord {
   secondarySpecificRole?: string;
   permissions: string[];
   isExternal?: boolean;
+  createLaborFile?: boolean;
   passwordHash: string;
 }
 
@@ -121,6 +122,7 @@ export interface UpdateManagedUserRecord {
   secondarySpecificRole?: string | null;
   permissions?: string[];
   isExternal?: boolean;
+  createLaborFile?: boolean;
   isActive?: boolean;
   passwordResetRequired?: boolean;
   emailConfirmedAt?: string | null;
@@ -420,6 +422,9 @@ export interface LaborFilesRepository {
   listDocumentsForContractPrefill(laborFileId: string): Promise<LaborFileDocumentRecord[]>;
   findVacationAcceptanceDocument(eventId: string): Promise<LaborVacationAcceptanceDocumentRecord | null>;
   update(laborFileId: string, payload: LaborFileUpdateInput): Promise<LaborFile>;
+  archive(laborFileId: string): Promise<LaborFile>;
+  restore(laborFileId: string): Promise<LaborFile>;
+  deleteLaborFile(laborFileId: string): Promise<void>;
   uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord): Promise<LaborFileDocument>;
   deleteDocument(documentId: string): Promise<void>;
   createVacationEvent(laborFileId: string, payload: LaborVacationEventInput): Promise<LaborVacationEvent>;
@@ -960,6 +965,8 @@ export interface UsersRepository {
   createTeam(payload: UserTeamWriteRecord): Promise<ManagedTeam>;
   updateTeam(teamId: string, payload: UserTeamUpdateRecord): Promise<ManagedTeam | null>;
   deactivateTeam(teamId: string): Promise<ManagedTeam | null>;
+  countTeamAssignments(teamKey: string): Promise<number>;
+  deleteTeam(teamId: string): Promise<ManagedTeam | null>;
 }
 
 export interface DashboardRepository {

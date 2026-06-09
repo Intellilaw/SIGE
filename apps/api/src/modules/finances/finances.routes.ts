@@ -76,12 +76,13 @@ const sendMatterSchema = yearMonthSchema.extend({
 
 export const financesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.FinancesService(app.repositories.finances);
+  const monthlyReadGuards = [requireAuth, requireAnyPermissions(["finances:read", "finances:write", "finances:monthly:read"])];
   const readGuards = [requireAuth, requireAnyPermissions(["finances:read", "finances:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
   const sendMatterGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
   const deleteGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
 
-  app.get("/finances/records", { preHandler: readGuards }, async (request) => {
+  app.get("/finances/records", { preHandler: monthlyReadGuards }, async (request) => {
     const query = yearMonthSchema.parse(request.query);
     return service.listRecords(query.year, query.month);
   });
@@ -128,5 +129,5 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
     return service.sendMatterToFinance(payload.matterId, payload.year, payload.month);
   });
 
-  app.get("/finances/commission-receivers", { preHandler: readGuards }, async () => service.listCommissionReceivers());
+  app.get("/finances/commission-receivers", { preHandler: monthlyReadGuards }, async () => service.listCommissionReceivers());
 };

@@ -17,7 +17,8 @@ const createUserSchema = z.object({
   secondaryLegacyTeam: z.string().optional(),
   specificRole: z.string().optional(),
   secondarySpecificRole: z.string().optional(),
-  isExternal: z.boolean().optional()
+  isExternal: z.boolean().optional(),
+  createLaborFile: z.boolean().optional()
 });
 
 const updateUserSchema = z.object({
@@ -32,6 +33,7 @@ const updateUserSchema = z.object({
   specificRole: z.string().nullable().optional(),
   secondarySpecificRole: z.string().nullable().optional(),
   isExternal: z.boolean().optional(),
+  createLaborFile: z.boolean().optional(),
   isActive: z.boolean().optional()
 });
 
@@ -102,6 +104,13 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
     const params = teamIdParamsSchema.parse(request.params);
     const payload = updateTeamSchema.parse(request.body);
     return service.updateTeam(params.teamId, payload);
+  });
+
+  app.delete("/users/teams/:teamId/permanent", { preHandler: teamManageGuards }, async (request, reply) => {
+    const params = teamIdParamsSchema.parse(request.params);
+    await service.deleteTeam(params.teamId);
+    reply.code(204);
+    return null;
   });
 
   app.delete("/users/teams/:teamId", { preHandler: teamManageGuards }, async (request) => {

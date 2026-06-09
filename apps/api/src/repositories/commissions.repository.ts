@@ -3,6 +3,7 @@ import { COMMISSION_SECTIONS } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
+import { attachSalesCommissionsToFinanceRecords } from "./finance-sales-commissions";
 import {
   mapCommissionExclusion,
   mapCommissionReceiver,
@@ -47,9 +48,13 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
         orderBy: [{ section: "asc" }, { group: "asc" }, { createdAt: "asc" }]
       })
     ]);
+    const enrichedFinanceRecords = await attachSalesCommissionsToFinanceRecords(
+      this.prisma,
+      financeRecords.map(mapFinanceRecord)
+    );
 
     return {
-      financeRecords: financeRecords.map(mapFinanceRecord),
+      financeRecords: enrichedFinanceRecords,
       generalExpenses: generalExpenses.map(mapGeneralExpense),
       receivers: receivers.map(mapCommissionReceiver),
       exclusions: exclusions.map(mapCommissionExclusion)

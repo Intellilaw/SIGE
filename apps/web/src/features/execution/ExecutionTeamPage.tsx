@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
@@ -672,6 +672,8 @@ export function ExecutionTeamWorkspace({
   const [panelMatter, setPanelMatter] = useState<Matter | null>(null);
   const [panelMode, setPanelMode] = useState<"create" | "history" | null>(null);
   const [generatingRiMatterIds, setGeneratingRiMatterIds] = useState<Set<string>>(() => new Set());
+  const [dirtyMatterIds, setDirtyMatterIds] = useState<Set<string>>(() => new Set());
+  const automaticRiAttemptKeysRef = useRef<Set<string>>(new Set());
 
   const module = useMemo(
     () => findExecutionModuleDescriptorBySlug(taskModules, slug),
@@ -753,6 +755,9 @@ export function ExecutionTeamWorkspace({
         setDistributionHistory(loadedDistributionHistory);
         setActiveMatters(sortActiveMatters(teamMatters, loadedClients));
         setDeletedMatters(sortDeletedMatters(teamDeleted));
+        setDirtyMatterIds(new Set());
+        setGeneratingRiMatterIds(new Set());
+        automaticRiAttemptKeysRef.current.clear();
       } catch (error) {
         setErrorMessage(toErrorMessage(error));
       } finally {
@@ -860,6 +865,31 @@ export function ExecutionTeamWorkspace({
     [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]
   );
 
+  useEffect(() => {
+    if (loading || !module || !legacyConfig || generatingRiMatterIds.size > 0) {
+      return;
+    }
+
+    const candidate = activeMatters.find((matter) => {
+      const telegramGroupId = normalizeText(matter.internalTelegramGroupId);
+      const riInput = normalizeText(matter.executionPrompt);
+      const attemptKey = `${matter.id}:${telegramGroupId}`;
+
+      return Boolean(telegramGroupId)
+        && !riInput
+        && !dirtyMatterIds.has(matter.id)
+        && !automaticRiAttemptKeysRef.current.has(attemptKey);
+    });
+
+    if (!candidate) {
+      return;
+    }
+
+    const attemptKey = `${candidate.id}:${normalizeText(candidate.internalTelegramGroupId)}`;
+    automaticRiAttemptKeysRef.current.add(attemptKey);
+    void handleGenerateRiInput(candidate.id);
+  }, [activeMatters, dirtyMatterIds, generatingRiMatterIds, legacyConfig, loading, module]);
+
   if (loadingModules) {
     return <div className="centered-message">Cargando ejecucion...</div>;
   }
@@ -891,12 +921,18 @@ export function ExecutionTeamWorkspace({
     try {
       const updated = await apiPatch<Matter>(`/matters/${matterId}`, payload);
       setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+      setDirtyMatterIds((current) => {
+        const next = new Set(current);
+        next.delete(matterId);
+        return next;
+      });
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     }
   }
 
   function handleLocalChange(matterId: string, field: keyof MatterPatchPayload, value: string) {
+    setDirtyMatterIds((current) => new Set(current).add(matterId));
     void updateMatterLocal(matterId, (matter) => {
       const draft = matter as Matter & Record<string, unknown>;
       draft[field as string] = value;
@@ -1358,18 +1394,11 @@ export function ExecutionTeamWorkspace({
                                 onBlur={() => handleBlur(matter.id)}
                                 placeholder="Prompt operativo..."
                               />
-                              <button
-                                type="button"
-                                className="secondary-button execution-ri-generate-button"
-                                disabled={
-                                  generatingRiMatterIds.has(matter.id) ||
-                                  !normalizeText(matter.internalTelegramGroupId)
-                                }
-                                onClick={() => void handleGenerateRiInput(matter.id)}
-                                title="Generar Input de RI con RI-001"
-                              >
-                                {generatingRiMatterIds.has(matter.id) ? "Generando..." : "Generar RI"}
-                              </button>
+                              {generatingRiMatterIds.has(matter.id) ? (
+                                <span className="execution-ri-generation-status" role="status">
+                                  Generando RI...
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                           <td>

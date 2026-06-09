@@ -66,20 +66,8 @@ import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses
 import { PrismaHolidaysRepository } from "./repositories/holidays.repository";
 import { PrismaInternalContractsRepository } from "./repositories/internal-contracts.repository";
 import { PrismaKpisRepository } from "./repositories/kpis.repository";
-import {
-  LocalLaborFilesRepository,
-  PrismaLaborFilesRepository,
-  ResilientLaborFilesRepository
-} from "./repositories/labor-files.repository";
+import { PrismaLaborFilesRepository, ResilientLaborFilesRepository } from "./repositories/labor-files.repository";
 import { PrismaLeadsRepository } from "./repositories/leads.repository";
-import { LocalAuthRepository } from "./repositories/local-auth.repository";
-import {
-  LocalBusinessStore,
-  LocalClientsRepository,
-  LocalMattersRepository,
-  LocalQuotesRepository,
-  LocalTasksRepository
-} from "./repositories/local-business.repository";
 import { PrismaMattersRepository } from "./repositories/matters.repository";
 import { PrismaModuleSettingsRepository } from "./repositories/module-settings.repository";
 import { PrismaQuotesRepository } from "./repositories/quotes.repository";
@@ -208,22 +196,18 @@ export async function buildApp() {
     runWithEmptyTenantContext(done);
   });
 
+  // Local development uses AWS RDS as the source of truth; local JSON/Postgres fallbacks stay disabled.
   const authRepository = new ResilientAuthRepository(
     new PrismaAuthRepository(prisma),
-    env.APP_ENV === "development" && LocalAuthRepository.isAvailable()
-      ? new LocalAuthRepository()
-      : null,
+    null,
     app.log
   );
-  const localBusinessStore = env.APP_ENV === "development" && LocalBusinessStore.isAvailable()
-    ? new LocalBusinessStore()
-    : null;
   app.decorate("repositories", {
     auth: authRepository,
     budgetPlanning: new PrismaBudgetPlanningRepository(prisma),
     clients: new ResilientClientsRepository(
       new PrismaClientsRepository(prisma),
-      localBusinessStore ? new LocalClientsRepository(localBusinessStore) : null,
+      null,
       app.log
     ),
     commissions: new PrismaCommissionsRepository(prisma),
@@ -232,7 +216,7 @@ export async function buildApp() {
     externalContracts: new PrismaExternalContractsRepository(prisma),
     finances: new ResilientFinanceRepository(
       new PrismaFinanceRepository(prisma),
-      env.APP_ENV === "development" && process.env.SIGE_USE_RDS_TUNNEL !== "true",
+      false,
       app.log
     ),
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
@@ -241,27 +225,25 @@ export async function buildApp() {
     kpis: new PrismaKpisRepository(prisma),
     laborFiles: new ResilientLaborFilesRepository(
       new PrismaLaborFilesRepository(prisma),
-      env.APP_ENV === "development" && LocalLaborFilesRepository.isAvailable()
-        ? new LocalLaborFilesRepository()
-        : null,
+      null,
       app.log
     ),
     leads: new PrismaLeadsRepository(prisma),
     matters: new ResilientMattersRepository(
       new PrismaMattersRepository(prisma),
-      localBusinessStore ? new LocalMattersRepository(localBusinessStore) : null,
+      null,
       app.log
     ),
     moduleSettings: new PrismaModuleSettingsRepository(prisma),
     quotes: new ResilientQuotesRepository(
       new PrismaQuotesRepository(prisma),
-      localBusinessStore ? new LocalQuotesRepository(localBusinessStore) : null,
+      null,
       app.log
     ),
     sales: new PrismaSalesRepository(prisma),
     tasks: new ResilientTasksRepository(
       new PrismaTasksRepository(prisma),
-      localBusinessStore ? new LocalTasksRepository(localBusinessStore) : null,
+      null,
       app.log
     ),
     users: new PrismaUsersRepository(prisma)

@@ -75,6 +75,7 @@ model User {
   secondarySpecificRole String?
   permissions           Json                 @default("[]")
   isExternal            Boolean              @default(false)
+  createLaborFile       Boolean              @default(true)
   isActive              Boolean              @default(true)
   passwordResetRequired Boolean              @default(false)
   lastLoginAt           DateTime?

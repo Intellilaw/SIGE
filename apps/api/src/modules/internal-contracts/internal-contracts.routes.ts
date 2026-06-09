@@ -216,11 +216,7 @@ export const internalContractsRoutes: FastifyPluginAsync = async (app) => {
     const requestedFormat = query.format ?? "docx";
     const generatedState = await service.findGeneratedProfessionalServicesStateByContractId(params.contractId);
 
-    if (generatedState) {
-      if (requestedFormat === "pdf") {
-        throw new app.errors.AppError(404, "INTERNAL_CONTRACT_DOCUMENT_NOT_FOUND", "El archivo del contrato no existe.");
-      }
-
+    if (generatedState && requestedFormat !== "pdf") {
       const { matter, quote, existingState } = await loadProfessionalServicesContext(generatedState.sourceMatterId);
       const prefill = buildProfessionalServicesContractPrefill(matter, quote, existingState);
       const files = await renderProfessionalServicesContractFiles({

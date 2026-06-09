@@ -49,6 +49,15 @@ function getComparableTeamAssignment(team?: Team | null, legacyTeam?: string | n
   return team ? `key:${team}` : `label:${normalizeTeamLabel(legacyTeam ?? "")}`;
 }
 
+function normalizeCreateLaborFile(value: boolean | undefined, context: {
+  isExternal: boolean;
+  role: string;
+  legacyRole: string;
+}) {
+  const requested = value ?? !context.isExternal;
+  return requested && context.role !== "SUPERADMIN" && context.legacyRole !== "SUPERADMIN";
+}
+
 export class UsersService {
   public constructor(private readonly repository: UsersRepository) {}
 
@@ -100,6 +109,7 @@ export class UsersService {
       secondarySpecificRole
     });
     assertStrongPassword(payload.password);
+    const isExternal = payload.isExternal ?? false;
 
     return this.repository.create({
       email,
@@ -115,7 +125,8 @@ export class UsersService {
       specificRole,
       secondarySpecificRole,
       permissions,
-      isExternal: payload.isExternal ?? false,
+      isExternal,
+      createLaborFile: normalizeCreateLaborFile(payload.createLaborFile, { isExternal, role, legacyRole }),
       passwordHash: hashPassword(payload.password)
     });
   }
@@ -157,10 +168,10 @@ export class UsersService {
     const email = payload.email === undefined ? undefined : normalizeEmail(payload.email);
     const team = payload.legacyTeam === undefined
       ? currentUser.team
-      : managedTeam?.key;
+      : (managedTeam?.key ?? null);
     const secondaryTeam = payload.secondaryLegacyTeam === undefined
       ? currentUser.secondaryTeam
-      : managedSecondaryTeam?.key;
+      : (managedSecondaryTeam?.key ?? null);
     this.assertDistinctTeams(team, legacyTeam, secondaryTeam, secondaryLegacyTeam);
     const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole, secondarySpecificRole });
     const permissions = derivePermissions({
@@ -173,6 +184,10 @@ export class UsersService {
       secondarySpecificRole
     });
     const nextPassword = payload.password?.trim();
+    const isExternal = payload.isExternal ?? currentUser.isExternal;
+    const createLaborFile = payload.createLaborFile === undefined
+      ? (role === "SUPERADMIN" || legacyRole === "SUPERADMIN" ? false : undefined)
+      : normalizeCreateLaborFile(payload.createLaborFile, { isExternal, role, legacyRole });
 
     if (payload.username !== undefined && !username) {
       throw new AppError(400, "INVALID_USERNAME", "Username is required.");
@@ -202,6 +217,7 @@ export class UsersService {
       secondarySpecificRole: secondarySpecificRole ?? null,
       permissions,
       isExternal: payload.isExternal,
+      createLaborFile,
       isActive: payload.isActive,
       passwordResetRequired: nextPassword ? false : undefined,
       emailConfirmedAt: nextPassword
@@ -266,6 +282,30 @@ export class UsersService {
     }
 
     return updatedTeam;
+  }
+
+  public async deleteTeam(teamId: string) {
+    const teams = await this.repository.listTeams();
+    const currentTeam = teams.find((team) => team.id === teamId);
+    if (!currentTeam) {
+      throw new AppError(404, "TEAM_NOT_FOUND", "El equipo no fue encontrado.");
+    }
+
+    const assignmentCount = await this.repository.countTeamAssignments(currentTeam.key);
+    if (assignmentCount > 0) {
+      throw new AppError(
+        409,
+        "TEAM_HAS_USERS",
+        `No se puede borrar el equipo porque tiene ${assignmentCount} usuario(s) asignado(s). Reasignalos antes de borrarlo.`
+      );
+    }
+
+    const deletedTeam = await this.repository.deleteTeam(teamId);
+    if (!deletedTeam) {
+      throw new AppError(404, "TEAM_NOT_FOUND", "El equipo no fue encontrado.");
+    }
+
+    return deletedTeam;
   }
 
   private validateTeamLabel(label: string) {

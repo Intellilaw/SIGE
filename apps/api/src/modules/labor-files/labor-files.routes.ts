@@ -181,6 +181,15 @@ function isSuperadminEduardoRusconi(user: SessionUser) {
   );
 }
 
+function isSuperadmin(user: SessionUser) {
+  const permissions = getEffectivePermissions(user);
+  return (
+    normalizeComparableText(user.role) === "superadmin" ||
+    normalizeComparableText(user.legacyRole) === "superadmin" ||
+    permissions.includes("*")
+  );
+}
+
 function getTeamKey(laborFile: LaborFile) {
   return normalizeComparableText(laborFile.team ?? laborFile.legacyTeam);
 }
@@ -484,6 +493,33 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
     const params = laborFileIdParamsSchema.parse(request.params);
     const payload = updateLaborFileSchema.parse(request.body ?? {});
     return service.update(params.laborFileId, payload);
+  });
+
+  app.post("/labor-files/:laborFileId/archive", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    return service.archive(params.laborFileId);
+  });
+
+  app.post("/labor-files/:laborFileId/restore", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    return service.restore(params.laborFileId);
+  });
+
+  app.delete("/labor-files/:laborFileId", { preHandler: [requireAuth] }, async (request, reply) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    const user = getSessionUser(request);
+
+    if (!isSuperadmin(user)) {
+      throw new app.errors.AppError(
+        403,
+        "LABOR_FILE_ARCHIVE_DELETE_FORBIDDEN",
+        "Solo el superadmin puede borrar expedientes laborales del archivo historico."
+      );
+    }
+
+    await service.deleteLaborFile(params.laborFileId);
+    reply.code(204);
+    return null;
   });
 
   app.post("/labor-files/:laborFileId/documents", { bodyLimit: 25 * 1024 * 1024, preHandler: writeGuards }, async (request) => {

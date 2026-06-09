@@ -10,6 +10,7 @@ const MAX_PDF_SCAN_BYTES = 2 * 1024 * 1024;
 const MAX_PDF_FALLBACK_BYTES = 256 * 1024;
 const MAX_PDF_STRING_CHARS = 32 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 80 * 1024;
+export const LABOR_SALARY_EXTRACTION_DETAIL_VERSION = "RI-003 v0.2";
 
 type LaborSalaryPeriod = "DAILY" | "MONTHLY";
 
@@ -447,21 +448,100 @@ function hasMoneySignal(rawValue: string, contextBefore: string, amount: number)
   return amount >= 1000 && /(?:salario|sueldo)\s+(?:bruto\s+)?mensual\s+(?:sera(?:\s+de)?|es(?:\s+de)?|asciende\s+a|queda\s+en|por)\s*$/i.test(contextBefore.slice(-80));
 }
 
-function getCandidatePeriod(context: string, contextBefore: string): LaborSalaryPeriod | null {
+function getLastPatternIndex(value: string, patterns: RegExp[]) {
+  let lastIndex = -1;
+
+  for (const pattern of patterns) {
+    const source = pattern.global ? pattern : new RegExp(pattern.source, `${pattern.flags}g`);
+    for (const match of value.matchAll(source)) {
+      lastIndex = Math.max(lastIndex, match.index ?? -1);
+    }
+  }
+
+  return lastIndex;
+}
+
+function getFirstPatternIndex(value: string, patterns: RegExp[]) {
+  let firstIndex = Number.POSITIVE_INFINITY;
+
+  for (const pattern of patterns) {
+    const source = pattern.global ? pattern : new RegExp(pattern.source, `${pattern.flags}g`);
+    for (const match of value.matchAll(source)) {
+      firstIndex = Math.min(firstIndex, match.index ?? Number.POSITIVE_INFINITY);
+      break;
+    }
+  }
+
+  return Number.isFinite(firstIndex) ? firstIndex : -1;
+}
+
+const DAILY_SALARY_CONTEXT_PATTERNS = [
+  /salario\s+diari[oa]/g,
+  /salario\s+base\s+diari[oa]/g,
+  /diari[oa]\s+ordinari[oa]/g,
+  /\bdiari[oa]\b/g,
+  /por\s+dia/g,
+  /cada\s+dia/g
+];
+
+const MONTHLY_SALARY_CONTEXT_PATTERNS = [
+  /salario\s+mensual/g,
+  /salario\s+bruto\s+mensual/g,
+  /mensual\s+brut[oa]/g,
+  /\bmensual(?:es)?\b/g,
+  /al\s+mes/g,
+  /por\s+mes/g,
+  /cada\s+mes/g
+];
+
+function getNearestCandidatePeriod(contextBefore: string, contextAfter: string): LaborSalaryPeriod | null {
+  const beforeWindow = contextBefore.slice(-160);
+  const dailyBeforeIndex = getLastPatternIndex(beforeWindow, DAILY_SALARY_CONTEXT_PATTERNS);
+  const monthlyBeforeIndex = getLastPatternIndex(beforeWindow, MONTHLY_SALARY_CONTEXT_PATTERNS);
+
+  if (dailyBeforeIndex >= 0 || monthlyBeforeIndex >= 0) {
+    return dailyBeforeIndex >= monthlyBeforeIndex ? "DAILY" : "MONTHLY";
+  }
+
+  const afterWindow = contextAfter.slice(0, 80);
+  const dailyAfterIndex = getFirstPatternIndex(afterWindow, DAILY_SALARY_CONTEXT_PATTERNS);
+  const monthlyAfterIndex = getFirstPatternIndex(afterWindow, MONTHLY_SALARY_CONTEXT_PATTERNS);
+
+  if (dailyAfterIndex >= 0 || monthlyAfterIndex >= 0) {
+    if (dailyAfterIndex < 0) {
+      return "MONTHLY";
+    }
+
+    if (monthlyAfterIndex < 0) {
+      return "DAILY";
+    }
+
+    return dailyAfterIndex <= monthlyAfterIndex ? "DAILY" : "MONTHLY";
+  }
+
+  return null;
+}
+
+function getCandidatePeriod(context: string, contextBefore: string, contextAfter: string): LaborSalaryPeriod | null {
   if (!/(salario|sueldo|remuneracion|retribucion|percepcion)/.test(context)) {
     return null;
   }
 
-  if (/(bono|asistencia|puntualidad|aguinaldo|prima|vacacion|vacaciones|fondo|ahorro|imss|isr|retencion|deduccion|comision|vales)/.test(contextBefore)) {
+  if (/(bono|asistencia|puntualidad|aguinaldo|prima|vacacion|vacaciones|fondo|ahorro|imss|isr|retencion|deduccion|comision|vales)/.test(contextBefore.slice(-90))) {
     return null;
   }
 
-  if (/(mensual|mensuales|al mes|por mes|cada mes)/.test(context)) {
-    return "MONTHLY";
+  const nearestPeriod = getNearestCandidatePeriod(contextBefore, contextAfter);
+  if (nearestPeriod) {
+    return nearestPeriod;
   }
 
   if (/(diario|diaria|por dia|cada dia|salario base diario)/.test(context)) {
     return "DAILY";
+  }
+
+  if (/(mensual|mensuales|al mes|por mes|cada mes)/.test(context)) {
+    return "MONTHLY";
   }
 
   if (/(quincenal|quincenales|catorcenal|semanal|semanales|dos pagos|dia 10|dias 10|veinticinco)/.test(contextBefore)) {
@@ -498,11 +578,12 @@ export function extractLaborSalaryCandidatesFromText(text: string) {
     const contextEnd = Math.min(normalizedText.length, index + rawValue.length + 120);
     const context = normalizedText.slice(contextStart, contextEnd);
     const contextBefore = normalizedText.slice(contextStart, index);
+    const contextAfter = normalizedText.slice(index + rawValue.length, contextEnd);
     if (!hasMoneySignal(rawValue, contextBefore, amountMxn)) {
       continue;
     }
 
-    const period = getCandidatePeriod(context, contextBefore);
+    const period = getCandidatePeriod(context, contextBefore, contextAfter);
     if (!period) {
       continue;
     }
@@ -578,8 +659,23 @@ function extractFallbackMonthlySalaryFromText(text: string) {
 
 export function extractLatestLaborSalaryFromText(text: string) {
   const candidates = extractLaborSalaryCandidatesFromText(text);
+  const dailyCandidates = candidates.filter((candidate) => candidate.period === "DAILY");
+  if (dailyCandidates.length > 0) {
+    return dailyCandidates.at(-1) ?? null;
+  }
+
   const monthlyCandidates = candidates.filter((candidate) => candidate.period === "MONTHLY");
-  return (monthlyCandidates.length > 0 ? monthlyCandidates : candidates).at(-1) ?? extractFallbackMonthlySalaryFromText(text);
+  return monthlyCandidates.at(-1) ?? candidates.at(-1) ?? extractFallbackMonthlySalaryFromText(text);
+}
+
+export function formatLaborSalaryExtractionDetail(extraction: Pick<LaborSalaryExtraction, "monthlyGrossSalaryMxn" | "originalFileName">) {
+  return extraction.monthlyGrossSalaryMxn
+    ? `${LABOR_SALARY_EXTRACTION_DETAIL_VERSION}: Salario mensual extraido y convertido a diario / 30 desde ${extraction.originalFileName}.`
+    : `${LABOR_SALARY_EXTRACTION_DETAIL_VERSION}: Salario diario extraido desde ${extraction.originalFileName}.`;
+}
+
+export function formatLaborSalaryExtractionFailureDetail(originalFileName: string) {
+  return `${LABOR_SALARY_EXTRACTION_DETAIL_VERSION}: Sin salario diario o mensual legible en ${originalFileName}.`;
 }
 
 export async function extractLaborSalaryFromDocument(
@@ -676,7 +772,7 @@ export async function getLaborDailySalaryRiStatus(laborFile?: LaborDailySalaryRi
   if (!extraction) {
     return {
       verified: false,
-      detail: "Contrato/addenda cargados sin salario mensual legible."
+      detail: "Contrato/addenda cargados sin salario diario legible."
     };
   }
 

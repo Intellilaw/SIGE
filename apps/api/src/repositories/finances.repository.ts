@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { ContractSignedStatus, FinanceRecord, FinanceRecordStats, FinanceSnapshotData, Matter, QuoteType } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { attachSalesCommissionsToFinanceRecords } from "./finance-sales-commissions";
 import { mapCommissionReceiver, mapFinanceRecord, mapFinanceSnapshot } from "./mappers";
 import type { FinanceRecordWriteRecord, FinanceRepository } from "./types";
 
@@ -289,6 +290,7 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
   const taxCollaboratorCommissionMxn = calculateExecutionCommission(0.01, record.pctTaxCompliance);
   const clientRelationsCommissionMxn = commissionableBaseMxn * 0.01;
   const financeCommissionMxn = commissionableBaseMxn * 0.01;
+  const salesCommissionMxn = record.salesCommissionMxn;
 
   const netProfitMxn =
     netFeesMxn -
@@ -306,7 +308,8 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
       taxLeaderCommissionMxn +
       taxCollaboratorCommissionMxn +
       clientRelationsCommissionMxn +
-      financeCommissionMxn
+      financeCommissionMxn +
+      salesCommissionMxn
     );
 
   return {
@@ -331,6 +334,7 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
     taxCollaboratorCommissionMxn,
     clientRelationsCommissionMxn,
     financeCommissionMxn,
+    salesCommissionMxn,
     netProfitMxn
   };
 }
@@ -366,7 +370,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
       select: getFinanceRecordSelect(includeCollectionProbability)
     });
 
-    return records.map(mapFinanceRecordWithCollectionDefaults);
+    return attachSalesCommissionsToFinanceRecords(this.prisma, records.map(mapFinanceRecordWithCollectionDefaults));
   }
 
   public async createRecord(year: number, month: number, payload: FinanceRecordWriteRecord = {}) {
@@ -420,7 +424,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
       select: getFinanceRecordSelect(includeCollectionProbability)
     });
 
-    return mapFinanceRecordWithCollectionDefaults(record);
+    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+    return enrichedRecord;
   }
 
   public async updateRecord(recordId: string, payload: FinanceRecordWriteRecord) {
@@ -569,7 +574,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
       return updated;
     });
 
-    return mapFinanceRecordWithCollectionDefaults(record);
+    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+    return enrichedRecord;
   }
 
   public async deleteRecord(recordId: string) {
@@ -734,7 +740,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
           select: getFinanceRecordSelect(includeCollectionProbability)
         });
 
-        return mapFinanceRecordWithCollectionDefaults(record);
+        const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+        return enrichedRecord;
       }
     }
 
@@ -764,7 +771,8 @@ export class PrismaFinanceRepository implements FinanceRepository {
       select: getFinanceRecordSelect(includeCollectionProbability)
     });
 
-    return mapFinanceRecordWithCollectionDefaults(record);
+    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+    return enrichedRecord;
   }
 
   public async listCommissionReceivers() {

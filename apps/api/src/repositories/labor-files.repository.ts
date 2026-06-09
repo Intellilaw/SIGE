@@ -20,7 +20,13 @@ import {
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
-import { extractLaborSalaryFromDocument, isLaborSalaryDocumentType } from "../modules/labor-files/labor-salary-intelligence";
+import {
+  LABOR_SALARY_EXTRACTION_DETAIL_VERSION,
+  extractLaborSalaryFromDocument,
+  formatLaborSalaryExtractionDetail,
+  formatLaborSalaryExtractionFailureDetail,
+  isLaborSalaryDocumentType
+} from "../modules/labor-files/labor-salary-intelligence";
 import { mapLaborFile, mapLaborFileDocument, mapLaborGlobalVacationDay, mapLaborVacationEvent } from "./mappers";
 import type { LaborFileDocumentUploadRecord, LaborFilesRepository, LaborVacationAcceptanceUploadRecord } from "./types";
 
@@ -35,6 +41,7 @@ type LaborFileUserSnapshot = {
   team: string | null;
   legacyTeam: string | null;
   specificRole: string | null;
+  createLaborFile?: boolean;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -402,14 +409,60 @@ function attachSalaryExtractionToDocument(
     ...document,
     riExtractedDailySalaryMxn: extraction.dailySalaryMxn,
     riExtractedMonthlyGrossSalaryMxn: extraction.monthlyGrossSalaryMxn,
-    riSalaryExtractionDetail: extraction.monthlyGrossSalaryMxn
-      ? `Salario mensual extraido y convertido a diario / 30 desde ${extraction.originalFileName}.`
-      : `Salario diario extraido desde ${extraction.originalFileName}.`
+    riSalaryExtractionDetail: formatLaborSalaryExtractionDetail(extraction)
   } satisfies LaborFileDocument;
 }
 
-export function shouldHaveLaborFile(user: Pick<LaborFileUserSnapshot, "role" | "legacyRole">) {
-  return user.role !== "SUPERADMIN" && user.legacyRole !== "SUPERADMIN";
+function getSalaryExtractionWriteData(
+  originalFileName: string,
+  extraction: Awaited<ReturnType<typeof extractLaborSalaryFromDocument>>
+) {
+  return extraction
+    ? {
+        riExtractedDailySalaryMxn: normalizeMoney(extraction.dailySalaryMxn),
+        riExtractedMonthlyGrossSalaryMxn: extraction.monthlyGrossSalaryMxn === undefined
+          ? null
+          : normalizeMoney(extraction.monthlyGrossSalaryMxn),
+        riSalaryExtractionDetail: formatLaborSalaryExtractionDetail(extraction)
+      }
+    : {
+        riExtractedDailySalaryMxn: null,
+        riExtractedMonthlyGrossSalaryMxn: null,
+        riSalaryExtractionDetail: formatLaborSalaryExtractionFailureDetail(originalFileName)
+      };
+}
+
+function getLocalSalaryExtractionData(
+  originalFileName: string,
+  extraction: Awaited<ReturnType<typeof extractLaborSalaryFromDocument>>
+) {
+  return extraction
+    ? {
+        riExtractedDailySalaryMxn: extraction.dailySalaryMxn,
+        riExtractedMonthlyGrossSalaryMxn: extraction.monthlyGrossSalaryMxn,
+        riSalaryExtractionDetail: formatLaborSalaryExtractionDetail(extraction)
+      }
+    : {
+        riExtractedDailySalaryMxn: undefined,
+        riExtractedMonthlyGrossSalaryMxn: undefined,
+        riSalaryExtractionDetail: formatLaborSalaryExtractionFailureDetail(originalFileName)
+      };
+}
+
+function shouldRefreshSalaryExtractionCache(document: {
+  documentType: string;
+  riSalaryExtractionDetail?: string | null;
+}) {
+  return isLaborSalaryDocumentType(document.documentType) &&
+    !document.riSalaryExtractionDetail?.includes(LABOR_SALARY_EXTRACTION_DETAIL_VERSION);
+}
+
+export function shouldHaveLaborFile(user: Pick<LaborFileUserSnapshot, "role" | "legacyRole" | "createLaborFile">) {
+  return user.createLaborFile !== false && user.role !== "SUPERADMIN" && user.legacyRole !== "SUPERADMIN";
+}
+
+function shouldExposeLaborFile(record: { user?: Pick<LaborFileUserSnapshot, "role" | "legacyRole" | "createLaborFile"> | null }) {
+  return !record.user || shouldHaveLaborFile(record.user);
 }
 
 export function buildLaborFileSnapshot(user: LaborFileUserSnapshot) {
@@ -443,47 +496,79 @@ export function buildLaborFileUserSyncSnapshot(user: LaborFileUserSnapshot) {
 }
 
 export class PrismaLaborFilesRepository implements LaborFilesRepository {
+  private salaryExtractionRefresh: Promise<void> | null = null;
+
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async list() {
     await this.syncMissingForUsers();
     await this.refreshStatuses();
+    this.scheduleSalaryExtractionCacheRefresh();
     const [records, globalVacationDays] = await Promise.all([
       this.prisma.laborFile.findMany({
-        include: LABOR_FILE_RELATIONS,
+        include: {
+          ...LABOR_FILE_RELATIONS,
+          user: {
+            select: {
+              role: true,
+              legacyRole: true,
+              createLaborFile: true
+            }
+          }
+        },
         orderBy: [{ employmentStatus: "asc" }, { employeeName: "asc" }]
       }),
       this.findGlobalVacationDayRecords()
     ]);
 
-    return records.map((record) => mapLaborFile(record, globalVacationDays));
+    return records.filter(shouldExposeLaborFile).map((record) => mapLaborFile(record, globalVacationDays));
   }
 
   public async listForUser(userId: string) {
     await this.ensureForUser(userId);
     await this.refreshStatuses({ userId });
+    this.scheduleSalaryExtractionCacheRefresh({ userId });
     const [records, globalVacationDays] = await Promise.all([
       this.prisma.laborFile.findMany({
         where: { userId },
-        include: LABOR_FILE_RELATIONS,
+        include: {
+          ...LABOR_FILE_RELATIONS,
+          user: {
+            select: {
+              role: true,
+              legacyRole: true,
+              createLaborFile: true
+            }
+          }
+        },
         orderBy: [{ employeeName: "asc" }]
       }),
       this.findGlobalVacationDayRecords()
     ]);
 
-    return records.map((record) => mapLaborFile(record, globalVacationDays));
+    return records.filter(shouldExposeLaborFile).map((record) => mapLaborFile(record, globalVacationDays));
   }
 
   public async findById(laborFileId: string) {
+    this.scheduleSalaryExtractionCacheRefresh({ id: laborFileId });
     const [record, globalVacationDays] = await Promise.all([
       this.prisma.laborFile.findUnique({
         where: { id: laborFileId },
-        include: LABOR_FILE_RELATIONS
+        include: {
+          ...LABOR_FILE_RELATIONS,
+          user: {
+            select: {
+              role: true,
+              legacyRole: true,
+              createLaborFile: true
+            }
+          }
+        }
       }),
       this.findGlobalVacationDayRecords()
     ]);
 
-    if (!record) {
+    if (!record || !shouldExposeLaborFile(record)) {
       return null;
     }
 
@@ -620,6 +705,69 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     return mapLaborFile(record);
   }
 
+  public async archive(laborFileId: string) {
+    const existing = await this.prisma.laborFile.findUnique({
+      where: { id: laborFileId },
+      select: {
+        id: true,
+        employmentStatus: true,
+        employmentEndedAt: true
+      }
+    });
+
+    if (!existing) {
+      throw new AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    const record = await this.prisma.laborFile.update({
+      where: { id: laborFileId },
+      data: {
+        employmentStatus: "ARCHIVED",
+        employmentEndedAt: existing.employmentStatus === "FORMER"
+          ? existing.employmentEndedAt ?? new Date()
+          : existing.employmentEndedAt
+      },
+      include: LABOR_FILE_RELATIONS
+    });
+
+    return mapLaborFile(record);
+  }
+
+  public async restore(laborFileId: string) {
+    await this.findOrThrow(laborFileId);
+    const record = await this.prisma.laborFile.update({
+      where: { id: laborFileId },
+      data: {
+        employmentStatus: "ACTIVE",
+        employmentEndedAt: null
+      },
+      include: LABOR_FILE_RELATIONS
+    });
+
+    return mapLaborFile(record);
+  }
+
+  public async deleteLaborFile(laborFileId: string) {
+    const existing = await this.prisma.laborFile.findUnique({
+      where: { id: laborFileId },
+      select: { id: true, employmentStatus: true }
+    });
+
+    if (!existing) {
+      throw new AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    if (existing.employmentStatus !== "ARCHIVED") {
+      throw new AppError(
+        400,
+        "LABOR_FILE_DELETE_REQUIRES_ARCHIVE",
+        "Primero envia el expediente laboral al archivo historico antes de borrarlo."
+      );
+    }
+
+    await this.prisma.laborFile.delete({ where: { id: laborFileId } });
+  }
+
   public async uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord) {
     await this.findOrThrow(laborFileId);
     validateDocumentType(payload.documentType);
@@ -658,17 +806,9 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
         fileMimeType: mimeType || null,
         fileSizeBytes: payload.fileSizeBytes ?? payload.fileContent.byteLength,
         fileContent: toPrismaBytes(payload.fileContent),
-        riExtractedDailySalaryMxn: salaryExtraction?.dailySalaryMxn === undefined
-          ? undefined
-          : normalizeMoney(salaryExtraction.dailySalaryMxn),
-        riExtractedMonthlyGrossSalaryMxn: salaryExtraction?.monthlyGrossSalaryMxn === undefined
-          ? undefined
-          : normalizeMoney(salaryExtraction.monthlyGrossSalaryMxn),
-        riSalaryExtractionDetail: salaryExtraction
-          ? salaryExtraction.monthlyGrossSalaryMxn
-            ? `Salario mensual extraido y convertido a diario / 30 desde ${filename}.`
-            : `Salario diario extraido desde ${filename}.`
-          : undefined
+        ...(isLaborSalaryDocumentType(payload.documentType)
+          ? getSalaryExtractionWriteData(filename, salaryExtraction)
+          : {})
       },
       select: LABOR_FILE_RELATIONS.documents.select
     });
@@ -964,6 +1104,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
   public async syncMissingForUsers() {
     const users = await this.prisma.user.findMany({
       where: {
+        createLaborFile: true,
         role: { not: "SUPERADMIN" },
         legacyRole: { not: "SUPERADMIN" }
       },
@@ -979,7 +1120,8 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
             legacyTeam: true,
             specificRole: true,
             employmentStatus: true,
-            employmentEndedAt: true
+            employmentEndedAt: true,
+            updatedAt: true
           }
         }
       }
@@ -996,23 +1138,40 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
       }
 
       const nextSnapshot = buildLaborFileUserSyncSnapshot(user);
-      const nextEmploymentEndedAt = nextSnapshot.employmentEndedAt?.toISOString().slice(0, 10) ?? null;
+      const wasManuallyRestoredToActive =
+        user.laborFile.employmentStatus === "ACTIVE" &&
+        !user.isActive &&
+        user.laborFile.updatedAt.getTime() >= user.updatedAt.getTime();
+      const syncSnapshot = user.laborFile.employmentStatus === "ARCHIVED"
+        ? {
+            ...nextSnapshot,
+            employmentStatus: "ARCHIVED",
+            employmentEndedAt: user.laborFile.employmentEndedAt ?? nextSnapshot.employmentEndedAt
+          }
+        : wasManuallyRestoredToActive
+          ? {
+              ...nextSnapshot,
+              employmentStatus: "ACTIVE",
+              employmentEndedAt: null
+            }
+        : nextSnapshot;
+      const nextEmploymentEndedAt = syncSnapshot.employmentEndedAt?.toISOString().slice(0, 10) ?? null;
       const currentEmploymentEndedAt = user.laborFile.employmentEndedAt?.toISOString().slice(0, 10) ?? null;
       const shouldUpdate =
-        user.laborFile.employeeName !== nextSnapshot.employeeName ||
-        user.laborFile.employeeEmail !== nextSnapshot.employeeEmail ||
-        user.laborFile.employeeUsername !== nextSnapshot.employeeUsername ||
-        user.laborFile.employeeShortName !== nextSnapshot.employeeShortName ||
-        user.laborFile.team !== nextSnapshot.team ||
-        user.laborFile.legacyTeam !== nextSnapshot.legacyTeam ||
-        user.laborFile.specificRole !== nextSnapshot.specificRole ||
-        user.laborFile.employmentStatus !== nextSnapshot.employmentStatus ||
+        user.laborFile.employeeName !== syncSnapshot.employeeName ||
+        user.laborFile.employeeEmail !== syncSnapshot.employeeEmail ||
+        user.laborFile.employeeUsername !== syncSnapshot.employeeUsername ||
+        user.laborFile.employeeShortName !== syncSnapshot.employeeShortName ||
+        user.laborFile.team !== syncSnapshot.team ||
+        user.laborFile.legacyTeam !== syncSnapshot.legacyTeam ||
+        user.laborFile.specificRole !== syncSnapshot.specificRole ||
+        user.laborFile.employmentStatus !== syncSnapshot.employmentStatus ||
         currentEmploymentEndedAt !== nextEmploymentEndedAt;
 
       if (shouldUpdate) {
         await this.prisma.laborFile.update({
           where: { id: user.laborFile.id },
-          data: nextSnapshot
+          data: syncSnapshot
         });
       }
     }
@@ -1112,6 +1271,49 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     }
   }
 
+  private scheduleSalaryExtractionCacheRefresh(laborFileWhere: Prisma.LaborFileWhereInput = {}) {
+    if (this.salaryExtractionRefresh) {
+      return;
+    }
+
+    this.salaryExtractionRefresh = this.refreshSalaryExtractionCaches(laborFileWhere)
+      .catch(() => undefined)
+      .finally(() => {
+        this.salaryExtractionRefresh = null;
+      });
+  }
+
+  private async refreshSalaryExtractionCaches(laborFileWhere: Prisma.LaborFileWhereInput = {}) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const documents = await this.prisma.laborFileDocument.findMany({
+      where: {
+        organizationId,
+        documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] },
+        laborFile: laborFileWhere,
+        OR: [
+          { riSalaryExtractionDetail: null },
+          { NOT: { riSalaryExtractionDetail: { contains: LABOR_SALARY_EXTRACTION_DETAIL_VERSION } } }
+        ]
+      },
+      select: {
+        id: true,
+        documentType: true,
+        originalFileName: true,
+        fileMimeType: true,
+        uploadedAt: true,
+        fileContent: true
+      }
+    });
+
+    for (const document of documents) {
+      const extraction = await extractLaborSalaryFromDocument(document);
+      await this.prisma.laborFileDocument.update({
+        where: { id: document.id },
+        data: getSalaryExtractionWriteData(document.originalFileName, extraction)
+      });
+    }
+  }
+
   private findGlobalVacationDayRecords() {
     return this.prisma.laborGlobalVacationDay.findMany({
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
@@ -1178,9 +1380,12 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
 
   public async list() {
     await this.syncMissingForUsers();
+    await this.refreshLocalSalaryExtractionCaches();
     this.refreshStatuses();
     const state = this.getState();
+    const users = this.readLocalUsers();
     return [...state.files]
+      .filter((record) => this.shouldExposeLocalLaborFile(record, users))
       .sort((left, right) =>
         left.employmentStatus.localeCompare(right.employmentStatus) ||
         left.employeeName.localeCompare(right.employeeName)
@@ -1190,17 +1395,21 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
 
   public async listForUser(userId: string) {
     await this.ensureForUser(userId);
+    await this.refreshLocalSalaryExtractionCaches({ userId });
     this.refreshStatuses();
+    const users = this.readLocalUsers();
     return this.getState().files
       .filter((record) => record.userId === userId)
+      .filter((record) => this.shouldExposeLocalLaborFile(record, users))
       .sort((left, right) => left.employeeName.localeCompare(right.employeeName))
       .map((record) => this.mapLaborFile(record));
   }
 
   public async findById(laborFileId: string) {
     await this.syncMissingForUsers();
+    await this.refreshLocalSalaryExtractionCaches({ laborFileId });
     const record = this.getState().files.find((candidate) => candidate.id === laborFileId);
-    return record ? this.mapLaborFile(record) : null;
+    return record && this.shouldExposeLocalLaborFile(record) ? this.mapLaborFile(record) : null;
   }
 
   public async findDocument(documentId: string) {
@@ -1303,6 +1512,67 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     return this.mapLaborFile(updated!);
   }
 
+  public async archive(laborFileId: string) {
+    let updated: LocalLaborFileState | null = null;
+    this.updateState((state) => {
+      const laborFile = this.findOrThrowInState(state, laborFileId);
+      const now = new Date().toISOString();
+      const wasFormer = laborFile.employmentStatus === "FORMER";
+      laborFile.employmentStatus = "ARCHIVED";
+      laborFile.employmentEndedAt = wasFormer
+        ? laborFile.employmentEndedAt ?? now.slice(0, 10)
+        : laborFile.employmentEndedAt;
+      laborFile.updatedAt = now;
+      updated = laborFile;
+    });
+
+    return this.mapLaborFile(updated!);
+  }
+
+  public async restore(laborFileId: string) {
+    let updated: LocalLaborFileState | null = null;
+    this.updateState((state) => {
+      const laborFile = this.findOrThrowInState(state, laborFileId);
+      laborFile.employmentStatus = "ACTIVE";
+      laborFile.employmentEndedAt = null;
+      laborFile.updatedAt = new Date().toISOString();
+      updated = laborFile;
+    });
+
+    return this.mapLaborFile(updated!);
+  }
+
+  public async deleteLaborFile(laborFileId: string) {
+    let found = false;
+    let archived = false;
+    this.updateState((state) => {
+      const laborFile = state.files.find((candidate) => candidate.id === laborFileId);
+      if (!laborFile) {
+        return;
+      }
+
+      found = true;
+      archived = laborFile.employmentStatus === "ARCHIVED";
+      if (!archived) {
+        return;
+      }
+
+      state.files = state.files.filter((candidate) => candidate.id !== laborFileId);
+    });
+
+    if (!found) {
+      throw new AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    if (!archived) {
+      throw new AppError(
+        400,
+        "LABOR_FILE_DELETE_REQUIRES_ARCHIVE",
+        "Primero envia el expediente laboral al archivo historico antes de borrarlo."
+      );
+    }
+  }
+
   public async uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord) {
     validateDocumentType(payload.documentType);
 
@@ -1342,13 +1612,9 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
         fileMimeType: mimeType || null,
         fileSizeBytes: getLocalFileSize(payload),
         fileBase64: payload.fileContent.toString("base64"),
-        riExtractedDailySalaryMxn: salaryExtraction?.dailySalaryMxn,
-        riExtractedMonthlyGrossSalaryMxn: salaryExtraction?.monthlyGrossSalaryMxn,
-        riSalaryExtractionDetail: salaryExtraction
-          ? salaryExtraction.monthlyGrossSalaryMxn
-            ? `Salario mensual extraido y convertido a diario / 30 desde ${filename}.`
-            : `Salario diario extraido desde ${filename}.`
-          : undefined,
+        ...(isLaborSalaryDocumentType(payload.documentType)
+          ? getLocalSalaryExtractionData(filename, salaryExtraction)
+          : {}),
         uploadedAt: now,
         createdAt: now,
         updatedAt: now
@@ -1671,6 +1937,10 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
         const existing = state.files.find((file) => file.userId === snapshot.id);
         if (existing) {
           const nextSnapshot = buildLaborFileSnapshot(snapshot);
+          const wasManuallyRestoredToActive =
+            existing.employmentStatus === "ACTIVE" &&
+            !snapshot.isActive &&
+            new Date(existing.updatedAt).getTime() >= snapshot.updatedAt.getTime();
           existing.employeeName = nextSnapshot.employeeName;
           existing.employeeEmail = nextSnapshot.employeeEmail;
           existing.employeeUsername = snapshot.username;
@@ -1678,8 +1948,16 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
           existing.team = nextSnapshot.team;
           existing.legacyTeam = nextSnapshot.legacyTeam;
           existing.specificRole = nextSnapshot.specificRole;
-          existing.employmentStatus = nextSnapshot.employmentStatus as LocalLaborFileState["employmentStatus"];
-          existing.employmentEndedAt = nextSnapshot.employmentEndedAt ? toDateKey(nextSnapshot.employmentEndedAt) : null;
+          existing.employmentStatus = existing.employmentStatus === "ARCHIVED"
+            ? "ARCHIVED"
+            : wasManuallyRestoredToActive
+              ? "ACTIVE"
+            : nextSnapshot.employmentStatus as LocalLaborFileState["employmentStatus"];
+          existing.employmentEndedAt = existing.employmentStatus === "ARCHIVED"
+            ? existing.employmentEndedAt ?? (nextSnapshot.employmentEndedAt ? toDateKey(nextSnapshot.employmentEndedAt) : null)
+            : wasManuallyRestoredToActive
+              ? null
+            : nextSnapshot.employmentEndedAt ? toDateKey(nextSnapshot.employmentEndedAt) : null;
           this.refreshStatusForRecord(existing);
           continue;
         }
@@ -1769,6 +2047,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       team: normalizeText(user.team) || null,
       legacyTeam: normalizeText(user.legacyTeam) || null,
       specificRole: normalizeText(user.specificRole) || null,
+      createLaborFile: user.createLaborFile !== false,
       isActive: user.isActive !== false,
       createdAt: localDate(user.createdAt),
       updatedAt: localDate(user.updatedAt)
@@ -1827,12 +2106,60 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     });
   }
 
+  private async refreshLocalSalaryExtractionCaches(filter: { userId?: string; laborFileId?: string } = {}) {
+    const state = this.getState();
+    let changed = false;
+
+    for (const laborFile of state.files) {
+      if (filter.userId && laborFile.userId !== filter.userId) {
+        continue;
+      }
+
+      if (filter.laborFileId && laborFile.id !== filter.laborFileId) {
+        continue;
+      }
+
+      for (const document of laborFile.documents) {
+        if (!shouldRefreshSalaryExtractionCache(document)) {
+          continue;
+        }
+
+        const extraction = await extractLaborSalaryFromDocument({
+          id: document.id,
+          documentType: document.documentType,
+          originalFileName: document.originalFileName,
+          fileMimeType: document.fileMimeType ?? null,
+          uploadedAt: document.uploadedAt,
+          fileContent: Buffer.from(document.fileBase64, "base64")
+        });
+        Object.assign(document, getLocalSalaryExtractionData(document.originalFileName, extraction), {
+          updatedAt: new Date().toISOString()
+        });
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.persistState(state);
+    }
+  }
+
   private refreshStatusForRecord(laborFile: LocalLaborFileState) {
     laborFile.status = computeLaborFileStatus({
       specificRole: laborFile.specificRole,
       documentTypes: laborFile.documents.map((document) => document.documentType)
     });
     laborFile.updatedAt = new Date().toISOString();
+  }
+
+  private shouldExposeLocalLaborFile(record: LocalLaborFileState, users = this.readLocalUsers()) {
+    if (!record.userId) {
+      return true;
+    }
+
+    const user = users.find((candidate) => candidate.id === record.userId);
+    const snapshot = user ? this.toLaborFileUserSnapshot(user) : null;
+    return !snapshot || shouldHaveLaborFile(snapshot);
   }
 
   private mapLaborFile(record: LocalLaborFileState) {
@@ -1967,6 +2294,18 @@ export class ResilientLaborFilesRepository implements LaborFilesRepository {
 
   public update(laborFileId: string, payload: LaborFileUpdateInput) {
     return this.withFallback(() => this.primary.update(laborFileId, payload), () => this.fallback!.update(laborFileId, payload));
+  }
+
+  public archive(laborFileId: string) {
+    return this.withFallback(() => this.primary.archive(laborFileId), () => this.fallback!.archive(laborFileId));
+  }
+
+  public restore(laborFileId: string) {
+    return this.withFallback(() => this.primary.restore(laborFileId), () => this.fallback!.restore(laborFileId));
+  }
+
+  public deleteLaborFile(laborFileId: string) {
+    return this.withFallback(() => this.primary.deleteLaborFile(laborFileId), () => this.fallback!.deleteLaborFile(laborFileId));
   }
 
   public uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord) {

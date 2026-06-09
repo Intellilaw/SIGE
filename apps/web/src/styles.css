@@ -1938,6 +1938,11 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.users-form-field-stack {
+  display: grid;
+  gap: 16px;
+}
+
 .form-field {
   display: grid;
   gap: 8px;
@@ -3775,11 +3780,17 @@ textarea {
   min-width: 260px;
 }
 
-.execution-ri-generate-button {
-  width: 100%;
-  min-height: 34px;
+.execution-ri-generation-status {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  white-space: nowrap;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(52, 64, 84, 0.08);
+  color: #344054;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .execution-authority-select {
@@ -9874,7 +9885,7 @@ textarea {
 .labor-file-selector-list {
   display: grid;
   gap: 8px;
-  max-height: 620px;
+  max-height: 420px;
   overflow: auto;
   padding-right: 4px;
 }
@@ -9902,6 +9913,30 @@ textarea {
 .labor-file-selector-list button.is-active {
   border-color: rgba(29, 78, 216, 0.42);
   box-shadow: inset 0 0 0 2px rgba(29, 78, 216, 0.14);
+}
+
+.labor-file-selector-entry {
+  display: grid;
+  gap: 7px;
+}
+
+.labor-file-selector-list .labor-file-selector-context-action {
+  background: rgba(29, 78, 216, 0.1);
+  border: none;
+  border-radius: 999px;
+  color: #1d4ed8;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 800;
+  justify-self: start;
+  line-height: 1.1;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.labor-file-selector-list .labor-file-selector-context-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .labor-file-selector-head {
@@ -9940,6 +9975,44 @@ textarea {
 .labor-file-selector-list .labor-file-selector-status.status-warning {
   background: rgba(180, 35, 24, 0.12);
   color: #b42318;
+}
+
+.labor-file-archive-section {
+  border-top: 1px solid rgba(31, 41, 51, 0.09);
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.labor-file-archive-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.labor-file-archive-head h3 {
+  color: #1f2d3d;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.labor-file-archive-head span {
+  color: #52657a;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.labor-file-archive-list {
+  max-height: 260px;
+}
+
+.labor-file-archive-list button {
+  background: #fffdf8;
+}
+
+.labor-file-archive-list .labor-file-selector-context-action {
+  background: rgba(29, 78, 216, 0.1);
 }
 
 .labor-file-status-group {

@@ -29,6 +29,18 @@ export class LaborFilesService {
     return this.repository.update(laborFileId, payload);
   }
 
+  public archive(laborFileId: string) {
+    return this.repository.archive(laborFileId);
+  }
+
+  public restore(laborFileId: string) {
+    return this.repository.restore(laborFileId);
+  }
+
+  public deleteLaborFile(laborFileId: string) {
+    return this.repository.deleteLaborFile(laborFileId);
+  }
+
   public uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord) {
     return this.repository.uploadDocument(laborFileId, payload);
   }

@@ -109,6 +109,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "230px",
   "190px",
   "190px",
+  "190px",
   "180px",
   "220px",
   "110px",
@@ -384,6 +385,30 @@ function getTeamLabel(team?: FinanceRecord["responsibleTeam"] | Matter["responsi
   return TEAM_OPTIONS.find((option) => option.key === team)?.label ?? "";
 }
 
+function isSalesTeamUser(user?: {
+  team?: string;
+  secondaryTeam?: string;
+  legacyTeam?: string;
+  secondaryLegacyTeam?: string;
+  specificRole?: string;
+  secondarySpecificRole?: string;
+} | null) {
+  if (!user) {
+    return false;
+  }
+
+  const normalizedAssignments = [
+    user.legacyTeam,
+    user.secondaryLegacyTeam,
+    user.specificRole,
+    user.secondarySpecificRole
+  ].map(normalizeComparableText);
+
+  return user.team === "SALES" ||
+    user.secondaryTeam === "SALES" ||
+    normalizedAssignments.includes("ventas");
+}
+
 function getDefaultPercentages(team?: FinanceRecord["responsibleTeam"] | null) {
   return {
     pctLitigation: team === "LITIGATION" ? 100 : 0,
@@ -423,6 +448,7 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
   const taxCollaboratorCommissionMxn = calculateExecutionCommission(0.01, record.pctTaxCompliance);
   const clientRelationsCommissionMxn = commissionableBaseMxn * 0.01;
   const financeCommissionMxn = commissionableBaseMxn * 0.01;
+  const salesCommissionMxn = record.salesCommissionMxn;
   const netProfitMxn =
     netFeesMxn -
     (
@@ -439,7 +465,8 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
       taxLeaderCommissionMxn +
       taxCollaboratorCommissionMxn +
       clientRelationsCommissionMxn +
-      financeCommissionMxn
+      financeCommissionMxn +
+      salesCommissionMxn
     );
 
   return {
@@ -464,6 +491,7 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
     taxCollaboratorCommissionMxn,
     clientRelationsCommissionMxn,
     financeCommissionMxn,
+    salesCommissionMxn,
     netProfitMxn
   };
 }
@@ -552,6 +580,7 @@ export function FinancesPage() {
   const canWriteFinances = canWriteModule(user, "finances");
   const canReadInternalContracts = hasPermission(user?.permissions, "internal-contracts:read") || hasPermission(user?.permissions, "internal-contracts:write");
   const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+  const isSalesMonthlyViewer = isSalesTeamUser(user) && !canWriteFinances && !isSuperadmin;
   const canDeleteFinanceRecords = isSuperadmin || canWriteFinances;
   const pageRef = useRef<HTMLElement | null>(null);
   const tabsPanelRef = useRef<HTMLElement | null>(null);
@@ -718,6 +747,7 @@ export function FinancesPage() {
             stats.totalPaidMxn,
             stats.dueTodayMxn,
             stats.netFeesMxn,
+            stats.salesCommissionMxn,
             stats.netProfitMxn,
             record.pctLitigation,
             record.pctCorporateLabor,
@@ -972,6 +1002,16 @@ export function FinancesPage() {
   }
 
   useEffect(() => {
+    if (isSalesMonthlyViewer && activeTab !== "monthly-view") {
+      setActiveTab("monthly-view");
+    }
+  }, [activeTab, isSalesMonthlyViewer]);
+
+  useEffect(() => {
+    if (isSalesMonthlyViewer && activeTab !== "monthly-view") {
+      return;
+    }
+
     if (activeTab === "monthly-view") {
       void loadMonthlyView();
       return;
@@ -983,7 +1023,7 @@ export function FinancesPage() {
     }
 
     void loadActiveMattersView();
-  }, [activeTab, canReadFinances, canReadInternalContracts, selectedMonth, selectedYear]);
+  }, [activeTab, canReadFinances, canReadInternalContracts, isSalesMonthlyViewer, selectedMonth, selectedYear]);
 
   useEffect(() => {
     if (activeTab !== "active-matters" && contractFormOpen) {
@@ -1301,6 +1341,7 @@ export function FinancesPage() {
           clientRelationsCommissionMxn:
             acc.clientRelationsCommissionMxn + stats.clientRelationsCommissionMxn,
           financeCommissionMxn: acc.financeCommissionMxn + stats.financeCommissionMxn,
+          salesCommissionMxn: acc.salesCommissionMxn + stats.salesCommissionMxn,
           netProfitMxn: acc.netProfitMxn + stats.netProfitMxn
         };
       },
@@ -1326,6 +1367,7 @@ export function FinancesPage() {
         taxCollaboratorCommissionMxn: 0,
         clientRelationsCommissionMxn: 0,
         financeCommissionMxn: 0,
+        salesCommissionMxn: 0,
         netProfitMxn: 0
       }
     );
@@ -1382,6 +1424,7 @@ export function FinancesPage() {
           <th>COM. EJEC. COMPL FIS (COLAB 1%)</th>
           <th>Com. Com. Cliente (1% Neto)</th>
           <th>Com. Finanzas (1% Neto)</th>
+          <th>Com. Ventas (1% primer pago)</th>
           <th>Utilidad neta</th>
           <th>Hito conclusion</th>
           <th>Concluyo?</th>
@@ -1508,6 +1551,7 @@ export function FinancesPage() {
                   <td>{formatCurrency(stats.taxCollaboratorCommissionMxn)}</td>
                   <td>{formatCurrency(stats.clientRelationsCommissionMxn)}</td>
                   <td>{formatCurrency(stats.financeCommissionMxn)}</td>
+                  <td>{formatCurrency(stats.salesCommissionMxn)}</td>
                   <td className="finance-profit-cell">{formatCurrency(stats.netProfitMxn)}</td>
                   <td><input className="finance-input finance-input-readonly" value={record.milestone ?? ""} readOnly /></td>
                   <td className="finance-cell-checkbox"><input type="checkbox" checked={record.concluded} onChange={(event) => { updateRecordLocal(record.id, { concluded: event.target.checked }); void persistRecordPatch(record.id, { concluded: event.target.checked }); }} /></td>
@@ -1517,7 +1561,7 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={46}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={47}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
@@ -1551,6 +1595,7 @@ export function FinancesPage() {
               <td>{formatCurrency(totals.taxCollaboratorCommissionMxn)}</td>
               <td>{formatCurrency(totals.clientRelationsCommissionMxn)}</td>
               <td>{formatCurrency(totals.financeCommissionMxn)}</td>
+              <td>{formatCurrency(totals.salesCommissionMxn)}</td>
               <td>{formatCurrency(totals.netProfitMxn)}</td>
               <td colSpan={4} />
             </tr>
@@ -1703,9 +1748,13 @@ export function FinancesPage() {
 
       <section className="panel finance-tabs-panel" ref={tabsPanelRef}>
         <div className="finance-tabs">
-          <button className={`finance-tab ${activeTab === "active-matters" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("active-matters")}>1. Asuntos activos</button>
-          <button className={`finance-tab ${activeTab === "monthly-view" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("monthly-view")}>2. Ver mes</button>
-          <button className={`finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("snapshots")}>3. Estampas guardadas</button>
+          {!isSalesMonthlyViewer ? (
+            <button className={`finance-tab ${activeTab === "active-matters" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("active-matters")}>1. Asuntos activos</button>
+          ) : null}
+          <button className={`finance-tab ${activeTab === "monthly-view" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("monthly-view")}>{isSalesMonthlyViewer ? "Ver mes" : "2. Ver mes"}</button>
+          {!isSalesMonthlyViewer ? (
+            <button className={`finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("snapshots")}>3. Estampas guardadas</button>
+          ) : null}
         </div>
       </section>
 
@@ -1778,17 +1827,21 @@ export function FinancesPage() {
               </label>
             </div>
             <div className="finance-toolbar-actions">
-              {selectedIds.size > 0 ? (
-                <button className="danger-button" type="button" onClick={() => void handleBulkDelete()} disabled={!canDeleteFinanceRecords}>
+              {canDeleteFinanceRecords && selectedIds.size > 0 ? (
+                <button className="danger-button" type="button" onClick={() => void handleBulkDelete()}>
                   Borrar ({selectedIds.size})
                 </button>
               ) : null}
-              <button className="secondary-button" type="button" onClick={() => void handleCreateSnapshot()} disabled={!canWriteFinances}>
-                Guardar estampa
-              </button>
-              <button className="primary-button" type="button" onClick={() => setCopyModalOpen(true)} disabled={!canWriteFinances}>
-                Copiar todo al mes siguiente
-              </button>
+              {canWriteFinances ? (
+                <>
+                  <button className="secondary-button" type="button" onClick={() => void handleCreateSnapshot()}>
+                    Guardar estampa
+                  </button>
+                  <button className="primary-button" type="button" onClick={() => setCopyModalOpen(true)}>
+                    Copiar todo al mes siguiente
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
           <MonthSummaryCards records={filteredRecords} />
@@ -2022,7 +2075,7 @@ export function FinancesPage() {
               <table className="finance-table finance-table-snapshot">
                 <thead>
                   <tr>
-                    <th>No.</th><th>Cliente</th><th>No. Cot.</th><th>Responsable</th><th>Tipo Asunto</th><th>Asunto</th><th>Tipo</th><th>Total Asunto</th><th>Conceptos</th><th>Hon. Conceptos</th><th>Pagos Previos</th><th>Remanente</th><th>Fecha de proximo pago</th><th>Semana</th><th>Pagado este mes</th><th>Fecha Pago Real</th><th>Adeudado</th><th>Netos</th><th>Comm Cliente (20%)</th><th>Comm Cierre (10%)</th><th>Ut. Neta</th>
+                    <th>No.</th><th>Cliente</th><th>No. Cot.</th><th>Responsable</th><th>Tipo Asunto</th><th>Asunto</th><th>Tipo</th><th>Total Asunto</th><th>Conceptos</th><th>Hon. Conceptos</th><th>Pagos Previos</th><th>Remanente</th><th>Fecha de proximo pago</th><th>Semana</th><th>Pagado este mes</th><th>Fecha Pago Real</th><th>Adeudado</th><th>Netos</th><th>Comm Cliente (20%)</th><th>Comm Cierre (10%)</th><th>Comm Ventas (1%)</th><th>Ut. Neta</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2051,6 +2104,7 @@ export function FinancesPage() {
                         <td>{formatCurrency(stats.netFeesMxn)}</td>
                         <td>{formatCurrency(stats.clientCommissionMxn)}</td>
                         <td>{formatCurrency(stats.closingCommissionMxn)}</td>
+                        <td>{formatCurrency(stats.salesCommissionMxn)}</td>
                         <td>{formatCurrency(stats.netProfitMxn)}</td>
                       </tr>
                     );

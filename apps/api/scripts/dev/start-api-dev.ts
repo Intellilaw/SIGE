@@ -66,7 +66,7 @@ function getLocalDatabaseTarget() {
 }
 
 function shouldUseRdsTunnel() {
-  return process.env.SIGE_USE_RDS_TUNNEL === "true";
+  return true;
 }
 
 function requireDevEnv(value: string | undefined, label: string) {

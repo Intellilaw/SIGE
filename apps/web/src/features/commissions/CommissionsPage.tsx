@@ -94,7 +94,14 @@ const EMPTY_CALCULATION: SectionCalculation = {
   netTotalMxn: 0
 };
 const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
+const SALES_COMMISSION_SECTION = "Ventas";
+const SALES_COMMISSION_RATE = 0.01;
 const COMMISSION_TOTALS_SECTION = "Totales de comisiones";
+const LEGALFLOW_COMMISSION_SECTIONS = [
+  SALES_COMMISSION_SECTION,
+  CLIENT_RELATIONS_COMMISSION_SECTION,
+  "Direccion general"
+];
 
 const ONE_PERCENT_GROUP_SECTIONS = [
   CLIENT_RELATIONS_COMMISSION_SECTION,
@@ -170,6 +177,14 @@ function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"])
   return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
 }
 
+function isLegalFlowTenant(user: ReturnType<typeof useAuth>["user"]) {
+  return Boolean(
+    user?.organizationId === "org-legalflow" ||
+    normalizeText(user?.organizationSlug) === "legalflow" ||
+    normalizeText(user?.organizationName) === "legalflow"
+  );
+}
+
 function buildCommissionExclusionKey(input: {
   year: number;
   month: number;
@@ -197,12 +212,20 @@ function usesOnePercentGroupBreakdown(section?: string | null) {
   return ONE_PERCENT_GROUP_SECTIONS.some((targetSection) => normalizeText(targetSection) === normalizeText(section));
 }
 
+function isSalesCommissionSection(section?: string | null) {
+  return normalizeText(section) === normalizeText(SALES_COMMISSION_SECTION);
+}
+
 function isCommissionTotalsSection(section?: string | null) {
   return normalizeText(section) === normalizeText(COMMISSION_TOTALS_SECTION);
 }
 
 function getGroup1RateLabel(section?: string | null) {
   const normalizedSection = normalizeText(section);
+
+  if (isSalesCommissionSection(section)) {
+    return "1%";
+  }
 
   if (usesOnePercentGroupBreakdown(section)) {
     return "1%";
@@ -221,6 +244,13 @@ function getGroup1RateLabel(section?: string | null) {
 
 function sumIncludedCommissionRows(records: CommissionBreakdownEntry[]) {
   return records.reduce((sum, record) => sum + (record.excluded ? 0 : record.amountMxn), 0);
+}
+
+function withSalesCommissionBase(records: CommissionBreakdownEntry[]) {
+  return records.map((record) => ({
+    ...record,
+    baseNetMxn: record.amountMxn / SALES_COMMISSION_RATE
+  }));
 }
 
 function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
@@ -320,6 +350,7 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
   const taxCollaboratorCommissionMxn = calculateExecutionCommission(0.01, record.pctTaxCompliance);
   const clientRelationsCommissionMxn = commissionableBaseMxn * 0.01;
   const financeCommissionMxn = commissionableBaseMxn * 0.01;
+  const salesCommissionMxn = record.salesCommissionMxn;
 
   const netProfitMxn =
     netFeesMxn -
@@ -337,7 +368,8 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
       taxLeaderCommissionMxn +
       taxCollaboratorCommissionMxn +
       clientRelationsCommissionMxn +
-      financeCommissionMxn
+      financeCommissionMxn +
+      salesCommissionMxn
     );
 
   return {
@@ -362,6 +394,7 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
     taxCollaboratorCommissionMxn,
     clientRelationsCommissionMxn,
     financeCommissionMxn,
+    salesCommissionMxn,
     netProfitMxn
   };
 }
@@ -401,6 +434,8 @@ function getExecutionAmount(record: FinanceRecord, stats: FinanceRecordStats, se
       return record.responsibleTeam === "TAX_COMPLIANCE" ? stats.taxCollaboratorCommissionMxn : 0;
     case normalizeText("Comunicacion con cliente"):
       return stats.clientRelationsCommissionMxn;
+    case normalizeText(SALES_COMMISSION_SECTION):
+      return stats.salesCommissionMxn;
     case normalizeText("Finanzas"):
       return stats.financeCommissionMxn;
     default:
@@ -612,6 +647,7 @@ function calculateSection(
         }
 
         const showOnePercentBase = usesOnePercentGroupBreakdown(section);
+        const showSalesCommissionBase = isSalesCommissionSection(section);
         const teamConfig = COMMISSION_GROUP_TEAMS.find((team) => team.teamKey === record.responsibleTeam);
         if (showOnePercentBase && !teamConfig) {
           return null;
@@ -624,7 +660,7 @@ function calculateSection(
           quoteNumber: record.quoteNumber,
           subject: `${record.subject}${showOnePercentBase ? " (1% Base)" : ""}`,
           group: "EXECUTION",
-          baseNetMxn: record.netFeesMxn,
+          baseNetMxn: showSalesCommissionBase ? amountMxn / SALES_COMMISSION_RATE : record.netFeesMxn,
           amountMxn,
           teamKey: teamConfig?.teamKey,
           teamLabel: teamConfig?.teamLabel,
@@ -780,6 +816,8 @@ function CommissionGroupTable(props: {
   toneClass: string;
   rows: CommissionBreakdownEntry[];
   showBaseNet?: boolean;
+  baseNetLabel?: string;
+  amountLabel?: string;
   showExclusionControls?: boolean;
   canManageExclusions?: boolean;
   savingExclusionKeys?: Set<string>;
@@ -791,6 +829,8 @@ function CommissionGroupTable(props: {
   const total = props.rows.reduce((sum, row) => sum + (row.excluded ? 0 : row.amountMxn), 0);
   const totalColumns = (props.showBaseNet ? 4 : 3) + (props.showExclusionControls ? 1 : 0);
   const totalLabelColumns = props.showBaseNet ? 3 : 2;
+  const baseNetLabel = props.baseNetLabel ?? "Base Neta";
+  const amountLabel = props.amountLabel ?? (props.showBaseNet ? "Comision" : "Monto");
 
   return (
     <section className="panel commissions-group-panel">
@@ -804,8 +844,8 @@ function CommissionGroupTable(props: {
             <tr>
               <th>Cliente</th>
               <th>Asunto</th>
-              {props.showBaseNet ? <th>Base Neta</th> : null}
-              <th>{props.showBaseNet ? "Comision" : "Monto"}</th>
+              {props.showBaseNet ? <th>{baseNetLabel}</th> : null}
+              <th>{amountLabel}</th>
               {props.showExclusionControls ? <th className="commissions-exclusion-heading">Excluir gasto</th> : null}
             </tr>
           </thead>
@@ -845,7 +885,13 @@ function CommissionGroupTable(props: {
                   >
                     <td>{row.clientName || "-"}</td>
                     <td>{row.subject || "-"}</td>
-                    {props.showBaseNet ? <td>{formatCurrency(row.baseNetMxn)}</td> : null}
+                    {props.showBaseNet ? (
+                      <td>
+                        <span className={row.excluded ? "commissions-amount-excluded" : undefined}>
+                          {formatCurrency(row.baseNetMxn)}
+                        </span>
+                      </td>
+                    ) : null}
                     <td className="commissions-amount-cell">
                       <span className={row.excluded ? "commissions-amount-excluded" : undefined}>
                         {formatCurrency(row.amountMxn)}
@@ -936,6 +982,10 @@ function SnapshotDetailModal(props: {
   const totals = data ? getSnapshotCommissionTotals(data) : null;
   const snapshotGroup1RateLabel = getGroup1RateLabel(props.snapshot.section);
   const snapshotUsesTeamBreakdown = Boolean(totals?.group1TeamBreakdowns.length);
+  const snapshotIsSalesSection = isSalesCommissionSection(props.snapshot.section);
+  const snapshotExecutionRecords = snapshotIsSalesSection
+    ? withSalesCommissionBase(data?.executionRecords ?? [])
+    : data?.executionRecords ?? [];
 
   return (
     <div className="commissions-modal-backdrop" onClick={props.onClose}>
@@ -998,7 +1048,14 @@ function SnapshotDetailModal(props: {
               />
             </div>
 
-            <CommissionGroupTable title="1. Comision por ejecucion" toneClass="tone-primary" rows={data.executionRecords} showBaseNet />
+            <CommissionGroupTable
+              title="1. Comision por ejecucion"
+              toneClass="tone-primary"
+              rows={snapshotExecutionRecords}
+              showBaseNet
+              baseNetLabel={snapshotIsSalesSection ? "Primer pago recibido" : undefined}
+              amountLabel={snapshotIsSalesSection ? "1%" : undefined}
+            />
             <CommissionGroupTable title="2. Comision por cliente" toneClass="tone-secondary" rows={data.clientRecords} showBaseNet />
             <CommissionGroupTable title="3. Comision por cierre" toneClass="tone-tertiary" rows={data.closingRecords} showBaseNet />
           </div>
@@ -1037,22 +1094,35 @@ export function CommissionsPage() {
   const canWriteOwnCommissionSection = hasPermission(user, "commissions:own-section:write");
   const canReadClients = hasPermission(user, "clients:read");
   const canManageExclusions = canManageCommissionExclusions(user);
+  const isLegalFlow = isLegalFlowTenant(user);
+  const availableCommissionSections = useMemo(
+    () => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...COMMISSION_SECTIONS],
+    [isLegalFlow]
+  );
 
   const visibleSections = useMemo(() => {
     const userRole = normalizeText(user?.specificRole);
 
     if (canReadAllCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
-      return [...COMMISSION_SECTIONS, COMMISSION_TOTALS_SECTION];
+      return isLegalFlow ? availableCommissionSections : [...availableCommissionSections, COMMISSION_TOTALS_SECTION];
     }
 
     if (canWriteClientRelationsCommissions) {
-      return COMMISSION_SECTIONS.filter(
+      return availableCommissionSections.filter(
         (section) => normalizeText(section) === normalizeText(CLIENT_RELATIONS_COMMISSION_SECTION)
       );
     }
 
-    return COMMISSION_SECTIONS.filter((section) => normalizeText(section) === userRole);
-  }, [canReadAllCommissions, canWriteClientRelationsCommissions, user?.legacyRole, user?.role, user?.specificRole]);
+    return availableCommissionSections.filter((section) => normalizeText(section) === userRole);
+  }, [
+    availableCommissionSections,
+    canReadAllCommissions,
+    canWriteClientRelationsCommissions,
+    isLegalFlow,
+    user?.legacyRole,
+    user?.role,
+    user?.specificRole
+  ]);
 
   const canAccessCalculation = visibleSections.length > 0;
   const visibleSectionKeys = useMemo(
@@ -1144,13 +1214,22 @@ export function CommissionsPage() {
       return [];
     }
 
-    return COMMISSION_SECTIONS
+    return availableCommissionSections
       .filter((section) => normalizeText(section) !== normalizeText("Direccion general"))
       .map((section) => ({
         section,
         calculation: calculateSection(financeRecords, generalExpenses, clients, section, selectedYear, selectedMonth, exclusions)
       }));
-  }, [clients, exclusions, financeRecords, generalExpenses, isTotalsActiveSection, selectedMonth, selectedYear]);
+  }, [
+    availableCommissionSections,
+    clients,
+    exclusions,
+    financeRecords,
+    generalExpenses,
+    isTotalsActiveSection,
+    selectedMonth,
+    selectedYear
+  ]);
   const commissionTotalsSummary = useMemo(
     () => commissionTotalsRows.reduce(
       (acc, row) => ({
@@ -1345,12 +1424,14 @@ export function CommissionsPage() {
 
   const snapshotCards = loadingSnapshots
     ? []
-    : canReadAllCommissions
+    : canReadAllCommissions && !isLegalFlow
       ? snapshots
       : snapshots.filter((snapshot) => visibleSectionKeys.has(normalizeText(snapshot.section)));
   const activeSectionLabel = activeSection || "Sin seccion";
   const shouldShowDeductionPanel = Boolean(activeSection && normalizeText(activeSection) !== normalizeText("Direccion general"));
+  const isSalesActiveSection = isSalesCommissionSection(activeSection);
   const group1RateLabel = getGroup1RateLabel(activeSection);
+  const group1RateLabelSuffix = group1RateLabel ? ` (${group1RateLabel})` : "";
   const usesTeamGroup1Breakdown = sectionCalculation.group1TeamBreakdowns.length > 0;
   const hasNegativeTeamBalance = sectionCalculation.group1TeamBreakdowns.some((team) => team.netMxn < 0);
   const yearOptions = Array.from({ length: 7 }, (_, index) => 2024 + index);
@@ -1472,7 +1553,7 @@ export function CommissionsPage() {
                     ) : (
                       <>
                         <CurrencyMetricCard
-                          label={`Comisiones brutas Grupo 1 (${group1RateLabel})`}
+                          label={`Comisiones brutas Grupo 1${group1RateLabelSuffix}`}
                           value={sectionCalculation.group1GrossMxn}
                           accentClass="is-primary"
                         />
@@ -1486,7 +1567,7 @@ export function CommissionsPage() {
                     )
                   ) : null}
                   <CurrencyMetricCard
-                    label={isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1 (${group1RateLabel})`}
+                    label={isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1${group1RateLabelSuffix}`}
                     value={isTotalsActiveSection ? commissionTotalsSummary.group1PayableMxn : sectionCalculation.group1NetMxn}
                     accentClass="is-success"
                   />
@@ -1536,6 +1617,9 @@ export function CommissionsPage() {
                       title="PRIMER GRUPO: Comisiones de Ejecucion"
                       toneClass="tone-primary"
                       rows={sectionCalculation.executionRecords}
+                      showBaseNet={isSalesActiveSection}
+                      baseNetLabel={isSalesActiveSection ? "Primer pago recibido" : undefined}
+                      amountLabel={isSalesActiveSection ? "1%" : undefined}
                       showExclusionControls
                       canManageExclusions={canManageExclusions}
                       savingExclusionKeys={savingExclusionKeys}
@@ -1593,9 +1677,9 @@ export function CommissionsPage() {
                         </p>
                       )}
                       <div className="commissions-deduction-summary">
-                        <span>Comisiones brutas Grupo 1 ({group1RateLabel}): <strong>{formatCurrency(sectionCalculation.group1GrossMxn)}</strong></span>
+                        <span>Comisiones brutas Grupo 1{group1RateLabelSuffix}: <strong>{formatCurrency(sectionCalculation.group1GrossMxn)}</strong></span>
                         <span>(-) Deduccion Gastos: <strong>{formatCurrency(sectionCalculation.deductionMxn)}</strong></span>
-                        <span>Comisiones netas Grupo 1 ({group1RateLabel}): <strong>{formatCurrency(sectionCalculation.group1NetMxn)}</strong></span>
+                        <span>Comisiones netas Grupo 1{group1RateLabelSuffix}: <strong>{formatCurrency(sectionCalculation.group1NetMxn)}</strong></span>
                         <span>Grupo 1 aplicado al total: <strong>{formatCurrency(sectionCalculation.group1PayableMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 2 (20%): <strong>{formatCurrency(sectionCalculation.group2TotalMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 3 (10%): <strong>{formatCurrency(sectionCalculation.group3TotalMxn)}</strong></span>

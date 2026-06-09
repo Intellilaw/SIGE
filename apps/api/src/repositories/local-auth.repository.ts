@@ -283,6 +283,7 @@ export class LocalAuthRepository implements AuthRepository {
         legacyTeam: user.legacyTeam ?? exportedUser?.legacyTeam ?? undefined,
         specificRole: user.specificRole ?? exportedUser?.specificRole ?? undefined,
         permissions: user.permissions,
+        createLaborFile: user.internalRole !== "SUPERADMIN" && user.legacyRole !== "SUPERADMIN",
         isActive: true,
         passwordResetRequired: true,
         passwordHash: hashPassword(randomBytes(32).toString("hex")),
@@ -343,6 +344,7 @@ export class LocalAuthRepository implements AuthRepository {
         secondarySpecificRole: user.secondarySpecificRole,
         permissions: user.permissions
       }),
+      createLaborFile: user.createLaborFile ?? true,
       isActive: user.isActive,
       passwordResetRequired: user.passwordResetRequired
     };

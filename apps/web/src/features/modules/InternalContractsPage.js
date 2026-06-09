@@ -421,10 +421,10 @@ export function InternalContractsPage() {
                 fileMimeType: selectedFile.type || "application/octet-stream",
                 fileBase64: await fileToBase64(selectedFile)
             });
-            setContracts((current) => [created, ...current]);
+            setContracts((current) => [created, ...current.filter((entry) => entry.id !== created.id)]);
             setForm(initialFormState);
             setSelectedFile(null);
-            setFlash({ tone: "success", text: `Contrato ${created.contractNumber} cargado correctamente.` });
+            setFlash({ tone: "success", text: `Contrato ${created.contractNumber} guardado correctamente.` });
             event.currentTarget.reset();
         }
         catch (error) {

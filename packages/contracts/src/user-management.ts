@@ -86,6 +86,7 @@ export interface CreateManagedUserInput {
   specificRole?: string;
   secondarySpecificRole?: string;
   isExternal?: boolean;
+  createLaborFile?: boolean;
 }
 
 export interface UpdateManagedUserInput {
@@ -100,6 +101,7 @@ export interface UpdateManagedUserInput {
   specificRole?: string | null;
   secondarySpecificRole?: string | null;
   isExternal?: boolean;
+  createLaborFile?: boolean;
   isActive?: boolean;
 }
 
@@ -406,6 +408,8 @@ export function derivePermissions(input: {
       permissions.add("matters:read");
       permissions.add("sales:read");
       permissions.add("sales:write");
+      permissions.add("finances:monthly:read");
+      permissions.add("commissions:all:read");
     }
 
     if (isFinanceTeam) {

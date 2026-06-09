@@ -59,9 +59,23 @@ function buildGeneratedProfessionalServicesDownloadFilename(record: {
 function buildGeneratedProfessionalServicesAvailableFormats(record: {
   originalFileName: string | null;
   fileMimeType: string | null;
+  pdfOriginalFileName?: string | null;
+  pdfFileMimeType?: string | null;
+  signatureStatus?: string | null;
 }) {
+  const formats = new Set<InternalContractDownloadFormat>();
   const primaryFormat = inferInternalContractFormat(record.originalFileName, record.fileMimeType);
-  return primaryFormat ? [primaryFormat] : [];
+  const pdfFormat = inferInternalContractFormat(record.pdfOriginalFileName, record.pdfFileMimeType);
+
+  if (primaryFormat) {
+    formats.add(primaryFormat);
+  }
+
+  if (record.signatureStatus === "SIGNED" && pdfFormat) {
+    formats.add(pdfFormat);
+  }
+
+  return [...formats];
 }
 
 function validateContractType(value: InternalContract["contractType"]) {
@@ -320,6 +334,10 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       return mapInternalContract(record);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        if (inferInternalContractFormat(payload.originalFileName, payload.fileMimeType) === "pdf") {
+          return this.attachPdfVersionToExistingContract(payload, contractNumber, title);
+        }
+
         throw new AppError(409, "INTERNAL_CONTRACT_NUMBER_EXISTS", "Ya existe un contrato con ese numero.");
       }
 
@@ -495,7 +513,9 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
         signatureStatus: true,
         generatedPayload: true,
         originalFileName: true,
-        fileMimeType: true
+        fileMimeType: true,
+        pdfOriginalFileName: true,
+        pdfFileMimeType: true
       }
     });
 
@@ -534,7 +554,9 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
         signatureStatus: true,
         generatedPayload: true,
         originalFileName: true,
-        fileMimeType: true
+        fileMimeType: true,
+        pdfOriginalFileName: true,
+        pdfFileMimeType: true
       }
     });
 
@@ -708,6 +730,68 @@ export class PrismaInternalContractsRepository implements InternalContractsRepos
       clientName: null,
       collaboratorName
     };
+  }
+
+  private async attachPdfVersionToExistingContract(
+    payload: InternalContractWriteRecord,
+    contractNumber: string,
+    resolvedTitle: string | null
+  ) {
+    const filename = normalizeText(payload.originalFileName);
+    const fileContent = toPrismaBytes(payload.fileContent);
+
+    if (!filename || !fileContent) {
+      throw new AppError(400, "INTERNAL_CONTRACT_PDF_REQUIRED", "Carga el PDF de la version adicional del contrato.");
+    }
+
+    const existing = await this.prisma.internalContract.findFirst({
+      where: { contractNumber },
+      select: {
+        id: true,
+        contractType: true,
+        clientId: true,
+        collaboratorName: true,
+        title: true,
+        notes: true
+      }
+    });
+
+    if (!existing) {
+      throw new AppError(409, "INTERNAL_CONTRACT_NUMBER_EXISTS", "Ya existe un contrato con ese numero.");
+    }
+
+    if (existing.contractType !== payload.contractType) {
+      throw new AppError(
+        409,
+        "INTERNAL_CONTRACT_NUMBER_EXISTS_IN_ANOTHER_SECTION",
+        "Ya existe un contrato con ese numero en otra seccion."
+      );
+    }
+
+    if (isClientScopedContractType(payload.contractType) && normalizeText(existing.clientId) !== normalizeText(payload.clientId)) {
+      throw new AppError(409, "INTERNAL_CONTRACT_NUMBER_EXISTS", "Ya existe un contrato con ese numero para otro cliente.");
+    }
+
+    if (payload.contractType === "LABOR" && normalizeText(existing.collaboratorName) !== normalizeText(payload.collaboratorName)) {
+      throw new AppError(409, "INTERNAL_CONTRACT_NUMBER_EXISTS", "Ya existe un contrato con ese numero para otro colaborador.");
+    }
+
+    const notes = normalizeText(payload.notes);
+    const title = normalizeText(existing.title) || normalizeText(resolvedTitle);
+    const record = await this.prisma.internalContract.update({
+      where: { id: existing.id },
+      data: {
+        title: title || undefined,
+        pdfOriginalFileName: filename,
+        pdfFileMimeType: normalizeText(payload.fileMimeType) || "application/pdf",
+        pdfFileSizeBytes: payload.fileSizeBytes ?? payload.fileContent?.byteLength ?? null,
+        pdfFileContent: fileContent,
+        signatureStatus: "SIGNED",
+        notes: notes || undefined
+      }
+    });
+
+    return mapInternalContract(record);
   }
 
   private async resolveContractTitle(payload: InternalContractWriteRecord, contractNumber: string) {

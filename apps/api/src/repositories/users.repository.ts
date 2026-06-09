@@ -125,6 +125,7 @@ export class PrismaUsersRepository implements UsersRepository {
           secondarySpecificRole: payload.secondarySpecificRole ?? null,
           permissions: payload.permissions,
           isExternal: payload.isExternal ?? false,
+          createLaborFile: payload.createLaborFile ?? true,
           passwordHash: payload.passwordHash,
           isActive: true,
           passwordResetRequired: false,
@@ -162,6 +163,7 @@ export class PrismaUsersRepository implements UsersRepository {
           secondarySpecificRole: payload.secondarySpecificRole === undefined ? undefined : payload.secondarySpecificRole,
           permissions: payload.permissions,
           isExternal: payload.isExternal,
+          createLaborFile: payload.createLaborFile,
           isActive: payload.isActive,
           passwordResetRequired: payload.passwordResetRequired,
           emailConfirmedAt: payload.emailConfirmedAt === undefined
@@ -378,5 +380,82 @@ export class PrismaUsersRepository implements UsersRepository {
 
   public async deactivateTeam(teamId: string) {
     return this.updateTeam(teamId, { isActive: false });
+  }
+
+  public async countTeamAssignments(teamKey: string) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    return this.prisma.user.count({
+      where: {
+        organizationId,
+        isActive: true,
+        OR: [
+          { team: teamKey },
+          { secondaryTeam: teamKey }
+        ]
+      }
+    });
+  }
+
+  public async deleteTeam(teamId: string) {
+    const deletedTeam = await this.prisma.$transaction(async (tx) => {
+      const currentTeam = await tx.userTeam.findUnique({
+        where: { id: teamId }
+      });
+      if (!currentTeam) {
+        return null;
+      }
+
+      await tx.user.updateMany({
+        where: {
+          organizationId: currentTeam.organizationId,
+          team: currentTeam.key
+        },
+        data: {
+          team: null,
+          legacyTeam: null,
+          specificRole: null
+        }
+      });
+      await tx.user.updateMany({
+        where: {
+          organizationId: currentTeam.organizationId,
+          secondaryTeam: currentTeam.key
+        },
+        data: {
+          secondaryTeam: null,
+          secondaryLegacyTeam: null,
+          secondarySpecificRole: null
+        }
+      });
+      await tx.laborFile.updateMany({
+        where: {
+          organizationId: currentTeam.organizationId,
+          team: currentTeam.key
+        },
+        data: {
+          team: null,
+          legacyTeam: null,
+          specificRole: null
+        }
+      });
+
+      const deletedRecord = await tx.userTeam.delete({
+        where: { id: teamId }
+      });
+
+      await tx.taskModule.updateMany({
+        where: {
+          team: currentTeam.key
+        },
+        data: {
+          isActive: false,
+          deactivatedAt: new Date()
+        }
+      });
+
+      return deletedRecord;
+    });
+
+    return deletedTeam ? mapManagedTeam(deletedTeam, 0) : null;
   }
 }

@@ -427,8 +427,8 @@ function getContractDailySalary(laborFile: LaborFile, salaryDocuments: LaborFile
 function formatContractSalaryReference(reference: ContractSalaryReference) {
   if (reference.kind === "unreadable-addendum") {
     return reference.originalFileName
-      ? `addendum vigente sin salario mensual legible (${reference.originalFileName}).`
-      : "addendum vigente sin salario mensual legible.";
+      ? `addendum vigente sin salario diario legible (${reference.originalFileName}).`
+      : "addendum vigente sin salario diario legible.";
   }
 
   const sourceLabel = reference.documentType === "ADDENDUM"
@@ -467,7 +467,7 @@ function getDailySalaryValidation(laborFile: LaborFile, salaryDocuments: LaborFi
     return {
       status: "mismatch" as const,
       label: "No coincide",
-      detail: "Contrato/addenda cargados sin salario mensual legible."
+      detail: "Contrato/addenda cargados sin salario diario legible."
     };
   }
 
@@ -596,6 +596,18 @@ function isSuperadminEduardoRusconi(input: {
   permissions?: string[];
 }) {
   return isEduardoRusconi(input) && (
+    normalizeComparableText(input.role) === "superadmin" ||
+    normalizeComparableText(input.legacyRole) === "superadmin" ||
+    Boolean(input.permissions?.includes("*"))
+  );
+}
+
+function isSuperadminUser(input: {
+  role?: string;
+  legacyRole?: string;
+  permissions?: string[];
+}) {
+  return (
     normalizeComparableText(input.role) === "superadmin" ||
     normalizeComparableText(input.legacyRole) === "superadmin" ||
     Boolean(input.permissions?.includes("*"))
@@ -836,6 +848,58 @@ function getEmployeeSecondaryLabel(laborFile: LaborFile) {
     : laborFile.employeeUsername;
 }
 
+function isActiveLaborFile(laborFile: LaborFile) {
+  return laborFile.employmentStatus === "ACTIVE";
+}
+
+function isHistoricalLaborFile(laborFile: LaborFile) {
+  return laborFile.employmentStatus !== "ACTIVE";
+}
+
+function getEmploymentStatusLabel(laborFile: LaborFile) {
+  if (laborFile.employmentStatus === "ARCHIVED") {
+    return "Archivo historico";
+  }
+
+  if (laborFile.employmentStatus === "FORMER") {
+    return "Extrabajador";
+  }
+
+  return "Activo";
+}
+
+function getEmploymentStatusClass(laborFile: LaborFile) {
+  return laborFile.employmentStatus === "ACTIVE" ? "status-live" : "status-migration";
+}
+
+function filterLaborFilesByQuery(laborFiles: LaborFile[], query: string) {
+  const normalized = query
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  if (!normalized) {
+    return laborFiles;
+  }
+
+  return laborFiles.filter((laborFile) => [
+    laborFile.employeeName,
+    laborFile.employeeUsername,
+    laborFile.employeeShortName,
+    laborFile.legacyTeam,
+    laborFile.specificRole
+  ].filter(Boolean).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalized));
+}
+
+function getDefaultLaborFileId(laborFiles: LaborFile[], preferredId?: string) {
+  if (preferredId && laborFiles.some((laborFile) => laborFile.id === preferredId)) {
+    return preferredId;
+  }
+
+  return laborFiles.find(isActiveLaborFile)?.id ?? laborFiles[0]?.id ?? "";
+}
+
 export function LaborFilesPage() {
   const { user } = useAuth();
   const [laborFiles, setLaborFiles] = useState<LaborFile[]>([]);
@@ -905,7 +969,27 @@ export function LaborFilesPage() {
     legacyRole: user.legacyRole,
     permissions: user.permissions
   }));
-  const selectedLaborFile = laborFiles.find((laborFile) => laborFile.id === selectedId) ?? laborFiles[0];
+  const canDeleteArchivedLaborFiles = Boolean(user && isSuperadminUser({
+    role: user.role,
+    legacyRole: user.legacyRole,
+    permissions: user.permissions
+  }));
+  const activeLaborFiles = useMemo(() => sortLaborFiles(laborFiles.filter(isActiveLaborFile)), [laborFiles]);
+  const historicalLaborFiles = useMemo(() => sortLaborFiles(laborFiles.filter(isHistoricalLaborFile)), [laborFiles]);
+  const filteredLaborFiles = useMemo(
+    () => filterLaborFilesByQuery(activeLaborFiles, query),
+    [activeLaborFiles, query]
+  );
+  const filteredHistoricalLaborFiles = useMemo(
+    () => filterLaborFilesByQuery(historicalLaborFiles, query),
+    [historicalLaborFiles, query]
+  );
+  const selectedLaborFile = laborFiles.find((laborFile) => laborFile.id === selectedId)
+    ?? filteredLaborFiles[0]
+    ?? filteredHistoricalLaborFiles[0]
+    ?? laborFiles[0];
+  const canMoveSelectedLaborFile = Boolean(canWrite && selectedLaborFile);
+  const canDeleteSelectedLaborFile = Boolean(canDeleteArchivedLaborFiles && selectedLaborFile?.employmentStatus === "ARCHIVED");
 
   async function loadLaborFiles(preferredId?: string) {
     setLoading(true);
@@ -916,9 +1000,10 @@ export function LaborFilesPage() {
         apiGet<LaborFile[]>("/labor-files"),
         canWrite ? apiGet<LaborGlobalVacationDay[]>("/labor-files/global-vacation-days") : Promise.resolve([])
       ]);
-      setLaborFiles(sortLaborFiles(rows));
+      const sortedRows = sortLaborFiles(rows);
+      setLaborFiles(sortedRows);
       setGlobalVacationDays(globalDays);
-      setSelectedId((current) => preferredId || current || rows[0]?.id || "");
+      setSelectedId((current) => getDefaultLaborFileId(sortedRows, preferredId || current));
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -975,31 +1060,11 @@ export function LaborFilesPage() {
   }, [selectedLaborFile?.id]);
 
   const metrics = useMemo(() => ({
-    total: laborFiles.length,
-    incomplete: laborFiles.filter((laborFile) => laborFile.status === "INCOMPLETE").length,
-    complete: laborFiles.filter((laborFile) => laborFile.status === "COMPLETE").length,
-    former: laborFiles.filter((laborFile) => laborFile.employmentStatus === "FORMER").length
-  }), [laborFiles]);
-
-  const filteredLaborFiles = useMemo(() => {
-    const normalized = query
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim();
-
-    if (!normalized) {
-      return laborFiles;
-    }
-
-    return laborFiles.filter((laborFile) => [
-      laborFile.employeeName,
-      laborFile.employeeUsername,
-      laborFile.employeeShortName,
-      laborFile.legacyTeam,
-      laborFile.specificRole
-    ].filter(Boolean).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalized));
-  }, [laborFiles, query]);
+    total: activeLaborFiles.length,
+    incomplete: activeLaborFiles.filter((laborFile) => laborFile.status === "INCOMPLETE").length,
+    complete: activeLaborFiles.filter((laborFile) => laborFile.status === "COMPLETE").length,
+    former: historicalLaborFiles.length
+  }), [activeLaborFiles, historicalLaborFiles]);
 
   function canDeleteVacationEventForCurrentUser(event: LaborVacationEvent) {
     if (!canWrite) {
@@ -1071,6 +1136,82 @@ export function LaborFilesPage() {
       );
       setFlash({ tone: "success", text: "Expediente actualizado." });
       await loadLaborFiles(selectedLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleLaborFileArchive(targetLaborFile = selectedLaborFile) {
+    if (!targetLaborFile || !canWrite || isHistoricalLaborFile(targetLaborFile)) {
+      return;
+    }
+
+    setSaving(true);
+    setFlash(null);
+
+    try {
+      const archivedLaborFile = await apiPost<LaborFile>(`/labor-files/${targetLaborFile.id}/archive`, {});
+      setLaborFiles((current) =>
+        sortLaborFiles(current.map((laborFile) =>
+          laborFile.id === archivedLaborFile.id ? archivedLaborFile : laborFile
+        ))
+      );
+      setSelectedId(archivedLaborFile.id);
+      setFlash({ tone: "success", text: "Expediente enviado al archivo historico." });
+      await loadLaborFiles(archivedLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleLaborFileRestore(targetLaborFile = selectedLaborFile) {
+    if (!targetLaborFile || !canWrite || !isHistoricalLaborFile(targetLaborFile)) {
+      return;
+    }
+
+    setSaving(true);
+    setFlash(null);
+
+    try {
+      const restoredLaborFile = await apiPost<LaborFile>(`/labor-files/${targetLaborFile.id}/restore`, {});
+      setLaborFiles((current) =>
+        sortLaborFiles(current.map((laborFile) =>
+          laborFile.id === restoredLaborFile.id ? restoredLaborFile : laborFile
+        ))
+      );
+      setSelectedId(restoredLaborFile.id);
+      setFlash({ tone: "success", text: "Expediente regresado a activos." });
+      await loadLaborFiles(restoredLaborFile.id);
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleLaborFileDelete() {
+    if (!selectedLaborFile || !canDeleteSelectedLaborFile) {
+      return;
+    }
+
+    if (!window.confirm(`Seguro que deseas borrar definitivamente el expediente archivado de ${selectedLaborFile.employeeName}?`)) {
+      return;
+    }
+
+    setSaving(true);
+    setFlash(null);
+
+    try {
+      await apiDelete(`/labor-files/${selectedLaborFile.id}`);
+      const nextRows = sortLaborFiles(laborFiles.filter((laborFile) => laborFile.id !== selectedLaborFile.id));
+      setLaborFiles(nextRows);
+      setSelectedId(getDefaultLaborFileId(nextRows));
+      setFlash({ tone: "success", text: "Expediente archivado eliminado." });
+      await loadLaborFiles(getDefaultLaborFileId(nextRows));
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
@@ -1590,6 +1731,57 @@ export function LaborFilesPage() {
     selectedUploadDefinition?.maxFiles && selectedUploadCount >= selectedUploadDefinition.maxFiles
   );
 
+  function renderLaborFileSelectorButton(laborFile: LaborFile) {
+    return (
+      <button
+        className={[
+          laborFile.id === selectedLaborFile?.id ? "is-active" : "",
+          laborFile.status === "COMPLETE" ? "is-complete" : "is-incomplete"
+        ].filter(Boolean).join(" ")}
+        key={laborFile.id}
+        onClick={() => setSelectedId(laborFile.id)}
+        type="button"
+      >
+        <div className="labor-file-selector-head">
+          <strong>{laborFile.employeeName}</strong>
+          <span className={`status-pill labor-file-selector-status ${laborFile.status === "COMPLETE" ? "status-live" : "status-warning"}`}>
+            {laborFile.status === "COMPLETE" ? "Completo" : "Incompleto"}
+          </span>
+        </div>
+        <span>{getEmployeeSecondaryLabel(laborFile)}</span>
+        {isHistoricalLaborFile(laborFile) ? <small>{getEmploymentStatusLabel(laborFile)}</small> : null}
+      </button>
+    );
+  }
+
+  function renderSelectedLaborFileMoveAction(laborFile: LaborFile) {
+    if (!canMoveSelectedLaborFile || laborFile.id !== selectedLaborFile?.id) {
+      return null;
+    }
+
+    const isHistorical = isHistoricalLaborFile(laborFile);
+
+    return (
+      <button
+        className="secondary-button labor-file-selector-context-action"
+        disabled={saving}
+        onClick={() => isHistorical ? void handleLaborFileRestore(laborFile) : void handleLaborFileArchive(laborFile)}
+        type="button"
+      >
+        {isHistorical ? "Regresar a activos" : "Enviar al archivo historico"}
+      </button>
+    );
+  }
+
+  function renderLaborFileSelectorEntry(laborFile: LaborFile) {
+    return (
+      <div className="labor-file-selector-entry" key={laborFile.id}>
+        {renderLaborFileSelectorButton(laborFile)}
+        {renderSelectedLaborFileMoveAction(laborFile)}
+      </div>
+    );
+  }
+
   return (
     <section className="page-stack labor-files-page">
       <header className="hero module-hero labor-files-hero">
@@ -1608,10 +1800,10 @@ export function LaborFilesPage() {
 
       {canWrite ? (
         <div className="summary-grid">
-          <SummaryCard label="Expedientes" value={metrics.total} accent="#1d4ed8" />
+          <SummaryCard label="Activos" value={metrics.total} accent="#1d4ed8" />
           <SummaryCard label="Completos" value={metrics.complete} accent="#0f766e" />
           <SummaryCard label="Incompletos" value={metrics.incomplete} accent="#b42318" />
-          <SummaryCard label="Extrabajadores" value={metrics.former} accent="#9a6700" />
+          <SummaryCard label="Archivo historico" value={metrics.former} accent="#9a6700" />
         </div>
       ) : null}
 
@@ -1749,7 +1941,7 @@ export function LaborFilesPage() {
         {canWrite ? (
           <aside className="panel labor-files-sidebar">
             <div className="panel-header">
-              <h2>Colaboradores</h2>
+              <h2>Colaboradores activos</h2>
               <span>{filteredLaborFiles.length}</span>
             </div>
             <label className="form-field">
@@ -1763,26 +1955,23 @@ export function LaborFilesPage() {
             </label>
             <div className="labor-file-selector-list">
               {loading ? <div className="centered-inline-message">Cargando expedientes...</div> : null}
-              {!loading && filteredLaborFiles.map((laborFile) => (
-                <button
-                  className={[
-                    laborFile.id === selectedLaborFile?.id ? "is-active" : "",
-                    laborFile.status === "COMPLETE" ? "is-complete" : "is-incomplete"
-                  ].filter(Boolean).join(" ")}
-                  key={laborFile.id}
-                  onClick={() => setSelectedId(laborFile.id)}
-                  type="button"
-                >
-                  <div className="labor-file-selector-head">
-                    <strong>{laborFile.employeeName}</strong>
-                    <span className={`status-pill labor-file-selector-status ${laborFile.status === "COMPLETE" ? "status-live" : "status-warning"}`}>
-                      {laborFile.status === "COMPLETE" ? "Completo" : "Incompleto"}
-                    </span>
-                  </div>
-                  <span>{getEmployeeSecondaryLabel(laborFile)}</span>
-                  {laborFile.employmentStatus === "FORMER" ? <small>Extrabajador</small> : null}
-                </button>
-              ))}
+              {!loading && filteredLaborFiles.length === 0 ? (
+                <div className="centered-inline-message">Sin colaboradores activos.</div>
+              ) : null}
+              {!loading && filteredLaborFiles.map(renderLaborFileSelectorEntry)}
+            </div>
+
+            <div className="labor-file-archive-section">
+              <div className="labor-file-archive-head">
+                <h3>Archivo historico</h3>
+                <span>{filteredHistoricalLaborFiles.length}</span>
+              </div>
+              <div className="labor-file-selector-list labor-file-archive-list">
+                {!loading && filteredHistoricalLaborFiles.length === 0 ? (
+                  <div className="centered-inline-message">Sin expedientes historicos.</div>
+                ) : null}
+                {!loading && filteredHistoricalLaborFiles.map(renderLaborFileSelectorEntry)}
+              </div>
             </div>
           </aside>
         ) : null}
@@ -1806,8 +1995,8 @@ export function LaborFilesPage() {
                     <span className={`status-pill ${selectedLaborFile.status === "COMPLETE" ? "status-live" : "status-warning"}`}>
                       {selectedLaborFile.status === "COMPLETE" ? "Completo" : "Incompleto"}
                     </span>
-                    <span className={`status-pill ${selectedLaborFile.employmentStatus === "FORMER" ? "status-migration" : "status-live"}`}>
-                      {selectedLaborFile.employmentStatus === "FORMER" ? "Extrabajador" : "Activo"}
+                    <span className={`status-pill ${getEmploymentStatusClass(selectedLaborFile)}`}>
+                      {getEmploymentStatusLabel(selectedLaborFile)}
                     </span>
                   </div>
                 </div>
@@ -1951,6 +2140,11 @@ export function LaborFilesPage() {
                       <button className="secondary-button" disabled={saving || loading} onClick={() => void loadLaborFiles(selectedLaborFile.id)} type="button">
                         Refrescar
                       </button>
+                      {canDeleteSelectedLaborFile ? (
+                        <button className="danger-button" disabled={saving} onClick={() => void handleLaborFileDelete()} type="button">
+                          Eliminar expediente archivado
+                        </button>
+                      ) : null}
                     </div>
                   </form>
                 ) : null}

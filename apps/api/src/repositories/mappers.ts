@@ -217,6 +217,7 @@ export function mapUser(record: {
   specificRole: string | null;
   secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
+  createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
 }): AuthUser {
@@ -252,6 +253,7 @@ export function mapUser(record: {
         ? record.permissions.filter((permission): permission is string => typeof permission === "string")
         : []
     }),
+    createLaborFile: record.createLaborFile,
     isActive: record.isActive,
     passwordResetRequired: record.passwordResetRequired
   };
@@ -272,6 +274,7 @@ export function mapStoredUser(record: {
   specificRole: string | null;
   secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
+  createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
   passwordHash: string;
@@ -298,6 +301,7 @@ export function mapManagedUser(record: {
   secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
   isExternal: boolean;
+  createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
   createdAt: Date;
@@ -402,6 +406,7 @@ function inferInternalContractFormat(originalFileName?: string | null, fileMimeT
 function buildInternalContractAvailableFormats(record: {
   contractType?: string | null;
   sourceMatterId?: string | null;
+  signatureStatus?: string | null;
   originalFileName?: string | null;
   fileMimeType?: string | null;
   pdfOriginalFileName?: string | null;
@@ -415,7 +420,7 @@ function buildInternalContractAvailableFormats(record: {
     formats.add(primaryFormat);
   }
 
-  if (pdfFormat && !(record.contractType === "PROFESSIONAL_SERVICES" && record.sourceMatterId)) {
+  if (pdfFormat && (!(record.contractType === "PROFESSIONAL_SERVICES" && record.sourceMatterId) || record.signatureStatus === "SIGNED")) {
     formats.add(pdfFormat);
   }
 
@@ -1653,6 +1658,7 @@ export function mapFinanceRecord(record: {
     closingCommissionRecipient: record.closingCommissionRecipient ?? undefined,
     highCollectionProbability: record.highCollectionProbability,
     lowCollectionProbability: record.lowCollectionProbability,
+    salesCommissionMxn: 0,
     milestone: record.milestone ?? undefined,
     concluded: record.concluded,
     financeComments: record.financeComments ?? undefined,
@@ -1770,7 +1776,7 @@ function getPayrollDailySalaryRiStatus(laborFile?: {
 
   return {
     verified: false,
-    detail: "Contrato laboral cargado; falta salario contractual verificable."
+    detail: "Contrato laboral cargado; falta salario diario contractual verificable."
   };
 }
 
