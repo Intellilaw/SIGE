@@ -15,6 +15,10 @@ export class MattersService {
     return this.repository.listCommissionShortNames();
   }
 
+  public listVisibilityOptions() {
+    return this.repository.listVisibilityOptions();
+  }
+
   public create(payload?: MatterWriteRecord) {
     return this.repository.create(payload);
   }

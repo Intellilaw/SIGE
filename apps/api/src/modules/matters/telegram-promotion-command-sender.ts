@@ -27,9 +27,16 @@ type BotFetchResult = {
 const PROMOTION_COMPLETION_STATUSES = new Set([
   "completed",
   "complete",
+  "accepted",
+  "queued",
+  "processing",
   "document_sent",
+  "message_sent",
+  "command_sent",
   "word_sent",
-  "sent"
+  "sent",
+  "success",
+  "ok"
 ]);
 
 function normalizeText(value?: string | null) {
@@ -64,6 +71,18 @@ function boolValue(value: unknown) {
   return value === true;
 }
 
+function getBotErrorStatus(status: number) {
+  return status >= 500 || status === 401 || status === 403 ? 502 : status || 502;
+}
+
+function shouldTryNextEndpoint(status: number) {
+  return status === 400 || status === 404 || status === 405 || status === 422 || status >= 500;
+}
+
+function isInternalBotFailure(message?: string) {
+  return /could not refresh instance|traceback|sqlalchemy|internal server error/i.test(message ?? "");
+}
+
 function hasDocumentMetadata(value: unknown): boolean {
   const record = asRecord(value);
   if (!record) {
@@ -88,13 +107,15 @@ function hasDocumentMetadata(value: unknown): boolean {
     record.documentId,
     record.file_id,
     record.fileId,
+    record.message_id,
+    record.messageId,
     record.file_name,
     record.fileName,
     record.filename
   ].some((candidate) => stringValue(candidate).length > 0);
 }
 
-function botConfirmedDocumentSent(payload: unknown) {
+function botAcceptedPromotionCommand(payload: unknown) {
   const record = asRecord(payload);
   if (!record) {
     return false;
@@ -103,14 +124,20 @@ function botConfirmedDocumentSent(payload: unknown) {
   const status = stringValue(record.status).toLowerCase();
   const resultStatus = stringValue(getNestedRecord(record, "result")?.status).toLowerCase();
   const dataStatus = stringValue(getNestedRecord(record, "data")?.status).toLowerCase();
-  const explicitDocumentSent =
+  const explicitAccepted =
+    boolValue(record.ok) ||
+    boolValue(record.success) ||
     boolValue(record.document_sent) ||
     boolValue(record.documentSent) ||
+    boolValue(record.message_sent) ||
+    boolValue(record.messageSent) ||
+    boolValue(record.command_sent) ||
+    boolValue(record.commandSent) ||
     boolValue(record.word_sent) ||
     boolValue(record.wordSent) ||
     boolValue(record.completed);
 
-  if (explicitDocumentSent) {
+  if (explicitAccepted) {
     return true;
   }
 
@@ -170,6 +197,27 @@ function getResponseMessage(result: BotFetchResult) {
   return stringValue(payload?.message) || stringValue(payload?.detail) || result.text;
 }
 
+function buildPromotionCommandBody(params: {
+  command: string;
+  taskName: string;
+  messageText: string;
+  chatId: string;
+  groupName: string | null;
+}) {
+  return {
+    command: params.command,
+    taskName: params.taskName,
+    task_name: params.taskName,
+    text: params.messageText,
+    message: params.messageText,
+    chatId: params.chatId,
+    chat_id: params.chatId,
+    chatTitle: params.groupName,
+    chat_title: params.groupName,
+    source: "sige"
+  };
+}
+
 export async function sendPromotionCommandToTelegram(params: {
   matter: Matter;
   taskName: string;
@@ -202,48 +250,46 @@ export async function sendPromotionCommandToTelegram(params: {
   }
 
   const messageText = `${command} ${taskName}`;
-  const body = {
-    command,
-    taskName,
-    task_name: taskName,
-    text: messageText,
-    message: messageText,
-    chatId: groupId,
-    chat_id: groupId,
-    chatTitle: groupName,
-    chat_title: groupName,
-    source: "sige"
-  };
   const candidates = getTelegramGroupIdCandidates(groupId);
   let lastFailure: { status: number; message: string } | null = null;
 
   for (const candidate of candidates) {
+    const body = buildPromotionCommandBody({
+      command,
+      taskName,
+      messageText,
+      chatId: candidate,
+      groupName
+    });
+
     for (const path of getBotEndpointPaths(candidate)) {
       const url = `${botBaseUrl.replace(/\/+$/, "")}${path}`;
 
       try {
         const result = await fetchBotEndpoint(url, body);
 
-        if (result.status === 404 || result.status === 405) {
-          lastFailure = { status: result.status, message: getResponseMessage(result) };
-          continue;
-        }
-
         if (!result.ok) {
           const message = getResponseMessage(result);
+          lastFailure = { status: result.status, message };
+
+          if (shouldTryNextEndpoint(result.status)) {
+            params.logger?.warn(`El endpoint de promocion del bot fallo (${result.status}) para grupo ${candidate}: ${message || "sin detalle"}`);
+            continue;
+          }
+
           throw new AppError(
-            result.status || 502,
+            getBotErrorStatus(result.status),
             "TELEGRAM_PROMOTION_SEND_FAILED",
             message || "No se pudo generar y enviar la promoción desde el bot de Telegram."
           );
         }
 
-        if (!botConfirmedDocumentSent(result.payload)) {
-          throw new AppError(
-            502,
-            "TELEGRAM_PROMOTION_NOT_CONFIRMED",
-            "El bot respondió, pero no confirmó que el Word haya sido enviado a Telegram."
-          );
+        if (!botAcceptedPromotionCommand(result.payload)) {
+          lastFailure = {
+            status: 502,
+            message: "El bot respondio, pero no confirmo que haya aceptado el comando de promocion."
+          };
+          continue;
         }
 
         return {
@@ -269,9 +315,15 @@ export async function sendPromotionCommandToTelegram(params: {
   }
 
   const missingEndpointMessage = "El bot no tiene habilitada una ruta segura para generar y confirmar promociones desde SIGE.";
+  const botFailureMessage = "El bot de Telegram no pudo procesar el comando de promocion. Ya se probaron las rutas configuradas.";
   const shouldUseMissingEndpointMessage =
     lastFailure?.status === 404 || lastFailure?.status === 405 || !lastFailure?.message;
-  const endpointFailureMessage = lastFailure?.message ?? missingEndpointMessage;
+  const shouldUseBotFailureMessage = Boolean(
+    lastFailure && (lastFailure.status >= 500 || isInternalBotFailure(lastFailure.message))
+  );
+  const endpointFailureMessage = shouldUseBotFailureMessage
+    ? botFailureMessage
+    : lastFailure?.message ?? missingEndpointMessage;
 
   throw new AppError(
     502,

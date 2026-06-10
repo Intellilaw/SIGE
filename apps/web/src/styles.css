@@ -1196,6 +1196,51 @@ textarea {
   opacity: 0.7;
 }
 
+.daily-doc-creditor-list {
+  gap: 12px;
+}
+
+.daily-doc-creditor-list-head,
+.daily-doc-creditor-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-doc-creditor-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-doc-creditor-row {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9e2ec;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.daily-doc-creditor-row-head strong {
+  color: #172033;
+  font-size: 0.95rem;
+}
+
+.daily-doc-creditor-type-toggle {
+  background: #fff;
+}
+
+.daily-doc-creditor-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.daily-doc-creditor-person-field {
+  grid-column: 1 / -1;
+}
+
 .daily-doc-attorney-list {
   gap: 12px;
 }
@@ -8586,12 +8631,15 @@ textarea {
 
   .daily-doc-attorney-list-head,
   .daily-doc-attorney-row,
-  .daily-doc-receipt-doc-list-head {
+  .daily-doc-receipt-doc-list-head,
+  .daily-doc-creditor-list-head,
+  .daily-doc-creditor-row-head {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .daily-doc-receipt-doc-row {
+  .daily-doc-receipt-doc-row,
+  .daily-doc-creditor-field-grid {
     grid-template-columns: 1fr;
   }
 

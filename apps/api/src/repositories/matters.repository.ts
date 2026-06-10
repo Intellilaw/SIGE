@@ -10,6 +10,7 @@ type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 const DEFAULT_CHANNEL: Matter["communicationChannel"] = "WHATSAPP";
 const DEFAULT_RF_STATUS: Matter["rfCreated"] = "NO";
 const DEFAULT_MATTER_TYPE: Matter["matterType"] = "ONE_TIME";
+const DEFAULT_VISIBILITY = "General";
 const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
 
 const EXECUTION_MODULE_BY_TEAM: Partial<Record<NonNullable<Matter["responsibleTeam"]>, string>> = {
@@ -35,6 +36,10 @@ function normalizeRequiredText(value?: string | null) {
   }
 
   return value.trim();
+}
+
+function normalizeVisibility(value?: string | null) {
+  return normalizeOptionalText(value) ?? DEFAULT_VISIBILITY;
 }
 
 function normalizeIdentifier(value?: string | null) {
@@ -118,6 +123,29 @@ export class PrismaMattersRepository implements MattersRepository {
     )].sort();
   }
 
+  public async listVisibilityOptions() {
+    const users = await this.prisma.user.findMany({
+      where: {
+        isActive: true,
+        isExternal: true,
+        legacyRole: "INTRANET",
+        shortName: { not: null }
+      },
+      select: {
+        shortName: true
+      }
+    });
+
+    return [
+      DEFAULT_VISIBILITY,
+      ...[...new Set(
+        users
+          .map((entry) => (entry.shortName ?? "").trim().toUpperCase())
+          .filter(Boolean)
+      )].sort()
+    ];
+  }
+
   public async create(payload: MatterWriteRecord = {}) {
     const linkedQuote = await this.findQuoteByReference(this.prisma, {
       quoteId: payload.quoteId,
@@ -165,6 +193,7 @@ export class PrismaMattersRepository implements MattersRepository {
         nextAction: normalizeOptionalText(payload.nextAction),
         nextActionDueAt: parseDateValue(payload.nextActionDueAt),
         nextActionSource: normalizeOptionalText(payload.nextActionSource),
+        visibility: normalizeVisibility(payload.visibility),
         milestone: normalizeOptionalText(linkedQuote?.milestone ?? payload.milestone),
         concluded: payload.concluded ?? false,
         stage: payload.stage ?? "INTAKE",
@@ -606,6 +635,9 @@ export class PrismaMattersRepository implements MattersRepository {
     }
     if (hasOwn(payload, "nextActionSource")) {
       data.nextActionSource = normalizeOptionalText(payload.nextActionSource);
+    }
+    if (hasOwn(payload, "visibility")) {
+      data.visibility = normalizeVisibility(payload.visibility);
     }
     if (hasOwn(payload, "concluded")) {
       data.concluded = payload.concluded ?? false;

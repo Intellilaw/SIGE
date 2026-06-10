@@ -120,6 +120,13 @@ export class ResilientMattersRepository extends ResilientRepositoryBase implemen
     );
   }
 
+  public listVisibilityOptions() {
+    return this.withFallback(
+      () => this.primary.listVisibilityOptions(),
+      () => this.fallback?.listVisibilityOptions() ?? Promise.resolve(["General"])
+    );
+  }
+
   public create(payload?: MatterWriteRecord) {
     return this.withFallback(() => this.primary.create(payload), () => this.fallback!.create(payload));
   }

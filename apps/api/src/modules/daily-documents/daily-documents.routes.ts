@@ -10,7 +10,8 @@ const writeDocumentSchema = z.object({
     "money-receipt",
     "rc-received-document-receipt",
     "rc-delivered-document-receipt",
-    "property-delivery-receipt"
+    "property-delivery-receipt",
+    "promissory-note"
   ]),
   templateTitle: z.string().trim().min(1).max(120),
   title: z.string().trim().min(1).max(160),

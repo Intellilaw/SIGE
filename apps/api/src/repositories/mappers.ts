@@ -1487,6 +1487,7 @@ export function mapMatter(record: {
   nextAction: string | null;
   nextActionDueAt: Date | null;
   nextActionSource: string | null;
+  visibility: string;
   milestone: string | null;
   concluded: boolean;
   stage: string;
@@ -1531,6 +1532,7 @@ export function mapMatter(record: {
     nextAction: record.nextAction ?? undefined,
     nextActionDueAt: record.nextActionDueAt?.toISOString(),
     nextActionSource: record.nextActionSource ?? undefined,
+    visibility: record.visibility || "General",
     milestone: record.milestone ?? undefined,
     concluded: record.concluded,
     stage: record.stage as Matter["stage"],

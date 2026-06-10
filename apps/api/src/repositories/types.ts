@@ -564,6 +564,7 @@ export interface MatterWriteRecord {
   nextAction?: string | null;
   nextActionDueAt?: string | null;
   nextActionSource?: string | null;
+  visibility?: string | null;
   milestone?: string | null;
   concluded?: boolean;
   stage?: Matter["stage"];
@@ -576,6 +577,7 @@ export interface MattersRepository {
   list(): Promise<Matter[]>;
   listDeleted(): Promise<Matter[]>;
   listCommissionShortNames(): Promise<string[]>;
+  listVisibilityOptions(): Promise<string[]>;
   create(payload?: MatterWriteRecord): Promise<Matter>;
   update(matterId: string, payload: MatterWriteRecord): Promise<Matter | null>;
   trash(matterId: string): Promise<Matter | null>;

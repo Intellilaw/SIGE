@@ -1,0 +1,2 @@
+ALTER TABLE "Matter"
+ADD COLUMN IF NOT EXISTS "visibility" TEXT NOT NULL DEFAULT 'General';

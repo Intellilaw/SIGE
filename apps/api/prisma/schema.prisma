@@ -627,6 +627,7 @@ model Matter {
   nextAction                String?
   nextActionDueAt           DateTime?
   nextActionSource          String?
+  visibility                String       @default("General")
   milestone                 String?
   concluded                 Boolean      @default(false)
   stage                     String       @default("INTAKE")

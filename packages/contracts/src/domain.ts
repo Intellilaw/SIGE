@@ -635,7 +635,8 @@ export type DailyDocumentTemplateId =
   | "money-receipt"
   | "rc-received-document-receipt"
   | "rc-delivered-document-receipt"
-  | "property-delivery-receipt";
+  | "property-delivery-receipt"
+  | "promissory-note";
 
 export interface DailyDocumentAssignment {
   id: string;
@@ -863,6 +864,7 @@ export interface Matter {
   nextAction?: string;
   nextActionDueAt?: string;
   nextActionSource?: string;
+  visibility: string;
   milestone?: string;
   concluded: boolean;
   stage: MatterStage;

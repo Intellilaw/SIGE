@@ -11,7 +11,8 @@ const DAILY_DOCUMENT_TEMPLATE_IDS = new Set<DailyDocumentTemplateId>([
   "money-receipt",
   "rc-received-document-receipt",
   "rc-delivered-document-receipt",
-  "property-delivery-receipt"
+  "property-delivery-receipt",
+  "promissory-note"
 ]);
 
 function normalizeText(value?: string | null) {

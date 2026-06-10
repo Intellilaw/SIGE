@@ -723,6 +723,7 @@ export class LocalBusinessStore {
       executionPrompt: optionalText(row.comentarios_llm),
       nextAction: optionalText(row.siguiente_accion),
       nextActionDueAt: isoDate(row.fecha_siguiente_accion),
+      visibility: optionalText(row.visibilidad) ?? "General",
       milestone: optionalText(row.hito_conclusion),
       concluded: booleanValue(row.ya_concluyo),
       stage: "EXECUTION",
@@ -907,6 +908,10 @@ export class LocalMattersRepository implements MattersRepository {
 
   public listCommissionShortNames() {
     return this.store.listCommissionShortNames();
+  }
+
+  public async listVisibilityOptions() {
+    return ["General"];
   }
 
   public create(_payload?: MatterWriteRecord) {

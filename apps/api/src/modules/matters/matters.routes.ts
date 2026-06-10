@@ -62,6 +62,7 @@ const matterSchema = z.object({
   nextAction: z.string().nullable().optional(),
   nextActionDueAt: z.string().nullable().optional(),
   nextActionSource: z.string().nullable().optional(),
+  visibility: z.string().nullable().optional(),
   milestone: z.string().nullable().optional(),
   concluded: z.boolean().optional(),
   stage: z.enum(["INTAKE", "EXECUTION", "CLOSED"]).optional(),
@@ -299,6 +300,7 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/matters/short-names", { preHandler: readGuards }, async () => service.listCommissionShortNames());
+  app.get("/matters/visibility-options", { preHandler: readGuards }, async () => service.listVisibilityOptions());
 
   app.post("/matters", { preHandler: writeGuards }, async (request) => {
     const payload = matterSchema.partial().parse(request.body ?? {});

@@ -31,6 +31,7 @@ type MatterPatchPayload = {
   nextAction?: string | null;
   nextActionDueAt?: string | null;
   nextActionSource?: string | null;
+  visibility?: string | null;
   milestone?: string | null;
   concluded?: boolean;
   stage?: Matter["stage"];
@@ -71,6 +72,7 @@ const EXECUTION_MODULE_BY_TEAM: Partial<Record<Team, string>> = {
   TAX_COMPLIANCE: "tax-compliance"
 };
 
+const GENERAL_VISIBILITY = "General";
 const EXECUTION_TEAM_OPTIONS = TEAM_OPTIONS.filter((option) => EXECUTION_TEAM_KEYS.has(option.key));
 
 function toErrorMessage(error: unknown) {
@@ -83,6 +85,21 @@ function toErrorMessage(error: unknown) {
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function normalizeVisibility(value?: string | null) {
+  return normalizeText(value) || GENERAL_VISIBILITY;
+}
+
+function normalizeVisibilityOptions(options: string[]) {
+  const unique = new Set<string>([GENERAL_VISIBILITY]);
+  options
+    .map((option) => normalizeText(option))
+    .filter(Boolean)
+    .sort()
+    .forEach((option) => unique.add(option));
+
+  return Array.from(unique);
 }
 
 function normalizeComparableText(value?: string | null) {
@@ -308,6 +325,7 @@ function matchesWordSearch(
       matter.notes,
       matter.milestone,
       matter.commissionAssignee,
+      matter.visibility,
       matter.origin,
       getTeamLabel(matter.responsibleTeam),
       getChannelLabel(matter.communicationChannel),
@@ -496,6 +514,7 @@ function buildMatterPatch(matter: Matter): MatterPatchPayload {
     nextAction: normalizeText(matter.nextAction) ? matter.nextAction ?? null : null,
     nextActionDueAt: toDateInput(matter.nextActionDueAt) || null,
     nextActionSource: normalizeText(matter.nextActionSource) ? matter.nextActionSource ?? null : null,
+    visibility: normalizeVisibility(matter.visibility),
     milestone: normalizeText(matter.milestone) ? matter.milestone ?? null : null,
     concluded: Boolean(matter.concluded),
     stage: matter.stage,
@@ -512,6 +531,7 @@ interface MatterTableProps {
   clients: Client[];
   reflections: Map<string, MatterReflection>;
   commissionOptions: string[];
+  visibilityOptions: string[];
   selectedIds: Set<string>;
   rowRefs: MutableRefObject<Map<string, HTMLTableRowElement>>;
   readOnly: boolean;
@@ -536,6 +556,7 @@ function MatterTable({
   clients,
   reflections,
   commissionOptions,
+  visibilityOptions,
   selectedIds,
   rowRefs,
   readOnly,
@@ -594,6 +615,7 @@ function MatterTable({
               {!isRetainerTable ? <th>Siguiente tarea</th> : null}
               {!isRetainerTable ? <th>Fecha sig.</th> : null}
               {!isRetainerTable ? <th>Origen</th> : null}
+              {!isRetainerTable ? <th>Visibilidad</th> : null}
               {!isRetainerTable ? <th>Hito conclusion</th> : null}
               {!isRetainerTable ? <th>Concluyo?</th> : null}
               <th>Borrar</th>
@@ -602,13 +624,13 @@ function MatterTable({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={isRetainerTable ? 9 : 28} className="centered-inline-message">
+                <td colSpan={isRetainerTable ? 9 : 29} className="centered-inline-message">
                   Cargando asuntos...
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={isRetainerTable ? 9 : 28} className="centered-inline-message">
+                <td colSpan={isRetainerTable ? 9 : 29} className="centered-inline-message">
                   No hay asuntos.
                 </td>
               </tr>
@@ -634,6 +656,10 @@ function MatterTable({
                 const isLinked = isMatterLinked(item);
                 const sendLabel = matterType === "RETAINER" ? "-> Ejecucion" : "-> Ejec + Fin";
                 const sendTone = matterType === "RETAINER" ? "secondary-button" : "primary-button";
+                const currentVisibility = normalizeVisibility(item.visibility);
+                const rowVisibilityOptions = visibilityOptions.includes(currentVisibility)
+                  ? visibilityOptions
+                  : [...visibilityOptions, currentVisibility];
                 const rowClassName = [
                   rowReason && !isSelected ? "matter-row-danger" : "",
                   isSelected ? "matter-row-selected" : ""
@@ -935,6 +961,22 @@ function MatterTable({
                     ) : null}
                     {!isRetainerTable ? (
                       <td>
+                        <select
+                          className="lead-cell-input"
+                          value={currentVisibility}
+                          disabled={readOnly}
+                          onChange={(event) => void onImmediateChange(item.id, "visibility", event.target.value)}
+                        >
+                          {rowVisibilityOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    ) : null}
+                    {!isRetainerTable ? (
+                      <td>
                         <input
                           className="lead-cell-input"
                           value={item.milestone || ""}
@@ -978,6 +1020,7 @@ export function MattersPage() {
   const [taskItems, setTaskItems] = useState<TaskItem[]>([]);
   const [taskModules, setTaskModules] = useState<TaskModuleDefinition[]>([]);
   const [commissionShortNames, setCommissionShortNames] = useState<string[]>([]);
+  const [visibilityOptions, setVisibilityOptions] = useState<string[]>([GENERAL_VISIBILITY]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -1007,14 +1050,24 @@ export function MattersPage() {
     setErrorMessage(null);
 
     try {
-      const [loadedMatters, loadedDeleted, loadedQuotes, loadedClients, loadedTaskItems, loadedTaskModules, shortNames] = await Promise.all([
+      const [
+        loadedMatters,
+        loadedDeleted,
+        loadedQuotes,
+        loadedClients,
+        loadedTaskItems,
+        loadedTaskModules,
+        shortNames,
+        loadedVisibilityOptions
+      ] = await Promise.all([
         apiGet<Matter[]>("/matters"),
         apiGet<Matter[]>("/matters/recycle-bin"),
         canWriteMatters ? apiGet<Quote[]>("/quotes") : Promise.resolve([]),
         canWriteMatters ? apiGet<Client[]>("/clients") : Promise.resolve([]),
         canReadTasks ? apiGet<TaskItem[]>("/tasks/items") : Promise.resolve([]),
         canReadTasks ? apiGet<TaskModuleDefinition[]>("/tasks/modules") : Promise.resolve([]),
-        apiGet<string[]>("/matters/short-names")
+        apiGet<string[]>("/matters/short-names"),
+        apiGet<string[]>("/matters/visibility-options")
       ]);
 
       setQuotes(sortQuotes(loadedQuotes));
@@ -1022,6 +1075,7 @@ export function MattersPage() {
       setTaskItems(loadedTaskItems);
       setTaskModules(loadedTaskModules);
       setCommissionShortNames(shortNames);
+      setVisibilityOptions(normalizeVisibilityOptions(loadedVisibilityOptions));
       setActiveItems(sortActiveMatters(loadedMatters, loadedClients));
       setDeletedItems(sortDeletedMatters(loadedDeleted));
       setSelectedIds(new Set());
@@ -1509,6 +1563,7 @@ export function MattersPage() {
           clients={clients}
           reflections={reflections}
           commissionOptions={commissionOptions}
+          visibilityOptions={visibilityOptions}
           selectedIds={selectedIds}
           rowRefs={matterRowRefs}
           readOnly={!canWriteMatters}
@@ -1544,6 +1599,7 @@ export function MattersPage() {
           clients={clients}
           reflections={reflections}
           commissionOptions={commissionOptions}
+          visibilityOptions={visibilityOptions}
           selectedIds={new Set()}
           rowRefs={matterRowRefs}
           readOnly={true}

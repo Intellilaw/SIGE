@@ -41,6 +41,13 @@ const receiptDocumentKindLabels = {
     original: "Original/copia certificada",
     simple: "Copia simple"
 };
+const maxPromissoryNoteCreditors = 4;
+const emptyPromissoryNoteCreditor = {
+    type: "physical",
+    personName: "",
+    companyName: "",
+    representativeName: ""
+};
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
         return error.message;
@@ -197,6 +204,77 @@ function receiptDocumentRows(rawDocuments, minimumRows = 5) {
 }
 function receiptCheckboxSymbol(isChecked) {
     return isChecked ? "☑" : "☐";
+}
+function normalizePromissoryNoteCreditor(entry) {
+    return {
+        type: entry?.type === "moral" ? "moral" : "physical",
+        personName: normalizeText(entry?.personName),
+        companyName: normalizeText(entry?.companyName),
+        representativeName: normalizeText(entry?.representativeName)
+    };
+}
+function promissoryNoteCreditorRows(rawCreditors) {
+    const normalizedCreditors = normalizeText(rawCreditors);
+    if (!normalizedCreditors) {
+        return [{ ...emptyPromissoryNoteCreditor }];
+    }
+    try {
+        const parsedCreditors = JSON.parse(normalizedCreditors);
+        if (Array.isArray(parsedCreditors)) {
+            const rows = parsedCreditors
+                .slice(0, maxPromissoryNoteCreditors)
+                .map((creditor) => normalizePromissoryNoteCreditor(creditor));
+            return rows.length ? rows : [{ ...emptyPromissoryNoteCreditor }];
+        }
+    }
+    catch {
+        // Future-proofing for any manually saved legacy plain-text creditor value.
+    }
+    return [
+        {
+            ...emptyPromissoryNoteCreditor,
+            personName: normalizedCreditors
+        }
+    ];
+}
+function serializePromissoryNoteCreditors(creditors) {
+    return JSON.stringify(creditors.slice(0, maxPromissoryNoteCreditors).map((creditor) => normalizePromissoryNoteCreditor(creditor)));
+}
+function promissoryNoteCreditorName(creditor, fallback) {
+    if (creditor.type === "moral") {
+        const companyName = normalizePartyName(creditor.companyName || fallback);
+        const representativeName = normalizePartyName(creditor.representativeName);
+        return representativeName ? `${companyName}, representada por ${representativeName}` : companyName;
+    }
+    return normalizePartyName(creditor.personName || fallback);
+}
+function promissoryNoteCreditorList(rawCreditors) {
+    const creditorNames = promissoryNoteCreditorRows(rawCreditors)
+        .map((creditor) => promissoryNoteCreditorName(creditor, ""))
+        .filter(Boolean);
+    return formatSpanishNameList(creditorNames.length ? creditorNames : ["acreedor pendiente"]);
+}
+function getPromissoryNoteDebtor(values) {
+    const debtorType = values.debtorType === "moral" ? "moral" : "physical";
+    const physicalName = normalizePartyName(value(values, "debtorPersonName", "deudor pendiente"));
+    const companyName = normalizePartyName(value(values, "debtorCompanyName", "sociedad deudora pendiente"));
+    const representativeName = normalizePartyName(value(values, "debtorCompanyRepresentative", "representante pendiente"));
+    if (debtorType === "moral") {
+        return {
+            text: `${companyName}, representada en este acto por ${representativeName}`,
+            signatureName: representativeName,
+            signatureRole: `Representante legal de ${companyName}`
+        };
+    }
+    return {
+        text: physicalName,
+        signatureName: physicalName,
+        signatureRole: "Deudor suscriptor"
+    };
+}
+function promissoryNoteAmountText(values) {
+    const amountInWords = value(values, "amountInWords", "cantidad con letra pendiente");
+    return `${amountLabel(values)} (${amountInWords}, Moneda Nacional)`;
 }
 const dailyDocumentTemplates = [
     {
@@ -473,6 +551,77 @@ const dailyDocumentTemplates = [
             ],
             signers: [value(values, "deliveredBy", "Entrega"), value(values, "receivedBy", "Recibe")]
         })
+    },
+    {
+        id: "promissory-note",
+        title: "Pagaré general",
+        shortTitle: "Pagaré general",
+        summary: "Pagaré con deudor y acreedor persona física o moral; permite hasta cuatro acreedores.",
+        fields: [
+            { name: "noteNumber", label: "Número de pagaré", placeholder: "1 de 1", defaultValue: "1 de 1" },
+            ...basePlaceDateFields,
+            { name: "paymentPlace", label: "Lugar de pago", placeholder: "Ciudad de México", defaultValue: "Ciudad de México" },
+            { name: "dueDate", label: "Fecha de pago / vencimiento", type: "date" },
+            { name: "amount", label: "Cantidad con número", type: "number", placeholder: "150000.00" },
+            { name: "amountInWords", label: "Cantidad con letra", placeholder: "Ciento cincuenta mil pesos 00/100" },
+            {
+                name: "defaultInterestRate",
+                label: "Interés moratorio mensual",
+                placeholder: "5% (cinco por ciento)",
+                defaultValue: "5% (cinco por ciento)"
+            },
+            {
+                name: "creditors",
+                label: "Parte acreedora",
+                type: "creditor-list"
+            },
+            { name: "debtorType", label: "Tipo de deudor", type: "grantor-type", defaultValue: "physical" },
+            {
+                name: "debtorPersonName",
+                label: "Nombre de la persona física deudora",
+                placeholder: "Nombre completo del deudor",
+                visibleWhen: { name: "debtorType", value: "physical" }
+            },
+            {
+                name: "debtorCompanyName",
+                label: "Nombre de la sociedad deudora",
+                placeholder: "Nombre de la sociedad",
+                visibleWhen: { name: "debtorType", value: "moral" }
+            },
+            {
+                name: "debtorCompanyRepresentative",
+                label: "Representante legal de la deudora",
+                placeholder: "Nombre del representante legal",
+                visibleWhen: { name: "debtorType", value: "moral" }
+            },
+            {
+                name: "debtorAddress",
+                label: "Domicilio del deudor",
+                type: "textarea",
+                placeholder: "Calle, número, colonia, alcaldía o municipio, entidad federativa"
+            }
+        ],
+        build: (values) => {
+            const debtor = getPromissoryNoteDebtor(values);
+            const creditors = promissoryNoteCreditorList(values.creditors);
+            const paymentPlace = fallbackValue(values, ["paymentPlace", "place"], "Ciudad de México");
+            const debtorAddress = value(values, "debtorAddress", "domicilio del deudor pendiente").replace(/[.\s]+$/g, "");
+            return {
+                title: "Pagaré",
+                subtitle: `Pagaré número ${value(values, "noteNumber", "1 de 1")}`,
+                paragraphs: [
+                    `${formatPlaceDate(values)}.`,
+                    `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatLongDate(values.dueDate)}, la cantidad de ${promissoryNoteAmountText(values)}.`,
+                    `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${value(values, "defaultInterestRate", "5% (cinco por ciento)")} mensual, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
+                    `DOMICILIO DEL DEUDOR: ${debtorAddress}.`,
+                    "ACEPTO,"
+                ],
+                signers: [debtor.signatureName],
+                signatures: [{ name: debtor.signatureName, role: debtor.signatureRole }],
+                signatureColumns: 1,
+                showPageNumbers: false
+            };
+        }
     }
 ];
 function sortClients(clients) {
@@ -627,7 +776,7 @@ async function fetchAssetDataUrl(assetUrl) {
     });
 }
 function isDocumentStandaloneHeading(paragraph) {
-    return paragraph.trim().toLocaleUpperCase("es-MX") === "CLÁUSULA ÚNICA";
+    return ["CLÁUSULA ÚNICA", "ACEPTO,"].includes(paragraph.trim().toLocaleUpperCase("es-MX"));
 }
 function getRcDeliveredForm(document) {
     return document.formLayout?.type === "rc-delivered-documents" || document.formLayout?.type === "rc-received-documents"
@@ -1661,6 +1810,26 @@ export function DailyDocumentsPage() {
         const rows = receiptDocumentItems(values[fieldName] ?? "").filter((_, rowIndex) => rowIndex !== index);
         updateValue(fieldName, serializeReceiptDocumentItems(rows.length ? rows : [{ description: "", kind: "original" }]));
     }
+    function updatePromissoryNoteCreditor(fieldName, index, nextCreditor) {
+        const rows = promissoryNoteCreditorRows(values[fieldName] ?? "");
+        const currentRow = rows[index] ?? { ...emptyPromissoryNoteCreditor };
+        rows[index] = normalizePromissoryNoteCreditor({
+            ...currentRow,
+            ...nextCreditor
+        });
+        updateValue(fieldName, serializePromissoryNoteCreditors(rows));
+    }
+    function addPromissoryNoteCreditor(fieldName) {
+        const rows = promissoryNoteCreditorRows(values[fieldName] ?? "");
+        if (rows.length >= maxPromissoryNoteCreditors) {
+            return;
+        }
+        updateValue(fieldName, serializePromissoryNoteCreditors([...rows, { ...emptyPromissoryNoteCreditor }]));
+    }
+    function removePromissoryNoteCreditor(fieldName, index) {
+        const rows = promissoryNoteCreditorRows(values[fieldName] ?? "").filter((_, rowIndex) => rowIndex !== index);
+        updateValue(fieldName, serializePromissoryNoteCreditors(rows.length ? rows : [{ ...emptyPromissoryNoteCreditor }]));
+    }
     function resetDraft() {
         const firstTemplate = dailyDocumentTemplates[0];
         setSelectedTemplateId(firstTemplate.id);
@@ -1852,6 +2021,10 @@ export function DailyDocumentsPage() {
                                                                                                 updateReceiptDocument(field.name, index, { kind });
                                                                                             }
                                                                                         }, type: "checkbox" }), _jsx("span", { children: receiptDocumentKindLabels[kind] })] }, kind))) }), documentRows.length > 1 ? (_jsx("button", { className: "danger-button", disabled: savingAssignment, onClick: () => removeReceiptDocument(field.name, index), type: "button", children: "Quitar" })) : null] }, `${field.name}-${index}`))) })] }, field.name));
+                                                }
+                                                if (field.type === "creditor-list") {
+                                                    const creditorRows = promissoryNoteCreditorRows(values[field.name] ?? "");
+                                                    return (_jsxs("div", { className: "form-field daily-doc-field-wide daily-doc-creditor-list", children: [_jsxs("div", { className: "daily-doc-creditor-list-head", children: [_jsx("span", { children: field.label }), _jsx("button", { className: "secondary-button", disabled: savingAssignment || creditorRows.length >= maxPromissoryNoteCreditors, onClick: () => addPromissoryNoteCreditor(field.name), type: "button", children: "+ Agregar acreedor" })] }), _jsx("div", { className: "daily-doc-creditor-rows", children: creditorRows.map((creditor, index) => (_jsxs("section", { className: "daily-doc-creditor-row", children: [_jsxs("div", { className: "daily-doc-creditor-row-head", children: [_jsxs("strong", { children: ["Acreedor ", index + 1] }), creditorRows.length > 1 ? (_jsx("button", { className: "danger-button", disabled: savingAssignment, onClick: () => removePromissoryNoteCreditor(field.name, index), type: "button", children: "Quitar" })) : null] }), _jsx("div", { className: "daily-doc-grantor-type-toggle daily-doc-creditor-type-toggle", role: "radiogroup", "aria-label": `Tipo de acreedor ${index + 1}`, children: ["physical", "moral"].map((creditorType) => (_jsx("button", { "aria-checked": creditor.type === creditorType, className: creditor.type === creditorType ? "is-active" : "", disabled: savingAssignment, onClick: () => updatePromissoryNoteCreditor(field.name, index, { type: creditorType }), role: "radio", type: "button", children: grantorTypeLabels[creditorType] }, creditorType))) }), _jsx("div", { className: "daily-doc-creditor-field-grid", children: creditor.type === "moral" ? (_jsxs(_Fragment, { children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nombre de la sociedad acreedora" }), _jsx("input", { disabled: savingAssignment, onChange: (event) => updatePromissoryNoteCreditor(field.name, index, { companyName: event.target.value }), placeholder: "Nombre de la sociedad", type: "text", value: creditor.companyName })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Representante legal de la acreedora" }), _jsx("input", { disabled: savingAssignment, onChange: (event) => updatePromissoryNoteCreditor(field.name, index, { representativeName: event.target.value }), placeholder: "Nombre del representante legal", type: "text", value: creditor.representativeName })] })] })) : (_jsxs("label", { className: "form-field daily-doc-creditor-person-field", children: [_jsx("span", { children: "Nombre de la persona f\u00EDsica acreedora" }), _jsx("input", { disabled: savingAssignment, onChange: (event) => updatePromissoryNoteCreditor(field.name, index, { personName: event.target.value }), placeholder: "Nombre completo del acreedor", type: "text", value: creditor.personName })] })) })] }, `${field.name}-${index}`))) })] }, field.name));
                                                 }
                                                 if (field.type === "payment-type") {
                                                     return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsxs("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "Pago total", children: [_jsx("option", { value: "Pago total", children: "Pago total" }), _jsx("option", { value: "Pago parcial", children: "Pago parcial" })] })] }, field.name));
