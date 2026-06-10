@@ -58,8 +58,8 @@ function getIncomeTotal(record: FinanceRecord) {
   return Number(record.paidThisMonthMxn || 0) + Number(record.payment2Mxn || 0) + Number(record.payment3Mxn || 0);
 }
 
-function getExpectedIncomeDueToday(record: FinanceRecord) {
-  return Number(record.conceptFeesMxn || 0) - Number(record.previousPaymentsMxn || 0) - getIncomeTotal(record);
+function getExpectedIncomeThisMonth(record: FinanceRecord) {
+  return Number(record.conceptFeesMxn || 0);
 }
 
 function getProgressPercent(actual: number, expected: number) {
@@ -148,17 +148,17 @@ export function BudgetPlanningPage() {
   const totals = useMemo(() => {
     const actualIncomeMxn = financeRecords.reduce((sum, record) => sum + getIncomeTotal(record), 0);
     const actualExpenseMxn = generalExpenses.reduce((sum, expense) => sum + Number(expense.amountMxn || 0), 0);
+    const expectedIncomeMxn = financeRecords.reduce((sum, record) => sum + getExpectedIncomeThisMonth(record), 0);
     const expectedHighProbabilityIncomeMxn = financeRecords.reduce(
-      (sum, record) => sum + (record.highCollectionProbability ? getExpectedIncomeDueToday(record) : 0),
+      (sum, record) => sum + (record.highCollectionProbability ? getExpectedIncomeThisMonth(record) : 0),
       0
     );
     const expectedLowProbabilityIncomeMxn = financeRecords.reduce(
-      (sum, record) => sum + (record.lowCollectionProbability ? getExpectedIncomeDueToday(record) : 0),
+      (sum, record) => sum + (record.lowCollectionProbability ? getExpectedIncomeThisMonth(record) : 0),
       0
     );
-    const expectedIncomeMxn = expectedHighProbabilityIncomeMxn;
     const expectedExpenseMxn = plan?.expectedExpenseMxn ?? 0;
-    const expectedResultMxn = expectedIncomeMxn - expectedExpenseMxn;
+    const expectedResultMxn = expectedHighProbabilityIncomeMxn - expectedExpenseMxn;
     const actualResultMxn = actualIncomeMxn - actualExpenseMxn;
 
     return {
@@ -238,16 +238,20 @@ export function BudgetPlanningPage() {
               </div>
               <div className="budget-pair-grid budget-income-grid">
                 <div className="budget-reported-field budget-readonly-field">
-                  <span>Esperados alta prob.</span>
+                  <span>Esperados total</span>
+                  <strong>{formatCurrency(totals.expectedIncomeMxn)}</strong>
+                </div>
+                <div className="budget-reported-field">
+                  <span>Reportados</span>
+                  <strong>{formatCurrency(totals.actualIncomeMxn)}</strong>
+                </div>
+                <div className="budget-reported-field budget-readonly-field">
+                  <span>Alta prob.</span>
                   <strong>{formatCurrency(totals.expectedHighProbabilityIncomeMxn)}</strong>
                 </div>
                 <div className="budget-reported-field budget-readonly-field">
-                  <span>Esperados baja prob.</span>
+                  <span>Baja prob.</span>
                   <strong>{formatCurrency(totals.expectedLowProbabilityIncomeMxn)}</strong>
-                </div>
-                <div className="budget-reported-field budget-income-reported-field">
-                  <span>Reportados</span>
-                  <strong>{formatCurrency(totals.actualIncomeMxn)}</strong>
                 </div>
               </div>
               <div className="budget-progress-track">

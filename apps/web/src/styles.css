@@ -8794,10 +8794,6 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.budget-income-reported-field {
-  grid-column: 1 / -1;
-}
-
 .budget-expected-field,
 .budget-reported-field,
 .budget-result-value {

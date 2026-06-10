@@ -35,39 +35,25 @@ function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
 }
 
-function calculateDueTodayMxn(record: {
+function calculateExpectedIncomeMxn(record: {
   conceptFeesMxn: Prisma.Decimal;
-  previousPaymentsMxn: Prisma.Decimal;
-  paidThisMonthMxn: Prisma.Decimal;
-  payment2Mxn: Prisma.Decimal;
-  payment3Mxn: Prisma.Decimal;
 }) {
-  return (
-    Number(record.conceptFeesMxn || 0) -
-    Number(record.previousPaymentsMxn || 0) -
-    Number(record.paidThisMonthMxn || 0) -
-    Number(record.payment2Mxn || 0) -
-    Number(record.payment3Mxn || 0)
-  );
+  return Number(record.conceptFeesMxn || 0);
 }
 
 function calculateExpectedIncomeBreakdownFromFinance(records: Array<{
   conceptFeesMxn: Prisma.Decimal;
-  previousPaymentsMxn: Prisma.Decimal;
-  paidThisMonthMxn: Prisma.Decimal;
-  payment2Mxn: Prisma.Decimal;
-  payment3Mxn: Prisma.Decimal;
   highCollectionProbability: boolean;
   lowCollectionProbability: boolean;
 }>) {
   return records.reduce(
     (totals, record) => {
-      const dueTodayMxn = calculateDueTodayMxn(record);
+      const expectedIncomeMxn = calculateExpectedIncomeMxn(record);
 
       return {
-        total: totals.total + dueTodayMxn,
-        highProbability: totals.highProbability + (record.highCollectionProbability ? dueTodayMxn : 0),
-        lowProbability: totals.lowProbability + (record.lowCollectionProbability ? dueTodayMxn : 0)
+        total: totals.total + expectedIncomeMxn,
+        highProbability: totals.highProbability + (record.highCollectionProbability ? expectedIncomeMxn : 0),
+        lowProbability: totals.lowProbability + (record.lowCollectionProbability ? expectedIncomeMxn : 0)
       };
     },
     { total: 0, highProbability: 0, lowProbability: 0 }
@@ -161,10 +147,6 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       where: { year, month },
       select: {
         conceptFeesMxn: true,
-        previousPaymentsMxn: true,
-        paidThisMonthMxn: true,
-        payment2Mxn: true,
-        payment3Mxn: true,
         highCollectionProbability: true,
         lowCollectionProbability: true
       }

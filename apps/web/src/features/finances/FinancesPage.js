@@ -388,11 +388,12 @@ function MonthSummaryCards({ records }) {
     const totals = useMemo(() => {
         return records.reduce((acc, record) => {
             const stats = calculateFinanceStats(record);
+            const expectedThisMonthMxn = Number(record.conceptFeesMxn || 0);
             return {
                 income: acc.income + stats.totalPaidMxn,
-                netRemainingExpectedThisMonth: acc.netRemainingExpectedThisMonth + stats.dueTodayMxn,
-                highCollectionProbability: acc.highCollectionProbability + (record.highCollectionProbability ? stats.dueTodayMxn : 0),
-                lowCollectionProbability: acc.lowCollectionProbability + (record.lowCollectionProbability ? stats.dueTodayMxn : 0)
+                netRemainingExpectedThisMonth: acc.netRemainingExpectedThisMonth + expectedThisMonthMxn,
+                highCollectionProbability: acc.highCollectionProbability + (record.highCollectionProbability ? expectedThisMonthMxn : 0),
+                lowCollectionProbability: acc.lowCollectionProbability + (record.lowCollectionProbability ? expectedThisMonthMxn : 0)
             };
         }, {
             income: 0,
