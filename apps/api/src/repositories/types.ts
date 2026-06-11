@@ -634,6 +634,8 @@ export interface GeneralExpensePayrollUpdateRecord {
   imssWithholdingMxn?: number;
   employmentSubsidyMxn?: number;
   infonavitCreditMxn?: number;
+  punctualityBonusExcluded?: boolean;
+  attendanceBonusExcluded?: boolean;
   advanceVacationDaysPaid?: boolean;
   payrollStampedByAraceli?: boolean;
   finalPaymentApprovedByEmrt?: boolean;

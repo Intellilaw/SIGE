@@ -72,6 +72,8 @@ const payrollUpdateSchema = z.object({
   imssWithholdingMxn: z.number().nonnegative().optional(),
   employmentSubsidyMxn: z.number().nonnegative().optional(),
   infonavitCreditMxn: z.number().nonnegative().optional(),
+  punctualityBonusExcluded: z.boolean().optional(),
+  attendanceBonusExcluded: z.boolean().optional(),
   advanceVacationDaysPaid: z.boolean().optional(),
   payrollStampedByAraceli: z.boolean().optional(),
   finalPaymentApprovedByEmrt: z.boolean().optional(),

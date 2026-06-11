@@ -692,6 +692,8 @@ model GeneralExpensePayrollEntry {
   grossSalaryMxn             Decimal      @default(0)
   punctualityBonusMxn        Decimal      @default(0)
   attendanceBonusMxn         Decimal      @default(0)
+  punctualityBonusExcluded   Boolean      @default(false)
+  attendanceBonusExcluded    Boolean      @default(false)
   absenceDays                Decimal      @default(0)
   overtimeHours              Decimal      @default(0)
   overtimeDetail             String       @default("")

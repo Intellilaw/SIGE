@@ -68,6 +68,8 @@ type PayrollPatchPayload = {
   imssWithholdingMxn?: number;
   employmentSubsidyMxn?: number;
   infonavitCreditMxn?: number;
+  punctualityBonusExcluded?: boolean;
+  attendanceBonusExcluded?: boolean;
   advanceVacationDaysPaid?: boolean;
   payrollStampedByAraceli?: boolean;
   finalPaymentApprovedByEmrt?: boolean;
@@ -570,8 +572,10 @@ function applyPayrollCalculations(
   const absenceDiscountMxn = getPayrollAbsenceDiscountMxn(entry);
   const netSalaryMxn = grossSalaryMxn - absenceDiscountMxn;
   const monthlyBonusMxn = entry.half === 2 ? getPayrollBonusMxn(monthlyNetSalaryMxn) : 0;
-  const punctualityBonusMxn = monthlyBonusMxn;
-  const attendanceBonusMxn = monthlyBonusMxn;
+  const punctualityBonusExcluded = Boolean(entry.punctualityBonusExcluded);
+  const attendanceBonusExcluded = Boolean(entry.attendanceBonusExcluded);
+  const punctualityBonusMxn = punctualityBonusExcluded ? 0 : monthlyBonusMxn;
+  const attendanceBonusMxn = attendanceBonusExcluded ? 0 : monthlyBonusMxn;
   const payrollWithholdingsMxn = (
     Number(entry.isrWithholdingMxn || 0) +
     Number(entry.imssWithholdingMxn || 0) +
@@ -592,6 +596,8 @@ function applyPayrollCalculations(
     grossSalaryMxn,
     punctualityBonusMxn,
     attendanceBonusMxn,
+    punctualityBonusExcluded,
+    attendanceBonusExcluded,
     absenceDiscountMxn,
     netSalaryMxn,
     overtimeHourlyRateMxn,
@@ -1317,6 +1323,43 @@ export function GeneralExpensesPage() {
     );
   }
 
+  function renderPayrollBonusCell(
+    entry: GeneralExpensePayrollEntry,
+    amountMxn: number,
+    excludedField: "punctualityBonusExcluded" | "attendanceBonusExcluded",
+    bonusLabel: string
+  ) {
+    const excluded = Boolean(entry[excludedField]);
+    const disabled = !canWrite || entry.finalPaymentApprovedByEmrt || entry.half !== 2;
+    const title = entry.half !== 2
+      ? "Los bonos se pagan en la segunda quincena."
+      : excluded
+        ? `${bonusLabel} excluido del pago.`
+        : "Se paga al 100% en la segunda quincena; cada bono es 10% del salario neto mensual.";
+
+    return (
+      <div className={`general-expense-payroll-bonus-cell ${excluded ? "is-excluded" : ""}`}>
+        <div className="general-expense-readonly-cell" title={title}>
+          {formatCurrency(amountMxn)}
+        </div>
+        <label className={`general-expense-inline-checkbox general-expense-payroll-bonus-exclusion ${disabled ? "is-disabled" : ""}`}>
+          <input
+            type="checkbox"
+            checked={excluded}
+            onChange={(event) => void persistPayrollPatch(
+              entry.id,
+              { [excludedField]: event.target.checked } as PayrollPatchPayload,
+              { [excludedField]: event.target.checked } as PayrollLocalPatchPayload
+            )}
+            disabled={disabled}
+            title={title}
+          />
+          <span>Excluir</span>
+        </label>
+      </div>
+    );
+  }
+
   function renderPayrollMoneyInput(
     entry: GeneralExpensePayrollEntry,
     field: (typeof PAYROLL_MONEY_FIELDS)[number]
@@ -1541,20 +1584,20 @@ export function GeneralExpensesPage() {
                       </div>
                     </td>
                     <td>
-                      <div
-                        className="general-expense-readonly-cell"
-                        title="Se paga al 100% en la segunda quincena; cada bono es 10% del salario neto mensual."
-                      >
-                        {formatCurrency(entry.punctualityBonusMxn)}
-                      </div>
+                      {renderPayrollBonusCell(
+                        entry,
+                        entry.punctualityBonusMxn,
+                        "punctualityBonusExcluded",
+                        "Bono de puntualidad"
+                      )}
                     </td>
                     <td>
-                      <div
-                        className="general-expense-readonly-cell"
-                        title="Se paga al 100% en la segunda quincena; cada bono es 10% del salario neto mensual."
-                      >
-                        {formatCurrency(entry.attendanceBonusMxn)}
-                      </div>
+                      {renderPayrollBonusCell(
+                        entry,
+                        entry.attendanceBonusMxn,
+                        "attendanceBonusExcluded",
+                        "Bono de asistencia"
+                      )}
                     </td>
                     <td>
                       <div className="general-expense-readonly-cell">

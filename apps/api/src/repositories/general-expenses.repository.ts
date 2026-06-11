@@ -359,12 +359,14 @@ function applyPayrollMonthlyBonusCalculations(entries: GeneralExpensePayrollEntr
   return entries.map((entry) => {
     const monthlyNetSalaryMxn = monthlyNetSalaryByEmployee.get(getPayrollEmployeeBonusKey(entry)) ?? 0;
     const monthlyBonusMxn = entry.half === 2 ? getPayrollBonusMxn(monthlyNetSalaryMxn) : 0;
+    const punctualityBonusMxn = entry.punctualityBonusExcluded ? 0 : monthlyBonusMxn;
+    const attendanceBonusMxn = entry.attendanceBonusExcluded ? 0 : monthlyBonusMxn;
 
     return {
       ...entry,
-      punctualityBonusMxn: monthlyBonusMxn,
-      attendanceBonusMxn: monthlyBonusMxn,
-      netDepositMxn: getPayrollNetDepositMxn(entry, monthlyBonusMxn, monthlyBonusMxn)
+      punctualityBonusMxn,
+      attendanceBonusMxn,
+      netDepositMxn: getPayrollNetDepositMxn(entry, punctualityBonusMxn, attendanceBonusMxn)
     };
   });
 }
@@ -795,6 +797,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
           grossSalaryMxn: normalizeMoney(getPayrollGrossSalaryMxn(dailySalaryMxn)),
           punctualityBonusMxn: normalizeMoney(bonusMxn),
           attendanceBonusMxn: normalizeMoney(bonusMxn),
+          punctualityBonusExcluded: row.punctualityBonusExcluded,
+          attendanceBonusExcluded: row.attendanceBonusExcluded,
           absenceDays: new Prisma.Decimal(0),
           overtimeHours: new Prisma.Decimal(0),
           overtimeDetail: "",
@@ -841,6 +845,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         grossSalaryMxn: normalizeMoney(getPayrollGrossSalaryMxn(dailySalaryMxn)),
         punctualityBonusMxn: normalizeMoney(bonusMxn),
         attendanceBonusMxn: normalizeMoney(bonusMxn),
+        punctualityBonusExcluded: false,
+        attendanceBonusExcluded: false,
         absenceDays: new Prisma.Decimal(0),
         overtimeHours: new Prisma.Decimal(0),
         overtimeDetail: "",
@@ -1217,6 +1223,14 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "infonavitCreditMxn")) {
       data.infonavitCreditMxn = normalizeMoney(payload.infonavitCreditMxn);
+    }
+
+    if (hasOwn(payload, "punctualityBonusExcluded")) {
+      data.punctualityBonusExcluded = Boolean(payload.punctualityBonusExcluded);
+    }
+
+    if (hasOwn(payload, "attendanceBonusExcluded")) {
+      data.attendanceBonusExcluded = Boolean(payload.attendanceBonusExcluded);
     }
 
     if (hasOwn(payload, "advanceVacationDaysPaid")) {

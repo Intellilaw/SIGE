@@ -1210,6 +1210,8 @@ export interface GeneralExpensePayrollEntry {
   grossSalaryMxn: number;
   punctualityBonusMxn: number;
   attendanceBonusMxn: number;
+  punctualityBonusExcluded: boolean;
+  attendanceBonusExcluded: boolean;
   advanceVacationDays: number;
   advanceVacationPremiumPaymentDate?: string;
   advanceVacationDaysPaid: boolean;

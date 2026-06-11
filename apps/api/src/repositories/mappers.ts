@@ -1807,6 +1807,8 @@ export function mapGeneralExpensePayrollEntry(record: {
   grossSalaryMxn: Prisma.Decimal;
   punctualityBonusMxn: Prisma.Decimal;
   attendanceBonusMxn: Prisma.Decimal;
+  punctualityBonusExcluded: boolean;
+  attendanceBonusExcluded: boolean;
   advanceVacationDays?: number;
   advanceVacationPremiumPaymentDate?: string | null;
   advanceVacationDaysPaid?: boolean;
@@ -1836,8 +1838,10 @@ export function mapGeneralExpensePayrollEntry(record: {
   const absenceDiscountMxn = dailySalaryMxn * absenceDays;
   const netSalaryMxn = grossSalaryMxn - absenceDiscountMxn;
   const bonusBaseMxn = record.half === 2 ? netSalaryMxn : 0;
-  const punctualityBonusMxn = roundMoney(Math.max(0, bonusBaseMxn * PAYROLL_BONUS_RATE));
-  const attendanceBonusMxn = roundMoney(Math.max(0, bonusBaseMxn * PAYROLL_BONUS_RATE));
+  const punctualityBonusExcluded = Boolean(record.punctualityBonusExcluded);
+  const attendanceBonusExcluded = Boolean(record.attendanceBonusExcluded);
+  const punctualityBonusMxn = punctualityBonusExcluded ? 0 : roundMoney(Math.max(0, bonusBaseMxn * PAYROLL_BONUS_RATE));
+  const attendanceBonusMxn = attendanceBonusExcluded ? 0 : roundMoney(Math.max(0, bonusBaseMxn * PAYROLL_BONUS_RATE));
   const overtimeHours = Number(record.overtimeHours);
   const isrWithholdingMxn = Number(record.isrWithholdingMxn);
   const imssWithholdingMxn = Number(record.imssWithholdingMxn);
@@ -1862,6 +1866,8 @@ export function mapGeneralExpensePayrollEntry(record: {
     grossSalaryMxn,
     punctualityBonusMxn,
     attendanceBonusMxn,
+    punctualityBonusExcluded,
+    attendanceBonusExcluded,
     advanceVacationDays: Number(record.advanceVacationDays ?? 0),
     advanceVacationPremiumPaymentDate: record.advanceVacationPremiumPaymentDate ?? undefined,
     advanceVacationDaysPaid: Boolean(record.advanceVacationDaysPaid),

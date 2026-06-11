@@ -3480,6 +3480,22 @@ textarea {
   min-width: 190px;
 }
 
+.general-expense-payroll-bonus-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.general-expense-payroll-bonus-cell.is-excluded .general-expense-readonly-cell {
+  background: rgba(180, 35, 24, 0.08);
+  border-color: rgba(180, 35, 24, 0.18);
+  color: #b42318;
+}
+
+.general-expense-payroll-bonus-exclusion {
+  justify-content: center;
+}
+
 .general-expense-payroll-ri-salary {
   gap: 8px;
   justify-content: space-between;
