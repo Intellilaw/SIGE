@@ -1196,6 +1196,58 @@ textarea {
   opacity: 0.7;
 }
 
+.daily-doc-date-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.daily-doc-date-controls input[type="date"] {
+  min-width: 0;
+}
+
+.daily-doc-date-blank-toggle {
+  min-height: 46px;
+  padding: 0 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.daily-doc-date-blank-toggle span {
+  color: #334e68;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.daily-doc-additional-instructions {
+  gap: 10px;
+}
+
+.daily-doc-additional-instructions textarea {
+  min-height: 96px;
+}
+
+.daily-doc-ri-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.daily-doc-ri-actions span {
+  color: #52606d;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.daily-doc-ri-actions .secondary-button {
+  max-width: 100%;
+  white-space: normal;
+}
+
 .daily-doc-creditor-list {
   gap: 12px;
 }
@@ -1415,6 +1467,10 @@ textarea {
 .daily-doc-paper-body {
   display: grid;
   gap: 14px;
+}
+
+.daily-doc-paper-body-supplemental {
+  margin-top: 28px;
 }
 
 .daily-doc-paper-body p {
@@ -8654,9 +8710,14 @@ textarea {
     flex-direction: column;
   }
 
+  .daily-doc-date-controls,
   .daily-doc-receipt-doc-row,
   .daily-doc-creditor-field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .daily-doc-date-blank-toggle {
+    justify-content: flex-start;
   }
 
   .tasks-active-term-verification-row,
@@ -8832,6 +8893,16 @@ textarea {
   padding: 10px 12px;
 }
 
+.budget-expected-expense-field {
+  align-content: start;
+}
+
+.budget-breakdown-button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 8px 12px;
+}
+
 .budget-reported-field,
 .budget-result-value {
   display: grid;
@@ -8902,6 +8973,50 @@ textarea {
 .budget-notes-field textarea {
   min-height: 88px;
   resize: vertical;
+}
+
+.budget-expense-breakdown-modal {
+  gap: 16px;
+}
+
+.budget-breakdown-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.budget-breakdown-table-wrap {
+  overflow-x: auto;
+}
+
+.budget-breakdown-table {
+  border-collapse: collapse;
+  min-width: 680px;
+  width: 100%;
+}
+
+.budget-breakdown-table th,
+.budget-breakdown-table td {
+  border-bottom: 1px solid rgba(31, 41, 51, 0.09);
+  padding: 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.budget-breakdown-table th {
+  color: #3b4f68;
+  font-size: 0.82rem;
+  letter-spacing: 0;
+}
+
+.budget-breakdown-table .danger-button {
+  min-height: 34px;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.budget-breakdown-amount-input {
+  text-align: right;
 }
 
 .budget-snapshots-panel {

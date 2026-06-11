@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
+import { applyDailyDocumentInstructions } from "./daily-document-instructions";
 
 const writeDocumentSchema = z.object({
   templateId: z.enum([
@@ -23,6 +24,26 @@ const paramsSchema = z.object({
   documentId: z.string().min(1)
 });
 
+const instructionDocumentSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  subtitle: z.string().trim().max(240).optional(),
+  paragraphs: z.array(z.string().trim().max(12000)).max(30).default([]),
+  details: z.array(
+    z.object({
+      label: z.string().trim().min(1).max(120),
+      value: z.string().trim().max(4000)
+    })
+  ).max(30).optional()
+});
+
+const instructionSchema = z.object({
+  templateId: writeDocumentSchema.shape.templateId,
+  templateTitle: z.string().trim().min(1).max(120),
+  additionalInstructions: z.string().trim().min(1).max(4000),
+  values: z.record(z.string()).default({}),
+  document: instructionDocumentSchema
+});
+
 export const dailyDocumentsRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.DailyDocumentsService(app.repositories.dailyDocuments);
   const readGuards = [requireAuth, requireAnyPermissions(["daily-documents:read", "daily-documents:write"])];
@@ -33,6 +54,11 @@ export const dailyDocumentsRoutes: FastifyPluginAsync = async (app) => {
   app.post("/daily-documents", { preHandler: writeGuards }, async (request) => {
     const payload = writeDocumentSchema.parse(request.body ?? {});
     return service.create(payload);
+  });
+
+  app.post("/daily-documents/apply-instructions", { preHandler: writeGuards }, async (request) => {
+    const payload = instructionSchema.parse(request.body ?? {});
+    return applyDailyDocumentInstructions(payload);
   });
 
   app.patch("/daily-documents/:documentId", { preHandler: writeGuards }, async (request) => {

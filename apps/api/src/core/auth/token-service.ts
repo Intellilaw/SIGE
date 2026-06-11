@@ -31,6 +31,7 @@ export async function issueTokenPair(app: FastifyInstance, repository: AuthRepos
       specificRole: user.specificRole,
       secondarySpecificRole: user.secondarySpecificRole,
       permissions: user.permissions,
+      isExternal: user.isExternal,
       createLaborFile: user.createLaborFile,
       isActive: user.isActive,
       passwordResetRequired: user.passwordResetRequired

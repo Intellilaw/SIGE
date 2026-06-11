@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import type { BudgetPlan, BudgetPlanSnapshot, FinanceRecord, GeneralExpense } from "@sige/contracts";
+import type {
+  BudgetPlan,
+  BudgetPlanExpenseBreakdownItem,
+  BudgetPlanSnapshot,
+  FinanceRecord,
+  GeneralExpense
+} from "@sige/contracts";
 
-import { apiGet, apiPatch } from "../../api/http-client";
+import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteModule } from "../auth/permissions";
 
@@ -23,11 +29,25 @@ const MONTH_NAMES = [
 
 interface BudgetPlanningOverview {
   plan: BudgetPlan;
+  expectedExpenseBreakdown: BudgetPlanExpenseBreakdownItem[];
   financeRecords: FinanceRecord[];
   generalExpenses: GeneralExpense[];
 }
 
-type BudgetPlanPatch = Partial<Pick<BudgetPlan, "expectedExpenseMxn" | "notes">>;
+interface BudgetExpenseBreakdownDraftRow {
+  concept: string;
+  amountMxn: string;
+}
+
+interface CopyExpenseBreakdownResult {
+  year: number;
+  month: number;
+  copied: number;
+}
+
+type BudgetPlanPatch = Partial<Pick<BudgetPlan, "notes">> & {
+  expectedExpenseBreakdown?: Array<{ concept: string; amountMxn: number }>;
+};
 type BudgetPlanningTab = "current" | "snapshots";
 
 function toErrorMessage(error: unknown) {
@@ -48,6 +68,28 @@ function formatCurrency(value: number) {
 
 function formatEditableNumber(value: number) {
   return Number.isFinite(value) ? String(value) : "0";
+}
+
+function parseEditableMoney(value: string) {
+  const normalized = value.replace(/[$,\s]/g, "");
+  const numeric = Number(normalized || 0);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
+function toExpenseBreakdownDraft(items: BudgetPlanExpenseBreakdownItem[]): BudgetExpenseBreakdownDraftRow[] {
+  return items.map((item) => ({
+    concept: item.concept,
+    amountMxn: formatEditableNumber(item.amountMxn)
+  }));
+}
+
+function normalizeExpenseBreakdownDraft(rows: BudgetExpenseBreakdownDraftRow[]) {
+  return rows
+    .map((row) => ({
+      concept: row.concept.trim(),
+      amountMxn: parseEditableMoney(row.amountMxn)
+    }))
+    .filter((row) => row.concept.length > 0 || row.amountMxn > 0);
 }
 
 function getMonthName(month: number) {
@@ -77,16 +119,27 @@ export function BudgetPlanningPage() {
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [activeTab, setActiveTab] = useState<BudgetPlanningTab>("current");
   const [plan, setPlan] = useState<BudgetPlan | null>(null);
+  const [expectedExpenseBreakdown, setExpectedExpenseBreakdown] = useState<BudgetPlanExpenseBreakdownItem[]>([]);
+  const [draftExpenseBreakdown, setDraftExpenseBreakdown] = useState<BudgetExpenseBreakdownDraftRow[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [generalExpenses, setGeneralExpenses] = useState<GeneralExpense[]>([]);
   const [snapshots, setSnapshots] = useState<BudgetPlanSnapshot[]>([]);
-  const [draftExpectedExpense, setDraftExpectedExpense] = useState("0");
-  const [editingExpectedExpense, setEditingExpectedExpense] = useState(false);
+  const [expenseBreakdownOpen, setExpenseBreakdownOpen] = useState(false);
+  const [savingExpenseBreakdown, setSavingExpenseBreakdown] = useState(false);
   const [draftNotes, setDraftNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const canWrite = canWriteModule(user, "budget-planning");
+
+  function applyOverview(overview: BudgetPlanningOverview) {
+    setPlan(overview.plan);
+    setExpectedExpenseBreakdown(overview.expectedExpenseBreakdown);
+    setDraftExpenseBreakdown(toExpenseBreakdownDraft(overview.expectedExpenseBreakdown));
+    setFinanceRecords(overview.financeRecords);
+    setGeneralExpenses(overview.generalExpenses);
+    setDraftNotes(overview.plan.notes ?? "");
+  }
 
   async function loadOverview() {
     setLoading(true);
@@ -94,11 +147,7 @@ export function BudgetPlanningPage() {
 
     try {
       const overview = await apiGet<BudgetPlanningOverview>(`/budget-planning?year=${selectedYear}&month=${selectedMonth}`);
-      setPlan(overview.plan);
-      setFinanceRecords(overview.financeRecords);
-      setGeneralExpenses(overview.generalExpenses);
-      setDraftExpectedExpense(formatEditableNumber(overview.plan.expectedExpenseMxn));
-      setDraftNotes(overview.plan.notes ?? "");
+      applyOverview(overview);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -131,17 +180,76 @@ export function BudgetPlanningPage() {
 
   async function persistPlanPatch(patch: BudgetPlanPatch) {
     if (!canWrite) {
-      return;
+      return false;
     }
 
     try {
-      const updated = await apiPatch<BudgetPlan>(`/budget-planning?year=${selectedYear}&month=${selectedMonth}`, patch);
-      setPlan(updated);
-      setDraftExpectedExpense(formatEditableNumber(updated.expectedExpenseMxn));
-      setDraftNotes(updated.notes ?? "");
+      const overview = await apiPatch<BudgetPlanningOverview>(`/budget-planning?year=${selectedYear}&month=${selectedMonth}`, patch);
+      applyOverview(overview);
+      return true;
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
       await loadOverview();
+      return false;
+    }
+  }
+
+  function openExpenseBreakdown() {
+    setDraftExpenseBreakdown(
+      expectedExpenseBreakdown.length > 0
+        ? toExpenseBreakdownDraft(expectedExpenseBreakdown)
+        : [{ concept: "", amountMxn: "0" }]
+    );
+    setExpenseBreakdownOpen(true);
+  }
+
+  function updateDraftExpenseBreakdownRow(index: number, patch: Partial<BudgetExpenseBreakdownDraftRow>) {
+    setDraftExpenseBreakdown((current) =>
+      current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row)
+    );
+  }
+
+  function addDraftExpenseBreakdownRow() {
+    setDraftExpenseBreakdown((current) => [...current, { concept: "", amountMxn: "0" }]);
+  }
+
+  function removeDraftExpenseBreakdownRow(index: number) {
+    setDraftExpenseBreakdown((current) => current.filter((_, rowIndex) => rowIndex !== index));
+  }
+
+  async function saveExpenseBreakdown() {
+    setSavingExpenseBreakdown(true);
+    try {
+      const saved = await persistPlanPatch({ expectedExpenseBreakdown: normalizeExpenseBreakdownDraft(draftExpenseBreakdown) });
+      if (saved) {
+        setExpenseBreakdownOpen(false);
+      }
+    } finally {
+      setSavingExpenseBreakdown(false);
+    }
+  }
+
+  async function copyExpenseBreakdownToNextMonth() {
+    if (!canWrite) {
+      return;
+    }
+
+    setSavingExpenseBreakdown(true);
+    try {
+      const saved = await persistPlanPatch({ expectedExpenseBreakdown: normalizeExpenseBreakdownDraft(draftExpenseBreakdown) });
+      if (!saved) {
+        return;
+      }
+
+      const result = await apiPost<CopyExpenseBreakdownResult>("/budget-planning/expense-breakdown/copy-to-next-month", {
+        year: selectedYear,
+        month: selectedMonth
+      });
+      window.alert(`Se copiaron ${result.copied} filas a ${getMonthName(result.month)} ${result.year}.`);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setSavingExpenseBreakdown(false);
     }
   }
 
@@ -174,6 +282,11 @@ export function BudgetPlanningPage() {
       expenseProgress: getProgressPercent(actualExpenseMxn, expectedExpenseMxn)
     };
   }, [financeRecords, generalExpenses, plan]);
+
+  const draftExpenseBreakdownTotal = useMemo(
+    () => normalizeExpenseBreakdownDraft(draftExpenseBreakdown).reduce((sum, row) => sum + row.amountMxn, 0),
+    [draftExpenseBreakdown]
+  );
 
   const expectedResultTone = totals.expectedResultMxn >= 0 ? "is-positive" : "is-negative";
   const actualResultTone = totals.actualResultMxn >= 0 ? "is-positive" : "is-negative";
@@ -268,21 +381,13 @@ export function BudgetPlanningPage() {
                 <strong>{Math.round(totals.expenseProgress)}%</strong>
               </div>
               <div className="budget-pair-grid">
-                <label className="form-field budget-expected-field">
+                <div className="budget-reported-field budget-expected-expense-field">
                   <span>Esperados</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={editingExpectedExpense ? draftExpectedExpense : formatCurrency(Number(draftExpectedExpense || 0))}
-                    disabled={!canWrite}
-                    onFocus={() => setEditingExpectedExpense(true)}
-                    onChange={(event) => setDraftExpectedExpense(event.target.value)}
-                    onBlur={() => {
-                      setEditingExpectedExpense(false);
-                      void persistPlanPatch({ expectedExpenseMxn: Math.max(0, Number(draftExpectedExpense || 0)) });
-                    }}
-                  />
-                </label>
+                  <strong>{formatCurrency(totals.expectedExpenseMxn)}</strong>
+                  <button className="secondary-button budget-breakdown-button" type="button" onClick={openExpenseBreakdown}>
+                    Entrar a desglose
+                  </button>
+                </div>
                 <div className="budget-reported-field">
                   <span>Reportados</span>
                   <strong>{formatCurrency(totals.actualExpenseMxn)}</strong>
@@ -392,6 +497,90 @@ export function BudgetPlanningPage() {
           </div>
         </section>
       )}
+
+      {expenseBreakdownOpen ? (
+        <div className="finance-modal-backdrop" role="presentation" onClick={() => setExpenseBreakdownOpen(false)}>
+          <div
+            className="finance-modal finance-modal-wide budget-expense-breakdown-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Desglose de egresos esperados"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="finance-modal-head">
+              <div>
+                <h3>Desglose de egresos esperados</h3>
+                <span>{getMonthName(selectedMonth)} {selectedYear}</span>
+              </div>
+              <strong>{formatCurrency(draftExpenseBreakdownTotal)}</strong>
+            </div>
+
+            <div className="budget-breakdown-toolbar">
+              <button className="secondary-button" type="button" onClick={addDraftExpenseBreakdownRow} disabled={!canWrite || savingExpenseBreakdown}>
+                Agregar fila
+              </button>
+              <button className="secondary-button" type="button" onClick={() => void copyExpenseBreakdownToNextMonth()} disabled={!canWrite || savingExpenseBreakdown}>
+                Copiar a mes siguiente
+              </button>
+            </div>
+
+            <div className="budget-breakdown-table-wrap">
+              <table className="budget-breakdown-table">
+                <thead>
+                  <tr>
+                    <th>Concepto</th>
+                    <th>Monto sin IVA</th>
+                    <th>Accion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftExpenseBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="centered-inline-message">Sin filas.</td>
+                    </tr>
+                  ) : (
+                    draftExpenseBreakdown.map((row, index) => (
+                      <tr key={`${index}-${row.concept}`}>
+                        <td>
+                          <input
+                            className="finance-input"
+                            value={row.concept}
+                            disabled={!canWrite || savingExpenseBreakdown}
+                            onChange={(event) => updateDraftExpenseBreakdownRow(index, { concept: event.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="finance-input budget-breakdown-amount-input"
+                            inputMode="decimal"
+                            value={row.amountMxn}
+                            disabled={!canWrite || savingExpenseBreakdown}
+                            onChange={(event) => updateDraftExpenseBreakdownRow(index, { amountMxn: event.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <button className="danger-button" type="button" onClick={() => removeDraftExpenseBreakdownRow(index)} disabled={!canWrite || savingExpenseBreakdown}>
+                            Eliminar fila
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="finance-modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setExpenseBreakdownOpen(false)} disabled={savingExpenseBreakdown}>
+                Cancelar
+              </button>
+              <button className="primary-button" type="button" onClick={() => void saveExpenseBreakdown()} disabled={!canWrite || savingExpenseBreakdown}>
+                Guardar desglose
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

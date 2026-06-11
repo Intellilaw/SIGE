@@ -96,6 +96,11 @@ type GeneratedDocument = {
   formLayout?: DailyDocumentFormLayout;
 };
 
+type DailyDocumentInstructionResponse = {
+  paragraphs: string[];
+  summary: string;
+};
+
 type PdfDocument = import("jspdf").jsPDF;
 
 function dateInputValue(date: Date) {
@@ -111,6 +116,7 @@ const rusconiLetterheadDimensions = {
   width: 816,
   height: 1056
 };
+const blankDateMarker = "____________________";
 const regularPageMargins = {
   top: 1440,
   right: 1440,
@@ -139,6 +145,9 @@ const receiptDocumentKindLabels: Record<ReceiptDocumentKind, string> = {
   original: "Original/copia certificada",
   simple: "Copia simple"
 };
+const additionalInstructionsFieldName = "additionalInstructions";
+const riAdjustedParagraphsFieldName = "riAdjustedParagraphs";
+const riAdjustmentSummaryFieldName = "riAdjustmentSummary";
 const maxPromissoryNoteCreditors = 4;
 const emptyPromissoryNoteCreditor: PromissoryNoteCreditor = {
   type: "physical",
@@ -267,8 +276,24 @@ function formatLongDate(rawDate: string) {
   }).format(date);
 }
 
+function blankDateFlagName(fieldName: string) {
+  return `${fieldName}Blank`;
+}
+
+function isDateBlank(values: DailyDocumentValues, fieldName: string) {
+  return values[blankDateFlagName(fieldName)] === "true";
+}
+
+function formatDateField(values: DailyDocumentValues, fieldName: string, fallback = blankDateMarker) {
+  if (isDateBlank(values, fieldName)) {
+    return fallback;
+  }
+
+  return formatLongDate(values[fieldName] ?? "");
+}
+
 function formatPlaceDate(values: DailyDocumentValues) {
-  return `${value(values, "place", "lugar pendiente")}, ${formatLongDate(values.date)}`;
+  return `${value(values, "place", "lugar pendiente")}, ${formatDateField(values, "date")}`;
 }
 
 function amountLabel(values: DailyDocumentValues) {
@@ -355,6 +380,42 @@ function receiptDocumentRows(rawDocuments: string, minimumRows = 5) {
 
 function receiptCheckboxSymbol(isChecked: boolean) {
   return isChecked ? "☑" : "☐";
+}
+
+function serializeAdjustedParagraphs(paragraphs: string[]) {
+  return JSON.stringify(paragraphs.map((paragraph) => normalizeText(paragraph)).filter(Boolean));
+}
+
+function parseAdjustedParagraphs(rawParagraphs?: string | null) {
+  const normalizedParagraphs = normalizeText(rawParagraphs);
+
+  if (!normalizedParagraphs) {
+    return null;
+  }
+
+  try {
+    const parsedParagraphs = JSON.parse(normalizedParagraphs) as unknown;
+
+    if (Array.isArray(parsedParagraphs)) {
+      return parsedParagraphs.map((paragraph) => normalizeText(paragraph)).filter(Boolean);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function clearRiAdjustmentValues(values: DailyDocumentValues) {
+  if (!values[riAdjustedParagraphsFieldName] && !values[riAdjustmentSummaryFieldName]) {
+    return values;
+  }
+
+  return {
+    ...values,
+    [riAdjustedParagraphsFieldName]: "",
+    [riAdjustmentSummaryFieldName]: ""
+  };
 }
 
 function normalizePromissoryNoteCreditor(entry?: Partial<PromissoryNoteCreditor>): PromissoryNoteCreditor {
@@ -619,7 +680,7 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
         paymentType: fallbackValue(values, ["paymentType", "paymentMethod"], "pago pendiente"),
         amount: moneyReceiptAmountLabel(values),
         receivedBy: value(values, "receivedBy", "pendiente"),
-        receivedDate: formatLongDate(values.date)
+        receivedDate: formatDateField(values, "date")
       }
     })
   },
@@ -657,7 +718,7 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
           documentRows: receiptDocumentRows(documents),
           deliveredBy,
           receivedBy,
-          date: formatLongDate(values.date)
+          date: formatDateField(values, "date")
         }
       };
     }
@@ -696,7 +757,7 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
           documentRows: receiptDocumentRows(documents),
           deliveredBy,
           receivedBy,
-          date: formatLongDate(values.date)
+          date: formatDateField(values, "date")
         }
       };
     }
@@ -807,8 +868,9 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
         subtitle: `Pagaré número ${value(values, "noteNumber", "1 de 1")}`,
         paragraphs: [
           `${formatPlaceDate(values)}.`,
-          `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatLongDate(
-            values.dueDate
+          `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatDateField(
+            values,
+            "dueDate"
           )}, la cantidad de ${promissoryNoteAmountText(values)}.`,
           `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${value(
             values,
@@ -881,6 +943,24 @@ function findTemplate(templateId: DailyDocumentTemplateId | "document-receipt") 
     templateId === "document-receipt" ? "rc-received-document-receipt" : templateId;
 
   return dailyDocumentTemplates.find((template) => template.id === normalizedTemplateId) ?? dailyDocumentTemplates[0];
+}
+
+function buildBaseDocument(template: DailyDocumentTemplate, values: DailyDocumentValues) {
+  return template.build(values);
+}
+
+function buildDocumentWithAdjustments(template: DailyDocumentTemplate, values: DailyDocumentValues) {
+  const document = buildBaseDocument(template, values);
+  const adjustedParagraphs = parseAdjustedParagraphs(values[riAdjustedParagraphsFieldName]);
+
+  if (!adjustedParagraphs) {
+    return document;
+  }
+
+  return {
+    ...document,
+    paragraphs: adjustedParagraphs
+  };
 }
 
 function mergeTemplateValues(template: DailyDocumentTemplate, values: DailyDocumentValues) {
@@ -1153,7 +1233,7 @@ function generatedDocumentToText(document: GeneratedDocument) {
   return [
     document.title,
     document.subtitle,
-    ...(form ? rcDeliveredFormText(form) : moneyForm ? moneyReceiptFormText(moneyForm) : document.paragraphs),
+    ...(form ? [...rcDeliveredFormText(form), ...document.paragraphs] : moneyForm ? [...moneyReceiptFormText(moneyForm), ...document.paragraphs] : document.paragraphs),
     ...detailLines,
     ...signerLines,
     shouldShowPageNumbers(document) ? pageNumberLabel(1, 1) : ""
@@ -1185,15 +1265,20 @@ function generatedDocumentToHtml(document: GeneratedDocument) {
   const pageNumber = shouldShowPageNumbers(document)
     ? `<footer class="page-number">${escapeHtml(pageNumberLabel(1, 1))}</footer>`
     : "";
-  const regularBody = `${document.paragraphs
+  const paragraphHtml = document.paragraphs
     .map(
       (paragraph) =>
         `<p${isDocumentStandaloneHeading(paragraph) ? ' class="clause-heading"' : ""}>${escapeHtml(paragraph)}</p>`
     )
-    .join("")}
+    .join("");
+  const regularBody = `${paragraphHtml}
   ${detailRows ? `<table>${detailRows}</table>` : ""}
   ${signerRows ? `<div class="signatures">${signerRows}</div>` : ""}`;
-  const bodyContent = form ? rcDeliveredFormHtml(form) : moneyForm ? moneyReceiptFormHtml(moneyForm) : regularBody;
+  const bodyContent = form
+    ? `${rcDeliveredFormHtml(form)}${paragraphHtml ? `<div class="supplemental-paragraphs">${paragraphHtml}</div>` : ""}`
+    : moneyForm
+      ? `${moneyReceiptFormHtml(moneyForm)}${paragraphHtml ? `<div class="supplemental-paragraphs">${paragraphHtml}</div>` : ""}`
+      : regularBody;
 
   return `<!doctype html>
 <html lang="es">
@@ -1233,6 +1318,7 @@ function generatedDocumentToHtml(document: GeneratedDocument) {
     .money-receiver-signature strong, .money-receiver-signature em { display: block; overflow-wrap: anywhere; }
     .money-receiver-signature strong { font-size: 15px; font-weight: 700; }
     .money-receiver-signature em { font-size: 13px; font-style: normal; font-weight: 700; margin-top: 4px; }
+    .supplemental-paragraphs { margin-top: 34px; }
     table { border-collapse: collapse; margin: 24px 0; width: 100%; }
     th, td { border: 1px solid #d9e2ec; padding: 10px; text-align: left; vertical-align: top; }
     th { width: 28%; }
@@ -2078,6 +2164,18 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
   const paperClassName = `daily-doc-paper${hasRusconiLetterhead(document) ? " daily-doc-paper-letterhead" : ""}${
     form ? " daily-doc-paper-rc-receipt" : ""
   }${moneyForm ? " daily-doc-paper-money-receipt" : ""}`;
+  const paragraphBlock = document.paragraphs.length ? (
+    <div className={`daily-doc-paper-body${form || moneyForm ? " daily-doc-paper-body-supplemental" : ""}`}>
+      {document.paragraphs.map((paragraph, index) => (
+        <p
+          className={isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined}
+          key={`${paragraph}-${index}`}
+        >
+          {paragraph}
+        </p>
+      ))}
+    </div>
+  ) : null;
 
   return (
     <article className={paperClassName} aria-live="polite">
@@ -2194,17 +2292,10 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
           </div>
         </section>
       ) : (
-        <div className="daily-doc-paper-body">
-          {document.paragraphs.map((paragraph, index) => (
-            <p
-              className={isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined}
-              key={`${paragraph}-${index}`}
-            >
-              {paragraph}
-            </p>
-          ))}
-        </div>
+        paragraphBlock
       )}
+
+      {form || moneyForm ? paragraphBlock : null}
 
       {document.details?.length ? (
         <dl className="daily-doc-details">
@@ -2255,8 +2346,10 @@ export function DailyDocumentsPage() {
   const [assignedSearch, setAssignedSearch] = useState("");
   const [loadingModuleData, setLoadingModuleData] = useState(true);
   const [savingAssignment, setSavingAssignment] = useState(false);
+  const [applyingInstructions, setApplyingInstructions] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
+  const [instructionStatus, setInstructionStatus] = useState("");
   const [flash, setFlash] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const canRead = canReadModule(user, "daily-documents");
   const canWrite = canWriteModule(user, "daily-documents");
@@ -2266,9 +2359,11 @@ export function DailyDocumentsPage() {
     () => clients.find((client) => client.id === selectedClientId) ?? null,
     [clients, selectedClientId]
   );
-  const generatedDocument = useMemo(() => selectedTemplate.build(values), [selectedTemplate, values]);
+  const baseGeneratedDocument = useMemo(() => buildBaseDocument(selectedTemplate, values), [selectedTemplate, values]);
+  const generatedDocument = useMemo(() => buildDocumentWithAdjustments(selectedTemplate, values), [selectedTemplate, values]);
   const generatedText = useMemo(() => generatedDocumentToText(generatedDocument), [generatedDocument]);
   const generatedHtml = useMemo(() => generatedDocumentToHtml(generatedDocument), [generatedDocument]);
+  const hasRiAdjustedText = Boolean(parseAdjustedParagraphs(values[riAdjustedParagraphsFieldName]));
   const filteredClientOptions = useMemo(() => {
     const terms = normalizeSearchText(clientSearch).split(/\s+/).filter(Boolean);
 
@@ -2334,17 +2429,27 @@ export function DailyDocumentsPage() {
     setSelectedTemplateId(templateId);
     setAssignmentTitle(nextTemplate.title);
     setCopyStatus("");
+    setInstructionStatus("");
   }
 
-  function updateValue(fieldName: string, nextValue: string) {
+  function updateValue(fieldName: string, nextValue: string, options?: { preserveRiAdjustment?: boolean }) {
+    const preserveRiAdjustment = options?.preserveRiAdjustment ?? false;
     setTemplateValues((currentValues) => ({
       ...currentValues,
-      [selectedTemplate.id]: {
-        ...currentValues[selectedTemplate.id],
-        [fieldName]: nextValue
-      }
+      [selectedTemplate.id]: preserveRiAdjustment
+        ? {
+            ...currentValues[selectedTemplate.id],
+            [fieldName]: nextValue
+          }
+        : clearRiAdjustmentValues({
+            ...currentValues[selectedTemplate.id],
+            [fieldName]: nextValue
+          })
     }));
     setCopyStatus("");
+    if (!preserveRiAdjustment) {
+      setInstructionStatus("");
+    }
   }
 
   function updateDocumentReceiptClientParty(
@@ -2355,13 +2460,14 @@ export function DailyDocumentsPage() {
   ) {
     setTemplateValues((currentValues) => ({
       ...currentValues,
-      [selectedTemplate.id]: {
+      [selectedTemplate.id]: clearRiAdjustmentValues({
         ...currentValues[selectedTemplate.id],
         [fieldName]: nextValue,
         [flagName]: useSelectedClient ? "true" : ""
-      }
+      })
     }));
     setCopyStatus("");
+    setInstructionStatus("");
   }
 
   function toggleDocumentReceiptClientParty(
@@ -2454,6 +2560,7 @@ export function DailyDocumentsPage() {
     setAssignmentTitle(firstTemplate.title);
     setEditingDocumentId(null);
     setCopyStatus("");
+    setInstructionStatus("");
   }
 
   function payloadFromCurrentDraft() {
@@ -2473,6 +2580,65 @@ export function DailyDocumentsPage() {
     } catch {
       setCopyStatus("No se pudo copiar el documento.");
     }
+  }
+
+  async function applyAdditionalInstructions() {
+    if (!canWrite || applyingInstructions) {
+      return;
+    }
+
+    const additionalInstructions = normalizeText(values[additionalInstructionsFieldName]);
+    if (!additionalInstructions) {
+      setInstructionStatus("Captura indicaciones adicionales antes de aplicar Rusconi Intelligence.");
+      return;
+    }
+
+    setApplyingInstructions(true);
+    setInstructionStatus("Aplicando indicaciones con Rusconi Intelligence...");
+    setFlash(null);
+
+    try {
+      const response = await apiPost<DailyDocumentInstructionResponse>("/daily-documents/apply-instructions", {
+        templateId: selectedTemplate.id,
+        templateTitle: selectedTemplate.title,
+        additionalInstructions,
+        values: {
+          ...values,
+          [riAdjustedParagraphsFieldName]: "",
+          [riAdjustmentSummaryFieldName]: ""
+        },
+        document: {
+          title: baseGeneratedDocument.title,
+          subtitle: baseGeneratedDocument.subtitle,
+          paragraphs: baseGeneratedDocument.paragraphs,
+          details: baseGeneratedDocument.details
+        }
+      });
+
+      setTemplateValues((currentValues) => ({
+        ...currentValues,
+        [selectedTemplate.id]: {
+          ...currentValues[selectedTemplate.id],
+          [riAdjustedParagraphsFieldName]: serializeAdjustedParagraphs(response.paragraphs),
+          [riAdjustmentSummaryFieldName]: response.summary
+        }
+      }));
+      setInstructionStatus(response.summary || "Indicaciones aplicadas por Rusconi Intelligence.");
+      setCopyStatus("");
+    } catch (error) {
+      setInstructionStatus(toErrorMessage(error));
+    } finally {
+      setApplyingInstructions(false);
+    }
+  }
+
+  function restoreBaseText() {
+    setTemplateValues((currentValues) => ({
+      ...currentValues,
+      [selectedTemplate.id]: clearRiAdjustmentValues(currentValues[selectedTemplate.id])
+    }));
+    setInstructionStatus("Texto base restaurado.");
+    setCopyStatus("");
   }
 
   function selectAssignmentClient(client: Client) {
@@ -2542,6 +2708,7 @@ export function DailyDocumentsPage() {
     setAssignmentTitle(assignment.title);
     setEditingDocumentId(assignment.id);
     setCopyStatus("");
+    setInstructionStatus(assignment.values[riAdjustmentSummaryFieldName] ?? "");
     setFlash({ tone: "success", text: "Documento cargado para modificacion." });
     setActiveTab("generate");
   }
@@ -2574,7 +2741,7 @@ export function DailyDocumentsPage() {
 
   function buildAssignmentDocument(assignment: DailyDocumentAssignment) {
     const template = findTemplate(assignment.templateId);
-    return template.build(mergeTemplateValues(template, assignment.values));
+    return buildDocumentWithAdjustments(template, mergeTemplateValues(template, assignment.values));
   }
 
   async function downloadAssignmentWord(assignment: DailyDocumentAssignment) {
@@ -2766,6 +2933,42 @@ export function DailyDocumentsPage() {
                     value={assignmentTitle}
                   />
                 </label>
+                <div className="form-field daily-doc-field-wide daily-doc-additional-instructions">
+                  <span>Indicaciones adicionales</span>
+                  <textarea
+                    disabled={savingAssignment || applyingInstructions}
+                    onChange={(event) => updateValue(additionalInstructionsFieldName, event.target.value)}
+                    placeholder="Agrega condiciones especiales, parrafos adicionales o ajustes puntuales al texto del formato."
+                    value={values[additionalInstructionsFieldName] ?? ""}
+                  />
+                  <div className="daily-doc-ri-actions">
+                    {canWrite ? (
+                      <button
+                        className="secondary-button"
+                        disabled={
+                          savingAssignment ||
+                          applyingInstructions ||
+                          !normalizeText(values[additionalInstructionsFieldName])
+                        }
+                        onClick={() => void applyAdditionalInstructions()}
+                        type="button"
+                      >
+                        {applyingInstructions ? "Aplicando..." : "Aplicar indicaciones con Rusconi Intelligence"}
+                      </button>
+                    ) : null}
+                    {hasRiAdjustedText ? (
+                      <button
+                        className="secondary-button"
+                        disabled={savingAssignment || applyingInstructions}
+                        onClick={restoreBaseText}
+                        type="button"
+                      >
+                        Restaurar texto base
+                      </button>
+                    ) : null}
+                    {instructionStatus ? <span>{instructionStatus}</span> : null}
+                  </div>
+                </div>
                 {selectedTemplate.id === "rc-delivered-document-receipt" ? (
                   <label className="daily-doc-client-paid-toggle daily-doc-field-wide checkbox-row">
                     <input
@@ -3003,6 +3206,34 @@ export function DailyDocumentsPage() {
                           <option value="Pago parcial">Pago parcial</option>
                         </select>
                       </label>
+                    );
+                  }
+
+                  if (field.type === "date") {
+                    return (
+                      <div className="form-field daily-doc-date-field" key={field.name}>
+                        <span>{field.label}</span>
+                        <div className="daily-doc-date-controls">
+                          <input
+                            aria-label={field.label}
+                            disabled={savingAssignment || isDateBlank(values, field.name)}
+                            onChange={(event) => updateValue(field.name, event.target.value)}
+                            type="date"
+                            value={values[field.name] ?? ""}
+                          />
+                          <label className="checkbox-row daily-doc-date-blank-toggle">
+                            <input
+                              checked={isDateBlank(values, field.name)}
+                              disabled={savingAssignment}
+                              onChange={(event) =>
+                                updateValue(blankDateFlagName(field.name), event.target.checked ? "true" : "")
+                              }
+                              type="checkbox"
+                            />
+                            <span>Dejar fecha en blanco</span>
+                          </label>
+                        </div>
+                      </div>
                     );
                   }
 

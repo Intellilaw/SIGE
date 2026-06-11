@@ -133,7 +133,8 @@ function getEffectivePermissions(user: ReturnType<typeof getSessionUser>) {
     secondaryLegacyTeam: user.secondaryLegacyTeam,
     specificRole: user.specificRole,
     secondarySpecificRole: user.secondarySpecificRole,
-    permissions: user.permissions
+    permissions: user.permissions,
+    isExternal: user.isExternal
   });
 }
 

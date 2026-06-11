@@ -67,7 +67,6 @@ export const SPECIFIC_ROLE_OPTIONS = [
 export type SpecificRole = typeof SPECIFIC_ROLE_OPTIONS[number];
 
 export interface ManagedUser extends AuthUser {
-  isExternal: boolean;
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
@@ -335,7 +334,19 @@ export function derivePermissions(input: {
   secondaryLegacyTeam?: string | null;
   specificRole?: string | null;
   secondarySpecificRole?: string | null;
+  isExternal?: boolean | null;
 }): string[] {
+  if (input.isExternal) {
+    return [
+      "dashboard:read",
+      "external-matters:read",
+      "external-execution:read",
+      "external-tasks:read",
+      "external-tasks:write",
+      "external-finances:read"
+    ].sort();
+  }
+
   const permissions = new Set<string>([
     "dashboard:read",
     "catalog:read",
@@ -517,10 +528,29 @@ export function deriveEffectivePermissions(input: {
   specificRole?: string | null;
   secondarySpecificRole?: string | null;
   permissions?: string[] | null;
+  isExternal?: boolean | null;
 }): string[] {
   const explicitPermissions = Array.isArray(input.permissions)
     ? input.permissions.filter((permission): permission is string => typeof permission === "string")
     : [];
+  if (input.isExternal) {
+    const permissions = new Set([
+      ...derivePermissions({
+        legacyRole: input.legacyRole,
+        team: input.team,
+        legacyTeam: input.legacyTeam,
+        secondaryTeam: input.secondaryTeam,
+        secondaryLegacyTeam: input.secondaryLegacyTeam,
+        specificRole: input.specificRole,
+        secondarySpecificRole: input.secondarySpecificRole,
+        isExternal: true
+      }),
+      ...explicitPermissions.filter((permission) => permission === "dashboard:read" || permission.startsWith("external-"))
+    ]);
+
+    return Array.from(permissions).sort();
+  }
+
   if (explicitPermissions.includes("*")) {
     return ["*"];
   }
@@ -533,7 +563,8 @@ export function deriveEffectivePermissions(input: {
       secondaryTeam: input.secondaryTeam,
       secondaryLegacyTeam: input.secondaryLegacyTeam,
       specificRole: input.specificRole,
-      secondarySpecificRole: input.secondarySpecificRole
+      secondarySpecificRole: input.secondarySpecificRole,
+      isExternal: input.isExternal
     }),
     ...explicitPermissions
   ]);

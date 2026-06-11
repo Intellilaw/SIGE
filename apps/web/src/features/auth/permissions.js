@@ -2,7 +2,7 @@ const MODULE_ACCESS = {
     clients: { read: ["clients:read", "clients:write"], write: ["clients:write"] },
     quotes: { read: ["quotes:read", "quotes:write"], write: ["quotes:write"] },
     "lead-tracking": { read: ["leads:read", "leads:write"], write: ["leads:write"] },
-    "active-matters": { read: ["matters:read", "matters:write"], write: ["matters:write"] },
+    "active-matters": { read: ["matters:read", "matters:write", "external-matters:read"], write: ["matters:write"] },
     sales: { read: ["sales:read", "sales:write"], write: ["sales:write"] },
     execution: {
         read: [
@@ -11,11 +11,12 @@ const MODULE_ACCESS = {
             "execution:corporate-labor",
             "execution:settlements",
             "execution:financial-law",
-            "execution:tax-compliance"
+            "execution:tax-compliance",
+            "external-execution:read"
         ]
     },
-    tasks: { read: ["tasks:read"] },
-    finances: { read: ["finances:read", "finances:write", "finances:monthly:read"], write: ["finances:write"] },
+    tasks: { read: ["tasks:read", "external-tasks:read", "external-tasks:write"] },
+    finances: { read: ["finances:read", "finances:write", "finances:monthly:read", "external-finances:read"], write: ["finances:write"] },
     "budget-planning": {
         read: ["budget-planning:read", "budget-planning:write"],
         write: ["budget-planning:write"]

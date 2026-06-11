@@ -1,7 +1,9 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import { deriveEffectivePermissions, type FinanceRecord } from "@sige/contracts";
 import { z } from "zod";
 
-import { requireAnyPermissions, requireAuth } from "../../core/auth/guards";
+import { getSessionUser, requireAnyPermissions, requireAuth } from "../../core/auth/guards";
+import { filterExternalVisibleMatters, isExternalScopedUser } from "../../core/auth/external-matter-access";
 
 const teamSchema = z.enum([
   "CLIENT_RELATIONS",
@@ -82,9 +84,89 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
   const sendMatterGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
   const deleteGuards = [requireAuth, requireAnyPermissions(["finances:write"])];
 
-  app.get("/finances/records", { preHandler: monthlyReadGuards }, async (request) => {
+  function normalizeComparableText(value?: string | null) {
+    return (value ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function buildFinanceMatchKey(input: { quoteNumber?: string | null; clientName?: string | null; subject?: string | null }) {
+    const quoteNumber = normalizeComparableText(input.quoteNumber);
+    if (quoteNumber) {
+      return `quote:${quoteNumber}`;
+    }
+
+    const clientName = normalizeComparableText(input.clientName);
+    const subject = normalizeComparableText(input.subject);
+    if (!clientName || !subject) {
+      return null;
+    }
+
+    return `matter:${clientName}|${subject}`;
+  }
+
+  function getEffectivePermissions(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    return deriveEffectivePermissions({
+      legacyRole: user.legacyRole,
+      team: user.team,
+      legacyTeam: user.legacyTeam,
+      secondaryTeam: user.secondaryTeam,
+      secondaryLegacyTeam: user.secondaryLegacyTeam,
+      specificRole: user.specificRole,
+      secondarySpecificRole: user.secondarySpecificRole,
+      permissions: user.permissions,
+      isExternal: user.isExternal
+    });
+  }
+
+  function canReadFullFinances(permissions: string[]) {
+    return permissions.includes("*")
+      || permissions.includes("finances:read")
+      || permissions.includes("finances:write")
+      || permissions.includes("finances:monthly:read");
+  }
+
+  async function filterExternalFinanceRecords(request: FastifyRequest, records: FinanceRecord[]) {
+    const user = getSessionUser(request);
+    const permissions = getEffectivePermissions(request);
+
+    if (!isExternalScopedUser(user)) {
+      return records;
+    }
+
+    if (!permissions.includes("external-finances:read")) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+
+    const visibleMatters = filterExternalVisibleMatters(user, await app.repositories.matters.list());
+    const matterKeys = new Set(
+      visibleMatters
+        .map(buildFinanceMatchKey)
+        .filter((key): key is string => Boolean(key))
+    );
+
+    return records.filter((record) => {
+      const key = buildFinanceMatchKey(record);
+      return Boolean(key && matterKeys.has(key));
+    });
+  }
+
+  app.get("/finances/records", { preHandler: [requireAuth] }, async (request) => {
     const query = yearMonthSchema.parse(request.query);
-    return service.listRecords(query.year, query.month);
+    const permissions = getEffectivePermissions(request);
+    const user = getSessionUser(request);
+
+    if (!canReadFullFinances(permissions) && !(isExternalScopedUser(user) && permissions.includes("external-finances:read"))) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+
+    const records = isExternalScopedUser(user)
+      ? await service.listRecordsReadOnly(query.year, query.month)
+      : await service.listRecords(query.year, query.month);
+    return filterExternalFinanceRecords(request, records);
   });
 
   app.post("/finances/records", { preHandler: writeGuards }, async (request) => {

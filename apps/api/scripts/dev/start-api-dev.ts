@@ -430,8 +430,8 @@ async function main() {
     try {
       rdsTunnelConfig = getRdsTunnelConfig();
       const runtimeSecret = await getRuntimeSecret(rdsTunnelConfig);
-      tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
       applyRuntimeSecretEnvironment(runtimeSecret);
+      tunnelProcess = await ensureRdsTunnel(rdsTunnelConfig);
       process.env.DATABASE_URL = toTunnelDatabaseUrl(
         requireDevEnv(runtimeSecret.DATABASE_URL, "DATABASE_URL in SIGE_AWS_APP_SECRET_ID"),
         rdsTunnelConfig

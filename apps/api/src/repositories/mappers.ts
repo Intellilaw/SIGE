@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import type {
   AuthUser,
   BudgetPlan,
+  BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
   Client,
   CommissionExclusion,
@@ -217,6 +218,7 @@ export function mapUser(record: {
   specificRole: string | null;
   secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
+  isExternal: boolean;
   createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
@@ -251,8 +253,10 @@ export function mapUser(record: {
       secondarySpecificRole: record.secondarySpecificRole,
       permissions: Array.isArray(record.permissions)
         ? record.permissions.filter((permission): permission is string => typeof permission === "string")
-        : []
+        : [],
+      isExternal: record.isExternal
     }),
+    isExternal: record.isExternal,
     createLaborFile: record.createLaborFile,
     isActive: record.isActive,
     passwordResetRequired: record.passwordResetRequired
@@ -274,6 +278,7 @@ export function mapStoredUser(record: {
   specificRole: string | null;
   secondarySpecificRole: string | null;
   permissions: Prisma.JsonValue;
+  isExternal: boolean;
   createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
@@ -1933,6 +1938,28 @@ export function mapBudgetPlan(record: {
     expectedIncomeMxn: Number(record.expectedIncomeMxn),
     expectedExpenseMxn: Number(record.expectedExpenseMxn),
     notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapBudgetPlanExpenseBreakdownItem(record: {
+  id: string;
+  year: number;
+  month: number;
+  concept: string;
+  amountMxn: Prisma.Decimal;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}): BudgetPlanExpenseBreakdownItem {
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    concept: record.concept,
+    amountMxn: Number(record.amountMxn),
+    sortOrder: record.sortOrder,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

@@ -29,6 +29,7 @@ interface SessionUser {
   secondarySpecificRole?: string;
   shortName?: string;
   permissions: string[];
+  isExternal: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
 }

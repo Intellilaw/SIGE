@@ -14,6 +14,7 @@ const rusconiLetterheadDimensions = {
     width: 816,
     height: 1056
 };
+const blankDateMarker = "____________________";
 const regularPageMargins = {
     top: 1440,
     right: 1440,
@@ -41,6 +42,9 @@ const receiptDocumentKindLabels = {
     original: "Original/copia certificada",
     simple: "Copia simple"
 };
+const additionalInstructionsFieldName = "additionalInstructions";
+const riAdjustedParagraphsFieldName = "riAdjustedParagraphs";
+const riAdjustmentSummaryFieldName = "riAdjustmentSummary";
 const maxPromissoryNoteCreditors = 4;
 const emptyPromissoryNoteCreditor = {
     type: "physical",
@@ -137,8 +141,20 @@ function formatLongDate(rawDate) {
         year: "numeric"
     }).format(date);
 }
+function blankDateFlagName(fieldName) {
+    return `${fieldName}Blank`;
+}
+function isDateBlank(values, fieldName) {
+    return values[blankDateFlagName(fieldName)] === "true";
+}
+function formatDateField(values, fieldName, fallback = blankDateMarker) {
+    if (isDateBlank(values, fieldName)) {
+        return fallback;
+    }
+    return formatLongDate(values[fieldName] ?? "");
+}
 function formatPlaceDate(values) {
-    return `${value(values, "place", "lugar pendiente")}, ${formatLongDate(values.date)}`;
+    return `${value(values, "place", "lugar pendiente")}, ${formatDateField(values, "date")}`;
 }
 function amountLabel(values) {
     const amount = Number(values.amount || 0);
@@ -204,6 +220,35 @@ function receiptDocumentRows(rawDocuments, minimumRows = 5) {
 }
 function receiptCheckboxSymbol(isChecked) {
     return isChecked ? "☑" : "☐";
+}
+function serializeAdjustedParagraphs(paragraphs) {
+    return JSON.stringify(paragraphs.map((paragraph) => normalizeText(paragraph)).filter(Boolean));
+}
+function parseAdjustedParagraphs(rawParagraphs) {
+    const normalizedParagraphs = normalizeText(rawParagraphs);
+    if (!normalizedParagraphs) {
+        return null;
+    }
+    try {
+        const parsedParagraphs = JSON.parse(normalizedParagraphs);
+        if (Array.isArray(parsedParagraphs)) {
+            return parsedParagraphs.map((paragraph) => normalizeText(paragraph)).filter(Boolean);
+        }
+    }
+    catch {
+        return null;
+    }
+    return null;
+}
+function clearRiAdjustmentValues(values) {
+    if (!values[riAdjustedParagraphsFieldName] && !values[riAdjustmentSummaryFieldName]) {
+        return values;
+    }
+    return {
+        ...values,
+        [riAdjustedParagraphsFieldName]: "",
+        [riAdjustmentSummaryFieldName]: ""
+    };
 }
 function normalizePromissoryNoteCreditor(entry) {
     return {
@@ -438,7 +483,7 @@ const dailyDocumentTemplates = [
                 paymentType: fallbackValue(values, ["paymentType", "paymentMethod"], "pago pendiente"),
                 amount: moneyReceiptAmountLabel(values),
                 receivedBy: value(values, "receivedBy", "pendiente"),
-                receivedDate: formatLongDate(values.date)
+                receivedDate: formatDateField(values, "date")
             }
         })
     },
@@ -475,7 +520,7 @@ const dailyDocumentTemplates = [
                     documentRows: receiptDocumentRows(documents),
                     deliveredBy,
                     receivedBy,
-                    date: formatLongDate(values.date)
+                    date: formatDateField(values, "date")
                 }
             };
         }
@@ -513,7 +558,7 @@ const dailyDocumentTemplates = [
                     documentRows: receiptDocumentRows(documents),
                     deliveredBy,
                     receivedBy,
-                    date: formatLongDate(values.date)
+                    date: formatDateField(values, "date")
                 }
             };
         }
@@ -611,7 +656,7 @@ const dailyDocumentTemplates = [
                 subtitle: `Pagaré número ${value(values, "noteNumber", "1 de 1")}`,
                 paragraphs: [
                     `${formatPlaceDate(values)}.`,
-                    `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatLongDate(values.dueDate)}, la cantidad de ${promissoryNoteAmountText(values)}.`,
+                    `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatDateField(values, "dueDate")}, la cantidad de ${promissoryNoteAmountText(values)}.`,
                     `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${value(values, "defaultInterestRate", "5% (cinco por ciento)")} mensual, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
                     `DOMICILIO DEL DEUDOR: ${debtorAddress}.`,
                     "ACEPTO,"
@@ -666,6 +711,20 @@ function groupAssignmentsByClient(assignments) {
 function findTemplate(templateId) {
     const normalizedTemplateId = templateId === "document-receipt" ? "rc-received-document-receipt" : templateId;
     return dailyDocumentTemplates.find((template) => template.id === normalizedTemplateId) ?? dailyDocumentTemplates[0];
+}
+function buildBaseDocument(template, values) {
+    return template.build(values);
+}
+function buildDocumentWithAdjustments(template, values) {
+    const document = buildBaseDocument(template, values);
+    const adjustedParagraphs = parseAdjustedParagraphs(values[riAdjustedParagraphsFieldName]);
+    if (!adjustedParagraphs) {
+        return document;
+    }
+    return {
+        ...document,
+        paragraphs: adjustedParagraphs
+    };
 }
 function mergeTemplateValues(template, values) {
     const mergedValues = {
@@ -887,7 +946,7 @@ function generatedDocumentToText(document) {
     return [
         document.title,
         document.subtitle,
-        ...(form ? rcDeliveredFormText(form) : moneyForm ? moneyReceiptFormText(moneyForm) : document.paragraphs),
+        ...(form ? [...rcDeliveredFormText(form), ...document.paragraphs] : moneyForm ? [...moneyReceiptFormText(moneyForm), ...document.paragraphs] : document.paragraphs),
         ...detailLines,
         ...signerLines,
         shouldShowPageNumbers(document) ? pageNumberLabel(1, 1) : ""
@@ -911,12 +970,17 @@ function generatedDocumentToHtml(document) {
     const pageNumber = shouldShowPageNumbers(document)
         ? `<footer class="page-number">${escapeHtml(pageNumberLabel(1, 1))}</footer>`
         : "";
-    const regularBody = `${document.paragraphs
+    const paragraphHtml = document.paragraphs
         .map((paragraph) => `<p${isDocumentStandaloneHeading(paragraph) ? ' class="clause-heading"' : ""}>${escapeHtml(paragraph)}</p>`)
-        .join("")}
+        .join("");
+    const regularBody = `${paragraphHtml}
   ${detailRows ? `<table>${detailRows}</table>` : ""}
   ${signerRows ? `<div class="signatures">${signerRows}</div>` : ""}`;
-    const bodyContent = form ? rcDeliveredFormHtml(form) : moneyForm ? moneyReceiptFormHtml(moneyForm) : regularBody;
+    const bodyContent = form
+        ? `${rcDeliveredFormHtml(form)}${paragraphHtml ? `<div class="supplemental-paragraphs">${paragraphHtml}</div>` : ""}`
+        : moneyForm
+            ? `${moneyReceiptFormHtml(moneyForm)}${paragraphHtml ? `<div class="supplemental-paragraphs">${paragraphHtml}</div>` : ""}`
+            : regularBody;
     return `<!doctype html>
 <html lang="es">
 <head>
@@ -955,6 +1019,7 @@ function generatedDocumentToHtml(document) {
     .money-receiver-signature strong, .money-receiver-signature em { display: block; overflow-wrap: anywhere; }
     .money-receiver-signature strong { font-size: 15px; font-weight: 700; }
     .money-receiver-signature em { font-size: 13px; font-style: normal; font-weight: 700; margin-top: 4px; }
+    .supplemental-paragraphs { margin-top: 34px; }
     table { border-collapse: collapse; margin: 24px 0; width: 100%; }
     th, td { border: 1px solid #d9e2ec; padding: 10px; text-align: left; vertical-align: top; }
     th { width: 28%; }
@@ -1666,7 +1731,8 @@ function DocumentPreview({ document }) {
     const signatures = getDocumentSignatures(document);
     const signatureClassName = `daily-doc-signatures${document.signatureColumns === 2 ? " daily-doc-signatures-two-column" : ""}`;
     const paperClassName = `daily-doc-paper${hasRusconiLetterhead(document) ? " daily-doc-paper-letterhead" : ""}${form ? " daily-doc-paper-rc-receipt" : ""}${moneyForm ? " daily-doc-paper-money-receipt" : ""}`;
-    return (_jsxs("article", { className: paperClassName, "aria-live": "polite", children: [_jsxs("header", { children: [_jsx("h3", { children: document.title }), document.subtitle ? (_jsx("span", { className: document.subtitleAlignment === "right" ? "daily-doc-subtitle-right" : undefined, children: document.subtitle })) : null] }), form ? (_jsxs("section", { className: "daily-doc-rc-delivered-form", children: [_jsxs("table", { className: "daily-doc-rc-docs-table", children: [_jsx("thead", { children: _jsx("tr", { children: _jsx("th", { colSpan: 3, children: form.descriptionHeading.split("\n").map((headingLine, index) => (_jsxs("span", { children: [index > 0 ? _jsx("br", {}) : null, headingLine] }, headingLine))) }) }) }), _jsx("tbody", { children: form.documentRows.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { className: "daily-doc-rc-doc-description", children: row.description || "\u00A0" }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "original" ? " is-checked" : ""}` }), receiptDocumentKindLabels.original] })) : ("\u00A0") }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "simple" ? " is-checked" : ""}` }), receiptDocumentKindLabels.simple] })) : ("\u00A0") })] }, `${row.description}-${index}`))) })] }), _jsx("table", { className: "daily-doc-rc-meta-table", children: _jsxs("tbody", { children: [_jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN ENTREGA" }), _jsx("th", { children: "FECHA" })] }), _jsxs("tr", { children: [_jsx("td", { children: form.deliveredBy }), _jsx("td", { children: form.date })] }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("td", { children: form.receivedBy })] })] }) }), _jsxs("div", { className: "daily-doc-rc-receiver-signature", children: [_jsx("strong", { children: form.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe los documentos" })] })] })) : moneyForm ? (_jsxs("section", { className: "daily-doc-money-receipt-form", children: [_jsxs("div", { className: "daily-doc-money-receipt-lines", children: [_jsxs("p", { children: [_jsx("strong", { children: "CONCEPTO:" }), " ", moneyForm.concept] }), _jsxs("p", { children: [_jsx("strong", { children: "PAGO PARCIAL/PAGO TOTAL:" }), " ", moneyForm.paymentType] }), _jsxs("p", { children: [_jsx("strong", { children: "MONTO:" }), " ", moneyForm.amount] })] }), _jsxs("table", { className: "daily-doc-money-receipt-table", children: [_jsxs("thead", { children: [_jsx("tr", { children: _jsx("th", { colSpan: 2, children: "PAGO RECIBIDO POR RUSCONI CONSULTING" }) }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("th", { children: "FECHA DE RECIBIDO" })] })] }), _jsx("tbody", { children: _jsxs("tr", { children: [_jsx("td", { children: moneyForm.receivedBy }), _jsx("td", { children: moneyForm.receivedDate })] }) })] }), _jsxs("div", { className: "daily-doc-money-receiver-signature", children: [_jsx("strong", { children: moneyForm.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe el dinero" })] })] })) : (_jsx("div", { className: "daily-doc-paper-body", children: document.paragraphs.map((paragraph, index) => (_jsx("p", { className: isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined, children: paragraph }, `${paragraph}-${index}`))) })), document.details?.length ? (_jsx("dl", { className: "daily-doc-details", children: document.details.map((detail) => (_jsxs("div", { children: [_jsx("dt", { children: detail.label }), _jsx("dd", { children: detail.value })] }, detail.label))) })) : null, signatures.length ? (_jsx("footer", { className: signatureClassName, children: signatures.map((signature, index) => (_jsxs("div", { children: [_jsx("span", {}), _jsx("strong", { children: signature.name }), signature.role ? _jsx("em", { children: signature.role }) : null] }, `${signature.name}-${signature.role ?? ""}-${index}`))) })) : null, shouldShowPageNumbers(document) ? _jsx("div", { className: "daily-doc-page-number", children: pageNumberLabel(1, 1) }) : null] }));
+    const paragraphBlock = document.paragraphs.length ? (_jsx("div", { className: `daily-doc-paper-body${form || moneyForm ? " daily-doc-paper-body-supplemental" : ""}`, children: document.paragraphs.map((paragraph, index) => (_jsx("p", { className: isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined, children: paragraph }, `${paragraph}-${index}`))) })) : null;
+    return (_jsxs("article", { className: paperClassName, "aria-live": "polite", children: [_jsxs("header", { children: [_jsx("h3", { children: document.title }), document.subtitle ? (_jsx("span", { className: document.subtitleAlignment === "right" ? "daily-doc-subtitle-right" : undefined, children: document.subtitle })) : null] }), form ? (_jsxs("section", { className: "daily-doc-rc-delivered-form", children: [_jsxs("table", { className: "daily-doc-rc-docs-table", children: [_jsx("thead", { children: _jsx("tr", { children: _jsx("th", { colSpan: 3, children: form.descriptionHeading.split("\n").map((headingLine, index) => (_jsxs("span", { children: [index > 0 ? _jsx("br", {}) : null, headingLine] }, headingLine))) }) }) }), _jsx("tbody", { children: form.documentRows.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { className: "daily-doc-rc-doc-description", children: row.description || "\u00A0" }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "original" ? " is-checked" : ""}` }), receiptDocumentKindLabels.original] })) : ("\u00A0") }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "simple" ? " is-checked" : ""}` }), receiptDocumentKindLabels.simple] })) : ("\u00A0") })] }, `${row.description}-${index}`))) })] }), _jsx("table", { className: "daily-doc-rc-meta-table", children: _jsxs("tbody", { children: [_jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN ENTREGA" }), _jsx("th", { children: "FECHA" })] }), _jsxs("tr", { children: [_jsx("td", { children: form.deliveredBy }), _jsx("td", { children: form.date })] }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("td", { children: form.receivedBy })] })] }) }), _jsxs("div", { className: "daily-doc-rc-receiver-signature", children: [_jsx("strong", { children: form.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe los documentos" })] })] })) : moneyForm ? (_jsxs("section", { className: "daily-doc-money-receipt-form", children: [_jsxs("div", { className: "daily-doc-money-receipt-lines", children: [_jsxs("p", { children: [_jsx("strong", { children: "CONCEPTO:" }), " ", moneyForm.concept] }), _jsxs("p", { children: [_jsx("strong", { children: "PAGO PARCIAL/PAGO TOTAL:" }), " ", moneyForm.paymentType] }), _jsxs("p", { children: [_jsx("strong", { children: "MONTO:" }), " ", moneyForm.amount] })] }), _jsxs("table", { className: "daily-doc-money-receipt-table", children: [_jsxs("thead", { children: [_jsx("tr", { children: _jsx("th", { colSpan: 2, children: "PAGO RECIBIDO POR RUSCONI CONSULTING" }) }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("th", { children: "FECHA DE RECIBIDO" })] })] }), _jsx("tbody", { children: _jsxs("tr", { children: [_jsx("td", { children: moneyForm.receivedBy }), _jsx("td", { children: moneyForm.receivedDate })] }) })] }), _jsxs("div", { className: "daily-doc-money-receiver-signature", children: [_jsx("strong", { children: moneyForm.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe el dinero" })] })] })) : (paragraphBlock), form || moneyForm ? paragraphBlock : null, document.details?.length ? (_jsx("dl", { className: "daily-doc-details", children: document.details.map((detail) => (_jsxs("div", { children: [_jsx("dt", { children: detail.label }), _jsx("dd", { children: detail.value })] }, detail.label))) })) : null, signatures.length ? (_jsx("footer", { className: signatureClassName, children: signatures.map((signature, index) => (_jsxs("div", { children: [_jsx("span", {}), _jsx("strong", { children: signature.name }), signature.role ? _jsx("em", { children: signature.role }) : null] }, `${signature.name}-${signature.role ?? ""}-${index}`))) })) : null, shouldShowPageNumbers(document) ? _jsx("div", { className: "daily-doc-page-number", children: pageNumberLabel(1, 1) }) : null] }));
 }
 export function DailyDocumentsPage() {
     const { user } = useAuth();
@@ -1687,16 +1753,20 @@ export function DailyDocumentsPage() {
     const [assignedSearch, setAssignedSearch] = useState("");
     const [loadingModuleData, setLoadingModuleData] = useState(true);
     const [savingAssignment, setSavingAssignment] = useState(false);
+    const [applyingInstructions, setApplyingInstructions] = useState(false);
     const [deletingDocumentId, setDeletingDocumentId] = useState(null);
     const [copyStatus, setCopyStatus] = useState("");
+    const [instructionStatus, setInstructionStatus] = useState("");
     const [flash, setFlash] = useState(null);
     const canRead = canReadModule(user, "daily-documents");
     const canWrite = canWriteModule(user, "daily-documents");
     const values = templateValues[selectedTemplate.id];
     const selectedClient = useMemo(() => clients.find((client) => client.id === selectedClientId) ?? null, [clients, selectedClientId]);
-    const generatedDocument = useMemo(() => selectedTemplate.build(values), [selectedTemplate, values]);
+    const baseGeneratedDocument = useMemo(() => buildBaseDocument(selectedTemplate, values), [selectedTemplate, values]);
+    const generatedDocument = useMemo(() => buildDocumentWithAdjustments(selectedTemplate, values), [selectedTemplate, values]);
     const generatedText = useMemo(() => generatedDocumentToText(generatedDocument), [generatedDocument]);
     const generatedHtml = useMemo(() => generatedDocumentToHtml(generatedDocument), [generatedDocument]);
+    const hasRiAdjustedText = Boolean(parseAdjustedParagraphs(values[riAdjustedParagraphsFieldName]));
     const filteredClientOptions = useMemo(() => {
         const terms = normalizeSearchText(clientSearch).split(/\s+/).filter(Boolean);
         if (!terms.length) {
@@ -1752,27 +1822,38 @@ export function DailyDocumentsPage() {
         setSelectedTemplateId(templateId);
         setAssignmentTitle(nextTemplate.title);
         setCopyStatus("");
+        setInstructionStatus("");
     }
-    function updateValue(fieldName, nextValue) {
+    function updateValue(fieldName, nextValue, options) {
+        const preserveRiAdjustment = options?.preserveRiAdjustment ?? false;
         setTemplateValues((currentValues) => ({
             ...currentValues,
-            [selectedTemplate.id]: {
-                ...currentValues[selectedTemplate.id],
-                [fieldName]: nextValue
-            }
+            [selectedTemplate.id]: preserveRiAdjustment
+                ? {
+                    ...currentValues[selectedTemplate.id],
+                    [fieldName]: nextValue
+                }
+                : clearRiAdjustmentValues({
+                    ...currentValues[selectedTemplate.id],
+                    [fieldName]: nextValue
+                })
         }));
         setCopyStatus("");
+        if (!preserveRiAdjustment) {
+            setInstructionStatus("");
+        }
     }
     function updateDocumentReceiptClientParty(fieldName, flagName, nextValue, useSelectedClient = false) {
         setTemplateValues((currentValues) => ({
             ...currentValues,
-            [selectedTemplate.id]: {
+            [selectedTemplate.id]: clearRiAdjustmentValues({
                 ...currentValues[selectedTemplate.id],
                 [fieldName]: nextValue,
                 [flagName]: useSelectedClient ? "true" : ""
-            }
+            })
         }));
         setCopyStatus("");
+        setInstructionStatus("");
     }
     function toggleDocumentReceiptClientParty(fieldName, flagName, checked) {
         if (checked && selectedClient) {
@@ -1843,6 +1924,7 @@ export function DailyDocumentsPage() {
         setAssignmentTitle(firstTemplate.title);
         setEditingDocumentId(null);
         setCopyStatus("");
+        setInstructionStatus("");
     }
     function payloadFromCurrentDraft() {
         return {
@@ -1861,6 +1943,61 @@ export function DailyDocumentsPage() {
         catch {
             setCopyStatus("No se pudo copiar el documento.");
         }
+    }
+    async function applyAdditionalInstructions() {
+        if (!canWrite || applyingInstructions) {
+            return;
+        }
+        const additionalInstructions = normalizeText(values[additionalInstructionsFieldName]);
+        if (!additionalInstructions) {
+            setInstructionStatus("Captura indicaciones adicionales antes de aplicar Rusconi Intelligence.");
+            return;
+        }
+        setApplyingInstructions(true);
+        setInstructionStatus("Aplicando indicaciones con Rusconi Intelligence...");
+        setFlash(null);
+        try {
+            const response = await apiPost("/daily-documents/apply-instructions", {
+                templateId: selectedTemplate.id,
+                templateTitle: selectedTemplate.title,
+                additionalInstructions,
+                values: {
+                    ...values,
+                    [riAdjustedParagraphsFieldName]: "",
+                    [riAdjustmentSummaryFieldName]: ""
+                },
+                document: {
+                    title: baseGeneratedDocument.title,
+                    subtitle: baseGeneratedDocument.subtitle,
+                    paragraphs: baseGeneratedDocument.paragraphs,
+                    details: baseGeneratedDocument.details
+                }
+            });
+            setTemplateValues((currentValues) => ({
+                ...currentValues,
+                [selectedTemplate.id]: {
+                    ...currentValues[selectedTemplate.id],
+                    [riAdjustedParagraphsFieldName]: serializeAdjustedParagraphs(response.paragraphs),
+                    [riAdjustmentSummaryFieldName]: response.summary
+                }
+            }));
+            setInstructionStatus(response.summary || "Indicaciones aplicadas por Rusconi Intelligence.");
+            setCopyStatus("");
+        }
+        catch (error) {
+            setInstructionStatus(toErrorMessage(error));
+        }
+        finally {
+            setApplyingInstructions(false);
+        }
+    }
+    function restoreBaseText() {
+        setTemplateValues((currentValues) => ({
+            ...currentValues,
+            [selectedTemplate.id]: clearRiAdjustmentValues(currentValues[selectedTemplate.id])
+        }));
+        setInstructionStatus("Texto base restaurado.");
+        setCopyStatus("");
     }
     function selectAssignmentClient(client) {
         setSelectedClientId(client.id);
@@ -1918,6 +2055,7 @@ export function DailyDocumentsPage() {
         setAssignmentTitle(assignment.title);
         setEditingDocumentId(assignment.id);
         setCopyStatus("");
+        setInstructionStatus(assignment.values[riAdjustmentSummaryFieldName] ?? "");
         setFlash({ tone: "success", text: "Documento cargado para modificacion." });
         setActiveTab("generate");
     }
@@ -1947,7 +2085,7 @@ export function DailyDocumentsPage() {
     }
     function buildAssignmentDocument(assignment) {
         const template = findTemplate(assignment.templateId);
-        return template.build(mergeTemplateValues(template, assignment.values));
+        return buildDocumentWithAdjustments(template, mergeTemplateValues(template, assignment.values));
     }
     async function downloadAssignmentWord(assignment) {
         setFlash(null);
@@ -2007,7 +2145,9 @@ export function DailyDocumentsPage() {
                                                                 event.preventDefault();
                                                                 selectAssignmentClient(filteredClientOptions[0]);
                                                             }
-                                                        }, placeholder: "Buscar por nombre o numero de cliente...", role: "combobox", type: "text", value: clientSearch }), isClientSearchOpen && !loadingModuleData && !savingAssignment ? (_jsx("div", { className: "daily-doc-client-search-results", role: "listbox", "aria-label": "Resultados de clientes", children: filteredClientOptions.length ? (filteredClientOptions.map((client) => (_jsxs("button", { "aria-selected": selectedClientId === client.id, onClick: () => selectAssignmentClient(client), onMouseDown: (event) => event.preventDefault(), type: "button", children: [_jsx("strong", { children: client.clientNumber }), _jsx("span", { children: client.name })] }, client.id)))) : (_jsx("div", { className: "daily-doc-client-search-empty", children: "Sin clientes que coincidan con la busqueda." })) })) : null, _jsx("input", { "aria-hidden": "true", disabled: loadingModuleData || savingAssignment, readOnly: true, tabIndex: -1, type: "hidden", value: selectedClientId })] }), _jsxs("label", { className: "form-field daily-doc-field-wide", children: [_jsx("span", { children: "Nombre del documento asignado" }), _jsx("input", { disabled: savingAssignment, onChange: (event) => setAssignmentTitle(event.target.value), placeholder: "Nombre para ubicarlo en la pesta\u00F1a de asignados", type: "text", value: assignmentTitle })] }), selectedTemplate.id === "rc-delivered-document-receipt" ? (_jsxs("label", { className: "daily-doc-client-paid-toggle daily-doc-field-wide checkbox-row", children: [_jsx("input", { checked: values.useClientAsDocumentReceiver === "true", disabled: savingAssignment || !selectedClient, onChange: (event) => toggleDocumentReceiptClientParty("receivedBy", "useClientAsDocumentReceiver", event.target.checked), type: "checkbox" }), _jsxs("span", { children: ["Usar el nombre del cliente asignado como persona que recibe los documentos", selectedClient ? ` (${selectedClient.name})` : ""] })] })) : null, selectedTemplate.id === "rc-received-document-receipt" ? (_jsxs("label", { className: "daily-doc-client-paid-toggle daily-doc-field-wide checkbox-row", children: [_jsx("input", { checked: values.useClientAsDocumentDeliverer === "true", disabled: savingAssignment || !selectedClient, onChange: (event) => toggleDocumentReceiptClientParty("deliveredBy", "useClientAsDocumentDeliverer", event.target.checked), type: "checkbox" }), _jsxs("span", { children: ["Usar el nombre del cliente asignado como persona que entrega los documentos", selectedClient ? ` (${selectedClient.name})` : ""] })] })) : null, selectedTemplate.fields.map((field) => {
+                                                        }, placeholder: "Buscar por nombre o numero de cliente...", role: "combobox", type: "text", value: clientSearch }), isClientSearchOpen && !loadingModuleData && !savingAssignment ? (_jsx("div", { className: "daily-doc-client-search-results", role: "listbox", "aria-label": "Resultados de clientes", children: filteredClientOptions.length ? (filteredClientOptions.map((client) => (_jsxs("button", { "aria-selected": selectedClientId === client.id, onClick: () => selectAssignmentClient(client), onMouseDown: (event) => event.preventDefault(), type: "button", children: [_jsx("strong", { children: client.clientNumber }), _jsx("span", { children: client.name })] }, client.id)))) : (_jsx("div", { className: "daily-doc-client-search-empty", children: "Sin clientes que coincidan con la busqueda." })) })) : null, _jsx("input", { "aria-hidden": "true", disabled: loadingModuleData || savingAssignment, readOnly: true, tabIndex: -1, type: "hidden", value: selectedClientId })] }), _jsxs("label", { className: "form-field daily-doc-field-wide", children: [_jsx("span", { children: "Nombre del documento asignado" }), _jsx("input", { disabled: savingAssignment, onChange: (event) => setAssignmentTitle(event.target.value), placeholder: "Nombre para ubicarlo en la pesta\u00F1a de asignados", type: "text", value: assignmentTitle })] }), _jsxs("div", { className: "form-field daily-doc-field-wide daily-doc-additional-instructions", children: [_jsx("span", { children: "Indicaciones adicionales" }), _jsx("textarea", { disabled: savingAssignment || applyingInstructions, onChange: (event) => updateValue(additionalInstructionsFieldName, event.target.value), placeholder: "Agrega condiciones especiales, parrafos adicionales o ajustes puntuales al texto del formato.", value: values[additionalInstructionsFieldName] ?? "" }), _jsxs("div", { className: "daily-doc-ri-actions", children: [canWrite ? (_jsx("button", { className: "secondary-button", disabled: savingAssignment ||
+                                                                    applyingInstructions ||
+                                                                    !normalizeText(values[additionalInstructionsFieldName]), onClick: () => void applyAdditionalInstructions(), type: "button", children: applyingInstructions ? "Aplicando..." : "Aplicar indicaciones con Rusconi Intelligence" })) : null, hasRiAdjustedText ? (_jsx("button", { className: "secondary-button", disabled: savingAssignment || applyingInstructions, onClick: restoreBaseText, type: "button", children: "Restaurar texto base" })) : null, instructionStatus ? _jsx("span", { children: instructionStatus }) : null] })] }), selectedTemplate.id === "rc-delivered-document-receipt" ? (_jsxs("label", { className: "daily-doc-client-paid-toggle daily-doc-field-wide checkbox-row", children: [_jsx("input", { checked: values.useClientAsDocumentReceiver === "true", disabled: savingAssignment || !selectedClient, onChange: (event) => toggleDocumentReceiptClientParty("receivedBy", "useClientAsDocumentReceiver", event.target.checked), type: "checkbox" }), _jsxs("span", { children: ["Usar el nombre del cliente asignado como persona que recibe los documentos", selectedClient ? ` (${selectedClient.name})` : ""] })] })) : null, selectedTemplate.id === "rc-received-document-receipt" ? (_jsxs("label", { className: "daily-doc-client-paid-toggle daily-doc-field-wide checkbox-row", children: [_jsx("input", { checked: values.useClientAsDocumentDeliverer === "true", disabled: savingAssignment || !selectedClient, onChange: (event) => toggleDocumentReceiptClientParty("deliveredBy", "useClientAsDocumentDeliverer", event.target.checked), type: "checkbox" }), _jsxs("span", { children: ["Usar el nombre del cliente asignado como persona que entrega los documentos", selectedClient ? ` (${selectedClient.name})` : ""] })] })) : null, selectedTemplate.fields.map((field) => {
                                                 if (field.visibleWhen && values[field.visibleWhen.name] !== field.visibleWhen.value) {
                                                     return null;
                                                 }
@@ -2028,6 +2168,9 @@ export function DailyDocumentsPage() {
                                                 }
                                                 if (field.type === "payment-type") {
                                                     return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsxs("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "Pago total", children: [_jsx("option", { value: "Pago total", children: "Pago total" }), _jsx("option", { value: "Pago parcial", children: "Pago parcial" })] })] }, field.name));
+                                                }
+                                                if (field.type === "date") {
+                                                    return (_jsxs("div", { className: "form-field daily-doc-date-field", children: [_jsx("span", { children: field.label }), _jsxs("div", { className: "daily-doc-date-controls", children: [_jsx("input", { "aria-label": field.label, disabled: savingAssignment || isDateBlank(values, field.name), onChange: (event) => updateValue(field.name, event.target.value), type: "date", value: values[field.name] ?? "" }), _jsxs("label", { className: "checkbox-row daily-doc-date-blank-toggle", children: [_jsx("input", { checked: isDateBlank(values, field.name), disabled: savingAssignment, onChange: (event) => updateValue(blankDateFlagName(field.name), event.target.checked ? "true" : ""), type: "checkbox" }), _jsx("span", { children: "Dejar fecha en blanco" })] })] })] }, field.name));
                                                 }
                                                 if (field.type === "attorneys") {
                                                     const attorneyRows = attorneyFormRows(values[field.name] ?? "");

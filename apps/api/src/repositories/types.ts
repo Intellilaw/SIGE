@@ -1,6 +1,7 @@
 import type {
   AuthUser,
   BudgetPlan,
+  BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
   Client,
   CommissionReceiver,
@@ -689,19 +690,31 @@ export interface HolidaysRepository {
 export interface BudgetPlanUpdateRecord {
   expectedIncomeMxn?: number;
   expectedExpenseMxn?: number;
+  expectedExpenseBreakdown?: BudgetPlanExpenseBreakdownUpdateItem[];
   notes?: string | null;
+}
+
+export interface BudgetPlanExpenseBreakdownUpdateItem {
+  concept?: string | null;
+  amountMxn?: number | null;
 }
 
 export interface BudgetPlanningOverviewRecord {
   plan: BudgetPlan;
+  expectedExpenseBreakdown: BudgetPlanExpenseBreakdownItem[];
   financeRecords: FinanceRecord[];
   generalExpenses: GeneralExpense[];
 }
 
 export interface BudgetPlanningRepository {
   getOverview(year: number, month: number): Promise<BudgetPlanningOverviewRecord>;
-  updatePlan(year: number, month: number, payload: BudgetPlanUpdateRecord): Promise<BudgetPlan>;
+  updatePlan(year: number, month: number, payload: BudgetPlanUpdateRecord): Promise<BudgetPlanningOverviewRecord>;
   listSnapshotsBefore(year: number, month: number): Promise<BudgetPlanSnapshot[]>;
+  copyExpenseBreakdownToNextMonth(year: number, month: number): Promise<{
+    year: number;
+    month: number;
+    copied: number;
+  }>;
 }
 
 export interface FinanceRecordWriteRecord {
@@ -746,6 +759,7 @@ export interface FinanceRecordWriteRecord {
 
 export interface FinanceRepository {
   listRecords(year: number, month: number): Promise<FinanceRecord[]>;
+  listRecordsReadOnly(year: number, month: number): Promise<FinanceRecord[]>;
   createRecord(year: number, month: number, payload?: FinanceRecordWriteRecord): Promise<FinanceRecord>;
   updateRecord(recordId: string, payload: FinanceRecordWriteRecord): Promise<FinanceRecord | null>;
   deleteRecord(recordId: string): Promise<void>;

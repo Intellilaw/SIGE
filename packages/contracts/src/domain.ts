@@ -100,6 +100,7 @@ export interface AuthUser {
   specificRole?: string;
   secondarySpecificRole?: string;
   permissions: string[];
+  isExternal: boolean;
   createLaborFile: boolean;
   isActive: boolean;
   passwordResetRequired: boolean;
@@ -1252,6 +1253,17 @@ export interface BudgetPlan {
   expectedIncomeMxn: number;
   expectedExpenseMxn: number;
   notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetPlanExpenseBreakdownItem {
+  id: string;
+  year: number;
+  month: number;
+  concept: string;
+  amountMxn: number;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }

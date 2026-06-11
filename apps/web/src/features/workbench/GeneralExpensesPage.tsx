@@ -1284,6 +1284,13 @@ export function GeneralExpensesPage() {
     2: payrollEntries.filter((entry) => entry.half === 2)
   }), [payrollEntries]);
 
+  const payrollNetDepositTotalMxn = useMemo(
+    () => payrollEntries.reduce((total, entry) => total + Number(entry.netDepositMxn || 0), 0),
+    [payrollEntries]
+  );
+
+  const registeredExpensesTotalMxn = totals.totalAmount + payrollNetDepositTotalMxn;
+
   const payrollEmployeeOptionsById = useMemo(() => new Map<string, GeneralExpensePayrollEmployeeOption>(
     payrollEmployeeOptions.map((option): [string, GeneralExpensePayrollEmployeeOption] => [option.laborFileId, option])
   ), [payrollEmployeeOptions]);
@@ -1788,7 +1795,7 @@ export function GeneralExpensesPage() {
             <div className="general-expense-summary-grid">
               <article className="general-expense-summary-card is-total">
                 <span>Total gastos registrados</span>
-                <strong>{formatCurrency(totals.totalAmount)}</strong>
+                <strong>{formatCurrency(registeredExpensesTotalMxn)}</strong>
               </article>
               <article className="general-expense-summary-card is-limit">
                 <span>Total límite</span>

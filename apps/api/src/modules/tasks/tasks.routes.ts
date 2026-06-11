@@ -3,6 +3,13 @@ import { deriveEffectivePermissions } from "@sige/contracts";
 import { z } from "zod";
 
 import { getSessionUser, requireAuth } from "../../core/auth/guards";
+import {
+  buildExternalTaskModuleIds,
+  buildMatterReferenceKeys,
+  filterExternalVisibleMatters,
+  isExternalScopedUser,
+  matchesMatterReference
+} from "../../core/auth/external-matter-access";
 
 const legacyStatusSchema = z.enum(["pendiente", "presentado", "concluida"]);
 const jsonRecordSchema = z.record(z.unknown());
@@ -141,8 +148,80 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
       secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
       secondarySpecificRole: user.secondarySpecificRole,
-      permissions: user.permissions
+      permissions: user.permissions,
+      isExternal: user.isExternal
     });
+  }
+
+  function hasExternalTaskReadAccess(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    const permissions = getEffectivePermissions(request);
+    return isExternalScopedUser(user) && permissions.includes("external-tasks:read");
+  }
+
+  function hasExternalTaskWriteAccess(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    const permissions = getEffectivePermissions(request);
+    return isExternalScopedUser(user) && permissions.includes("external-tasks:write");
+  }
+
+  async function getExternalMatterScope(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    if (!hasExternalTaskReadAccess(request)) {
+      return null;
+    }
+
+    const matters = filterExternalVisibleMatters(user, await app.repositories.matters.list());
+    return {
+      matters,
+      moduleIds: buildExternalTaskModuleIds(matters),
+      matterKeys: buildMatterReferenceKeys(matters)
+    };
+  }
+
+  function assertInternalTaskMutation(request: FastifyRequest) {
+    if (isExternalScopedUser(getSessionUser(request))) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "External users can only execute tasks assigned to their matters.");
+    }
+  }
+
+  function assertExternalTaskExecutionPatch(payload: Record<string, unknown>, allowedKeys: string[]) {
+    const keys = Object.keys(payload);
+    if (keys.length === 0 || !keys.every((key) => allowedKeys.includes(key))) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "External users can only update task execution status.");
+    }
+  }
+
+  async function assertExternalRecordAccess(request: FastifyRequest, record?: {
+    matterId?: string | null;
+    matterNumber?: string | null;
+    matterIdentifier?: string | null;
+  }) {
+    if (!isExternalScopedUser(getSessionUser(request))) {
+      return;
+    }
+
+    if (!hasExternalTaskWriteAccess(request) || !record) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+    }
+
+    const scope = await getExternalMatterScope(request);
+    if (!scope || !matchesMatterReference(scope.matterKeys, record)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "This task is not assigned to the external user.");
+    }
+  }
+
+  async function filterExternalMatterRecords<T extends {
+    matterId?: string | null;
+    matterNumber?: string | null;
+    matterIdentifier?: string | null;
+  }>(request: FastifyRequest, records: T[]) {
+    const scope = await getExternalMatterScope(request);
+    if (!scope) {
+      return records;
+    }
+
+    return records.filter((record) => matchesMatterReference(scope.matterKeys, record));
   }
 
   function canAccessTaskModule(permissions: string[], moduleId?: string) {
@@ -162,6 +241,11 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
   async function getAllowedTaskModules(request: FastifyRequest) {
     const permissions = getEffectivePermissions(request);
     const modules = await service.listModules();
+    const externalScope = await getExternalMatterScope(request);
+    if (externalScope) {
+      return modules.filter((module) => externalScope.moduleIds.has(module.id));
+    }
+
     return modules.filter((module) => canAccessTaskModule(permissions, module.id));
   }
 
@@ -232,13 +316,15 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     const query = z.object({ moduleId: z.string().optional() }).parse(request.query);
     if (query.moduleId) {
       await assertTaskModuleAccess(request, query.moduleId);
-      return service.listTasks(query.moduleId);
+      return filterExternalMatterRecords(request, await service.listTasks(query.moduleId));
     }
 
     const allowedModuleIds = new Set(await getAllowedTaskModuleIds(request));
-    return (await service.listTasks()).filter((task) => allowedModuleIds.has(task.moduleId));
+    const records = (await service.listTasks()).filter((task) => allowedModuleIds.has(task.moduleId));
+    return filterExternalMatterRecords(request, records);
   });
   app.post("/tasks/items", { preHandler: [requireAuth] }, async (request) => {
+    assertInternalTaskMutation(request);
     const payload = taskSchema.parse(request.body);
     await assertTaskModuleAccess(request, payload.moduleId);
     return service.create(payload);
@@ -248,6 +334,7 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     const body = updateStateSchema.parse(request.body);
     const task = await findTaskItem(params.taskId);
     await assertTaskModuleAccess(request, task?.moduleId);
+    await assertExternalRecordAccess(request, task);
     return service.updateState(params.taskId, body.state);
   });
 
@@ -259,11 +346,11 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     }).parse(request.query);
     if (query.moduleId) {
       await assertTaskModuleAccess(request, query.moduleId);
-      return service.listTrackingRecords({
+      return filterExternalMatterRecords(request, await service.listTrackingRecords({
         moduleId: query.moduleId,
         tableCode: query.tableCode,
         includeDeleted: query.includeDeleted === "true"
-      });
+      }));
     }
 
     const allowedModuleIds = new Set(await getAllowedTaskModuleIds(request));
@@ -272,10 +359,11 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
       tableCode: query.tableCode,
       includeDeleted: query.includeDeleted === "true"
     });
-    return records.filter((record) => allowedModuleIds.has(record.moduleId));
+    return filterExternalMatterRecords(request, records.filter((record) => allowedModuleIds.has(record.moduleId)));
   });
 
   app.post("/tasks/tracking-records", { preHandler: [requireAuth] }, async (request) => {
+    assertInternalTaskMutation(request);
     const payload = trackingRecordSchema.parse(request.body);
     await assertTaskModuleAccess(request, payload.moduleId);
     return service.createTrackingRecord(payload);
@@ -286,10 +374,15 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     const payload = trackingRecordPatchSchema.parse(request.body);
     const record = await findTrackingRecord(params.recordId);
     await assertTaskModuleAccess(request, payload.moduleId ?? record?.moduleId);
+    if (isExternalScopedUser(getSessionUser(request))) {
+      assertExternalTaskExecutionPatch(payload, ["status", "completedAt"]);
+      await assertExternalRecordAccess(request, record);
+    }
     return service.updateTrackingRecord(params.recordId, payload);
   });
 
   app.delete("/tasks/tracking-records/:recordId", { preHandler: [requireAuth] }, async (request, reply) => {
+    assertInternalTaskMutation(request);
     const params = z.object({ recordId: z.string() }).parse(request.params);
     const record = await findTrackingRecord(params.recordId);
     await assertTaskModuleAccess(request, record?.moduleId);
@@ -300,10 +393,11 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
   app.get("/tasks/terms", { preHandler: [requireAuth] }, async (request) => {
     const query = z.object({ moduleId: z.string().min(2) }).parse(request.query);
     await assertTaskModuleAccess(request, query.moduleId);
-    return service.listTerms(query.moduleId);
+    return filterExternalMatterRecords(request, await service.listTerms(query.moduleId));
   });
 
   app.post("/tasks/terms", { preHandler: [requireAuth] }, async (request) => {
+    assertInternalTaskMutation(request);
     const payload = termSchema.parse(request.body);
     await assertTaskModuleAccess(request, payload.moduleId);
     return service.createTerm(payload);
@@ -314,10 +408,15 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     const payload = termPatchSchema.parse(request.body);
     const term = await findTerm(params.termId);
     await assertTaskModuleAccess(request, payload.moduleId ?? term?.moduleId);
+    if (isExternalScopedUser(getSessionUser(request))) {
+      assertExternalTaskExecutionPatch(payload, ["status"]);
+      await assertExternalRecordAccess(request, term);
+    }
     return service.updateTerm(params.termId, payload);
   });
 
   app.delete("/tasks/terms/:termId", { preHandler: [requireAuth] }, async (request, reply) => {
+    assertInternalTaskMutation(request);
     const params = z.object({ termId: z.string() }).parse(request.params);
     const term = await findTerm(params.termId);
     await assertTaskModuleAccess(request, term?.moduleId);
@@ -326,12 +425,17 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/tasks/distribution-events", { preHandler: [requireAuth] }, async (request) => {
+    if (isExternalScopedUser(getSessionUser(request))) {
+      return [];
+    }
+
     const query = z.object({ moduleId: z.string().min(2) }).parse(request.query);
     await assertTaskModuleAccess(request, query.moduleId);
     return service.listDistributionEvents(query.moduleId);
   });
 
   app.post("/tasks/distribution-events", { preHandler: [requireAuth] }, async (request) => {
+    assertInternalTaskMutation(request);
     const payload = distributionEventSchema.parse(request.body);
     await assertTaskModuleAccess(request, payload.moduleId);
     return service.createDistributionEvent(payload);
@@ -341,11 +445,13 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ eventId: z.string() }).parse(request.params);
     const payload = distributionEventPatchSchema.parse(request.body);
     const event = await findDistributionEvent(params.eventId);
+    assertInternalTaskMutation(request);
     await assertTaskModuleAccess(request, payload.moduleId ?? event?.moduleId);
     return service.updateDistributionEvent(params.eventId, payload);
   });
 
   app.delete("/tasks/distribution-events/:eventId", { preHandler: [requireAuth] }, async (request, reply) => {
+    assertInternalTaskMutation(request);
     const params = z.object({ eventId: z.string() }).parse(request.params);
     const event = await findDistributionEvent(params.eventId);
     await assertTaskModuleAccess(request, event?.moduleId);
@@ -356,22 +462,28 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
   app.get("/tasks/distributions", { preHandler: [requireAuth] }, async (request) => {
     const query = z.object({ moduleId: z.string().min(2) }).parse(request.query);
     await assertTaskModuleAccess(request, query.moduleId);
-    return service.listDistributionHistory(query.moduleId);
+    return filterExternalMatterRecords(request, await service.listDistributionHistory(query.moduleId));
   });
 
   app.post("/tasks/distributions", { preHandler: [requireAuth] }, async (request) => {
+    assertInternalTaskMutation(request);
     const payload = distributionSchema.parse(request.body);
     await assertTaskModuleAccess(request, payload.moduleId);
     return service.createDistribution(payload);
   });
 
   app.get("/tasks/additional", { preHandler: [requireAuth] }, async (request) => {
+    if (isExternalScopedUser(getSessionUser(request))) {
+      return [];
+    }
+
     const query = z.object({ moduleId: z.string().min(2) }).parse(request.query);
     await assertTaskModuleAccess(request, query.moduleId);
     return service.listAdditionalTasks(query.moduleId);
   });
 
   app.post("/tasks/additional", { preHandler: [requireAuth] }, async (request) => {
+    assertInternalTaskMutation(request);
     const payload = additionalTaskSchema.parse(request.body);
     await assertTaskModuleAccess(request, payload.moduleId);
     return service.createAdditionalTask(payload);
@@ -381,11 +493,13 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ taskId: z.string() }).parse(request.params);
     const payload = additionalTaskPatchSchema.parse(request.body);
     const task = await findAdditionalTask(params.taskId);
+    assertInternalTaskMutation(request);
     await assertTaskModuleAccess(request, payload.moduleId ?? task?.moduleId);
     return service.updateAdditionalTask(params.taskId, payload);
   });
 
   app.delete("/tasks/additional/:taskId", { preHandler: [requireAuth] }, async (request, reply) => {
+    assertInternalTaskMutation(request);
     const params = z.object({ taskId: z.string() }).parse(request.params);
     const task = await findAdditionalTask(params.taskId);
     await assertTaskModuleAccess(request, task?.moduleId);

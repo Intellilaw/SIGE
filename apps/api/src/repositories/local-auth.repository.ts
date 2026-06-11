@@ -288,6 +288,7 @@ export class LocalAuthRepository implements AuthRepository {
         legacyTeam: user.legacyTeam ?? exportedUser?.legacyTeam ?? undefined,
         specificRole: user.specificRole ?? exportedUser?.specificRole ?? undefined,
         permissions: user.permissions,
+        isExternal: false,
         createLaborFile: user.internalRole !== "SUPERADMIN" && user.legacyRole !== "SUPERADMIN",
         isActive: true,
         passwordResetRequired: true,
@@ -347,8 +348,10 @@ export class LocalAuthRepository implements AuthRepository {
         secondaryLegacyTeam: user.secondaryLegacyTeam,
         specificRole: user.specificRole,
         secondarySpecificRole: user.secondarySpecificRole,
-        permissions: user.permissions
+        permissions: user.permissions,
+        isExternal: user.isExternal ?? false
       }),
+      isExternal: user.isExternal ?? false,
       createLaborFile: user.createLaborFile ?? true,
       isActive: user.isActive,
       passwordResetRequired: user.passwordResetRequired

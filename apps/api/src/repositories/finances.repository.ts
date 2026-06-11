@@ -363,7 +363,15 @@ export class PrismaFinanceRepository implements FinanceRepository {
   public async listRecords(year: number, month: number) {
     const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
     await this.syncRecordsWithMatters(year, month, includeCollectionProbability);
+    return this.listRecordsForMonth(year, month, includeCollectionProbability);
+  }
 
+  public async listRecordsReadOnly(year: number, month: number) {
+    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    return this.listRecordsForMonth(year, month, includeCollectionProbability);
+  }
+
+  private async listRecordsForMonth(year: number, month: number, includeCollectionProbability: boolean) {
     const records = await this.prisma.financeRecord.findMany({
       where: { year, month },
       orderBy: [{ createdAt: "asc" }, { clientNumber: "asc" }],

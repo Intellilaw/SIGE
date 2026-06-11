@@ -91,6 +91,10 @@ export class FinancesService {
     return this.repository.listRecords(year, month);
   }
 
+  public listRecordsReadOnly(year: number, month: number) {
+    return this.repository.listRecordsReadOnly(year, month);
+  }
+
   public createRecord(year: number, month: number, payload?: FinanceRecordWriteRecord) {
     return this.repository.createRecord(year, month, payload);
   }

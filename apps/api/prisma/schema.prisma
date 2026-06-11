@@ -32,6 +32,7 @@ model Organization {
   generalExpenses                  GeneralExpense[]
   payrollEntries                   GeneralExpensePayrollEntry[]
   budgetPlans                      BudgetPlan[]
+  budgetPlanExpenseBreakdownItems  BudgetPlanExpenseBreakdownItem[]
   budgetPlanSnapshots              BudgetPlanSnapshot[]
   commissionReceivers              CommissionReceiver[]
   commissionExclusions             CommissionExclusion[]
@@ -728,6 +729,21 @@ model BudgetPlan {
 
   @@unique([organizationId, year, month])
   @@index([organizationId, year, month])
+}
+
+model BudgetPlanExpenseBreakdownItem {
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  year           Int
+  month          Int
+  concept        String       @default("")
+  amountMxn      Decimal      @default(0)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, year, month, sortOrder])
 }
 
 model BudgetPlanSnapshot {

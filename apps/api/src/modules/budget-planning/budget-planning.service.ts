@@ -14,4 +14,8 @@ export class BudgetPlanningService {
   public listSnapshotsBefore(year: number, month: number) {
     return this.repository.listSnapshotsBefore(year, month);
   }
+
+  public copyExpenseBreakdownToNextMonth(year: number, month: number) {
+    return this.repository.copyExpenseBreakdownToNextMonth(year, month);
+  }
 }

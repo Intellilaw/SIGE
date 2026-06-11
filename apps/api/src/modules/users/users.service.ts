@@ -99,6 +99,7 @@ export class UsersService {
     const secondaryTeam = managedSecondaryTeam?.key;
     this.assertDistinctTeams(team, legacyTeam, secondaryTeam, secondaryLegacyTeam);
     const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole, secondarySpecificRole });
+    const isExternal = payload.isExternal ?? false;
     const permissions = derivePermissions({
       legacyRole,
       team,
@@ -106,10 +107,10 @@ export class UsersService {
       secondaryTeam,
       secondaryLegacyTeam,
       specificRole,
-      secondarySpecificRole
+      secondarySpecificRole,
+      isExternal
     });
     assertStrongPassword(payload.password);
-    const isExternal = payload.isExternal ?? false;
 
     return this.repository.create({
       email,
@@ -174,6 +175,7 @@ export class UsersService {
       : (managedSecondaryTeam?.key ?? null);
     this.assertDistinctTeams(team, legacyTeam, secondaryTeam, secondaryLegacyTeam);
     const role = deriveSystemRole({ legacyRole, legacyTeam, specificRole, secondarySpecificRole });
+    const isExternal = payload.isExternal ?? currentUser.isExternal;
     const permissions = derivePermissions({
       legacyRole,
       team,
@@ -181,10 +183,10 @@ export class UsersService {
       secondaryTeam,
       secondaryLegacyTeam,
       specificRole,
-      secondarySpecificRole
+      secondarySpecificRole,
+      isExternal
     });
     const nextPassword = payload.password?.trim();
-    const isExternal = payload.isExternal ?? currentUser.isExternal;
     const createLaborFile = payload.createLaborFile === undefined
       ? (role === "SUPERADMIN" || legacyRole === "SUPERADMIN" ? false : undefined)
       : normalizeCreateLaborFile(payload.createLaborFile, { isExternal, role, legacyRole });

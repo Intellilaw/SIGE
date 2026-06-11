@@ -222,6 +222,10 @@ export class ResilientFinanceRepository extends ResilientRepositoryBase implemen
     return this.withFallback(() => this.primary.listRecords(year, month), () => Promise.resolve([]));
   }
 
+  public listRecordsReadOnly(year: number, month: number) {
+    return this.withFallback(() => this.primary.listRecordsReadOnly(year, month), () => Promise.resolve([]));
+  }
+
   public createRecord(year: number, month: number, payload?: FinanceRecordWriteRecord) {
     return this.primary.createRecord(year, month, payload);
   }

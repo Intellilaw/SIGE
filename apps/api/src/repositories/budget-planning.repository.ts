@@ -2,8 +2,14 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
-import { mapBudgetPlan, mapBudgetPlanSnapshot, mapFinanceRecord, mapGeneralExpense } from "./mappers";
-import type { BudgetPlanUpdateRecord, BudgetPlanningRepository } from "./types";
+import {
+  mapBudgetPlan,
+  mapBudgetPlanExpenseBreakdownItem,
+  mapBudgetPlanSnapshot,
+  mapFinanceRecord,
+  mapGeneralExpense
+} from "./mappers";
+import type { BudgetPlanExpenseBreakdownUpdateItem, BudgetPlanUpdateRecord, BudgetPlanningRepository } from "./types";
 
 const DEFAULT_MONTH_RANGE = { min: 1, max: 12 };
 
@@ -60,8 +66,29 @@ function calculateExpectedIncomeBreakdownFromFinance(records: Array<{
   );
 }
 
+function calculateExpectedExpenseFromBreakdown(records: Array<{ amountMxn: Prisma.Decimal }>) {
+  return records.reduce((sum, record) => sum + Number(record.amountMxn || 0), 0);
+}
+
+function normalizeExpenseBreakdownItems(items?: BudgetPlanExpenseBreakdownUpdateItem[]) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      concept: normalizeOptionalText(item.concept)?.slice(0, 160) ?? "",
+      amountMxn: Math.max(0, Number(item.amountMxn ?? 0))
+    }))
+    .filter((item) => item.concept.length > 0 || item.amountMxn > 0);
+}
+
 function getMonthKey(year: number, month: number) {
   return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function getNextMonth(year: number, month: number) {
+  if (month >= 12) {
+    return { year: year + 1, month: 1 };
+  }
+
+  return { year, month: month + 1 };
 }
 
 function isBeforeMonth(inputYear: number, inputMonth: number, targetYear: number, targetMonth: number) {
@@ -86,7 +113,7 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
   public async getOverview(year: number, month: number) {
     assertMonth(month);
 
-    const [plan, financeRecords, generalExpenses] = await Promise.all([
+    const [plan, financeRecords, generalExpenses, expectedExpenseBreakdown] = await Promise.all([
       this.findOrCreatePlan(year, month),
       this.prisma.financeRecord.findMany({
         where: { year, month },
@@ -95,16 +122,23 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       this.prisma.generalExpense.findMany({
         where: { year, month },
         orderBy: [{ createdAt: "asc" }]
+      }),
+      this.prisma.budgetPlanExpenseBreakdownItem.findMany({
+        where: { year, month },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
       })
     ]);
 
     const expectedIncome = calculateExpectedIncomeBreakdownFromFinance(financeRecords);
+    const expectedExpenseMxn = calculateExpectedExpenseFromBreakdown(expectedExpenseBreakdown);
 
     return {
       plan: {
         ...plan,
-        expectedIncomeMxn: expectedIncome.total
+        expectedIncomeMxn: expectedIncome.total,
+        expectedExpenseMxn
       },
+      expectedExpenseBreakdown: expectedExpenseBreakdown.map(mapBudgetPlanExpenseBreakdownItem),
       financeRecords: financeRecords.map(mapFinanceRecord),
       generalExpenses: generalExpenses.map(mapGeneralExpense)
     };
@@ -115,48 +149,69 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
     const organizationId = getCurrentOrganizationIdOrDefault();
 
     const data: Prisma.BudgetPlanUncheckedUpdateInput = {};
+    const shouldReplaceExpectedExpenseBreakdown = hasOwn(payload, "expectedExpenseBreakdown");
+    const expectedExpenseBreakdown = shouldReplaceExpectedExpenseBreakdown
+      ? normalizeExpenseBreakdownItems(payload.expectedExpenseBreakdown)
+      : [];
+    const expectedExpenseBreakdownTotal = expectedExpenseBreakdown.reduce((sum, item) => sum + item.amountMxn, 0);
+
     if (hasOwn(payload, "expectedIncomeMxn")) {
       data.expectedIncomeMxn = normalizeMoney(payload.expectedIncomeMxn);
     }
-    if (hasOwn(payload, "expectedExpenseMxn")) {
+    if (shouldReplaceExpectedExpenseBreakdown) {
+      data.expectedExpenseMxn = normalizeMoney(expectedExpenseBreakdownTotal);
+    } else if (hasOwn(payload, "expectedExpenseMxn")) {
       data.expectedExpenseMxn = normalizeMoney(payload.expectedExpenseMxn);
     }
     if (hasOwn(payload, "notes")) {
       data.notes = normalizeOptionalText(payload.notes);
     }
 
-    const plan = await this.prisma.budgetPlan.upsert({
-      where: {
-        organizationId_year_month: {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.budgetPlan.upsert({
+        where: {
+          organizationId_year_month: {
+            organizationId,
+            year,
+            month
+          }
+        },
+        create: {
           organizationId,
           year,
-          month
-        }
-      },
-      create: {
-        year,
-        month,
-        expectedIncomeMxn: hasOwn(payload, "expectedIncomeMxn") ? normalizeMoney(payload.expectedIncomeMxn) : new Prisma.Decimal(0),
-        expectedExpenseMxn: hasOwn(payload, "expectedExpenseMxn") ? normalizeMoney(payload.expectedExpenseMxn) : new Prisma.Decimal(0),
-        notes: hasOwn(payload, "notes") ? normalizeOptionalText(payload.notes) : null
-      },
-      update: data
-    });
+          month,
+          expectedIncomeMxn: hasOwn(payload, "expectedIncomeMxn") ? normalizeMoney(payload.expectedIncomeMxn) : new Prisma.Decimal(0),
+          expectedExpenseMxn: shouldReplaceExpectedExpenseBreakdown
+            ? normalizeMoney(expectedExpenseBreakdownTotal)
+            : hasOwn(payload, "expectedExpenseMxn")
+              ? normalizeMoney(payload.expectedExpenseMxn)
+              : new Prisma.Decimal(0),
+          notes: hasOwn(payload, "notes") ? normalizeOptionalText(payload.notes) : null
+        },
+        update: data
+      });
 
-    const financeRecords = await this.prisma.financeRecord.findMany({
-      where: { year, month },
-      select: {
-        conceptFeesMxn: true,
-        highCollectionProbability: true,
-        lowCollectionProbability: true
+      if (shouldReplaceExpectedExpenseBreakdown) {
+        await tx.budgetPlanExpenseBreakdownItem.deleteMany({
+          where: { organizationId, year, month }
+        });
+
+        if (expectedExpenseBreakdown.length > 0) {
+          await tx.budgetPlanExpenseBreakdownItem.createMany({
+            data: expectedExpenseBreakdown.map((item, index) => ({
+              organizationId,
+              year,
+              month,
+              concept: item.concept,
+              amountMxn: normalizeMoney(item.amountMxn),
+              sortOrder: index
+            }))
+          });
+        }
       }
     });
-    const expectedIncome = calculateExpectedIncomeBreakdownFromFinance(financeRecords);
 
-    return {
-      ...mapBudgetPlan(plan),
-      expectedIncomeMxn: expectedIncome.total
-    };
+    return this.getOverview(year, month);
   }
 
   public async listSnapshotsBefore(year: number, month: number) {
@@ -242,7 +297,7 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       return mapBudgetPlanSnapshot(existing);
     }
 
-    const [plan, financeRecords, generalExpenses] = await Promise.all([
+    const [plan, financeRecords, generalExpenses, expectedExpenseBreakdown] = await Promise.all([
       this.prisma.budgetPlan.findUnique({
         where: {
           organizationId_year_month: {
@@ -257,12 +312,15 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       }),
       this.prisma.generalExpense.findMany({
         where: { year, month }
+      }),
+      this.prisma.budgetPlanExpenseBreakdownItem.findMany({
+        where: { year, month }
       })
     ]);
 
     const expectedIncome = calculateExpectedIncomeBreakdownFromFinance(financeRecords);
     const expectedIncomeMxn = expectedIncome.total;
-    const expectedExpenseMxn = Number(plan?.expectedExpenseMxn ?? 0);
+    const expectedExpenseMxn = calculateExpectedExpenseFromBreakdown(expectedExpenseBreakdown);
     const actualIncomeMxn = financeRecords.reduce(
       (sum, record) =>
         sum +
@@ -292,5 +350,62 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
     });
 
     return mapBudgetPlanSnapshot(snapshot);
+  }
+
+  public async copyExpenseBreakdownToNextMonth(year: number, month: number) {
+    assertMonth(month);
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const next = getNextMonth(year, month);
+    const sourceItems = await this.prisma.budgetPlanExpenseBreakdownItem.findMany({
+      where: { organizationId, year, month },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+    });
+    const copiedTotal = calculateExpectedExpenseFromBreakdown(sourceItems);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.budgetPlan.upsert({
+        where: {
+          organizationId_year_month: {
+            organizationId,
+            year: next.year,
+            month: next.month
+          }
+        },
+        create: {
+          organizationId,
+          year: next.year,
+          month: next.month,
+          expectedIncomeMxn: new Prisma.Decimal(0),
+          expectedExpenseMxn: normalizeMoney(copiedTotal),
+          notes: null
+        },
+        update: {
+          expectedExpenseMxn: normalizeMoney(copiedTotal)
+        }
+      });
+
+      await tx.budgetPlanExpenseBreakdownItem.deleteMany({
+        where: { organizationId, year: next.year, month: next.month }
+      });
+
+      if (sourceItems.length > 0) {
+        await tx.budgetPlanExpenseBreakdownItem.createMany({
+          data: sourceItems.map((item, index) => ({
+            organizationId,
+            year: next.year,
+            month: next.month,
+            concept: item.concept,
+            amountMxn: item.amountMxn,
+            sortOrder: index
+          }))
+        });
+      }
+    });
+
+    return {
+      year: next.year,
+      month: next.month,
+      copied: sourceItems.length
+    };
   }
 }

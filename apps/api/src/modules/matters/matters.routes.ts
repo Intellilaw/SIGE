@@ -11,6 +11,7 @@ import {
 } from "@sige/contracts";
 
 import { getSessionUser, requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
+import { filterExternalVisibleMatters, isExternalScopedUser } from "../../core/auth/external-matter-access";
 import { generateMatterRiExpiration, generateMatterRiInput, type RiMatterTaskContext } from "./matter-ri-input-generator";
 import { enrichMatterTelegramGroupName } from "./telegram-group-name-resolver";
 import { sendPromotionCommandToTelegram } from "./telegram-promotion-command-sender";
@@ -160,7 +161,8 @@ function getEffectivePermissionsForRequest(request: FastifyRequest) {
     secondaryLegacyTeam: user.secondaryLegacyTeam,
     specificRole: user.specificRole,
     secondarySpecificRole: user.secondarySpecificRole,
-    permissions: user.permissions
+    permissions: user.permissions,
+    isExternal: user.isExternal
   });
 }
 
@@ -261,13 +263,17 @@ async function listRiTaskContext(app: FastifyInstance, matter: Matter) {
 
 export const mattersRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.MattersService(app.repositories.matters);
-  const readGuards = [requireAuth, requireAnyPermissions(["matters:read", "matters:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["matters:write"])];
   const superadminGuards = [requireAuth, requireRoles(["SUPERADMIN"])];
 
   app.get("/matters", { preHandler: [requireAuth] }, async (request) => {
+    const user = getSessionUser(request);
     const permissions = getEffectivePermissionsForRequest(request);
     const records = await service.list();
+
+    if (isExternalScopedUser(user) && permissions.includes("external-matters:read")) {
+      return filterExternalVisibleMatters(user, records);
+    }
 
     if (canReadAllMatters(permissions)) {
       return records;
@@ -283,8 +289,13 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/matters/recycle-bin", { preHandler: [requireAuth] }, async (request) => {
+    const user = getSessionUser(request);
     const permissions = getEffectivePermissionsForRequest(request);
     const records = await service.listDeleted();
+
+    if (isExternalScopedUser(user)) {
+      return [];
+    }
 
     if (canReadAllMatters(permissions)) {
       return records;
@@ -299,8 +310,32 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
     throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
   });
 
-  app.get("/matters/short-names", { preHandler: readGuards }, async () => service.listCommissionShortNames());
-  app.get("/matters/visibility-options", { preHandler: readGuards }, async () => service.listVisibilityOptions());
+  app.get("/matters/short-names", { preHandler: [requireAuth] }, async (request) => {
+    const user = getSessionUser(request);
+    const permissions = getEffectivePermissionsForRequest(request);
+    if (isExternalScopedUser(user) && permissions.includes("external-matters:read")) {
+      return [];
+    }
+
+    if (canReadAllMatters(permissions)) {
+      return service.listCommissionShortNames();
+    }
+
+    throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+  });
+  app.get("/matters/visibility-options", { preHandler: [requireAuth] }, async (request) => {
+    const user = getSessionUser(request);
+    const permissions = getEffectivePermissionsForRequest(request);
+    if (isExternalScopedUser(user) && permissions.includes("external-matters:read")) {
+      return user.shortName ? [user.shortName] : [];
+    }
+
+    if (canReadAllMatters(permissions)) {
+      return service.listVisibilityOptions();
+    }
+
+    throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+  });
 
   app.post("/matters", { preHandler: writeGuards }, async (request) => {
     const payload = matterSchema.partial().parse(request.body ?? {});

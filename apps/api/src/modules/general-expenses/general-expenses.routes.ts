@@ -129,7 +129,8 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
       secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
       secondarySpecificRole: user.secondarySpecificRole,
-      permissions: user.permissions
+      permissions: user.permissions,
+      isExternal: user.isExternal
     });
     const isStampOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "payrollStampedByAraceli");
     const isJnlsApprovalOnlyPatch = payloadKeys.length === 1 && Object.prototype.hasOwnProperty.call(payload, "reviewedByJnls");
@@ -168,7 +169,8 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
       secondaryLegacyTeam: user.secondaryLegacyTeam,
       specificRole: user.specificRole,
       secondarySpecificRole: user.secondarySpecificRole,
-      permissions: user.permissions
+      permissions: user.permissions,
+      isExternal: user.isExternal
     });
 
     if (isJnlsApprovalOnlyPatch) {
