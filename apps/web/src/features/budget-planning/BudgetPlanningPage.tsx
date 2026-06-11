@@ -35,6 +35,7 @@ interface BudgetPlanningOverview {
 }
 
 interface BudgetExpenseBreakdownDraftRow {
+  id: string;
   concept: string;
   amountMxn: string;
 }
@@ -66,21 +67,25 @@ function formatCurrency(value: number) {
   }).format(Number(value || 0));
 }
 
-function formatEditableNumber(value: number) {
-  return Number.isFinite(value) ? String(value) : "0";
-}
-
 function parseEditableMoney(value: string) {
   const normalized = value.replace(/[$,\s]/g, "");
   const numeric = Number(normalized || 0);
   return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 }
 
+let expenseBreakdownDraftRowSequence = 0;
+
+function createExpenseBreakdownDraftRow(concept = "", amountMxn = 0): BudgetExpenseBreakdownDraftRow {
+  expenseBreakdownDraftRowSequence += 1;
+  return {
+    id: `expense-breakdown-draft-${expenseBreakdownDraftRowSequence}`,
+    concept,
+    amountMxn: formatCurrency(amountMxn)
+  };
+}
+
 function toExpenseBreakdownDraft(items: BudgetPlanExpenseBreakdownItem[]): BudgetExpenseBreakdownDraftRow[] {
-  return items.map((item) => ({
-    concept: item.concept,
-    amountMxn: formatEditableNumber(item.amountMxn)
-  }));
+  return items.map((item) => createExpenseBreakdownDraftRow(item.concept, item.amountMxn));
 }
 
 function normalizeExpenseBreakdownDraft(rows: BudgetExpenseBreakdownDraftRow[]) {
@@ -198,7 +203,7 @@ export function BudgetPlanningPage() {
     setDraftExpenseBreakdown(
       expectedExpenseBreakdown.length > 0
         ? toExpenseBreakdownDraft(expectedExpenseBreakdown)
-        : [{ concept: "", amountMxn: "0" }]
+        : [createExpenseBreakdownDraftRow()]
     );
     setExpenseBreakdownOpen(true);
   }
@@ -210,7 +215,7 @@ export function BudgetPlanningPage() {
   }
 
   function addDraftExpenseBreakdownRow() {
-    setDraftExpenseBreakdown((current) => [...current, { concept: "", amountMxn: "0" }]);
+    setDraftExpenseBreakdown((current) => [...current, createExpenseBreakdownDraftRow()]);
   }
 
   function removeDraftExpenseBreakdownRow(index: number) {
@@ -540,7 +545,7 @@ export function BudgetPlanningPage() {
                     </tr>
                   ) : (
                     draftExpenseBreakdown.map((row, index) => (
-                      <tr key={`${index}-${row.concept}`}>
+                      <tr key={row.id}>
                         <td>
                           <input
                             className="finance-input"
@@ -556,6 +561,7 @@ export function BudgetPlanningPage() {
                             value={row.amountMxn}
                             disabled={!canWrite || savingExpenseBreakdown}
                             onChange={(event) => updateDraftExpenseBreakdownRow(index, { amountMxn: event.target.value })}
+                            onBlur={(event) => updateDraftExpenseBreakdownRow(index, { amountMxn: formatCurrency(parseEditableMoney(event.target.value)) })}
                           />
                         </td>
                         <td>

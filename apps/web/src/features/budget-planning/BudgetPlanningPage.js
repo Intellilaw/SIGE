@@ -31,19 +31,22 @@ function formatCurrency(value) {
         minimumFractionDigits: 2
     }).format(Number(value || 0));
 }
-function formatEditableNumber(value) {
-    return Number.isFinite(value) ? String(value) : "0";
-}
 function parseEditableMoney(value) {
     const normalized = value.replace(/[$,\s]/g, "");
     const numeric = Number(normalized || 0);
     return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 }
+let expenseBreakdownDraftRowSequence = 0;
+function createExpenseBreakdownDraftRow(concept = "", amountMxn = 0) {
+    expenseBreakdownDraftRowSequence += 1;
+    return {
+        id: `expense-breakdown-draft-${expenseBreakdownDraftRowSequence}`,
+        concept,
+        amountMxn: formatCurrency(amountMxn)
+    };
+}
 function toExpenseBreakdownDraft(items) {
-    return items.map((item) => ({
-        concept: item.concept,
-        amountMxn: formatEditableNumber(item.amountMxn)
-    }));
+    return items.map((item) => createExpenseBreakdownDraftRow(item.concept, item.amountMxn));
 }
 function normalizeExpenseBreakdownDraft(rows) {
     return rows
@@ -148,14 +151,14 @@ export function BudgetPlanningPage() {
     function openExpenseBreakdown() {
         setDraftExpenseBreakdown(expectedExpenseBreakdown.length > 0
             ? toExpenseBreakdownDraft(expectedExpenseBreakdown)
-            : [{ concept: "", amountMxn: "0" }]);
+            : [createExpenseBreakdownDraftRow()]);
         setExpenseBreakdownOpen(true);
     }
     function updateDraftExpenseBreakdownRow(index, patch) {
         setDraftExpenseBreakdown((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
     }
     function addDraftExpenseBreakdownRow() {
-        setDraftExpenseBreakdown((current) => [...current, { concept: "", amountMxn: "0" }]);
+        setDraftExpenseBreakdown((current) => [...current, createExpenseBreakdownDraftRow()]);
     }
     function removeDraftExpenseBreakdownRow(index) {
         setDraftExpenseBreakdown((current) => current.filter((_, rowIndex) => rowIndex !== index));
@@ -224,5 +227,5 @@ export function BudgetPlanningPage() {
                             const snapshotExpectedTone = snapshot.expectedResultMxn >= 0 ? "is-positive" : "is-negative";
                             const snapshotActualTone = snapshot.actualResultMxn >= 0 ? "is-positive" : "is-negative";
                             return (_jsxs("article", { className: "budget-snapshot-card", children: [_jsx("div", { className: "budget-card-head", children: _jsxs("div", { children: [_jsxs("h3", { children: [getMonthName(snapshot.month), " ", snapshot.year] }), _jsxs("span", { children: ["Estampa congelada el ", new Date(snapshot.createdAt).toLocaleDateString("es-MX")] })] }) }), _jsxs("div", { className: "budget-snapshot-metrics", children: [_jsxs("div", { children: [_jsx("span", { children: "Ingresos esperados" }), _jsx("strong", { children: formatCurrency(snapshot.expectedIncomeMxn) })] }), _jsxs("div", { children: [_jsx("span", { children: "Ingresos reportados" }), _jsx("strong", { children: formatCurrency(snapshot.actualIncomeMxn) })] }), _jsxs("div", { children: [_jsx("span", { children: "Egresos esperados" }), _jsx("strong", { children: formatCurrency(snapshot.expectedExpenseMxn) })] }), _jsxs("div", { children: [_jsx("span", { children: "Egresos reportados" }), _jsx("strong", { children: formatCurrency(snapshot.actualExpenseMxn) })] })] }), _jsxs("div", { className: "budget-result-pair", children: [_jsxs("div", { className: `budget-result-value ${snapshotExpectedTone}`, children: [_jsx("span", { children: "Resultado esperado" }), _jsx("strong", { children: formatCurrency(snapshot.expectedResultMxn) })] }), _jsxs("div", { className: `budget-result-value ${snapshotActualTone}`, children: [_jsx("span", { children: "Resultado real" }), _jsx("strong", { children: formatCurrency(snapshot.actualResultMxn) })] })] }), _jsxs("small", { children: [snapshot.financeRecordCount, " ingresos y ", snapshot.generalExpenseCount, " egresos reportados"] }), snapshot.notes ? _jsx("p", { className: "muted", children: snapshot.notes }) : null] }, snapshot.id));
-                        })) })] })), expenseBreakdownOpen ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => setExpenseBreakdownOpen(false), children: _jsxs("div", { className: "finance-modal finance-modal-wide budget-expense-breakdown-modal", role: "dialog", "aria-modal": "true", "aria-label": "Desglose de egresos esperados", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "finance-modal-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Desglose de egresos esperados" }), _jsxs("span", { children: [getMonthName(selectedMonth), " ", selectedYear] })] }), _jsx("strong", { children: formatCurrency(draftExpenseBreakdownTotal) })] }), _jsxs("div", { className: "budget-breakdown-toolbar", children: [_jsx("button", { className: "secondary-button", type: "button", onClick: addDraftExpenseBreakdownRow, disabled: !canWrite || savingExpenseBreakdown, children: "Agregar fila" }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => void copyExpenseBreakdownToNextMonth(), disabled: !canWrite || savingExpenseBreakdown, children: "Copiar a mes siguiente" })] }), _jsx("div", { className: "budget-breakdown-table-wrap", children: _jsxs("table", { className: "budget-breakdown-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Concepto" }), _jsx("th", { children: "Monto sin IVA" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: draftExpenseBreakdown.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 3, className: "centered-inline-message", children: "Sin filas." }) })) : (draftExpenseBreakdown.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { children: _jsx("input", { className: "finance-input", value: row.concept, disabled: !canWrite || savingExpenseBreakdown, onChange: (event) => updateDraftExpenseBreakdownRow(index, { concept: event.target.value }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input budget-breakdown-amount-input", inputMode: "decimal", value: row.amountMxn, disabled: !canWrite || savingExpenseBreakdown, onChange: (event) => updateDraftExpenseBreakdownRow(index, { amountMxn: event.target.value }) }) }), _jsx("td", { children: _jsx("button", { className: "danger-button", type: "button", onClick: () => removeDraftExpenseBreakdownRow(index), disabled: !canWrite || savingExpenseBreakdown, children: "Eliminar fila" }) })] }, `${index}-${row.concept}`)))) })] }) }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", onClick: () => setExpenseBreakdownOpen(false), disabled: savingExpenseBreakdown, children: "Cancelar" }), _jsx("button", { className: "primary-button", type: "button", onClick: () => void saveExpenseBreakdown(), disabled: !canWrite || savingExpenseBreakdown, children: "Guardar desglose" })] })] }) })) : null] }));
+                        })) })] })), expenseBreakdownOpen ? (_jsx("div", { className: "finance-modal-backdrop", role: "presentation", onClick: () => setExpenseBreakdownOpen(false), children: _jsxs("div", { className: "finance-modal finance-modal-wide budget-expense-breakdown-modal", role: "dialog", "aria-modal": "true", "aria-label": "Desglose de egresos esperados", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "finance-modal-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Desglose de egresos esperados" }), _jsxs("span", { children: [getMonthName(selectedMonth), " ", selectedYear] })] }), _jsx("strong", { children: formatCurrency(draftExpenseBreakdownTotal) })] }), _jsxs("div", { className: "budget-breakdown-toolbar", children: [_jsx("button", { className: "secondary-button", type: "button", onClick: addDraftExpenseBreakdownRow, disabled: !canWrite || savingExpenseBreakdown, children: "Agregar fila" }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => void copyExpenseBreakdownToNextMonth(), disabled: !canWrite || savingExpenseBreakdown, children: "Copiar a mes siguiente" })] }), _jsx("div", { className: "budget-breakdown-table-wrap", children: _jsxs("table", { className: "budget-breakdown-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Concepto" }), _jsx("th", { children: "Monto sin IVA" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: draftExpenseBreakdown.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 3, className: "centered-inline-message", children: "Sin filas." }) })) : (draftExpenseBreakdown.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { children: _jsx("input", { className: "finance-input", value: row.concept, disabled: !canWrite || savingExpenseBreakdown, onChange: (event) => updateDraftExpenseBreakdownRow(index, { concept: event.target.value }) }) }), _jsx("td", { children: _jsx("input", { className: "finance-input budget-breakdown-amount-input", inputMode: "decimal", value: row.amountMxn, disabled: !canWrite || savingExpenseBreakdown, onChange: (event) => updateDraftExpenseBreakdownRow(index, { amountMxn: event.target.value }), onBlur: (event) => updateDraftExpenseBreakdownRow(index, { amountMxn: formatCurrency(parseEditableMoney(event.target.value)) }) }) }), _jsx("td", { children: _jsx("button", { className: "danger-button", type: "button", onClick: () => removeDraftExpenseBreakdownRow(index), disabled: !canWrite || savingExpenseBreakdown, children: "Eliminar fila" }) })] }, row.id)))) })] }) }), _jsxs("div", { className: "finance-modal-actions", children: [_jsx("button", { className: "secondary-button", type: "button", onClick: () => setExpenseBreakdownOpen(false), disabled: savingExpenseBreakdown, children: "Cancelar" }), _jsx("button", { className: "primary-button", type: "button", onClick: () => void saveExpenseBreakdown(), disabled: !canWrite || savingExpenseBreakdown, children: "Guardar desglose" })] })] }) })) : null] }));
 }
