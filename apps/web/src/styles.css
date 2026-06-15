@@ -3910,6 +3910,11 @@ textarea {
   background: rgba(15, 118, 110, 0.1);
 }
 
+.execution-row-focused td {
+  background: rgba(255, 247, 221, 0.96) !important;
+  box-shadow: inset 0 0 0 2px rgba(191, 128, 0, 0.28);
+}
+
 .execution-actions-cell {
   min-width: 200px;
   min-height: 42px;
@@ -4010,6 +4015,12 @@ textarea {
 
 .execution-promotion-select {
   min-width: 220px;
+}
+
+.execution-promotion-select.is-focused-from-manager {
+  border-color: #bf8000;
+  box-shadow: 0 0 0 5px rgba(191, 128, 0, 0.14);
+  outline: 3px solid rgba(191, 128, 0, 0.45);
 }
 
 .execution-table-note td {
@@ -5328,6 +5339,75 @@ textarea {
 .tasks-distributor-small-button {
   padding: 7px 11px;
   font-size: 0.78rem;
+}
+
+.tasks-promotion-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.tasks-promotion-popup {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.24);
+}
+
+.tasks-promotion-popup.is-error {
+  border-color: rgba(180, 35, 24, 0.26);
+  background: linear-gradient(180deg, #fff7f6 0%, #ffffff 100%);
+}
+
+.tasks-promotion-popup.is-success {
+  border-color: rgba(15, 118, 110, 0.24);
+  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
+}
+
+.tasks-promotion-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tasks-promotion-popup-kicker {
+  color: #8a6100;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tasks-promotion-popup h3,
+.tasks-promotion-popup p {
+  margin: 0;
+}
+
+.tasks-promotion-popup h3 {
+  color: #17202c;
+  font-size: 1.35rem;
+}
+
+.tasks-promotion-popup p {
+  color: #334155;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.tasks-promotion-popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .tasks-active-target-list,
@@ -7172,6 +7252,15 @@ textarea {
 
 .supervision-summary-card.is-week {
   border-color: rgba(15, 118, 110, 0.22);
+  grid-column: 1 / -1;
+  justify-self: center;
+  text-align: center;
+  width: min(100%, 560px);
+}
+
+.supervision-summary-card.is-week strong {
+  font-size: 1.12rem;
+  line-height: 1.35;
 }
 
 .supervision-bucket-card,
@@ -7383,6 +7472,110 @@ textarea {
   white-space: nowrap;
 }
 
+.supervision-task-detail-button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.supervision-task-user-detail {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 14px;
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+  padding-top: 12px;
+}
+
+.supervision-task-detail-row strong,
+.supervision-task-kpi-detail-period header strong {
+  color: #102a43;
+}
+
+.supervision-task-detail-row span,
+.supervision-task-kpi-detail-period header span {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.supervision-task-detail-list,
+.supervision-task-kpi-detail-list {
+  display: grid;
+  gap: 10px;
+}
+
+.supervision-task-detail-row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+  padding-top: 10px;
+}
+
+.supervision-task-detail-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.supervision-task-kpi-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(124, 58, 237, 0.24);
+  border-left: 5px solid #7c3aed;
+  border-radius: 8px;
+  background: #faf7ff;
+  padding: 14px;
+  box-shadow: 0 12px 26px rgba(88, 28, 135, 0.08);
+}
+
+.supervision-task-kpi-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(124, 58, 237, 0.16);
+  padding-bottom: 12px;
+}
+
+.supervision-task-kpi-card-head div {
+  display: grid;
+  gap: 2px;
+}
+
+.supervision-task-kpi-card-head strong {
+  color: #102a43;
+  font-size: 1.02rem;
+}
+
+.supervision-task-kpi-card-head span {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.supervision-task-kpi-alert-count {
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #6d28d9 !important;
+  padding: 7px 11px;
+  white-space: nowrap;
+}
+
+.supervision-task-kpi-detail-period {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(124, 58, 237, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.supervision-task-kpi-detail-period header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .supervision-bucket-head,
 .supervision-group-head,
 .supervision-kpi-metric-head,
@@ -7391,6 +7584,10 @@ textarea {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.supervision-kpi-metric-head {
+  flex-wrap: wrap;
 }
 
 .supervision-bucket-head {
@@ -7493,18 +7690,33 @@ textarea {
 
 .supervision-kpi-metric {
   display: grid;
-  gap: 10px;
-  border-top: 1px solid rgba(31, 41, 51, 0.08);
-  padding-top: 12px;
-}
-
-.supervision-kpi-metric:first-child {
-  border-top: none;
-  padding-top: 0;
+  gap: 12px;
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  border-radius: 8px;
+  background: #fbfaff;
+  padding: 14px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
 }
 
 .supervision-kpi-metric.is-missed {
-  border-top-color: rgba(190, 18, 60, 0.18);
+  border-color: rgba(190, 18, 60, 0.22);
+  border-left: 4px solid #be123c;
+}
+
+.supervision-kpi-metric.is-warning {
+  border-color: rgba(180, 83, 9, 0.22);
+  border-left: 4px solid #b45309;
+}
+
+.supervision-kpi-metric-title {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  border-radius: 8px;
+  background: #ede9fe;
+  color: #102a43;
+  padding: 8px 11px;
+  line-height: 1.2;
 }
 
 .supervision-kpi-values {
@@ -7516,6 +7728,61 @@ textarea {
   background: #f8fafc;
   padding: 7px 9px;
   font-weight: 700;
+}
+
+.supervision-kpi-week-reference {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid rgba(124, 58, 237, 0.14);
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 800;
+  padding-top: 10px;
+}
+
+.supervision-kpi-week-reference strong {
+  color: #102a43;
+}
+
+.supervision-kpi-week-incident-group {
+  display: grid;
+  gap: 6px;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.82);
+  padding: 8px 10px;
+}
+
+.supervision-kpi-week-incident-group ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.supervision-kpi-week-incident-group li {
+  display: grid;
+  gap: 2px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.supervision-kpi-week-incident-group li.is-missed {
+  color: #9f1239;
+}
+
+.supervision-kpi-week-incident-group li.is-warning {
+  color: #9a3412;
+}
+
+.supervision-kpi-week-incident-group li small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.supervision-kpi-week-incident-group > span {
+  color: #94a3b8;
+  font-weight: 800;
 }
 
 .rusconi-intelligence-page {
@@ -8695,6 +8962,12 @@ textarea {
 
   .supervision-task-link-list {
     justify-content: flex-start;
+  }
+
+  .supervision-task-kpi-detail-period header,
+  .supervision-task-kpi-card-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .daily-doc-actions {

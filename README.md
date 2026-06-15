@@ -56,44 +56,135 @@ SIGE_2/
 npm install
 ```
 
-2. Copy env files:
+### Local development with local PostgreSQL
+
+1. Copy the local example files:
 
 ```bash
-copy .env.example .env
-copy apps\api\.env.example apps\api\.env
-copy apps\web\.env.example apps\web\.env
+copy .env.local.example .env.local
+copy apps\api\.env.local.example apps\api\.env.local
+copy apps\web\.env.local.example apps\web\.env.local
 ```
 
-3. Point `DATABASE_URL` to your managed PostgreSQL instance.
-   Recommended: AWS RDS or Aurora PostgreSQL, with secrets injected from Secrets Manager.
+2. Edit only the copied local files and set:
 
-4. Generate Prisma client:
+- `APP_ENV=local`
+- `DATABASE_URL` to your local PostgreSQL database only, using `localhost`, `127.0.0.1`, or `::1`
+- local JWT/SSO placeholders with non-production development values
+
+Do not paste an AWS RDS production URL into `.env`, `.env.local`, `apps/api/.env`, or `apps/api/.env.local`.
+
+3. Make sure the local PostgreSQL database named in `DATABASE_URL` exists, then generate Prisma:
 
 ```bash
-npm run db:generate --workspace @sige/api
+npm run db:local:generate
 ```
 
-5. Apply Prisma migrations, then seed baseline data:
+4. Apply migrations and seed baseline data against local PostgreSQL:
+
+```bash
+npm run db:local:migrate
+npm run db:local:seed
+```
+
+5. Start the backend:
+
+```bash
+npm run dev:local:api
+```
+
+6. Start the frontend in another terminal:
+
+```bash
+npm run dev:local:web
+```
+
+7. For local verification, sign in through `/intranet-login?organization=rusconi-consulting`.
+   Seeded local databases include superadmin users with the seed password shown in `apps/api/prisma/seed.ts`.
+
+The API refuses to start with `APP_ENV=local` or `APP_ENV=test` when `DATABASE_URL` points to a remote host. Local scripts also reject `SIGE_USE_RDS_TUNNEL=true`.
+
+### Refresh local data from production RDS
+
+The local app must keep using local PostgreSQL:
+
+```text
+DATABASE_URL=postgresql://...@127.0.0.1:15432/sige_2?schema=public
+```
+
+Production RDS is only a dump source. Do not change local `DATABASE_URL` to an RDS URL.
+
+Downloaded snapshots are written to `db_snapshots/`, which is ignored by Git because dumps can contain production data.
+
+1. Prepare an existing private S3 bucket for dump files. The bucket must already exist; the dump script will not create it. Required bucket settings:
+
+```text
+Full S3 Public Access Block enabled
+No public bucket policy
+No public ACL grants
+Uploads encrypted server-side
+```
+
+Use that bucket name in `SIGE_RDS_DUMP_BUCKET`. The AWS caller needs read-only bucket checks such as `s3:HeadBucket`, `s3:GetBucketPublicAccessBlock`, `s3:GetBucketPolicyStatus`, and `s3:GetBucketAcl`; it also needs `ssm:SendCommand`, `ssm:GetCommandInvocation`, and `secretsmanager:DescribeSecret`. The SSM bastion instance role needs `secretsmanager:GetSecretValue` for `sige-prod-readonly-dump`, plus `s3:PutObject` and `s3:GetObject` for the dump prefix. The bastion also needs AWS CLI, `pg_dump`, `python3`, and `sha256sum`.
+
+2. In a controlled shell, set only the AWS/S3 dump settings. Do not set `RDS_SOURCE_DATABASE_URL`; `db:rds:dump` refuses to run when that variable is present.
+
+```powershell
+$env:AWS_PROFILE="intellilaw-deploy"
+$env:AWS_REGION="us-east-1"
+$env:SIGE_RDS_DUMP_BUCKET="<existing-private-dump-bucket>"
+$env:SIGE_RDS_DUMP_PREFIX="prod-rds-readonly"
+```
+
+3. Create a production dump through the existing SSM bastion:
+
+```bash
+npm run db:rds:dump -- --preflight-only --bucket sige-prod-readonly-dumps-110661052936-us-east-1
+```
+
+The preflight checks AWS access, the SSM bastion connection, the read-only secret metadata, and the S3 bucket privacy/encryption/lifecycle settings without sending the remote dump command.
+
+```bash
+npm run db:rds:dump
+```
+
+This command sends a read-only `pg_dump` job to the bastion. The remote script uses only Secrets Manager secret `sige-prod-readonly-dump`, rejects `username=sige_admin`, rejects any username other than `sige_readonly_dump`, and aborts unless the secret has `dbname=sige`. It does not read `DATABASE_URL`, does not read app secrets, does not open RDS to the Internet, and does not modify security groups.
+
+The temporary dump exists only under `/tmp` on the bastion, with `umask 077`, and is deleted at the end. The dump and checksum are uploaded to S3 with server-side encryption, then the script verifies that the uploaded objects are encrypted.
+
+4. Download the dump from S3 into the ignored local snapshots folder:
+
+```powershell
+New-Item -ItemType Directory -Force db_snapshots
+aws s3 cp "s3://<existing-private-dump-bucket>/prod-rds-readonly/<dump-file>.dump" ".\db_snapshots\latest-prod.dump" --profile intellilaw-deploy --region us-east-1
+aws s3 cp "s3://<existing-private-dump-bucket>/prod-rds-readonly/<dump-file>.dump.sha256" ".\db_snapshots\latest-prod.dump.sha256" --profile intellilaw-deploy --region us-east-1
+```
+
+5. Optional: create a manual backup of the current local database:
+
+```bash
+npm run db:local:backup
+```
+
+6. Restore a dump into local PostgreSQL only:
+
+```bash
+npm run db:local:restore -- --input db_snapshots/latest-prod.dump
+```
+
+The restore script refuses to run unless `APP_ENV=local` and `DATABASE_URL` points exactly to `127.0.0.1:15432/sige_2`. Before restoring, it creates a local backup in `db_snapshots/` and asks you to type `RESTORE sige_2`.
+
+These refresh scripts do not run Prisma migrations, do not seed, do not modify RDS, and do not make the local app connect to RDS.
+
+### Production
+
+Production must run with `APP_ENV=production` and an AWS RDS PostgreSQL `DATABASE_URL` injected through AWS Secrets Manager or the deployment environment. Do not commit production credentials to any env file.
+
+Run production database commands only from a controlled deployment shell with `APP_ENV=production` and the intended RDS secret loaded:
 
 ```bash
 npm run db:migrate:deploy --workspace @sige/api
-npm run db:seed --workspace @sige/api
 ```
-
-6. Start the backend:
-
-```bash
-npm run dev:api
-```
-
-7. Start the frontend in another terminal:
-
-```bash
-npm run dev:web
-```
-
-8. For local verification, sign in through `/intranet-login?organization=rusconi-consulting`.
-   Seeded development databases include superadmin users with the seed password shown in `apps/api/prisma/seed.ts`.
 
 ## Rusconi Intelligence
 
@@ -115,8 +206,6 @@ curl http://localhost:4000/api/v1/health/rusconi-intelligence
 ```
 
 Protected app routes such as `/app/execution/litigio` are expected to redirect to the access page when there is no active session. In production this must remain protected; in local, log in with a seeded or migrated user before testing RI columns.
-
-For local API startup, `npm run dev:api` respects `SIGE_USE_RDS_TUNNEL`. If the RDS tunnel is requested but AWS SSM is unavailable, the dev script falls back to `SIGE_LOCAL_DATABASE_URL` unless `SIGE_RDS_TUNNEL_REQUIRED=true`.
 
 ## Security baseline
 

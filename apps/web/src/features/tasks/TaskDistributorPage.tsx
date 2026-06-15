@@ -63,9 +63,12 @@ type HolidayGuideItem = {
   authorities: string[];
 };
 
-type FlashMessage = {
+type PromotionPopup = {
   tone: "success" | "error";
+  title: string;
   text: string;
+  actionLabel?: string;
+  actionPath?: string;
 };
 
 type PromotionCommandResult = {
@@ -75,12 +78,18 @@ type PromotionCommandResult = {
   groupName?: string | null;
 };
 
+const PROMOTION_COMMAND_REQUIRED_TEXT_NORMALIZED = "selecciona un comando de promocion en ejecucion antes de generar el escrito";
+
 function normalize(value?: string | null) {
   return (value ?? "").trim();
 }
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
+}
+
+function isPromotionCommandRequiredMessage(message: string) {
+  return normalizeComparableText(message).includes(PROMOTION_COMMAND_REQUIRED_TEXT_NORMALIZED);
 }
 
 function normalizeResponsibleOption(value?: string | null) {
@@ -395,7 +404,7 @@ export function TaskDistributorPage() {
   const [holidayGuideError, setHolidayGuideError] = useState<string | null>(null);
   const [responsibleOptions, setResponsibleOptions] = useState<string[]>([]);
   const [dateEditedHistorySortKeys, setDateEditedHistorySortKeys] = useState<Record<string, string>>({});
-  const [promotionFlash, setPromotionFlash] = useState<FlashMessage | null>(null);
+  const [promotionPopup, setPromotionPopup] = useState<PromotionPopup | null>(null);
   const [sendingPromotionRecordIds, setSendingPromotionRecordIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
 
@@ -1081,38 +1090,50 @@ export function TaskDistributorPage() {
 
     const matterId = normalize(record.matterId);
     const normalizedTaskName = normalize(taskName || record.taskName || record.eventName);
+    const executionActionPath = executionModule && matterId
+      ? `/app/execution/${executionModule.slug}?matterId=${encodeURIComponent(matterId)}&focus=promotionCommand`
+      : undefined;
 
     if (!matterId) {
-      setPromotionFlash({
+      setPromotionPopup({
         tone: "error",
+        title: "No se puede generar el escrito",
         text: "No se encontro el asunto vinculado a esta tarea."
       });
       return;
     }
 
     if (!normalizedTaskName) {
-      setPromotionFlash({
+      setPromotionPopup({
         tone: "error",
+        title: "No se puede generar el escrito",
         text: "La tarea necesita nombre para generar el escrito."
       });
       return;
     }
 
-    setPromotionFlash(null);
+    setPromotionPopup(null);
     setSendingPromotionRecordIds((current) => new Set(current).add(record.id));
 
     try {
       await apiPost<PromotionCommandResult>(`/matters/${encodeURIComponent(matterId)}/send-promotion-command`, {
         taskName: normalizedTaskName
       });
-      setPromotionFlash({
+      setPromotionPopup({
         tone: "success",
+        title: "Promoción enviada",
         text: "Promoción enviada a Telegram"
       });
     } catch (error) {
-      setPromotionFlash({
+      const message = toErrorMessage(error);
+      const needsPromotionCommand = isPromotionCommandRequiredMessage(message);
+
+      setPromotionPopup({
         tone: "error",
-        text: toErrorMessage(error)
+        title: needsPromotionCommand ? "Falta seleccionar comando" : "No se pudo generar el escrito",
+        text: message,
+        actionLabel: needsPromotionCommand && executionActionPath ? "Ir a Ejecución" : undefined,
+        actionPath: needsPromotionCommand ? executionActionPath : undefined
       });
     } finally {
       setSendingPromotionRecordIds((current) => {
@@ -1255,12 +1276,6 @@ export function TaskDistributorPage() {
                 </div>
               </div>
             </div>
-
-            {promotionFlash ? (
-              <div className={`message-banner ${promotionFlash.tone === "success" ? "message-success" : "message-error"}`}>
-                {promotionFlash.text}
-              </div>
-            ) : null}
 
             <div className="table-scroll tasks-legacy-table-wrap">
               <table className="data-table tasks-legacy-table tasks-distributor-active-table">
@@ -1685,6 +1700,57 @@ export function TaskDistributorPage() {
           </div>
         )}
       </section>
+
+      {promotionPopup ? (
+        <div
+          className="tasks-promotion-popup-backdrop"
+          role="presentation"
+          onClick={() => setPromotionPopup(null)}
+        >
+          <div
+            className={`tasks-promotion-popup ${promotionPopup.tone === "success" ? "is-success" : "is-error"}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tasks-promotion-popup-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="tasks-promotion-popup-head">
+              <span className="tasks-promotion-popup-kicker">
+                {promotionPopup.tone === "success" ? "Listo" : "Atención"}
+              </span>
+              <button
+                type="button"
+                className="secondary-button tasks-distributor-small-button"
+                onClick={() => setPromotionPopup(null)}
+              >
+                Cerrar
+              </button>
+            </div>
+            <h3 id="tasks-promotion-popup-title">{promotionPopup.title}</h3>
+            <p>{promotionPopup.text}</p>
+            <div className="tasks-promotion-popup-actions">
+              {promotionPopup.actionPath ? (
+                <button
+                  type="button"
+                  className="primary-action-button"
+                  onClick={() => {
+                    const actionPath = promotionPopup.actionPath;
+                    setPromotionPopup(null);
+                    if (actionPath) {
+                      navigate(actionPath);
+                    }
+                  }}
+                >
+                  {promotionPopup.actionLabel ?? "Ir a Ejecución"}
+                </button>
+              ) : null}
+              <button type="button" className="secondary-button" onClick={() => setPromotionPopup(null)}>
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

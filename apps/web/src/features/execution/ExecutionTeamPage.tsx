@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
   MATTER_PROMOTION_COMMANDS,
@@ -673,6 +673,9 @@ export function ExecutionTeamWorkspace({
 }: ExecutionTeamWorkspaceProps) {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const focusMatterId = normalizeText(searchParams.get("matterId"));
+  const focusTarget = normalizeText(searchParams.get("focus"));
 
   const [taskModules, setTaskModules] = useState<TaskModuleDefinition[]>([]);
   const [loadingModules, setLoadingModules] = useState(true);
@@ -887,6 +890,27 @@ export function ExecutionTeamWorkspace({
       }),
     [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]
   );
+
+  useEffect(() => {
+    if (loading || !focusMatterId) {
+      return;
+    }
+
+    const row = document.getElementById(`execution-matter-row-${focusMatterId}`);
+    if (!row) {
+      return;
+    }
+
+    row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+
+    const target = focusTarget === "promotionCommand"
+      ? row.querySelector<HTMLSelectElement>("[data-execution-focus='promotionCommand']")
+      : null;
+
+    window.setTimeout(() => {
+      target?.focus({ preventScroll: true });
+    }, 350);
+  }, [filteredMatters, focusMatterId, focusTarget, loading]);
 
   useEffect(() => {
     if (loading || !module || !legacyConfig || generatingRiMatterIds.size > 0) {
@@ -1345,11 +1369,16 @@ export function ExecutionTeamWorkspace({
                       const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                       const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
                       const isGeneratingCaducidadRi = generatingCaducidadRiMatterIds.has(matter.id);
-                      const rowClassName = validation.missing.length > 0 || validation.isOverdue
-                        ? "execution-row-danger"
-                        : validation.isNextBusinessDay
-                          ? "execution-row-next-business"
-                          : "";
+                      const isFocusedMatter = matter.id === focusMatterId;
+                      const isPromotionCommandFocus = isFocusedMatter && focusTarget === "promotionCommand";
+                      const rowClassName = [
+                        validation.missing.length > 0 || validation.isOverdue
+                          ? "execution-row-danger"
+                          : validation.isNextBusinessDay
+                            ? "execution-row-next-business"
+                            : "",
+                        isFocusedMatter ? "execution-row-focused" : ""
+                      ].filter(Boolean).join(" ");
                       const rowTitle = [
                         validation.missing.length > 0 ? `Falta: ${validation.missing.join(", ")}` : "",
                         validation.isOverdue ? "Tiene tareas vencidas o con vencimiento de hoy." : ""
@@ -1358,7 +1387,7 @@ export function ExecutionTeamWorkspace({
                         .join(" ");
 
                       return (
-                        <tr key={matter.id} className={rowClassName} title={rowTitle}>
+                        <tr id={`execution-matter-row-${matter.id}`} key={matter.id} className={rowClassName} title={rowTitle}>
                           <td>
                             <input className="lead-cell-input matter-cell-derived" value={clientNumber || "-"} readOnly />
                           </td>
@@ -1536,7 +1565,8 @@ export function ExecutionTeamWorkspace({
                           </td>
                           <td>
                             <select
-                              className="lead-cell-input execution-promotion-select"
+                              data-execution-focus="promotionCommand"
+                              className={`lead-cell-input execution-promotion-select${isPromotionCommandFocus ? " is-focused-from-manager" : ""}`}
                               value={getMatterPromotionCommand(matter.promotionCommand)}
                               onChange={(event) => void handlePromotionCommandChange(matter.id, event.target.value)}
                             >

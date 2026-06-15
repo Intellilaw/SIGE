@@ -10,7 +10,7 @@ export const REFRESH_TOKEN_COOKIE_NAME = "sige_refresh";
 type AppConfig = typeof env;
 
 function getCookieOptions(config: AppConfig, maxAge: number) {
-  const secure = config.APP_ENV === "production" || config.APP_ENV === "staging" || config.AUTH_COOKIE_SAME_SITE === "none";
+  const secure = config.APP_ENV === "production" || config.AUTH_COOKIE_SAME_SITE === "none";
 
   return {
     httpOnly: true,

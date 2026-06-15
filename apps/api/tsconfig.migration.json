@@ -11,6 +11,7 @@
     "scripts/migration/**/*.ts",
     "scripts/users/**/*.ts",
     "scripts/deploy/**/*.ts",
+    "scripts/db-refresh/**/*.ts",
     "scripts/dev/**/*.ts"
   ]
 }

@@ -84,6 +84,7 @@ export const generalSupervisionRoutes: FastifyPluginAsync = async (app) => {
     matters: app.repositories.matters,
     users: app.repositories.users,
     kpis: app.repositories.kpis,
+    holidays: app.repositories.holidays,
     supervisionPreferences: app.repositories.generalSupervisionPreferences
   });
 

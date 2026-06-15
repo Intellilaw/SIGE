@@ -2,13 +2,28 @@ import "dotenv/config";
 
 import { z } from "zod";
 
+import { assertDatabaseUrlAllowedForAppEnv } from "./database-url-guard";
+
 const optionalNonEmptyString = z.preprocess(
   (value) => (value === "" ? undefined : value),
   z.string().min(1).optional()
 );
 
+const appEnvSchema = z.preprocess((value) => {
+  if (value === undefined || value === null || value === "") {
+    return "local";
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "development" ? "local" : normalized;
+  }
+
+  return value;
+}, z.enum(["local", "test", "production"]));
+
 const envSchema = z.object({
-  APP_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
+  APP_ENV: appEnvSchema,
   API_PORT: z.coerce.number().default(4000),
   WEB_ORIGIN: z.string().url(),
   WEB_ORIGINS: z.string().optional(),
@@ -43,3 +58,5 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
+
+assertDatabaseUrlAllowedForAppEnv(env.DATABASE_URL, env.APP_ENV);

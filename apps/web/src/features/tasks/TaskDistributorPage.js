@@ -7,11 +7,15 @@ import { EXECUTION_MODULE_BY_SLUG } from "../execution/execution-config";
 import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, getTermEnabledRecordData, hasValidTrackingResponsible, isTrackingTermEnabled, resolveTrackingTaskName, usesOptionalTermToggle, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { encodeCatalogTarget, findLegacyTableByAnyName, getCatalogTargetEntries, getTableDisplayName, makeCatalogTargetEntry } from "./task-distribution-utils";
+const PROMOTION_COMMAND_REQUIRED_TEXT_NORMALIZED = "selecciona un comando de promocion en ejecucion antes de generar el escrito";
 function normalize(value) {
     return (value ?? "").trim();
 }
 function toErrorMessage(error) {
     return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
+}
+function isPromotionCommandRequiredMessage(message) {
+    return normalizeComparableText(message).includes(PROMOTION_COMMAND_REQUIRED_TEXT_NORMALIZED);
 }
 function normalizeResponsibleOption(value) {
     return normalize(value).toUpperCase();
@@ -257,7 +261,7 @@ export function TaskDistributorPage() {
     const [holidayGuideError, setHolidayGuideError] = useState(null);
     const [responsibleOptions, setResponsibleOptions] = useState([]);
     const [dateEditedHistorySortKeys, setDateEditedHistorySortKeys] = useState({});
-    const [promotionFlash, setPromotionFlash] = useState(null);
+    const [promotionPopup, setPromotionPopup] = useState(null);
     const [sendingPromotionRecordIds, setSendingPromotionRecordIds] = useState(() => new Set());
     const [loading, setLoading] = useState(true);
     async function loadDistributor() {
@@ -758,35 +762,46 @@ export function TaskDistributorPage() {
         }
         const matterId = normalize(record.matterId);
         const normalizedTaskName = normalize(taskName || record.taskName || record.eventName);
+        const executionActionPath = executionModule && matterId
+            ? `/app/execution/${executionModule.slug}?matterId=${encodeURIComponent(matterId)}&focus=promotionCommand`
+            : undefined;
         if (!matterId) {
-            setPromotionFlash({
+            setPromotionPopup({
                 tone: "error",
+                title: "No se puede generar el escrito",
                 text: "No se encontro el asunto vinculado a esta tarea."
             });
             return;
         }
         if (!normalizedTaskName) {
-            setPromotionFlash({
+            setPromotionPopup({
                 tone: "error",
+                title: "No se puede generar el escrito",
                 text: "La tarea necesita nombre para generar el escrito."
             });
             return;
         }
-        setPromotionFlash(null);
+        setPromotionPopup(null);
         setSendingPromotionRecordIds((current) => new Set(current).add(record.id));
         try {
             await apiPost(`/matters/${encodeURIComponent(matterId)}/send-promotion-command`, {
                 taskName: normalizedTaskName
             });
-            setPromotionFlash({
+            setPromotionPopup({
                 tone: "success",
+                title: "Promoción enviada",
                 text: "Promoción enviada a Telegram"
             });
         }
         catch (error) {
-            setPromotionFlash({
+            const message = toErrorMessage(error);
+            const needsPromotionCommand = isPromotionCommandRequiredMessage(message);
+            setPromotionPopup({
                 tone: "error",
-                text: toErrorMessage(error)
+                title: needsPromotionCommand ? "Falta seleccionar comando" : "No se pudo generar el escrito",
+                text: message,
+                actionLabel: needsPromotionCommand && executionActionPath ? "Ir a Ejecución" : undefined,
+                actionPath: needsPromotionCommand ? executionActionPath : undefined
             });
         }
         finally {
@@ -832,7 +847,7 @@ export function TaskDistributorPage() {
     if (!moduleConfig) {
         return _jsx(Navigate, { to: "/app/tasks", replace: true });
     }
-    return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsx("div", { className: "execution-page-topline", children: _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }) }), _jsxs("h2", { children: ["Manager de tareas (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "La pesta\u00F1a de tareas activas es la fuente operativa: sus registros alimentan las tablas de seguimiento y el modulo de ejecucion. La configuracion define el catalogo usado por el Selector de Tareas." })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "tasks-legacy-tabs tasks-distributor-tabs", children: [_jsx("button", { type: "button", className: activeTab === "active" ? "is-active" : "", onClick: () => setActiveTab("active"), children: "Tareas activas" }), _jsx("button", { type: "button", className: activeTab === "config" ? "is-active" : "", onClick: () => setActiveTab("config"), children: "Configuraci\u00F3n" })] }), activeTab === "active" ? (_jsxs("div", { className: "tasks-distributor-active", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsxs("h2", { children: ["Tareas activas (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "Registro de tareas distribuidas. Editar aqui actualiza la informacion que se ve en seguimiento y ejecucion." })] }), _jsxs("span", { children: [activeHistory.length, " activas"] })] }), _jsx("div", { className: "tasks-distributor-search-panel", children: _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, tabla..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsxs("div", { className: "matters-toolbar-actions tasks-distributor-search-actions", children: [_jsx("span", { className: "muted", children: "Filtra las tareas activas por cliente o por cualquier dato del asunto, tarea, tabla o vencimiento." }), executionModule ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/execution/${executionModule.slug}`), children: "Ir a Ejecuci\u00F3n" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => document.getElementById("tasks-recycle-bin")?.scrollIntoView({ behavior: "smooth", block: "start" }), children: "Ir a papelera" })] })] }) }), promotionFlash ? (_jsx("div", { className: `message-banner ${promotionFlash.tone === "success" ? "message-success" : "message-error"}`, children: promotionFlash.text })) : null, _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: "data-table tasks-legacy-table tasks-distributor-active-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Tablas / tareas" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 6, className: "centered-inline-message", children: "Cargando tareas activas..." }) })) : activeHistory.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 6, className: "centered-inline-message", children: "No hay tareas activas en este equipo." }) })) : (activeHistory.map((item) => {
+    return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsx("div", { className: "execution-page-topline", children: _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }) }), _jsxs("h2", { children: ["Manager de tareas (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "La pesta\u00F1a de tareas activas es la fuente operativa: sus registros alimentan las tablas de seguimiento y el modulo de ejecucion. La configuracion define el catalogo usado por el Selector de Tareas." })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "tasks-legacy-tabs tasks-distributor-tabs", children: [_jsx("button", { type: "button", className: activeTab === "active" ? "is-active" : "", onClick: () => setActiveTab("active"), children: "Tareas activas" }), _jsx("button", { type: "button", className: activeTab === "config" ? "is-active" : "", onClick: () => setActiveTab("config"), children: "Configuraci\u00F3n" })] }), activeTab === "active" ? (_jsxs("div", { className: "tasks-distributor-active", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("div", { children: [_jsxs("h2", { children: ["Tareas activas (", moduleConfig.label, ")"] }), _jsx("p", { className: "muted", children: "Registro de tareas distribuidas. Editar aqui actualiza la informacion que se ve en seguimiento y ejecucion." })] }), _jsxs("span", { children: [activeHistory.length, " activas"] })] }), _jsx("div", { className: "tasks-distributor-search-panel", children: _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, tabla..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsxs("div", { className: "matters-toolbar-actions tasks-distributor-search-actions", children: [_jsx("span", { className: "muted", children: "Filtra las tareas activas por cliente o por cualquier dato del asunto, tarea, tabla o vencimiento." }), executionModule ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/execution/${executionModule.slug}`), children: "Ir a Ejecuci\u00F3n" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => document.getElementById("tasks-recycle-bin")?.scrollIntoView({ behavior: "smooth", block: "start" }), children: "Ir a papelera" })] })] }) }), _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: "data-table tasks-legacy-table tasks-distributor-active-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Tablas / tareas" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 6, className: "centered-inline-message", children: "Cargando tareas activas..." }) })) : activeHistory.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 6, className: "centered-inline-message", children: "No hay tareas activas en este equipo." }) })) : (activeHistory.map((item) => {
                                                 const usedIds = new Set();
                                                 return (_jsxs("tr", { children: [_jsx("td", { children: item.clientNumber || "-" }), _jsx("td", { children: item.clientName || "-" }), _jsx("td", { children: item.subject || "-" }), _jsx("td", { children: _jsx("span", { className: "tasks-legacy-process-pill", children: item.specificProcess || "N/A" }) }), _jsx("td", { children: item.matterIdentifier || item.matterNumber || "-" }), _jsx("td", { children: _jsxs("div", { className: "tasks-active-target-list", children: [_jsxs("div", { className: "tasks-active-target-toolbar", children: [_jsxs("span", { children: ["Fecha m\u00E1s pr\u00F3xima: ", getEarliestOpenDate(item) || "sin fecha"] }), _jsx("button", { type: "button", className: "danger-button tasks-distributor-small-button", onClick: () => void handleDeleteDistribution(item), children: "Borrar tarea completamente" })] }), item.targetTables.map((targetTable, index) => {
                                                                         const record = resolveHistoryRecord(item, targetTable, index, usedIds);
@@ -868,5 +883,11 @@ export function TaskDistributorPage() {
                                                 }) }), _jsxs("div", { className: "tasks-legacy-actions", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => void saveCatalogEvent(), disabled: !catalogName.trim() || catalogEntries.length === 0, children: editingCatalogId ? "Guardar cambios" : "Guardar tarea" }), editingCatalogId ? (_jsx("button", { type: "button", className: "secondary-button", onClick: resetCatalogForm, children: "Cancelar" })) : null] })] }), _jsxs("article", { className: "tasks-distributor-card", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h3", { children: "Cat\u00E1logo guardado" }), _jsx("span", { children: events.length })] }), _jsx("div", { className: "tasks-distributor-event-list", children: events.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "Aun no hay tareas configuradas." })) : (events.map((event) => {
                                                     const entries = getCatalogTargetEntries(event, moduleConfig);
                                                     return (_jsxs("div", { className: "tasks-distributor-event-row tasks-distributor-catalog-row", children: [_jsxs("div", { children: [_jsx("strong", { children: event.name }), _jsxs("span", { children: [entries.length, " destino", entries.length === 1 ? "" : "s"] }), _jsx("div", { className: "tasks-legacy-chip-list", children: entries.map((entry) => (_jsxs("span", { children: [getTableDisplayName(moduleConfig, entry.tableSlug), ": ", entry.taskName] }, entry.id))) })] }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => startCatalogEdit(event), children: "Configurar" }), _jsx("button", { type: "button", className: "danger-button", onClick: () => void deleteCatalogEvent(event), children: "Eliminar" })] }, event.id));
-                                                })) })] })] })] }))] })] }));
+                                                })) })] })] })] }))] }), promotionPopup ? (_jsx("div", { className: "tasks-promotion-popup-backdrop", role: "presentation", onClick: () => setPromotionPopup(null), children: _jsxs("div", { className: `tasks-promotion-popup ${promotionPopup.tone === "success" ? "is-success" : "is-error"}`, role: "dialog", "aria-modal": "true", "aria-labelledby": "tasks-promotion-popup-title", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "tasks-promotion-popup-head", children: [_jsx("span", { className: "tasks-promotion-popup-kicker", children: promotionPopup.tone === "success" ? "Listo" : "Atención" }), _jsx("button", { type: "button", className: "secondary-button tasks-distributor-small-button", onClick: () => setPromotionPopup(null), children: "Cerrar" })] }), _jsx("h3", { id: "tasks-promotion-popup-title", children: promotionPopup.title }), _jsx("p", { children: promotionPopup.text }), _jsxs("div", { className: "tasks-promotion-popup-actions", children: [promotionPopup.actionPath ? (_jsx("button", { type: "button", className: "primary-action-button", onClick: () => {
+                                        const actionPath = promotionPopup.actionPath;
+                                        setPromotionPopup(null);
+                                        if (actionPath) {
+                                            navigate(actionPath);
+                                        }
+                                    }, children: promotionPopup.actionLabel ?? "Ir a Ejecución" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => setPromotionPopup(null), children: "Entendido" })] })] }) })) : null] }));
 }

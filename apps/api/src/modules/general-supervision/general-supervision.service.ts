@@ -13,6 +13,7 @@ import {
 import type {
   GeneralSupervisionObservationActor,
   GeneralSupervisionPreferencesRepository,
+  HolidaysRepository,
   KpiAccessScope,
   KpisRepository,
   MattersRepository,
@@ -202,6 +203,58 @@ function addDaysKey(value: string, offset: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function getMonthPeriodsInRange(startDate: string, endDate: string) {
+  const periods: Array<{ year: number; month: number }> = [];
+  let year = Number(startDate.slice(0, 4));
+  let month = Number(startDate.slice(5, 7));
+  const endYear = Number(endDate.slice(0, 4));
+  const endMonth = Number(endDate.slice(5, 7));
+
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    periods.push({ year, month });
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+
+  return periods;
+}
+
+function isBusinessDateKey(dateKey: string, holidayKeys: Set<string>) {
+  const day = dateFromKey(dateKey).getUTCDay();
+  return day !== 0 && day !== 6 && !holidayKeys.has(dateKey);
+}
+
+function getFirstBusinessDateKey(startDate: string, endDate: string, holidayKeys: Set<string>) {
+  let cursor = startDate;
+
+  while (cursor <= endDate) {
+    if (isBusinessDateKey(cursor, holidayKeys)) {
+      return cursor;
+    }
+
+    cursor = addDaysKey(cursor, 1);
+  }
+
+  return startDate;
+}
+
+function getLastBusinessDateKey(startDate: string, endDate: string, holidayKeys: Set<string>) {
+  let cursor = endDate;
+
+  while (cursor >= startDate) {
+    if (isBusinessDateKey(cursor, holidayKeys)) {
+      return cursor;
+    }
+
+    cursor = addDaysKey(cursor, -1);
+  }
+
+  return endDate;
+}
+
 function getCurrentDateKey() {
   return toDateKey(new Date());
 }
@@ -211,6 +264,19 @@ function getWeekStartKey(dateKey: string) {
   const day = date.getUTCDay();
   const offset = day === 0 ? -6 : 1 - day;
   return addDaysKey(dateKey, offset);
+}
+
+function isWeekendDateKey(dateKey: string) {
+  const day = dateFromKey(dateKey).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function getBusinessWeekRange(dateKey: string) {
+  const startDate = getWeekStartKey(dateKey);
+  return {
+    startDate,
+    endDate: addDaysKey(startDate, 4)
+  };
 }
 
 function getMonthStartKey(dateKey: string) {
@@ -495,14 +561,32 @@ function buildDashboardRanges(todayKey: string): DateRange[] {
 }
 
 function buildKpiRanges(todayKey: string): KpiDateRange[] {
-  const currentWeekStart = getWeekStartKey(todayKey);
-  const currentWeekEnd = addDaysKey(currentWeekStart, 6);
-  const lastWeekStart = addDaysKey(currentWeekStart, -7);
-  const lastWeekEnd = addDaysKey(currentWeekStart, -1);
+  const currentWeek = getBusinessWeekRange(todayKey);
+
+  if (isWeekendDateKey(todayKey)) {
+    const nextWeek = getBusinessWeekRange(addDaysKey(currentWeek.startDate, 7));
+
+    return [
+      {
+        key: "lastWeek",
+        label: "Semana pasada",
+        startDate: currentWeek.startDate,
+        endDate: currentWeek.endDate
+      },
+      {
+        key: "currentWeek",
+        label: "Semana actual",
+        startDate: nextWeek.startDate,
+        endDate: nextWeek.endDate
+      }
+    ];
+  }
+
+  const lastWeek = getBusinessWeekRange(addDaysKey(currentWeek.startDate, -7));
 
   return [
-    { key: "lastWeek", label: "Semana pasada", startDate: lastWeekStart, endDate: lastWeekEnd },
-    { key: "currentWeek", label: "Esta semana", startDate: currentWeekStart, endDate: currentWeekEnd }
+    { key: "lastWeek", label: "Semana pasada", startDate: lastWeek.startDate, endDate: lastWeek.endDate },
+    { key: "currentWeek", label: "Semana actual", startDate: currentWeek.startDate, endDate: currentWeek.endDate }
   ];
 }
 
@@ -1008,6 +1092,7 @@ export class GeneralSupervisionService {
       matters: MattersRepository;
       users: UsersRepository;
       kpis: KpisRepository;
+      holidays: HolidaysRepository;
       supervisionPreferences: GeneralSupervisionPreferencesRepository;
     }
   ) {}
@@ -1020,17 +1105,37 @@ export class GeneralSupervisionService {
     const todayKey = getCurrentDateKey();
     const dashboardRanges = buildDashboardRanges(todayKey);
     const kpiRanges = buildKpiRanges(todayKey);
-    const currentWeekStart = getWeekStartKey(todayKey);
-    const currentWeekEnd = addDaysKey(currentWeekStart, 6);
+    const displayWeekReference = isWeekendDateKey(todayKey)
+      ? getBusinessWeekRange(addDaysKey(getWeekStartKey(todayKey), 7))
+      : getBusinessWeekRange(todayKey);
+    const currentWeekStart = displayWeekReference.startDate;
+    const currentWeekEnd = displayWeekReference.endDate;
     const currentMonthStart = getMonthStartKey(todayKey);
     const currentMonthEnd = getMonthEndKey(todayKey);
+    const currentWeekHolidayPeriods = getMonthPeriodsInRange(currentWeekStart, currentWeekEnd);
 
-    const [storedModules, trackingRecords, users, observedUserSettings] = await Promise.all([
+    const [storedModules, trackingRecords, users, observedUserSettings, currentWeekHolidaysByPeriod] = await Promise.all([
       this.repositories.tasks.listModules(),
       this.repositories.tasks.listTrackingRecords({ includeDeleted: false }),
       this.repositories.users.list(),
-      this.repositories.supervisionPreferences.listObservedUsers()
+      this.repositories.supervisionPreferences.listObservedUsers(),
+      Promise.all(
+        currentWeekHolidayPeriods.map((period) =>
+          this.repositories.holidays.list(period.year, period.month)
+        )
+      )
     ]);
+    const currentWeekHolidayKeys = new Set(currentWeekHolidaysByPeriod.flat().map((holiday) => holiday.date));
+    const currentWeekDisplayStart = getFirstBusinessDateKey(
+      currentWeekStart,
+      currentWeekEnd,
+      currentWeekHolidayKeys
+    );
+    const currentWeekDisplayEnd = getLastBusinessDateKey(
+      currentWeekStart,
+      currentWeekEnd,
+      currentWeekHolidayKeys
+    );
 
     const moduleDefinitions = getTaskModuleDefinitions(storedModules);
     const moduleIds = Array.from(moduleDefinitions.keys());
@@ -1103,6 +1208,8 @@ export class GeneralSupervisionService {
       generatedAt: new Date().toISOString(),
       today: todayKey,
       currentWeekStart,
+      currentWeekDisplayStart,
+      currentWeekDisplayEnd,
       currentWeekEnd,
       currentMonthStart,
       currentMonthEnd,

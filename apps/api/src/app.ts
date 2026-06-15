@@ -156,7 +156,7 @@ declare module "fastify" {
 }
 
 export async function buildApp() {
-  const usePrettyLogger = env.APP_ENV === "development" && process.env.SIGE_DISABLE_PRETTY_LOGS !== "true";
+  const usePrettyLogger = env.APP_ENV === "local" && process.env.SIGE_DISABLE_PRETTY_LOGS !== "true";
   const configuredWebOrigins = env.WEB_ORIGINS
     ? env.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [env.WEB_ORIGIN];
@@ -166,7 +166,7 @@ export async function buildApp() {
     await assertTenantScopedDatabaseSchema(prisma);
   }
 
-  if (env.APP_ENV === "development") {
+  if (env.APP_ENV === "local") {
     for (const origin of configuredWebOrigins) {
       try {
         const parsedOrigin = new URL(origin);
@@ -198,7 +198,7 @@ export async function buildApp() {
     runWithEmptyTenantContext(done);
   });
 
-  // Local development uses AWS RDS as the source of truth; local JSON/Postgres fallbacks stay disabled.
+  // Runtime persistence always goes through Prisma/PostgreSQL; APP_ENV decides which database host is allowed.
   const authRepository = new ResilientAuthRepository(
     new PrismaAuthRepository(prisma),
     null,

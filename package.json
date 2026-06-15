@@ -10,9 +10,18 @@
     "build": "npm run build --workspace @sige/contracts && npm run build --workspace @sige/api && npm run build --workspace @sige/web",
     "lint": "npm run lint --workspace @sige/contracts && npm run lint --workspace @sige/api && npm run lint --workspace @sige/web",
     "dev:api": "npm run dev --workspace @sige/api",
+    "dev:local:api": "npm run dev:local --workspace @sige/api",
+    "dev:local:web": "npm run dev --workspace @sige/web",
     "dev:mobile": "npm run dev --workspace @sige/mobile",
     "dev:mobile:client": "npm run dev:client --workspace @sige/mobile",
-    "dev:web": "npm run dev --workspace @sige/web"
+    "dev:web": "npm run dev --workspace @sige/web",
+    "db:rds:dump": "npm run db:rds:dump --workspace @sige/api",
+    "db:local:backup": "npm run db:local:backup --workspace @sige/api",
+    "db:local:generate": "npm run db:generate:local --workspace @sige/api",
+    "db:local:migrate": "npm run db:migrate:local --workspace @sige/api",
+    "db:local:migrate:status": "npm run db:migrate:status:local --workspace @sige/api",
+    "db:local:restore": "npm run db:local:restore --workspace @sige/api",
+    "db:local:seed": "npm run db:seed:local --workspace @sige/api"
   },
   "dependencies": {
     "react": "19.1.0",
