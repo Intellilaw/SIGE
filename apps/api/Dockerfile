@@ -38,6 +38,8 @@ COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
+COPY --from=build /app/apps/api/scripts/dev ./apps/api/scripts/dev
+COPY --from=build /app/apps/api/src/config/database-url-guard.ts ./apps/api/src/config/database-url-guard.ts
 COPY --from=build /app/apps/api/runtime-assets ./apps/api/runtime-assets
 COPY --from=build /app/apps/api/templates ./apps/api/templates
 
