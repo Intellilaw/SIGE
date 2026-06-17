@@ -618,6 +618,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         recurring: false,
         approvedByEmrt: false,
         paidByEmrtAt: null,
+        emrtReimbursementPending: false,
         reviewedByJnls: false,
         paid: false,
         paidAt: null
@@ -695,6 +696,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         recurring: true,
         approvedByEmrt: false,
         paidByEmrtAt: null,
+        emrtReimbursementPending: false,
         reviewedByJnls: false,
         paid: false,
         paidAt: null
@@ -995,6 +997,24 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         throw new AppError(403, "GENERAL_EXPENSE_EMRT_DATE_FORBIDDEN", "Only Eduardo Rusconi can edit the EMRT paid date for cash expenses.");
       }
     }
+
+    if (hasOwn(payload, "emrtReimbursementPending")) {
+      const nextPaymentMethod = hasOwn(payload, "paymentMethod")
+        ? normalizePaymentMethod(payload.paymentMethod)
+        : (current.paymentMethod as GeneralExpense["paymentMethod"]);
+
+      if (!isSuperadmin(actor) || !isEduardoRusconi(actor)) {
+        throw new AppError(403, "GENERAL_EXPENSE_EMRT_REIMBURSEMENT_FORBIDDEN", "Only Eduardo Rusconi can update the EMRT reimbursement flag.");
+      }
+
+      if (Boolean(payload.emrtReimbursementPending) && nextPaymentMethod !== "Transferencia") {
+        throw new AppError(
+          400,
+          "GENERAL_EXPENSE_EMRT_REIMBURSEMENT_PAYMENT_METHOD",
+          "The EMRT reimbursement flag only applies to transfer expenses."
+        );
+      }
+    }
   }
 
   private buildUpdatePayload(current: StoredGeneralExpense, payload: GeneralExpenseUpdateRecord): Prisma.GeneralExpenseUpdateInput {
@@ -1110,6 +1130,12 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "paidByEmrtAt")) {
       data.paidByEmrtAt = parseDateOnly(payload.paidByEmrtAt);
+    }
+
+    if (hasOwn(payload, "emrtReimbursementPending")) {
+      data.emrtReimbursementPending = Boolean(payload.emrtReimbursementPending);
+    } else if (hasOwn(payload, "paymentMethod") && nextPaymentMethod !== "Transferencia") {
+      data.emrtReimbursementPending = false;
     }
 
     if (hasOwn(payload, "reviewedByJnls")) {

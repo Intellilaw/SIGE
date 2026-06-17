@@ -11,7 +11,9 @@ import {
 } from "./task-module-descriptors";
 import {
   getEffectiveTrackingResponsible,
+  getLitigationWritingFollowUpTaskLabel,
   hasValidTrackingResponsible,
+  isLitigationWritingPostPresentationStage,
   isTrackingTermEnabled,
   resolveTrackingTaskName,
   usesPresentationAndTermDates
@@ -381,10 +383,18 @@ function getTrackingDashboardDateForMember(
     return getLocalDateInput();
   }
 
+  if (isLitigationWritingPostPresentationStage(table, record)) {
+    return getLocalDateInput();
+  }
+
   return getTrackingDashboardDate(table, record);
 }
 
 function getTrackingDateCandidates(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
+  if (isLitigationWritingPostPresentationStage(table, record)) {
+    return [getLocalDateInput()];
+  }
+
   const dates = [toDateInput(record.dueDate)];
   const termDate = toDateInput(record.termDate);
 
@@ -414,6 +424,10 @@ function isTrackingDashboardRed(
 
   if (!taskLabel || !hasValidTrackingResponsible(record, table)) {
     return true;
+  }
+
+  if (isLitigationWritingPostPresentationStage(table, record)) {
+    return false;
   }
 
   if (usesPresentationAndTermDates(table)) {
@@ -591,6 +605,7 @@ export function TasksTeamPage() {
       .filter((record) => !record.deletedAt)
       .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
       .filter(({ table }) => Boolean(table))
+      .filter(({ record, table }) => !(isLitigationWritingTable(table) && isCompletedTrackingRecord(table, record)))
       .filter(({ record, table }) =>
         matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? [])
       )
@@ -604,11 +619,13 @@ export function TasksTeamPage() {
         const linkedTerm = (record.termId ? termLookup.byId.get(record.termId) : undefined) ?? termLookup.bySourceRecordId.get(record.id);
         const dueDate = getTrackingDashboardDateForMember(table, record, member);
         const baseTaskLabel = resolveTrackingTaskName(record, table, undefined, record.eventName);
+        const followUpTaskLabel = getLitigationWritingFollowUpTaskLabel(table, record);
+        const dashboardTaskLabel = followUpTaskLabel || baseTaskLabel;
         const completed = isCompletedTrackingRecord(table, record);
         const assignmentPending = !completed
           && isResponsibleAssignmentPending(table, record)
           && member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER;
-        const highlighted = assignmentPending || isTrackingDashboardRed(table, record, baseTaskLabel, linkedTerm);
+        const highlighted = assignmentPending || isTrackingDashboardRed(table, record, dashboardTaskLabel, linkedTerm);
 
         return {
           taskId: `tracking-${record.id}`,
@@ -617,8 +634,8 @@ export function TasksTeamPage() {
           subject: record.subject || "-",
           specificProcess: record.specificProcess || "-",
           taskLabel: assignmentPending
-            ? `Definir responsable: ${baseTaskLabel || "Tarea"}`
-            : baseTaskLabel || "Tarea",
+            ? `Definir responsable: ${dashboardTaskLabel || "Tarea"}`
+            : dashboardTaskLabel || "Tarea",
           typeLabel: completed
             ? "Completada"
             : assignmentPending

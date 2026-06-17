@@ -670,6 +670,7 @@ model GeneralExpense {
   recurring          Boolean      @default(false)
   approvedByEmrt     Boolean      @default(false)
   paidByEmrtAt       DateTime?    @db.Date
+  emrtReimbursementPending Boolean      @default(false)
   reviewedByJnls     Boolean      @default(false)
   paid               Boolean      @default(false)
   paidAt             DateTime?    @db.Date

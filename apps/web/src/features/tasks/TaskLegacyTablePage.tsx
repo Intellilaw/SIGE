@@ -9,6 +9,7 @@ import {
   buildDistributionHistoryTaskNameMap,
   getEffectiveTrackingResponsible,
   hasValidTrackingResponsible,
+  isLitigationWritingPostPresentationStage,
   isTrackingTermEnabled,
   resolveHistoryTaskName,
   resolveTrackingTaskName,
@@ -91,6 +92,10 @@ function isRowRed(
   }
 
   const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId, historyFallback);
+
+  if (isLitigationWritingPostPresentationStage(table, record)) {
+    return !taskName || !hasValidTrackingResponsible(record, table);
+  }
 
   if (usesPresentationAndTermDates(table)) {
     const presentationDate = toDateInput(record.dueDate);

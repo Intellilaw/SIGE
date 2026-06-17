@@ -5,7 +5,7 @@ import { apiGet } from "../../api/http-client";
 import { externalContractMilestoneKindLabel, getAllExternalContractMilestones } from "../modules/external-contract-milestones";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
 import { buildTaskDashboardMembers, findTaskModuleDescriptorBySlug } from "./task-module-descriptors";
-import { getEffectiveTrackingResponsible, hasValidTrackingResponsible, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
+import { getEffectiveTrackingResponsible, getLitigationWritingFollowUpTaskLabel, hasValidTrackingResponsible, isLitigationWritingPostPresentationStage, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { LEGACY_TASK_MODULE_BY_ID } from "./task-legacy-config";
 const TIMEFRAMES = [
     { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
@@ -265,9 +265,15 @@ function getTrackingDashboardDateForMember(table, record, member) {
     if (isResponsibleAssignmentPending(table, record) && member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER) {
         return getLocalDateInput();
     }
+    if (isLitigationWritingPostPresentationStage(table, record)) {
+        return getLocalDateInput();
+    }
     return getTrackingDashboardDate(table, record);
 }
 function getTrackingDateCandidates(table, record) {
+    if (isLitigationWritingPostPresentationStage(table, record)) {
+        return [getLocalDateInput()];
+    }
     const dates = [toDateInput(record.dueDate)];
     const termDate = toDateInput(record.termDate);
     if (isTrackingTermEnabled(record, table) && termDate) {
@@ -286,6 +292,9 @@ function isTrackingDashboardRed(table, record, taskLabel, linkedTerm) {
     const termEnabled = isTrackingTermEnabled(record, table);
     if (!taskLabel || !hasValidTrackingResponsible(record, table)) {
         return true;
+    }
+    if (isLitigationWritingPostPresentationStage(table, record)) {
+        return false;
     }
     if (usesPresentationAndTermDates(table)) {
         const presentationDate = toDateInput(record.dueDate);
@@ -422,6 +431,7 @@ export function TasksTeamPage() {
             .filter((record) => !record.deletedAt)
             .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
             .filter(({ table }) => Boolean(table))
+            .filter(({ record, table }) => !(isLitigationWritingTable(table) && isCompletedTrackingRecord(table, record)))
             .filter(({ record, table }) => matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? []))
             .filter(({ record, table }) => belongsToTimeframe({
             state: isCompletedTrackingRecord(table, record) ? "closed" : "open",
@@ -431,11 +441,13 @@ export function TasksTeamPage() {
             const linkedTerm = (record.termId ? termLookup.byId.get(record.termId) : undefined) ?? termLookup.bySourceRecordId.get(record.id);
             const dueDate = getTrackingDashboardDateForMember(table, record, member);
             const baseTaskLabel = resolveTrackingTaskName(record, table, undefined, record.eventName);
+            const followUpTaskLabel = getLitigationWritingFollowUpTaskLabel(table, record);
+            const dashboardTaskLabel = followUpTaskLabel || baseTaskLabel;
             const completed = isCompletedTrackingRecord(table, record);
             const assignmentPending = !completed
                 && isResponsibleAssignmentPending(table, record)
                 && member.id === LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER;
-            const highlighted = assignmentPending || isTrackingDashboardRed(table, record, baseTaskLabel, linkedTerm);
+            const highlighted = assignmentPending || isTrackingDashboardRed(table, record, dashboardTaskLabel, linkedTerm);
             return {
                 taskId: `tracking-${record.id}`,
                 clientNumber: record.clientNumber || "-",
@@ -443,8 +455,8 @@ export function TasksTeamPage() {
                 subject: record.subject || "-",
                 specificProcess: record.specificProcess || "-",
                 taskLabel: assignmentPending
-                    ? `Definir responsable: ${baseTaskLabel || "Tarea"}`
-                    : baseTaskLabel || "Tarea",
+                    ? `Definir responsable: ${dashboardTaskLabel || "Tarea"}`
+                    : dashboardTaskLabel || "Tarea",
                 typeLabel: completed
                     ? "Completada"
                     : assignmentPending

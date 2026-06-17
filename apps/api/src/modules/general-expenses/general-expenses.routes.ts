@@ -40,6 +40,7 @@ const updateSchema = z.object({
   recurring: z.boolean().optional(),
   approvedByEmrt: z.boolean().optional(),
   paidByEmrtAt: z.string().nullable().optional(),
+  emrtReimbursementPending: z.boolean().optional(),
   reviewedByJnls: z.boolean().optional(),
   paid: z.boolean().optional(),
   paidAt: z.string().nullable().optional()

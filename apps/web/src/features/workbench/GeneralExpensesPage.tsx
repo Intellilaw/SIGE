@@ -46,6 +46,7 @@ type GeneralExpensePatchPayload = {
   recurring?: boolean;
   approvedByEmrt?: boolean;
   paidByEmrtAt?: string | null;
+  emrtReimbursementPending?: boolean;
   reviewedByJnls?: boolean;
   paid?: boolean;
   paidAt?: string | null;
@@ -710,6 +711,7 @@ export function GeneralExpensesPage() {
     secondarySpecificRole: user.secondarySpecificRole
   }));
   const canEditEmrtDate = Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
+  const canEditEmrtReimbursement = canApprove && canEditEmrtDate;
   const canReviewJnlsFlag = Boolean(user && canReviewJnls({
     role: user.role,
     legacyRole: user.legacyRole,
@@ -882,6 +884,7 @@ export function GeneralExpensesPage() {
     const canApplyPrivilegedPatch = (
       (Object.prototype.hasOwnProperty.call(payload, "approvedByEmrt") && canApprove) ||
       (Object.prototype.hasOwnProperty.call(payload, "paidByEmrtAt") && canEditEmrtDate) ||
+      (Object.prototype.hasOwnProperty.call(payload, "emrtReimbursementPending") && canEditEmrtReimbursement) ||
       (Object.prototype.hasOwnProperty.call(payload, "reviewedByJnls") && canReviewJnlsFlag) ||
       (Object.prototype.hasOwnProperty.call(payload, "paid") && canPay)
     );
@@ -1840,6 +1843,7 @@ export function GeneralExpensesPage() {
                       <th>Gasto Recurrente</th>
                       <th>Aprobado EMRT</th>
                       <th>Fecha pagado por EMRT</th>
+                      <th className="general-expense-emrt-reimbursement-column">Reembolso pendiente a favor de EMRT</th>
                       <th>Aprobado por JNLS</th>
                       <th>¿Pagado a receptor final?</th>
                       <th>Fecha Pago</th>
@@ -1856,13 +1860,13 @@ export function GeneralExpensesPage() {
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={30} className="centered-inline-message">
+                        <td colSpan={31} className="centered-inline-message">
                           Cargando gastos...
                         </td>
                       </tr>
                     ) : records.length === 0 ? (
                       <tr>
-                        <td colSpan={30} className="centered-inline-message">
+                        <td colSpan={31} className="centered-inline-message">
                           No hay gastos registrados en este mes.
                         </td>
                       </tr>
@@ -1983,7 +1987,7 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => {
                                     const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
                                     const localPatch = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false }
+                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false, emrtReimbursementPending: false }
                                       : { paymentMethod: nextMethod };
                                     void persistExpensePatch(expense.id, localPatch, localPatch);
                                   }}
@@ -2053,6 +2057,14 @@ export function GeneralExpensesPage() {
                                   </div>
                                 ) : null}
                               </td>
+                              <td className="general-expense-checkbox-cell general-expense-emrt-reimbursement-column">
+                                <input
+                                  type="checkbox"
+                                  checked={expense.paymentMethod === "Transferencia" && expense.emrtReimbursementPending}
+                                  onChange={(event) => void persistExpensePatch(expense.id, { emrtReimbursementPending: event.target.checked })}
+                                  disabled={!canEditEmrtReimbursement || expense.paymentMethod !== "Transferencia"}
+                                />
+                              </td>
                               <td className="general-expense-checkbox-cell">
                                 <input
                                   type="checkbox"
@@ -2102,7 +2114,7 @@ export function GeneralExpensesPage() {
                     )}
                     {!loading && records.length > 0 ? (
                       <tr className="general-expense-totals-row">
-                        <td colSpan={22}>Totales distribuidos:</td>
+                        <td colSpan={23}>Totales distribuidos:</td>
                         <td>{formatCurrency(totals.withoutTeam)}</td>
                         <td>{formatCurrency(totals.litigation)}</td>
                         <td>{formatCurrency(totals.corporateLabor)}</td>

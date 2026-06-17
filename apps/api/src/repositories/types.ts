@@ -619,6 +619,7 @@ export interface GeneralExpenseUpdateRecord {
   recurring?: boolean;
   approvedByEmrt?: boolean;
   paidByEmrtAt?: string | null;
+  emrtReimbursementPending?: boolean;
   reviewedByJnls?: boolean;
   paid?: boolean;
   paidAt?: string | null;

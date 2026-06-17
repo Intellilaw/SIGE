@@ -16,6 +16,7 @@ import {
   getEffectiveTrackingResponsible,
   getTermEnabledRecordData,
   hasValidTrackingResponsible,
+  isLitigationWritingPostPresentationStage,
   isTrackingTermEnabled,
   resolveTrackingTaskName,
   usesOptionalTermToggle,
@@ -244,6 +245,10 @@ function summarizeHolidayAuthorities(authorities: string[]) {
 }
 
 function getRowDate(record: TaskTrackingRecord, table?: LegacyTaskTableConfig) {
+  if (isLitigationWritingPostPresentationStage(table, record)) {
+    return todayInput();
+  }
+
   return [toDateInput(record.dueDate), isTrackingTermEnabled(record, table) ? toDateInput(record.termDate) : ""]
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right))[0] ?? "";
@@ -308,6 +313,11 @@ function isTrackingRecordRed(
   }
 
   const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId);
+
+  if (isLitigationWritingPostPresentationStage(table, record)) {
+    return !taskName || !hasValidTrackingResponsible(record, table);
+  }
+
   const dueDate = getRowDate(record, table);
   const requiresDate = table?.showDateColumn !== false;
 
@@ -1149,12 +1159,21 @@ export function TaskDistributorPage() {
       return;
     }
 
+    const workflowStage = table.mode === "workflow" ? tab.stage ?? record.workflowStage : record.workflowStage;
     const completed = tab.isCompleted || tab.status === "presentado";
+    const locksPresentationAndTerm = isLitigationWritingPostPresentationStage(table, {
+      ...record,
+      workflowStage
+    });
 
     await patchRecord(record, {
-      workflowStage: table.mode === "workflow" ? tab.stage ?? record.workflowStage : record.workflowStage,
+      workflowStage,
       status: tab.status ?? (completed ? "presentado" : "pendiente"),
-      completedAt: completed ? record.completedAt ?? new Date().toISOString() : null
+      completedAt: completed ? record.completedAt ?? new Date().toISOString() : null,
+      ...(locksPresentationAndTerm ? {
+        termDate: null,
+        data: getTermEnabledRecordData(record, false)
+      } : {})
     });
   }
 
@@ -1327,7 +1346,8 @@ export function TaskDistributorPage() {
                                   ? resolveTrackingTaskName(record, table, taskNamesByRecordId, item.eventNamesPerTable[index] || item.eventName)
                                   : item.eventNamesPerTable[index] || item.eventName;
                                 const linkedTerm = record ? getLinkedTerm(terms, record) : undefined;
-                                const termEnabled = record ? isTrackingTermEnabled(record, table) : false;
+                                const presentationAndTermLocked = record ? isLitigationWritingPostPresentationStage(table, record) : false;
+                                const termEnabled = record && !presentationAndTermLocked ? isTrackingTermEnabled(record, table) : false;
                                 const showTermToggle = usesOptionalTermToggle(table);
                                 const showTermVerification = record ? shouldShowTermVerification(table, record) : false;
                                 const danger = record
@@ -1422,7 +1442,13 @@ export function TaskDistributorPage() {
                                                   className="tasks-legacy-input"
                                                   type="date"
                                                   value={toDateInput(record.dueDate)}
-                                                  onChange={(event) => void patchRecord(record, { dueDate: event.target.value || null })}
+                                                  onChange={(event) => {
+                                                    if (presentationAndTermLocked) {
+                                                      return;
+                                                    }
+                                                    void patchRecord(record, { dueDate: event.target.value || null });
+                                                  }}
+                                                  disabled={presentationAndTermLocked}
                                                   aria-label="Fecha debe presentarse"
                                                 />
                                               </label>
@@ -1433,7 +1459,13 @@ export function TaskDistributorPage() {
                                                     className="tasks-active-term-toggle-input"
                                                     type="checkbox"
                                                     checked={termEnabled}
-                                                    onChange={(event) => void patchTermEnabled(record, event.target.checked)}
+                                                    onChange={(event) => {
+                                                      if (presentationAndTermLocked) {
+                                                        return;
+                                                      }
+                                                      void patchTermEnabled(record, event.target.checked);
+                                                    }}
+                                                    disabled={presentationAndTermLocked}
                                                     aria-label="Habilitar término"
                                                   />
                                                 </label>
@@ -1443,9 +1475,14 @@ export function TaskDistributorPage() {
                                                 <input
                                                   className="tasks-legacy-input"
                                                   type="date"
-                                                  value={toDateInput(record.termDate)}
-                                                  onChange={(event) => void patchRecord(record, { termDate: event.target.value || null })}
-                                                  disabled={showTermToggle && !termEnabled}
+                                                  value={presentationAndTermLocked ? "" : toDateInput(record.termDate)}
+                                                  onChange={(event) => {
+                                                    if (presentationAndTermLocked) {
+                                                      return;
+                                                    }
+                                                    void patchRecord(record, { termDate: event.target.value || null });
+                                                  }}
+                                                  disabled={presentationAndTermLocked || (showTermToggle && !termEnabled)}
                                                   aria-label={table?.termDateLabel ?? "Término"}
                                                 />
                                               </label>

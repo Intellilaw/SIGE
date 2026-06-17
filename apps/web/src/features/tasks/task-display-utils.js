@@ -25,6 +25,9 @@ const LEGACY_TASK_NAME_KEYS = [
     "tarea_pendiente",
     "pending_task_label"
 ];
+const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
+const LITIGATION_WRITING_REGISTERED_STAGE = 3;
+const LITIGATION_WRITING_RADICATION_REVIEW_STAGE = 4;
 function normalize(value) {
     return (value ?? "").trim();
 }
@@ -81,9 +84,29 @@ export function usesOptionalTermToggle(table) {
 export function usesPresentationAndTermDates(table) {
     return usesOptionalTermToggle(table) || isAlwaysTermTable(table);
 }
+export function isLitigationWritingPostPresentationStage(table, record) {
+    return table?.slug === LITIGATION_WRITINGS_TABLE_SLUG
+        && (record.workflowStage === LITIGATION_WRITING_REGISTERED_STAGE
+            || record.workflowStage === LITIGATION_WRITING_RADICATION_REVIEW_STAGE);
+}
+export function getLitigationWritingFollowUpTaskLabel(table, record) {
+    if (table?.slug !== LITIGATION_WRITINGS_TABLE_SLUG) {
+        return "";
+    }
+    if (record.workflowStage === LITIGATION_WRITING_REGISTERED_STAGE) {
+        return "Pendiente de registro en BE y BL";
+    }
+    if (record.workflowStage === LITIGATION_WRITING_RADICATION_REVIEW_STAGE) {
+        return "Pendiente de que se revise el auto de radicación";
+    }
+    return "";
+}
 export function isTrackingTermEnabled(record, table) {
     if (!table) {
         return Boolean(record.termDate);
+    }
+    if (isLitigationWritingPostPresentationStage(table, record)) {
+        return false;
     }
     if (isNeverTermTable(table)) {
         return false;

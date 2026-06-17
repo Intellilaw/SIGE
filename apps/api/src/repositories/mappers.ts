@@ -1725,6 +1725,7 @@ export function mapGeneralExpense(record: {
   recurring: boolean;
   approvedByEmrt: boolean;
   paidByEmrtAt: Date | null;
+  emrtReimbursementPending: boolean;
   reviewedByJnls: boolean;
   paid: boolean;
   paidAt: Date | null;
@@ -1752,6 +1753,7 @@ export function mapGeneralExpense(record: {
     recurring: record.recurring,
     approvedByEmrt: record.approvedByEmrt,
     paidByEmrtAt: record.paidByEmrtAt?.toISOString(),
+    emrtReimbursementPending: record.emrtReimbursementPending,
     reviewedByJnls: record.reviewedByJnls,
     paid: record.paid,
     paidAt: record.paidAt?.toISOString(),

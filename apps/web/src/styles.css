@@ -3406,7 +3406,12 @@ textarea {
 }
 
 .general-expense-table {
-  min-width: 2850px;
+  min-width: 3050px;
+}
+
+.general-expense-emrt-reimbursement-column {
+  min-width: 180px;
+  text-align: center;
 }
 
 .general-expense-table thead th,

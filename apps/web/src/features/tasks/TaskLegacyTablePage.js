@@ -4,7 +4,7 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
-import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, hasValidTrackingResponsible, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
+import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, hasValidTrackingResponsible, isLitigationWritingPostPresentationStage, isTrackingTermEnabled, resolveHistoryTaskName, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
 import { getAdjacentLegacyTaskTable, getLegacyTaskTable, LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
 import { findLegacyTableByAnyName } from "./task-distribution-utils";
 function toDateInput(value) {
@@ -54,6 +54,9 @@ function isRowRed(record, tab, showDateColumn, table, taskNamesByRecordId, histo
         return false;
     }
     const taskName = resolveTrackingTaskName(record, table, taskNamesByRecordId, historyFallback);
+    if (isLitigationWritingPostPresentationStage(table, record)) {
+        return !taskName || !hasValidTrackingResponsible(record, table);
+    }
     if (usesPresentationAndTermDates(table)) {
         const presentationDate = toDateInput(record.dueDate);
         const termDate = toDateInput(record.termDate);

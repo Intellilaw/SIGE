@@ -1187,6 +1187,7 @@ export interface GeneralExpense {
   recurring: boolean;
   approvedByEmrt: boolean;
   paidByEmrtAt?: string;
+  emrtReimbursementPending: boolean;
   reviewedByJnls: boolean;
   paid: boolean;
   paidAt?: string;
