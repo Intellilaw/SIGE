@@ -269,7 +269,13 @@ function buildKpiAlertsByUser(periods) {
     return alertsByUser;
 }
 function summarizeDailyStatus(dailyBreakdown) {
-    return dailyBreakdown.some((day) => day.status === "missed") ? "missed" : "warning";
+    if (dailyBreakdown.some((day) => day.status === "missed")) {
+        return "missed";
+    }
+    if (dailyBreakdown.some((day) => day.status === "warning")) {
+        return "warning";
+    }
+    return "met";
 }
 function pluralizeDays(count) {
     return `${count} ${count === 1 ? "dia" : "dias"}`;
@@ -277,6 +283,7 @@ function pluralizeDays(count) {
 function buildRangeMetric(metric, dailyBreakdown) {
     const missedDays = dailyBreakdown.filter((day) => day.status === "missed").length;
     const warningDays = dailyBreakdown.filter((day) => day.status === "warning").length;
+    const metDays = dailyBreakdown.filter((day) => day.status === "met").length;
     const incidents = dailyBreakdown.flatMap((day) => day.incidents);
     return {
         ...metric,
@@ -285,7 +292,8 @@ function buildRangeMetric(metric, dailyBreakdown) {
         target: dailyBreakdown.reduce((total, day) => total + day.target, 0),
         actualLabel: [
             missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
-            warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : ""
+            warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
+            missedDays === 0 && warningDays === 0 ? `${pluralizeDays(metDays)} cumplidos` : ""
         ].filter(Boolean).join(" / "),
         targetLabel: `${pluralizeDays(dailyBreakdown.length)} habiles evaluados`,
         progressPct: metric.progressPct,
@@ -301,10 +309,9 @@ function buildKpiPeriodsFromMonthlyOverviews(ranges, overviews) {
             overview.teams.forEach((team) => {
                 team.users.forEach((user) => {
                     user.metrics.forEach((metric) => {
-                        const alertDays = metric.dailyBreakdown.filter((day) => day.date >= range.startDate
-                            && day.date <= range.endDate
-                            && KPI_ALERT_STATUSES.includes(day.status));
-                        if (alertDays.length === 0) {
+                        const rangeDays = metric.dailyBreakdown.filter((day) => day.date >= range.startDate
+                            && day.date <= range.endDate);
+                        if (rangeDays.length === 0) {
                             return;
                         }
                         const group = users.get(user.userId) ?? {
@@ -319,8 +326,8 @@ function buildKpiPeriodsFromMonthlyOverviews(ranges, overviews) {
                         };
                         const currentMetric = group.metricsById.get(metric.id);
                         const mergedDays = currentMetric
-                            ? [...currentMetric.dailyBreakdown, ...alertDays].sort((left, right) => left.date.localeCompare(right.date))
-                            : alertDays;
+                            ? [...currentMetric.dailyBreakdown, ...rangeDays].sort((left, right) => left.date.localeCompare(right.date))
+                            : rangeDays;
                         group.metricsById.set(metric.id, buildRangeMetric(metric, mergedDays));
                         users.set(user.userId, group);
                     });
@@ -329,12 +336,13 @@ function buildKpiPeriodsFromMonthlyOverviews(ranges, overviews) {
         });
         const periodUsers = Array.from(users.values()).map(({ metricsById, ...user }) => {
             const metrics = Array.from(metricsById.values()).sort((left, right) => left.label.localeCompare(right.label));
+            const alertMetricCount = metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status)).length;
             return {
                 ...user,
-                total: metrics.length,
+                total: alertMetricCount,
                 metrics
             };
-        }).filter((user) => user.total > 0).sort((left, right) => left.displayName.localeCompare(right.displayName));
+        }).filter((user) => user.metrics.length > 0).sort((left, right) => left.displayName.localeCompare(right.displayName));
         return {
             ...range,
             totalMetrics: periodUsers.reduce((total, user) => total + user.total, 0),

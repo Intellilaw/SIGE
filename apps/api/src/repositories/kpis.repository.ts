@@ -20,6 +20,19 @@ const LITIGATION_MODULE_ID = "litigation";
 const BRIEF_TABLE_ALIASES = ["escritos-fondo", "escritos_fondo"];
 const WRIT_TABLE_ALIASES = ["escritos", "escritos_kpi"];
 const PREVENTION_TABLE_ALIASES = ["desahogo-prevenciones", "desahogo_prevenciones"];
+const KPI_HISTORY_BASELINE_DATE_KEY = "2026-06-17";
+const TERM_MARKED_AT_DATA_KEY = "termMarkedAt";
+const VERIFICATION_DATES_DATA_KEY = "verificationDates";
+const WRITING_PRESENTED_AT_DATA_KEY = "writingPresentedAt";
+const WRITING_REGISTERED_AT_DATA_KEY = "writingRegisteredAt";
+const BRIEF_PRESENTED_STAGE = 3;
+const BRIEF_REGISTERED_STAGE = 4;
+const LITIGATION_VERIFICATION_KEYS: Record<string, string> = {
+  MEOO: "verificado_meoo",
+  LAMR: "verificado_lamr",
+  EKPO: "verificado_ekpo",
+  NBSG: "verificado_nbsg"
+};
 
 const TEAM_LABELS: Record<string, string> = {
   ADMIN: "Direccion general",
@@ -111,6 +124,7 @@ interface TrackingRecord {
   completedAt: Date | null;
   status: string;
   workflowStage: number;
+  termId: string | null;
   data: unknown;
   deletedAt: Date | null;
   createdAt: Date;
@@ -133,6 +147,8 @@ interface TermRecord {
   termDate: Date | null;
   status: string;
   recurring: boolean;
+  verification: unknown;
+  data: unknown;
   deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -171,6 +187,7 @@ interface PeriodContext {
   businessDaysInPeriod: number;
   businessDaysElapsed: number;
   periodComplete: boolean;
+  holidayKeys: Set<string>;
   excludedDateKeys: Set<string>;
   evaluatedDateKeys: string[];
 }
@@ -298,6 +315,25 @@ function getBusinessDateKeys(startKey: string, endKey: string, holidayKeys: Set<
   });
 }
 
+function isBusinessDateKey(dateKey: string, period: PeriodContext) {
+  const day = dateFromKey(dateKey).getUTCDay();
+  return day !== 0 && day !== 6 && !period.holidayKeys.has(dateKey) && !period.excludedDateKeys.has(dateKey);
+}
+
+function addBusinessDaysKey(startKey: string, days: number, period: PeriodContext) {
+  let cursor = startKey;
+  let remaining = days;
+
+  while (remaining > 0) {
+    cursor = addDaysKey(cursor, 1);
+    if (isBusinessDateKey(cursor, period)) {
+      remaining -= 1;
+    }
+  }
+
+  return cursor;
+}
+
 function formatDecimal(value: number, maximumFractionDigits = 1) {
   return new Intl.NumberFormat("es-MX", {
     maximumFractionDigits,
@@ -352,6 +388,47 @@ function normalizeBoolean(value: unknown) {
   }
 
   return undefined;
+}
+
+function isYesValue(value: unknown) {
+  return ["si", "yes"].includes(normalizeText(typeof value === "string" ? value : ""));
+}
+
+function getStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+}
+
+function getDateDataValue(data: unknown, key: string) {
+  const value = getDataRecord(data)[key];
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
+}
+
+function getVerificationDate(term: TermRecord, verificationKey: string) {
+  const verificationDates = getStringRecord(getDataRecord(term.data)[VERIFICATION_DATES_DATA_KEY]);
+  const dateKey = verificationDates[verificationKey];
+  if (dateKey && /^\d{4}-\d{2}-\d{2}/.test(dateKey)) {
+    return dateKey.slice(0, 10);
+  }
+
+  return isYesValue(getStringRecord(term.verification)[verificationKey])
+    ? getBaselineOrRecordedDateKey("", term.updatedAt)
+    : "";
+}
+
+function getBaselineOrRecordedDateKey(value: string, fallbackDate: Date) {
+  if (value) {
+    return value;
+  }
+
+  const fallbackKey = toDateKey(fallbackDate);
+  return fallbackKey && fallbackKey > KPI_HISTORY_BASELINE_DATE_KEY ? fallbackKey : KPI_HISTORY_BASELINE_DATE_KEY;
 }
 
 function isCompletedStatus(status?: string | null) {
@@ -839,6 +916,258 @@ function buildDeadlineDailyBreakdown(input: {
   });
 }
 
+function buildDatedIncident(input: {
+  id: string;
+  source: DeadlineSource;
+  dueKey: string;
+  completedKey?: string;
+  reason: string;
+}) {
+  return {
+    id: input.id,
+    sourceType: input.source.sourceType,
+    moduleId: input.source.moduleId,
+    tableCode: input.source.tableCode,
+    tableLabel: input.source.tableLabel,
+    clientName: input.source.clientName,
+    subject: input.source.subject,
+    matterIdentifier: input.source.matterIdentifier,
+    taskName: input.source.taskName,
+    responsible: input.source.responsible,
+    dueDate: input.dueKey,
+    termDate: input.source.termDate,
+    completedAt: input.completedKey,
+    status: input.source.status,
+    reason: input.reason
+  } satisfies KpiIncident;
+}
+
+function getTermMarkedKeyForRecord(record: TrackingRecord, linkedTerm?: TermRecord) {
+  return getDateDataValue(record.data, TERM_MARKED_AT_DATA_KEY)
+    || (linkedTerm ? getDateDataValue(linkedTerm.data, TERM_MARKED_AT_DATA_KEY) : "")
+    || getBaselineOrRecordedDateKey("", record.createdAt);
+}
+
+function getTermMarkedKeyForTerm(term: TermRecord) {
+  return getDateDataValue(term.data, TERM_MARKED_AT_DATA_KEY)
+    || getBaselineOrRecordedDateKey("", term.createdAt);
+}
+
+function buildTermVerificationMetric(input: {
+  id: string;
+  label: string;
+  description: string;
+  verificationKey: string;
+  verificationLabel: string;
+  trackingRecords: TrackingRecord[];
+  terms: TermRecord[];
+  period: PeriodContext;
+}) {
+  const termsByRecordId = new Map(
+    input.terms
+      .filter((term) => term.moduleId === LITIGATION_MODULE_ID && !term.deletedAt && term.sourceRecordId)
+      .map((term) => [term.sourceRecordId as string, term])
+  );
+  const termsById = new Map(
+    input.terms
+      .filter((term) => term.moduleId === LITIGATION_MODULE_ID && !term.deletedAt)
+      .map((term) => [term.id, term])
+  );
+  const linkedTermIds = new Set<string>();
+  const verificationSources: Array<{
+    id: string;
+    source: DeadlineSource;
+    dueKey: string;
+    verifiedKey: string;
+  }> = [];
+
+  input.trackingRecords
+    .filter((record) => record.moduleId === LITIGATION_MODULE_ID && !record.deletedAt)
+    .filter(isTermRequiredForTrackingRecord)
+    .forEach((record) => {
+      const linkedTerm = termsByRecordId.get(record.id) ?? (record.termId ? termsById.get(record.termId) : undefined);
+      if (linkedTerm) {
+        linkedTermIds.add(linkedTerm.id);
+      }
+
+      const markedKey = getTermMarkedKeyForRecord(record, linkedTerm);
+      const dueKey = addBusinessDaysKey(markedKey, 1, input.period);
+      const verifiedKey = linkedTerm ? getVerificationDate(linkedTerm, input.verificationKey) : "";
+      verificationSources.push({
+        id: `term-verification:${record.id}:${input.verificationKey}`,
+        source: trackingToDeadlineSource(record),
+        dueKey,
+        verifiedKey
+      });
+    });
+
+  input.terms
+    .filter((term) => term.moduleId === LITIGATION_MODULE_ID && !term.deletedAt && !linkedTermIds.has(term.id))
+    .filter((term) => !term.sourceRecordId)
+    .forEach((term) => {
+      const markedKey = getTermMarkedKeyForTerm(term);
+      const dueKey = addBusinessDaysKey(markedKey, 1, input.period);
+      verificationSources.push({
+        id: `term-verification:${term.id}:${input.verificationKey}`,
+        source: termToDeadlineSource(term),
+        dueKey,
+        verifiedKey: getVerificationDate(term, input.verificationKey)
+      });
+    });
+
+  const dueSources = verificationSources.filter((source) =>
+    isDateInRange(source.dueKey, input.period.startKey, input.period.cutoffKey)
+  );
+  const incidents = dueSources
+    .filter((source) => !source.verifiedKey || source.verifiedKey > source.dueKey)
+    .map((source) => buildDatedIncident({
+      id: source.id,
+      source: source.source,
+      dueKey: source.dueKey,
+      completedKey: source.verifiedKey || undefined,
+      reason: source.verifiedKey
+        ? `${input.verificationLabel} marco Si despues del dia habil siguiente.`
+        : `${input.verificationLabel} no marco Si dentro del dia habil siguiente.`
+    }));
+  const verifiedOnTime = dueSources.length - incidents.length;
+  const progressPct = dueSources.length > 0 ? clampProgress((verifiedOnTime / dueSources.length) * 100) : 100;
+  const incidentDateKeys = incidents
+    .map((incident) => incident.dueDate ?? "")
+    .filter((dateKey) => isDateInRange(dateKey, input.period.startKey, input.period.cutoffKey));
+  const dateKeys = Array.from(new Set([...input.period.evaluatedDateKeys, ...incidentDateKeys])).sort();
+  const dailyBreakdown = dateKeys.map((dateKey) => {
+    const dueToday = verificationSources.filter((source) => source.dueKey === dateKey);
+    const incidentsToday = incidents.filter((incident) => incident.dueDate === dateKey);
+    const verifiedToday = dueToday.length - incidentsToday.length;
+
+    return {
+      date: dateKey,
+      status: incidentsToday.length > 0 ? "missed" : "met",
+      value: verifiedToday,
+      target: dueToday.length,
+      unit: "verificaciones",
+      actualLabel: `${verifiedToday}/${dueToday.length} verificados a tiempo`,
+      targetLabel: `${dueToday.length} verificaciones esperadas en el dia`,
+      helper: incidentsToday.length > 0
+        ? "Hay terminos que no fueron verificados dentro del dia habil siguiente."
+        : "Las verificaciones vencidas al corte del dia estan en meta.",
+      incidents: incidentsToday
+    } satisfies KpiMetric["dailyBreakdown"][number];
+  });
+
+  return {
+    id: input.id,
+    label: input.label,
+    description: input.description,
+    kind: "deadline",
+    status: incidents.length > 0 ? "missed" : "met",
+    value: verifiedOnTime,
+    target: dueSources.length,
+    unit: "verificaciones",
+    progressPct,
+    targetLabel: `${dueSources.length} verificaciones esperadas al corte`,
+    actualLabel: `${verifiedOnTime} verificaciones a tiempo`,
+    helper: "Se revisa el checkbox Es termino y el dropdown individual de verificacion del Manager de tareas.",
+    sourceDescription: "Manager de tareas: tareas marcadas como termino y dropdown de verificacion.",
+    sourceTables: ["manager_tareas_terminos"],
+    incidents,
+    dailyBreakdown
+  } satisfies KpiMetric;
+}
+
+function getBriefPresentedKey(record: TrackingRecord) {
+  return getDateDataValue(record.data, WRITING_PRESENTED_AT_DATA_KEY)
+    || getBaselineOrRecordedDateKey("", record.updatedAt);
+}
+
+function getBriefRegisteredKey(record: TrackingRecord) {
+  if (record.workflowStage < BRIEF_REGISTERED_STAGE) {
+    return "";
+  }
+
+  return getDateDataValue(record.data, WRITING_REGISTERED_AT_DATA_KEY)
+    || getBaselineOrRecordedDateKey("", record.updatedAt);
+}
+
+function buildBriefBeBlRegistrationMetric(input: {
+  aliases: string[];
+  trackingRecords: TrackingRecord[];
+  period: PeriodContext;
+}) {
+  const sources = input.trackingRecords
+    .filter((record) => record.moduleId === LITIGATION_MODULE_ID && !record.deletedAt)
+    .filter((record) => tableMatches(record, BRIEF_TABLE_ALIASES))
+    .filter((record) => matchesResponsible(record.responsible, input.aliases))
+    .filter((record) => record.workflowStage >= BRIEF_PRESENTED_STAGE)
+    .map((record) => {
+      const presentedKey = getBriefPresentedKey(record);
+      return {
+        id: `brief-be-bl:${record.id}`,
+        source: trackingToDeadlineSource(record),
+        dueKey: addBusinessDaysKey(presentedKey, 1, input.period),
+        registeredKey: getBriefRegisteredKey(record)
+      };
+    });
+  const dueSources = sources.filter((source) =>
+    isDateInRange(source.dueKey, input.period.startKey, input.period.cutoffKey)
+  );
+  const incidents = dueSources
+    .filter((source) => !source.registeredKey || source.registeredKey > source.dueKey)
+    .map((source) => buildDatedIncident({
+      id: source.id,
+      source: source.source,
+      dueKey: source.dueKey,
+      completedKey: source.registeredKey || undefined,
+      reason: source.registeredKey
+        ? "El escrito de fondo fue dado de alta en BE y BL despues del dia habil siguiente."
+        : "El escrito de fondo no fue dado de alta en BE y BL dentro del dia habil siguiente."
+    }));
+  const completedOnTime = dueSources.length - incidents.length;
+  const progressPct = dueSources.length > 0 ? clampProgress((completedOnTime / dueSources.length) * 100) : 100;
+  const incidentDateKeys = incidents
+    .map((incident) => incident.dueDate ?? "")
+    .filter((dateKey) => isDateInRange(dateKey, input.period.startKey, input.period.cutoffKey));
+  const dateKeys = Array.from(new Set([...input.period.evaluatedDateKeys, ...incidentDateKeys])).sort();
+  const dailyBreakdown = dateKeys.map((dateKey) => {
+    const dueToday = sources.filter((source) => source.dueKey === dateKey);
+    const incidentsToday = incidents.filter((incident) => incident.dueDate === dateKey);
+    const completedToday = dueToday.length - incidentsToday.length;
+
+    return {
+      date: dateKey,
+      status: incidentsToday.length > 0 ? "missed" : "met",
+      value: completedToday,
+      target: dueToday.length,
+      unit: "escritos",
+      actualLabel: `${completedToday}/${dueToday.length} dados de alta a tiempo`,
+      targetLabel: `${dueToday.length} altas en BE y BL esperadas`,
+      helper: incidentsToday.length > 0
+        ? "Hay escritos de fondo que no llegaron a BE y BL dentro del dia habil siguiente."
+        : "Las altas en BE y BL vencidas al corte del dia estan en meta.",
+      incidents: incidentsToday
+    } satisfies KpiMetric["dailyBreakdown"][number];
+  });
+
+  return {
+    id: "escritos-fondo-be-bl-dia-habil",
+    label: "Dar de alta escritos de fondo en BE y BL",
+    description: "Todos los escritos de fondo presentados deben estar dados de alta en BE y BL dentro del dia habil siguiente.",
+    kind: "deadline",
+    status: incidents.length > 0 ? "missed" : "met",
+    value: completedOnTime,
+    target: dueSources.length,
+    unit: "escritos",
+    progressPct,
+    targetLabel: `${dueSources.length} escritos esperados en BE y BL al corte`,
+    actualLabel: `${completedOnTime} escritos dados de alta a tiempo`,
+    helper: "Se mide desde que el escrito de fondo pasa a la pestana 3 Presentados hasta su alta en la pestana 4 BE y BL.",
+    sourceDescription: "Tabla de seguimiento: Escritos de fondo, pestanas 3 y 4.",
+    sourceTables: ["escritos_fondo"],
+    incidents,
+    dailyBreakdown
+  } satisfies KpiMetric;
+}
+
 function buildProductionMetric(input: {
   id: string;
   label: string;
@@ -1047,6 +1376,16 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         tableAliases: BRIEF_TABLE_ALIASES,
         sourceDescription: "Terminos habilitados dentro de Escritos de fondo.",
         sourceTables: ["escritos_fondo"]
+      }),
+      buildTermVerificationMetric({
+        id: "meoo-verificaciones-terminos",
+        label: "Verificaciones de terminos",
+        description: "Todos los terminos marcados en el Manager de tareas deben verificarse a mas tardar al dia habil siguiente.",
+        verificationKey: LITIGATION_VERIFICATION_KEYS.MEOO,
+        verificationLabel: "MEOO",
+        trackingRecords,
+        terms,
+        period
       })
     ]
   },
@@ -1101,6 +1440,16 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         excludedTableAliases: [...WRIT_TABLE_ALIASES, ...PREVENTION_TABLE_ALIASES],
         sourceDescription: "Todos los demas terminos del modulo de litigio asignados a Alejandra.",
         sourceTables: ["terminos_litigio"]
+      }),
+      buildTermVerificationMetric({
+        id: "lamr-verificaciones-terminos",
+        label: "Verificaciones de terminos",
+        description: "Todos los terminos marcados en el Manager de tareas deben verificarse a mas tardar al dia habil siguiente.",
+        verificationKey: LITIGATION_VERIFICATION_KEYS.LAMR,
+        verificationLabel: "LAMR",
+        trackingRecords,
+        terms,
+        period
       })
     ]
   },
@@ -1108,22 +1457,10 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
     key: "EKPO",
     aliases: ["EKPO", "Evelyng Perez", "Evelyng Pérez", "Proyectista 1"],
     buildMetrics: ({ aliases, trackingRecords, terms, period }) => [
-      buildProductionMetric({
-        id: "ekpo-escritos-fondo-dos-dias",
-        label: "Escritos de fondo cada 2 dias habiles",
-        description: "Se debe elaborar un escrito de fondo por cada 2 dias habiles maximo.",
-        aliases,
-        trackingRecords,
-        period,
-        tableAliases: BRIEF_TABLE_ALIASES,
-        targetCadence: "one-per-two-business-days",
-        sourceDescription: "Tabla de seguimiento: Escritos de fondo.",
-        sourceTables: ["escritos_fondo"]
-      }),
       buildDeadlineMetric({
         id: "ekpo-terminos-prevenciones",
         label: "Terminos de desahogo de prevenciones",
-        description: "Se debe evitar que venza ningun termino en desahogo de prevenciones a su cargo.",
+        description: "No se debe vencer ningun termino de desahogo de prevenciones.",
         aliases,
         trackingRecords,
         terms,
@@ -1131,6 +1468,21 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         tableAliases: PREVENTION_TABLE_ALIASES,
         sourceDescription: "Tabla de seguimiento y terminos de Desahogo de prevenciones.",
         sourceTables: ["desahogo_prevenciones"]
+      }),
+      buildTermVerificationMetric({
+        id: "ekpo-verificaciones-terminos",
+        label: "Verificaciones de terminos",
+        description: "Todos los terminos deben estar verificados dentro del dia habil siguiente a aquel en el que la tarea de termino fue subida al Manager de tareas.",
+        verificationKey: LITIGATION_VERIFICATION_KEYS.EKPO,
+        verificationLabel: "EKPO",
+        trackingRecords,
+        terms,
+        period
+      }),
+      buildBriefBeBlRegistrationMetric({
+        aliases,
+        trackingRecords,
+        period
       })
     ]
   },
@@ -1138,22 +1490,10 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
     key: "NBSG",
     aliases: ["NBSG", "Noelia Serrano", "Proyectista 2"],
     buildMetrics: ({ aliases, trackingRecords, terms, period }) => [
-      buildProductionMetric({
-        id: "nbsg-escritos-fondo-dos-dias",
-        label: "Escritos de fondo cada 2 dias habiles",
-        description: "Se debe elaborar un escrito de fondo por cada 2 dias habiles maximo.",
-        aliases,
-        trackingRecords,
-        period,
-        tableAliases: BRIEF_TABLE_ALIASES,
-        targetCadence: "one-per-two-business-days",
-        sourceDescription: "Tabla de seguimiento: Escritos de fondo.",
-        sourceTables: ["escritos_fondo"]
-      }),
       buildDeadlineMetric({
         id: "nbsg-terminos-prevenciones",
         label: "Terminos de desahogo de prevenciones",
-        description: "Se debe evitar que venza ningun termino en desahogo de prevenciones a su cargo.",
+        description: "No se debe vencer ningun termino de desahogo de prevenciones.",
         aliases,
         trackingRecords,
         terms,
@@ -1161,6 +1501,21 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         tableAliases: PREVENTION_TABLE_ALIASES,
         sourceDescription: "Tabla de seguimiento y terminos de Desahogo de prevenciones.",
         sourceTables: ["desahogo_prevenciones"]
+      }),
+      buildTermVerificationMetric({
+        id: "nbsg-verificaciones-terminos",
+        label: "Verificaciones de terminos",
+        description: "Todos los terminos deben estar verificados dentro del dia habil siguiente a aquel en el que la tarea de termino fue subida al Manager de tareas.",
+        verificationKey: LITIGATION_VERIFICATION_KEYS.NBSG,
+        verificationLabel: "NBSG",
+        trackingRecords,
+        terms,
+        period
+      }),
+      buildBriefBeBlRegistrationMetric({
+        aliases,
+        trackingRecords,
+        period
       })
     ]
   },
@@ -1301,6 +1656,7 @@ export class PrismaKpisRepository implements KpisRepository {
       businessDaysInPeriod,
       businessDaysElapsed,
       periodComplete: endKey < todayKey,
+      holidayKeys,
       excludedDateKeys: new Set(),
       evaluatedDateKeys: getBusinessDateKeys(startKey, cutoffKey, holidayKeys)
     };

@@ -143,6 +143,7 @@ const TASK_MODULE_SLUGS: Record<string, string> = {
 const OPEN_LEGACY_STATUSES: LegacyTaskStatus[] = ["pendiente"];
 const CLOSED_LEGACY_STATUSES: LegacyTaskStatus[] = ["presentado", "concluida"];
 const KPI_ALERT_STATUSES: KpiMetricStatus[] = ["missed", "warning"];
+const VERIFICATION_DATES_DATA_KEY = "verificationDates";
 const TASK_VERIFICATION_COLUMNS: Record<string, Array<{ key: string; label: string }>> = {
   litigation: [
     { key: "verificado_meoo", label: "V. MEOO" },
@@ -305,6 +306,25 @@ function getStringDataValue(data: unknown, keys: string[]) {
   }
 
   return undefined;
+}
+
+function getStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+}
+
+function getVerificationCompletedDateKey(term: TaskTerm, verificationKey: string) {
+  const verificationDates = getStringRecord(getDataRecord(term.data)[VERIFICATION_DATES_DATA_KEY]);
+  const dateKey = verificationDates[verificationKey];
+  return dateKey && /^\d{4}-\d{2}-\d{2}/.test(dateKey)
+    ? dateKey.slice(0, 10)
+    : toDateKey(term.updatedAt);
 }
 
 function normalizeBoolean(value: unknown) {
@@ -753,7 +773,7 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
   overview.teams.forEach((team) => {
     team.users.forEach((user) => {
       const alertMetrics = user.metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status));
-      if (alertMetrics.length === 0) {
+      if (user.metrics.length === 0) {
         return;
       }
 
@@ -764,7 +784,7 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
         teamLabel: user.teamLabel,
         specificRole: user.specificRole,
         total: alertMetrics.length,
-        metrics: alertMetrics
+        metrics: user.metrics
       });
     });
   });
@@ -968,15 +988,15 @@ function buildCompletedTaskCandidates(input: {
         : managerTermIds.has(term.id)
     )
     .forEach((term) => {
-      const completedDate = toDateKey(term.updatedAt);
-      if (!isInDateRange(completedDate, input.currentMonthStart, input.currentMonthEnd)) {
-        return;
-      }
-
       const module = input.moduleDefinitions.get(term.moduleId);
       (TASK_VERIFICATION_COLUMNS[term.moduleId] ?? [])
         .filter((column) => isVerificationValueComplete(term.verification[column.key]))
         .forEach((column) => {
+          const completedDate = getVerificationCompletedDateKey(term, column.key);
+          if (!isInDateRange(completedDate, input.currentMonthStart, input.currentMonthEnd)) {
+            return;
+          }
+
           candidates.push({
             id: `term-verification:${term.id}:${column.key}`,
             moduleId: term.moduleId,

@@ -69,6 +69,193 @@ function toJsonValue(value?: Record<string, unknown> | Record<string, string> | 
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
+const LITIGATION_MODULE_ID = "litigation";
+const TERM_ENABLED_DATA_KEY = "termEnabled";
+const TERM_MARKED_AT_DATA_KEY = "termMarkedAt";
+const VERIFICATION_DATES_DATA_KEY = "verificationDates";
+const WRITING_PRESENTED_AT_DATA_KEY = "writingPresentedAt";
+const WRITING_REGISTERED_AT_DATA_KEY = "writingRegisteredAt";
+const BRIEF_PRESENTED_STAGE = 3;
+const BRIEF_REGISTERED_STAGE = 4;
+const BRIEF_TABLE_ALIASES = new Set(["escritos-fondo", "escritos_fondo"]);
+const PREVENTION_TABLE_ALIASES = new Set(["desahogo-prevenciones", "desahogo_prevenciones"]);
+
+function todayDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeComparable(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeTableKey(value?: string | null) {
+  return normalizeComparable(value).replace(/[-\s]+/g, "_");
+}
+
+function getDataRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return { ...(value as Record<string, unknown>) };
+}
+
+function getStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+}
+
+function getDateDataValue(data: Record<string, unknown>, key: string) {
+  const value = data[key];
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
+}
+
+function normalizeBoolean(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeComparable(value);
+    if (["1", "true", "si", "yes"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return undefined;
+}
+
+function isYesValue(value: unknown) {
+  return ["si", "yes"].includes(normalizeComparable(typeof value === "string" ? value : ""));
+}
+
+function isTableAlias(tableCode: string | null | undefined, sourceTable: string | null | undefined, aliases: Set<string>) {
+  return aliases.has(normalizeTableKey(tableCode)) || aliases.has(normalizeTableKey(sourceTable));
+}
+
+function isTrackingTermMarked(input: {
+  tableCode?: string | null;
+  sourceTable?: string | null;
+  termDate?: Date | null;
+  data: Record<string, unknown>;
+}) {
+  if (isTableAlias(input.tableCode, input.sourceTable, PREVENTION_TABLE_ALIASES)) {
+    return true;
+  }
+
+  return normalizeBoolean(input.data[TERM_ENABLED_DATA_KEY]) === true || Boolean(input.termDate);
+}
+
+function enrichTrackingDataForKpis(input: {
+  existingData?: unknown;
+  payloadData?: unknown;
+  moduleId?: string | null;
+  tableCode?: string | null;
+  sourceTable?: string | null;
+  termDate?: Date | null;
+  workflowStage?: number | null;
+  previousWorkflowStage?: number | null;
+}) {
+  const data = {
+    ...getDataRecord(input.existingData),
+    ...getDataRecord(input.payloadData)
+  };
+  const todayKey = todayDateKey();
+
+  if (input.moduleId === LITIGATION_MODULE_ID && isTrackingTermMarked({
+    tableCode: input.tableCode,
+    sourceTable: input.sourceTable,
+    termDate: input.termDate,
+    data
+  }) && !getDateDataValue(data, TERM_MARKED_AT_DATA_KEY)) {
+    data[TERM_MARKED_AT_DATA_KEY] = todayKey;
+  }
+
+  if (
+    input.moduleId === LITIGATION_MODULE_ID
+    && isTableAlias(input.tableCode, input.sourceTable, BRIEF_TABLE_ALIASES)
+  ) {
+    const workflowStage = input.workflowStage ?? 1;
+    const previousWorkflowStage = input.previousWorkflowStage;
+
+    if (workflowStage < BRIEF_PRESENTED_STAGE) {
+      delete data[WRITING_PRESENTED_AT_DATA_KEY];
+      delete data[WRITING_REGISTERED_AT_DATA_KEY];
+    } else {
+      if (
+        (previousWorkflowStage !== undefined && previousWorkflowStage !== null && previousWorkflowStage < BRIEF_PRESENTED_STAGE)
+        || !getDateDataValue(data, WRITING_PRESENTED_AT_DATA_KEY)
+      ) {
+        data[WRITING_PRESENTED_AT_DATA_KEY] = todayKey;
+      }
+
+      if (workflowStage < BRIEF_REGISTERED_STAGE) {
+        delete data[WRITING_REGISTERED_AT_DATA_KEY];
+      } else if (
+        (previousWorkflowStage !== undefined && previousWorkflowStage !== null && previousWorkflowStage < BRIEF_REGISTERED_STAGE)
+        || !getDateDataValue(data, WRITING_REGISTERED_AT_DATA_KEY)
+      ) {
+        data[WRITING_REGISTERED_AT_DATA_KEY] = todayKey;
+      }
+    }
+  }
+
+  return data;
+}
+
+function enrichTermDataForKpis(input: {
+  existingData?: unknown;
+  payloadData?: unknown;
+  existingVerification?: unknown;
+  payloadVerification?: unknown;
+}) {
+  const data = {
+    ...getDataRecord(input.existingData),
+    ...getDataRecord(input.payloadData)
+  };
+  const todayKey = todayDateKey();
+
+  if (!getDateDataValue(data, TERM_MARKED_AT_DATA_KEY)) {
+    data[TERM_MARKED_AT_DATA_KEY] = todayKey;
+  }
+
+  const existingVerification = getStringRecord(input.existingVerification);
+  const payloadVerification = input.payloadVerification === undefined
+    ? undefined
+    : getStringRecord(input.payloadVerification);
+  const nextVerification = payloadVerification ?? existingVerification;
+  const verificationDates = getStringRecord(data[VERIFICATION_DATES_DATA_KEY]);
+  const keys = new Set([...Object.keys(existingVerification), ...Object.keys(nextVerification)]);
+
+  keys.forEach((key) => {
+    const wasVerified = isYesValue(existingVerification[key]);
+    const isVerified = isYesValue(nextVerification[key]);
+    if (isVerified && (!wasVerified || !verificationDates[key])) {
+      verificationDates[key] = todayKey;
+    }
+    if (payloadVerification && !isVerified) {
+      delete verificationDates[key];
+    }
+  });
+
+  data[VERIFICATION_DATES_DATA_KEY] = verificationDates;
+  return data;
+}
+
 function getSourceTable(target: TaskDistributionTargetRecord) {
   return normalizeRequiredText(target.sourceTable) || normalizeRequiredText(target.tableCode);
 }
@@ -237,10 +424,21 @@ export class PrismaTasksRepository implements TasksRepository {
   public async createTrackingRecord(payload: TaskTrackingRecordWriteRecord) {
     const tableCode = normalizeRequiredText(payload.tableCode) || normalizeRequiredText(payload.sourceTable);
     const sourceTable = normalizeRequiredText(payload.sourceTable) || tableCode;
+    const moduleId = normalizeRequiredText(payload.moduleId);
+    const termDate = parseOptionalDateValue(payload.termDate);
+    const workflowStage = payload.workflowStage ?? 1;
+    const data = enrichTrackingDataForKpis({
+      payloadData: payload.data,
+      moduleId,
+      tableCode,
+      sourceTable,
+      termDate,
+      workflowStage
+    });
 
     const record = await this.prisma.taskTrackingRecord.create({
       data: {
-        moduleId: normalizeRequiredText(payload.moduleId),
+        moduleId,
         tableCode,
         sourceTable,
         matterId: normalizeOptionalText(payload.matterId),
@@ -254,13 +452,13 @@ export class PrismaTasksRepository implements TasksRepository {
         eventName: normalizeOptionalText(payload.eventName),
         responsible: normalizeRequiredText(payload.responsible),
         dueDate: parseOptionalDateValue(payload.dueDate),
-        termDate: parseOptionalDateValue(payload.termDate),
+        termDate,
         completedAt: parseOptionalDateValue(payload.completedAt),
         status: payload.status ?? "pendiente",
-        workflowStage: payload.workflowStage ?? 1,
+        workflowStage,
         reportedMonth: normalizeOptionalText(payload.reportedMonth),
         termId: normalizeOptionalText(payload.termId),
-        data: toJsonValue(payload.data) ?? {},
+        data: toJsonValue(data) ?? {},
         deletedAt: parseOptionalDateValue(payload.deletedAt)
       }
     });
@@ -269,6 +467,30 @@ export class PrismaTasksRepository implements TasksRepository {
   }
 
   public async updateTrackingRecord(recordId: string, payload: TaskTrackingRecordWriteRecord) {
+    const existingRecord = await this.prisma.taskTrackingRecord.findUnique({
+      where: { id: recordId }
+    });
+
+    if (!existingRecord) {
+      return null;
+    }
+
+    const nextModuleId = payload.moduleId ?? existingRecord.moduleId;
+    const nextTableCode = payload.tableCode ?? existingRecord.tableCode;
+    const nextSourceTable = payload.sourceTable ?? existingRecord.sourceTable;
+    const nextTermDate = payload.termDate !== undefined ? parseOptionalDateValue(payload.termDate) : existingRecord.termDate;
+    const nextWorkflowStage = payload.workflowStage ?? existingRecord.workflowStage;
+    const nextData = enrichTrackingDataForKpis({
+      existingData: existingRecord.data,
+      payloadData: payload.data,
+      moduleId: nextModuleId,
+      tableCode: nextTableCode,
+      sourceTable: nextSourceTable,
+      termDate: nextTermDate,
+      workflowStage: nextWorkflowStage,
+      previousWorkflowStage: existingRecord.workflowStage
+    });
+
     const record = await this.prisma.taskTrackingRecord.update({
       where: { id: recordId },
       data: {
@@ -292,7 +514,7 @@ export class PrismaTasksRepository implements TasksRepository {
         workflowStage: payload.workflowStage,
         reportedMonth: normalizeOptionalText(payload.reportedMonth),
         termId: normalizeOptionalText(payload.termId),
-        data: toJsonValue(payload.data),
+        data: toJsonValue(nextData),
         deletedAt: parseOptionalDateValue(payload.deletedAt)
       }
     }).catch(() => null);
@@ -366,6 +588,12 @@ export class PrismaTasksRepository implements TasksRepository {
   }
 
   public async createTerm(payload: TaskTermWriteRecord) {
+    const verification = payload.verification ?? {};
+    const data = enrichTermDataForKpis({
+      payloadData: payload.data,
+      payloadVerification: verification
+    });
+
     const record = await this.prisma.taskTerm.create({
       data: {
         moduleId: normalizeRequiredText(payload.moduleId),
@@ -386,8 +614,8 @@ export class PrismaTasksRepository implements TasksRepository {
         status: payload.status ?? "pendiente",
         recurring: payload.recurring ?? false,
         reportedMonth: normalizeOptionalText(payload.reportedMonth),
-        verification: toJsonValue(payload.verification) ?? {},
-        data: toJsonValue(payload.data) ?? {},
+        verification: toJsonValue(verification) ?? {},
+        data: toJsonValue(data) ?? {},
         deletedAt: parseOptionalDateValue(payload.deletedAt)
       }
     });
@@ -396,6 +624,21 @@ export class PrismaTasksRepository implements TasksRepository {
   }
 
   public async updateTerm(termId: string, payload: TaskTermWriteRecord) {
+    const existingTerm = await this.prisma.taskTerm.findUnique({
+      where: { id: termId }
+    });
+
+    if (!existingTerm) {
+      return null;
+    }
+
+    const data = enrichTermDataForKpis({
+      existingData: existingTerm.data,
+      payloadData: payload.data,
+      existingVerification: existingTerm.verification,
+      payloadVerification: payload.verification
+    });
+
     const record = await this.prisma.taskTerm.update({
       where: { id: termId },
       data: {
@@ -418,7 +661,7 @@ export class PrismaTasksRepository implements TasksRepository {
         recurring: payload.recurring,
         reportedMonth: normalizeOptionalText(payload.reportedMonth),
         verification: toJsonValue(payload.verification),
-        data: toJsonValue(payload.data),
+        data: toJsonValue(data),
         deletedAt: parseOptionalDateValue(payload.deletedAt)
       }
     }).catch(() => null);
@@ -495,11 +738,25 @@ export class PrismaTasksRepository implements TasksRepository {
         const tableCode = normalizeRequiredText(target.tableCode) || sourceTable;
         const taskName = normalizeRequiredText(target.taskName) || payload.eventName;
         const targetResponsible = target.responsible === undefined ? payload.responsible : target.responsible;
+        const moduleId = normalizeRequiredText(payload.moduleId);
+        const targetTermDate = parseOptionalDateValue(target.termDate);
+        const targetWorkflowStage = target.workflowStage ?? 1;
+        const trackingData = enrichTrackingDataForKpis({
+          payloadData: {
+            ...(target.data ?? {}),
+            tableLabel: target.tableLabel
+          },
+          moduleId,
+          tableCode,
+          sourceTable,
+          termDate: targetTermDate,
+          workflowStage: targetWorkflowStage
+        });
         targetTables.push(tableCode);
 
         const trackingRecord = await tx.taskTrackingRecord.create({
           data: {
-            moduleId: payload.moduleId,
+            moduleId,
             tableCode,
             sourceTable,
             matterId: normalizeOptionalText(payload.matterId),
@@ -513,14 +770,11 @@ export class PrismaTasksRepository implements TasksRepository {
             eventName: payload.eventName,
             responsible: normalizeRequiredText(targetResponsible),
             dueDate: parseOptionalDateValue(target.dueDate),
-            termDate: parseOptionalDateValue(target.termDate),
+            termDate: targetTermDate,
             status: target.status ?? "pendiente",
-            workflowStage: target.workflowStage ?? 1,
+            workflowStage: targetWorkflowStage,
             reportedMonth: normalizeOptionalText(target.reportedMonth),
-            data: toJsonValue({
-              ...(target.data ?? {}),
-              tableLabel: target.tableLabel
-            }) ?? {}
+            data: toJsonValue(trackingData) ?? {}
           }
         });
 
@@ -531,9 +785,13 @@ export class PrismaTasksRepository implements TasksRepository {
         eventNamesPerTable.push(taskName);
 
         if (target.createTerm) {
+          const termData = enrichTermDataForKpis({
+            payloadData: target.data
+          });
+
           const term = await tx.taskTerm.create({
             data: {
-              moduleId: payload.moduleId,
+              moduleId,
               sourceTable,
               sourceRecordId: trackingRecord.id,
               matterId: normalizeOptionalText(payload.matterId),
@@ -547,10 +805,10 @@ export class PrismaTasksRepository implements TasksRepository {
               pendingTaskLabel: taskName,
               responsible: normalizeRequiredText(targetResponsible),
               dueDate: parseOptionalDateValue(target.dueDate),
-              termDate: parseOptionalDateValue(target.termDate),
+              termDate: targetTermDate,
               status: target.status ?? "pendiente",
               reportedMonth: normalizeOptionalText(target.reportedMonth),
-              data: toJsonValue(target.data) ?? {}
+              data: toJsonValue(termData) ?? {}
             }
           });
 
