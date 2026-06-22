@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpensePayrollEntry } from "@sige/contracts";
+import {
+  deriveEffectivePermissions,
+  type GeneralExpense,
+  type GeneralExpensePayrollEmployeeOption,
+  type GeneralExpensePayrollEntry,
+  type LegacyAccessRole
+} from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -673,6 +679,7 @@ export function GeneralExpensesPage() {
   const now = new Date();
   const expensePatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchSequenceRef = useRef<Record<string, number>>({});
+  const expenseRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const [activeTab, setActiveTab] = useState<ActiveTab>("registro");
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -687,9 +694,21 @@ export function GeneralExpensesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedSummaryDate, setCopiedSummaryDate] = useState("");
   const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState<string | null>(null);
+  const [pendingScrollExpenseId, setPendingScrollExpenseId] = useState<string | null>(null);
 
-  const canRead = hasPermission(user?.permissions, "general-expenses:read") || hasPermission(user?.permissions, "general-expenses:write");
-  const canWrite = hasPermission(user?.permissions, "general-expenses:write");
+  const effectivePermissions = useMemo(() => user ? deriveEffectivePermissions({
+    legacyRole: user.legacyRole as LegacyAccessRole,
+    team: user.team,
+    legacyTeam: user.legacyTeam,
+    secondaryTeam: user.secondaryTeam,
+    secondaryLegacyTeam: user.secondaryLegacyTeam,
+    specificRole: user.specificRole,
+    secondarySpecificRole: user.secondarySpecificRole,
+    permissions: user.permissions,
+    isExternal: user.isExternal
+  }) : [], [user]);
+  const canRead = hasPermission(effectivePermissions, "general-expenses:read") || hasPermission(effectivePermissions, "general-expenses:write");
+  const canWrite = hasPermission(effectivePermissions, "general-expenses:write");
   const canApprove = Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN");
   const canStampPayroll = Boolean(user && isAraceliLozano({
     username: user.username,
@@ -721,7 +740,7 @@ export function GeneralExpensesPage() {
     secondaryLegacyTeam: user.secondaryLegacyTeam,
     specificRole: user.specificRole,
     secondarySpecificRole: user.secondarySpecificRole,
-    permissions: user.permissions
+    permissions: effectivePermissions
   }));
 
   async function loadRecords() {
@@ -797,6 +816,32 @@ export function GeneralExpensesPage() {
   useEffect(() => {
     void loadPayrollEmployeeOptions();
   }, [canRead]);
+
+  useEffect(() => {
+    if (activeTab !== "registro" || !pendingScrollExpenseId) {
+      return;
+    }
+
+    if (!records.some((item) => item.id === pendingScrollExpenseId)) {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const row = expenseRowRefs.current.get(pendingScrollExpenseId);
+      if (!row) {
+        return;
+      }
+
+      row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      const firstEditableField = row.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        "textarea:not(:disabled), input:not([type='checkbox']):not(:disabled), select:not(:disabled)"
+      );
+      firstEditableField?.focus({ preventScroll: true });
+      setPendingScrollExpenseId(null);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [activeTab, pendingScrollExpenseId, records]);
 
   function setDraft(expenseId: string, field: ExpenseDraftField, value: string) {
     setDrafts((current) => ({
@@ -1012,6 +1057,8 @@ export function GeneralExpensesPage() {
         year: selectedYear,
         month: selectedMonth
       });
+      setActiveTab("registro");
+      setPendingScrollExpenseId(created.id);
       setRecords((items) => [...items, created]);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -1888,7 +1935,18 @@ export function GeneralExpensesPage() {
                           const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableMoney(Number(expense.amountMxn || 0));
 
                           return (
-                            <tr key={expense.id} className={rowIncomplete ? "general-expense-row-danger" : undefined}>
+                            <tr
+                              key={expense.id}
+                              ref={(node) => {
+                                if (node) {
+                                  expenseRowRefs.current.set(expense.id, node);
+                                  return;
+                                }
+
+                                expenseRowRefs.current.delete(expense.id);
+                              }}
+                              className={rowIncomplete ? "general-expense-row-danger" : undefined}
+                            >
                               <td className="general-expense-row-index">{index + 1}</td>
                               <td>
                                 <textarea
@@ -1987,7 +2045,7 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => {
                                     const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
                                     const localPatch = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false, emrtReimbursementPending: false }
+                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false }
                                       : { paymentMethod: nextMethod };
                                     void persistExpensePatch(expense.id, localPatch, localPatch);
                                   }}

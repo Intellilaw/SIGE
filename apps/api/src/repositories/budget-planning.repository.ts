@@ -66,6 +66,40 @@ function calculateExpectedIncomeBreakdownFromFinance(records: Array<{
   );
 }
 
+function isFinancePaymentMethodReceived(value?: string | null) {
+  return value === "T" || value === "E_RECEIVED";
+}
+
+function hasPaymentDate(value?: Date | null) {
+  return Boolean(value && !Number.isNaN(value.getTime()));
+}
+
+function calculateReceivedIncomeMxn(record: {
+  paidThisMonthMxn: Prisma.Decimal;
+  payment2Mxn: Prisma.Decimal;
+  payment3Mxn: Prisma.Decimal;
+  paymentDate1?: Date | null;
+  paymentDate2?: Date | null;
+  paymentDate3?: Date | null;
+  paymentMethod?: string | null;
+  paymentMethod2?: string | null;
+  paymentMethod3?: string | null;
+}) {
+  const primaryPaymentMxn =
+    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+      ? Number(record.paidThisMonthMxn || 0)
+      : 0;
+  const payment2Mxn =
+    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+      ? Number(record.payment2Mxn || 0)
+      : 0;
+  const payment3Mxn =
+    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+      ? Number(record.payment3Mxn || 0)
+      : 0;
+  return primaryPaymentMxn + payment2Mxn + payment3Mxn;
+}
+
 function calculateExpectedExpenseFromBreakdown(records: Array<{ amountMxn: Prisma.Decimal }>) {
   return records.reduce((sum, record) => sum + Number(record.amountMxn || 0), 0);
 }
@@ -322,11 +356,7 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
     const expectedIncomeMxn = expectedIncome.total;
     const expectedExpenseMxn = calculateExpectedExpenseFromBreakdown(expectedExpenseBreakdown);
     const actualIncomeMxn = financeRecords.reduce(
-      (sum, record) =>
-        sum +
-        Number(record.paidThisMonthMxn || 0) +
-        Number(record.payment2Mxn || 0) +
-        Number(record.payment3Mxn || 0),
+      (sum, record) => sum + calculateReceivedIncomeMxn(record),
       0
     );
     const actualExpenseMxn = generalExpenses.reduce((sum, expense) => sum + Number(expense.amountMxn || 0), 0);

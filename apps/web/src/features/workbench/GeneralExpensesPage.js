@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { deriveEffectivePermissions } from "@sige/contracts";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
@@ -472,6 +473,7 @@ export function GeneralExpensesPage() {
     const now = new Date();
     const expensePatchSequenceRef = useRef({});
     const payrollPatchSequenceRef = useRef({});
+    const expenseRowRefs = useRef(new Map());
     const [activeTab, setActiveTab] = useState("registro");
     const [selectedYear, setSelectedYear] = useState(now.getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -486,8 +488,20 @@ export function GeneralExpensesPage() {
     const [errorMessage, setErrorMessage] = useState(null);
     const [copiedSummaryDate, setCopiedSummaryDate] = useState("");
     const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState(null);
-    const canRead = hasPermission(user?.permissions, "general-expenses:read") || hasPermission(user?.permissions, "general-expenses:write");
-    const canWrite = hasPermission(user?.permissions, "general-expenses:write");
+    const [pendingScrollExpenseId, setPendingScrollExpenseId] = useState(null);
+    const effectivePermissions = useMemo(() => user ? deriveEffectivePermissions({
+        legacyRole: user.legacyRole,
+        team: user.team,
+        legacyTeam: user.legacyTeam,
+        secondaryTeam: user.secondaryTeam,
+        secondaryLegacyTeam: user.secondaryLegacyTeam,
+        specificRole: user.specificRole,
+        secondarySpecificRole: user.secondarySpecificRole,
+        permissions: user.permissions,
+        isExternal: user.isExternal
+    }) : [], [user]);
+    const canRead = hasPermission(effectivePermissions, "general-expenses:read") || hasPermission(effectivePermissions, "general-expenses:write");
+    const canWrite = hasPermission(effectivePermissions, "general-expenses:write");
     const canApprove = Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN");
     const canStampPayroll = Boolean(user && isAraceliLozano({
         username: user.username,
@@ -519,7 +533,7 @@ export function GeneralExpensesPage() {
         secondaryLegacyTeam: user.secondaryLegacyTeam,
         specificRole: user.specificRole,
         secondarySpecificRole: user.secondarySpecificRole,
-        permissions: user.permissions
+        permissions: effectivePermissions
     }));
     async function loadRecords() {
         if (!canRead) {
@@ -589,6 +603,25 @@ export function GeneralExpensesPage() {
     useEffect(() => {
         void loadPayrollEmployeeOptions();
     }, [canRead]);
+    useEffect(() => {
+        if (activeTab !== "registro" || !pendingScrollExpenseId) {
+            return;
+        }
+        if (!records.some((item) => item.id === pendingScrollExpenseId)) {
+            return;
+        }
+        const animationFrameId = window.requestAnimationFrame(() => {
+            const row = expenseRowRefs.current.get(pendingScrollExpenseId);
+            if (!row) {
+                return;
+            }
+            row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+            const firstEditableField = row.querySelector("textarea:not(:disabled), input:not([type='checkbox']):not(:disabled), select:not(:disabled)");
+            firstEditableField?.focus({ preventScroll: true });
+            setPendingScrollExpenseId(null);
+        });
+        return () => window.cancelAnimationFrame(animationFrameId);
+    }, [activeTab, pendingScrollExpenseId, records]);
     function setDraft(expenseId, field, value) {
         setDrafts((current) => ({
             ...current,
@@ -747,6 +780,8 @@ export function GeneralExpensesPage() {
                 year: selectedYear,
                 month: selectedMonth
             });
+            setActiveTab("registro");
+            setPendingScrollExpenseId(created.id);
             setRecords((items) => [...items, created]);
         }
         catch (error) {
@@ -1060,10 +1095,16 @@ export function GeneralExpensesPage() {
                                                             const vatCheckboxDisabled = !canWrite || expense.approvedByEmrt || expense.paymentMethod !== "Transferencia";
                                                             const rowIncomplete = isRowIncomplete(expense);
                                                             const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableMoney(Number(expense.amountMxn || 0));
-                                                            return (_jsxs("tr", { className: rowIncomplete ? "general-expense-row-danger" : undefined, children: [_jsx("td", { className: "general-expense-row-index", children: index + 1 }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-textarea", value: drafts[expense.id]?.detail ?? expense.detail ?? "", onChange: (event) => setDraft(expense.id, "detail", event.target.value), onBlur: () => void flushDraftField(expense.id, "detail"), rows: 2, disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "text", inputMode: "decimal", value: draftAmount, onChange: (event) => setDraft(expense.id, "amountMxn", formatMoneyDraftValue(event.target.value)), onBlur: () => void flushDraftField(expense.id, "amountMxn"), disabled: !canWrite || expense.approvedByEmrt })] }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-vat-stack", children: [_jsx("div", { className: `general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`, children: ivaAmount !== null ? formatCurrency(ivaAmount) : "-" }), expense.paymentMethod === "Transferencia" ? (_jsxs("label", { className: `general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`, children: [_jsx("input", { type: "checkbox", checked: expense.hasVat, onChange: (event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked }), disabled: vatCheckboxDisabled }), _jsx("span", { children: "Con IVA" })] })) : null] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.countsTowardLimit, onChange: (event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked }), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: `general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`, children: expense.countsTowardLimit ? formatCurrency(runningLimit) : "-" }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.generalExpense, onChange: (event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.expenseWithoutTeam, onChange: (event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), DISTRIBUTION_FIELDS.map((field) => (_jsx("td", { children: _jsxs("div", { className: "general-expense-percent-field", children: [_jsx("input", { className: "general-expense-input general-expense-percent-input", type: "number", min: "0", max: "100", step: "0.01", value: drafts[expense.id]?.[field.key] ?? formatEditableNumber(Number(expense[field.key] || 0)), onChange: (event) => setDraft(expense.id, field.key, event.target.value), onBlur: () => void flushDraftField(expense.id, field.key), disabled: pctDisabled }), _jsx("span", { children: "%" })] }) }, `${expense.id}-${field.key}`))), _jsx("td", { className: `general-expense-percent-sum ${sum === 100 ? "is-valid" : "is-invalid"}`, children: expense.expenseWithoutTeam ? "" : `${sum}%` }), _jsx("td", { children: _jsx("select", { className: "general-expense-input", value: expense.paymentMethod, onChange: (event) => {
+                                                            return (_jsxs("tr", { ref: (node) => {
+                                                                    if (node) {
+                                                                        expenseRowRefs.current.set(expense.id, node);
+                                                                        return;
+                                                                    }
+                                                                    expenseRowRefs.current.delete(expense.id);
+                                                                }, className: rowIncomplete ? "general-expense-row-danger" : undefined, children: [_jsx("td", { className: "general-expense-row-index", children: index + 1 }), _jsx("td", { children: _jsx("textarea", { className: "general-expense-input general-expense-textarea", value: drafts[expense.id]?.detail ?? expense.detail ?? "", onChange: (event) => setDraft(expense.id, "detail", event.target.value), onBlur: () => void flushDraftField(expense.id, "detail"), rows: 2, disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-currency-input", children: [_jsx("span", { "aria-hidden": "true", children: "$" }), _jsx("input", { className: "general-expense-input general-expense-number-input", type: "text", inputMode: "decimal", value: draftAmount, onChange: (event) => setDraft(expense.id, "amountMxn", formatMoneyDraftValue(event.target.value)), onBlur: () => void flushDraftField(expense.id, "amountMxn"), disabled: !canWrite || expense.approvedByEmrt })] }) }), _jsx("td", { children: _jsxs("div", { className: "general-expense-vat-stack", children: [_jsx("div", { className: `general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`, children: ivaAmount !== null ? formatCurrency(ivaAmount) : "-" }), expense.paymentMethod === "Transferencia" ? (_jsxs("label", { className: `general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`, children: [_jsx("input", { type: "checkbox", checked: expense.hasVat, onChange: (event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked }), disabled: vatCheckboxDisabled }), _jsx("span", { children: "Con IVA" })] })) : null] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.countsTowardLimit, onChange: (event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked }), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: `general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`, children: expense.countsTowardLimit ? formatCurrency(runningLimit) : "-" }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.generalExpense, onChange: (event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: expense.expenseWithoutTeam, onChange: (event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked), disabled: !canWrite || expense.approvedByEmrt }) }), DISTRIBUTION_FIELDS.map((field) => (_jsx("td", { children: _jsxs("div", { className: "general-expense-percent-field", children: [_jsx("input", { className: "general-expense-input general-expense-percent-input", type: "number", min: "0", max: "100", step: "0.01", value: drafts[expense.id]?.[field.key] ?? formatEditableNumber(Number(expense[field.key] || 0)), onChange: (event) => setDraft(expense.id, field.key, event.target.value), onBlur: () => void flushDraftField(expense.id, field.key), disabled: pctDisabled }), _jsx("span", { children: "%" })] }) }, `${expense.id}-${field.key}`))), _jsx("td", { className: `general-expense-percent-sum ${sum === 100 ? "is-valid" : "is-invalid"}`, children: expense.expenseWithoutTeam ? "" : `${sum}%` }), _jsx("td", { children: _jsx("select", { className: "general-expense-input", value: expense.paymentMethod, onChange: (event) => {
                                                                                 const nextMethod = event.target.value;
                                                                                 const localPatch = nextMethod === "Efectivo"
-                                                                                    ? { paymentMethod: nextMethod, bank: null, hasVat: false, emrtReimbursementPending: false }
+                                                                                    ? { paymentMethod: nextMethod, bank: null, hasVat: false }
                                                                                     : { paymentMethod: nextMethod };
                                                                                 void persistExpensePatch(expense.id, localPatch, localPatch);
                                                                             }, disabled: !canWrite || expense.approvedByEmrt, children: PAYMENT_METHOD_OPTIONS.map((method) => (_jsx("option", { value: method, children: method }, method))) }) }), _jsx("td", { children: _jsxs("select", { className: "general-expense-input", value: expense.bank ?? "", onChange: (event) => void persistExpensePatch(expense.id, {

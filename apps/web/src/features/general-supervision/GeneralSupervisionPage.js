@@ -11,6 +11,7 @@ const KPI_STATUS_LABELS = {
     "not-configured": "Sin configurar"
 };
 const KPI_ALERT_STATUSES = ["missed", "warning"];
+const NON_EVALUATED_KPI_DAY_UNIT = "dias-no-evaluados";
 function formatDate(value) {
     if (!value) {
         return "-";
@@ -269,33 +270,50 @@ function buildKpiAlertsByUser(periods) {
     return alertsByUser;
 }
 function summarizeDailyStatus(dailyBreakdown) {
-    if (dailyBreakdown.some((day) => day.status === "missed")) {
+    const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
+    if (evaluatedDays.length === 0) {
+        return "not-configured";
+    }
+    if (evaluatedDays.some((day) => day.status === "missed")) {
         return "missed";
     }
-    if (dailyBreakdown.some((day) => day.status === "warning")) {
+    if (evaluatedDays.some((day) => day.status === "warning")) {
         return "warning";
     }
     return "met";
+}
+function isNonEvaluatedKpiDay(day) {
+    return day.status === "not-configured" && day.unit === NON_EVALUATED_KPI_DAY_UNIT;
+}
+function metricHasNonEvaluatedDays(metric) {
+    return metric.dailyBreakdown.some(isNonEvaluatedKpiDay);
 }
 function pluralizeDays(count) {
     return `${count} ${count === 1 ? "dia" : "dias"}`;
 }
 function buildRangeMetric(metric, dailyBreakdown) {
-    const missedDays = dailyBreakdown.filter((day) => day.status === "missed").length;
-    const warningDays = dailyBreakdown.filter((day) => day.status === "warning").length;
-    const metDays = dailyBreakdown.filter((day) => day.status === "met").length;
-    const incidents = dailyBreakdown.flatMap((day) => day.incidents);
+    const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
+    const nonEvaluatedDays = dailyBreakdown.filter(isNonEvaluatedKpiDay);
+    const missedDays = evaluatedDays.filter((day) => day.status === "missed").length;
+    const warningDays = evaluatedDays.filter((day) => day.status === "warning").length;
+    const metDays = evaluatedDays.filter((day) => day.status === "met").length;
+    const incidents = evaluatedDays.flatMap((day) => day.incidents);
+    const actualLabel = [
+        missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
+        warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
+        missedDays === 0 && warningDays === 0 && metDays > 0 ? `${pluralizeDays(metDays)} cumplidos` : "",
+        nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
+    ].filter(Boolean).join(" / ") || "Sin dias evaluados";
     return {
         ...metric,
         status: summarizeDailyStatus(dailyBreakdown),
-        value: dailyBreakdown.reduce((total, day) => total + day.value, 0),
-        target: dailyBreakdown.reduce((total, day) => total + day.target, 0),
-        actualLabel: [
-            missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
-            warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
-            missedDays === 0 && warningDays === 0 ? `${pluralizeDays(metDays)} cumplidos` : ""
+        value: evaluatedDays.reduce((total, day) => total + day.value, 0),
+        target: evaluatedDays.reduce((total, day) => total + day.target, 0),
+        actualLabel,
+        targetLabel: [
+            `${pluralizeDays(evaluatedDays.length)} habiles evaluados`,
+            nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
         ].filter(Boolean).join(" / "),
-        targetLabel: `${pluralizeDays(dailyBreakdown.length)} habiles evaluados`,
         progressPct: metric.progressPct,
         helper: `Periodo evaluado: ${formatDateRange(dailyBreakdown[0]?.date ?? "", dailyBreakdown.at(-1)?.date ?? "")}`,
         incidents,
@@ -354,9 +372,6 @@ function buildKpiPeriodsFromMonthlyOverviews(ranges, overviews) {
 function countKpiAlerts(periods) {
     return periods.reduce((total, period) => total + period.totalMetrics, 0);
 }
-function countUserKpiAlerts(periods) {
-    return periods.reduce((total, period) => total + period.totalMetrics, 0);
-}
 function getMetricPeriod(periods, metricId, periodKey) {
     return periods.find((period) => period.key === periodKey)
         ?.metrics.find((metric) => metric.id === metricId);
@@ -388,14 +403,25 @@ function formatKpiIncident(incident) {
     ].filter(Boolean).join(" / ");
     return [date ? formatShortDate(date) : "", details || incident.reason].filter(Boolean).join(" - ");
 }
-function getKpiWeekIncidentItems(periods, metricId, periodKey) {
+function getKpiWeekIncidentItems(periods, metricId, periodKey, view) {
     const metric = getMetricPeriod(periods, metricId, periodKey);
     const items = new Map();
+    const includedStatuses = view === "met" ? ["met"] : KPI_ALERT_STATUSES;
     metric?.dailyBreakdown
-        .filter((day) => KPI_ALERT_STATUSES.includes(day.status))
+        .filter((day) => includedStatuses.includes(day.status) || isNonEvaluatedKpiDay(day))
         .forEach((day) => {
+        if (isNonEvaluatedKpiDay(day)) {
+            const key = [day.date, metric.id, day.status, day.unit].join(":");
+            items.set(key, {
+                key,
+                status: day.status,
+                label: `${formatShortDate(day.date)} - ${day.actualLabel}`,
+                description: day.helper
+            });
+            return;
+        }
         const dayIncidents = getUniqueKpiIncidents(day.incidents);
-        if (dayIncidents.length > 0) {
+        if (view === "unmet" && dayIncidents.length > 0) {
             dayIncidents.forEach((incident) => {
                 const key = getKpiIncidentKey(incident);
                 items.set(key, {
@@ -417,10 +443,13 @@ function getKpiWeekIncidentItems(periods, metricId, periodKey) {
     });
     return Array.from(items.values()).sort((left, right) => left.key.localeCompare(right.key));
 }
-function getKpiAlertMetrics(periods) {
+function getKpiUnmetMetrics(periods) {
     const metricsById = new Map();
     periods.forEach((period) => {
         period.metrics.forEach((metric) => {
+            if (!KPI_ALERT_STATUSES.includes(metric.status) && !metricHasNonEvaluatedDays(metric)) {
+                return;
+            }
             const current = metricsById.get(metric.id);
             if (!current || period.key === "currentWeek") {
                 metricsById.set(metric.id, { metric, periodKey: period.key });
@@ -431,18 +460,61 @@ function getKpiAlertMetrics(periods) {
         .sort((left, right) => left.metric.label.localeCompare(right.metric.label))
         .map((entry) => entry.metric);
 }
+function getKpiMetMetrics(periods) {
+    const metricsById = new Map();
+    periods.forEach((period) => {
+        period.metrics.forEach((metric) => {
+            if (metric.status !== "met" && !metricHasNonEvaluatedDays(metric)) {
+                return;
+            }
+            const current = metricsById.get(metric.id);
+            if (!current || period.key === "currentWeek") {
+                metricsById.set(metric.id, { metric, periodKey: period.key });
+            }
+        });
+    });
+    return Array.from(metricsById.values())
+        .sort((left, right) => left.metric.label.localeCompare(right.metric.label))
+        .map((entry) => entry.metric);
+}
+function getKpiDetailCountLabel(view, metrics) {
+    const primaryCount = view === "unmet"
+        ? metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status)).length
+        : metrics.filter((metric) => metric.status === "met").length;
+    const nonEvaluatedOnlyCount = metrics.filter((metric) => {
+        const isPrimary = view === "unmet"
+            ? KPI_ALERT_STATUSES.includes(metric.status)
+            : metric.status === "met";
+        return !isPrimary && metricHasNonEvaluatedDays(metric);
+    }).length;
+    const primaryLabel = view === "unmet"
+        ? `${primaryCount} alertas`
+        : `${primaryCount} cumplidos`;
+    return nonEvaluatedOnlyCount > 0
+        ? `${primaryLabel} / ${nonEvaluatedOnlyCount} sin evaluacion`
+        : primaryLabel;
+}
 function TaskUserRow(props) {
     const { user, kpiAlerts, kpiWeekReference, muted = false, saving, onToggleObserved } = props;
     const [showDetail, setShowDetail] = useState(false);
+    const [kpiDetailView, setKpiDetailView] = useState("unmet");
     const canToggle = canToggleUserObservation(user);
     const isObserved = isObservedTaskUser(user);
     const completedThisMonth = getCompletedThisMonth(user);
     const kpiMetDays = getKpiMetDays(user);
     const kpiMissedDays = getKpiMissedDays(user);
-    const kpiAlertCount = countUserKpiAlerts(kpiAlerts);
-    const kpiAlertMetrics = getKpiAlertMetrics(kpiAlerts);
+    const kpiUnmetMetrics = getKpiUnmetMetrics(kpiAlerts);
+    const kpiMetMetrics = getKpiMetMetrics(kpiAlerts);
+    const displayedKpiMetrics = kpiDetailView === "unmet" ? kpiUnmetMetrics : kpiMetMetrics;
+    const displayedKpiCountLabel = getKpiDetailCountLabel(kpiDetailView, displayedKpiMetrics);
+    const detailPeriodTitle = kpiDetailView === "met" ? "Semanas evaluadas" : "Semana actual";
+    const detailPeriodRange = kpiDetailView === "met"
+        ? `${formatDateRange(kpiWeekReference.lastWeek.startDate, kpiWeekReference.lastWeek.endDate)} / ${formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate)}`
+        : formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate);
     const detailId = `supervision-detail-${user.userId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-    return (_jsxs("section", { className: `supervision-task-user-row ${muted ? "is-muted" : ""}`, children: [_jsxs("div", { className: "supervision-task-user-main", children: [_jsx("h4", { children: user.displayName }), _jsx("span", { children: user.shortName ?? user.teamLabel })] }), _jsxs("label", { className: `supervision-observe-toggle ${canToggle ? "" : "is-locked"}`, children: [canToggle ? (_jsx("input", { type: "checkbox", checked: isObserved, disabled: saving, onChange: (event) => onToggleObserved(user.userId, event.currentTarget.checked) })) : null, _jsx("span", { children: canToggle ? "Observar" : "Automatico abajo" })] }), _jsxs("div", { className: "supervision-task-counts", "aria-label": `${user.displayName}: ${formatTaskCount(completedThisMonth)} realizadas este mes, ${formatTaskCount(user.today)} para hoy incluyendo vencidas, ${formatTaskCount(user.overdue)} vencidas, ${kpiMetDays} días KPI cumplidos este mes y ${kpiMissedDays} días KPI incumplidos este mes`, children: [_jsxs("span", { className: "is-total", children: [_jsx("strong", { children: completedThisMonth }), "Realizadas mes"] }), _jsxs("span", { children: [_jsx("strong", { children: user.today }), "Hoy + vencidas"] }), _jsxs("span", { className: "is-overdue", children: [_jsx("strong", { children: user.overdue }), "Vencidas"] }), _jsxs("span", { className: "is-kpi-met", children: [_jsx("strong", { children: kpiMetDays }), "D\u00EDas KPI cumplidos este mes"] }), _jsxs("span", { className: "is-kpi-missed", children: [_jsx("strong", { children: kpiMissedDays }), "D\u00EDas KPI incumplidos este mes"] })] }), _jsxs("div", { className: "supervision-task-link-list", children: [user.dashboardLinks.length > 0 ? (user.dashboardLinks.map((link) => (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: link.path, children: user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label }, link.moduleId)))) : (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: "/app/kpis", children: "Ir a KPI's" })), _jsx("button", { "aria-controls": detailId, "aria-expanded": showDetail, className: "secondary-button supervision-task-detail-button", onClick: () => setShowDetail((current) => !current), type: "button", children: showDetail ? "Ocultar detalle" : "Ver detalle" })] }), showDetail ? (_jsxs("div", { className: "supervision-task-user-detail", id: detailId, children: [user.dashboardLinks.length > 0 ? (_jsx("div", { className: "supervision-task-detail-list", children: user.dashboardLinks.map((link) => (_jsx("div", { className: "supervision-task-detail-row", children: _jsx("div", { children: _jsx("strong", { children: link.label }) }) }, link.moduleId))) })) : (_jsx(EmptyState, { children: "Sin dashboards asociados para esta persona." })), _jsxs("section", { className: "supervision-task-kpi-card", "aria-label": `Key Performance Indicators de ${user.displayName}`, children: [_jsxs("header", { className: "supervision-task-kpi-card-head", children: [_jsx("div", { children: _jsx("strong", { children: "Key Performance Indicators" }) }), _jsxs("span", { className: "supervision-task-kpi-alert-count", children: [kpiAlertCount, " alertas"] })] }), kpiAlertMetrics.length > 0 ? (_jsxs("section", { className: "supervision-task-kpi-detail-period", children: [_jsxs("header", { children: [_jsx("strong", { children: "Semana actual" }), _jsxs("span", { children: [formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate), " - ", kpiAlertCount, " alertas"] })] }), _jsx("div", { className: "supervision-kpi-list", children: kpiAlertMetrics.map((metric) => (_jsx(KpiMetricRow, { metric: metric, periods: kpiAlerts, weekReference: kpiWeekReference }, metric.id))) })] })) : (_jsx(EmptyState, { children: "Sin KPI's no cumplidos para esta persona." }))] })] })) : null] }));
+    return (_jsxs("section", { className: `supervision-task-user-row ${muted ? "is-muted" : ""}`, children: [_jsxs("div", { className: "supervision-task-user-main", children: [_jsx("h4", { children: user.displayName }), _jsx("span", { children: user.shortName ?? user.teamLabel })] }), _jsxs("label", { className: `supervision-observe-toggle ${canToggle ? "" : "is-locked"}`, children: [canToggle ? (_jsx("input", { type: "checkbox", checked: isObserved, disabled: saving, onChange: (event) => onToggleObserved(user.userId, event.currentTarget.checked) })) : null, _jsx("span", { children: canToggle ? "Observar" : "Automatico abajo" })] }), _jsxs("div", { className: "supervision-task-counts", "aria-label": `${user.displayName}: ${formatTaskCount(completedThisMonth)} realizadas este mes, ${formatTaskCount(user.today)} para hoy incluyendo vencidas, ${formatTaskCount(user.overdue)} vencidas, ${kpiMetDays} días KPI cumplidos este mes y ${kpiMissedDays} días KPI incumplidos este mes`, children: [_jsxs("span", { className: "is-total", children: [_jsx("strong", { children: completedThisMonth }), "Realizadas mes"] }), _jsxs("span", { children: [_jsx("strong", { children: user.today }), "Hoy + vencidas"] }), _jsxs("span", { className: "is-overdue", children: [_jsx("strong", { children: user.overdue }), "Vencidas"] }), _jsxs("span", { className: "is-kpi-met", children: [_jsx("strong", { children: kpiMetDays }), "D\u00EDas KPI cumplidos este mes"] }), _jsxs("span", { className: "is-kpi-missed", children: [_jsx("strong", { children: kpiMissedDays }), "D\u00EDas KPI incumplidos este mes"] })] }), _jsxs("div", { className: "supervision-task-link-list", children: [user.dashboardLinks.length > 0 ? (user.dashboardLinks.map((link) => (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: link.path, children: user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label }, link.moduleId)))) : (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: "/app/kpis", children: "Ir a KPI's" })), _jsx("button", { "aria-controls": detailId, "aria-expanded": showDetail, className: "secondary-button supervision-task-detail-button", onClick: () => setShowDetail((current) => !current), type: "button", children: showDetail ? "Ocultar detalle" : "Ver detalle" })] }), showDetail ? (_jsxs("div", { className: "supervision-task-user-detail", id: detailId, children: [user.dashboardLinks.length > 0 ? (_jsx("div", { className: "supervision-task-detail-list", children: user.dashboardLinks.map((link) => (_jsx("div", { className: "supervision-task-detail-row", children: _jsx("div", { children: _jsx("strong", { children: link.label }) }) }, link.moduleId))) })) : (_jsx(EmptyState, { children: "Sin dashboards asociados para esta persona." })), _jsxs("section", { className: "supervision-task-kpi-card", "aria-label": `Key Performance Indicators de ${user.displayName}`, children: [_jsxs("header", { className: "supervision-task-kpi-card-head", children: [_jsx("div", { children: _jsx("strong", { children: "Key Performance Indicators" }) }), _jsxs("div", { className: "supervision-task-kpi-card-actions", children: [_jsxs("div", { className: "supervision-kpi-view-toggle", role: "group", "aria-label": "Vista de KPI", children: [_jsx("button", { type: "button", className: kpiDetailView === "unmet" ? "is-active" : "", "aria-pressed": kpiDetailView === "unmet", onClick: () => setKpiDetailView("unmet"), children: "Ver KPI's incumplidos" }), _jsx("button", { type: "button", className: kpiDetailView === "met" ? "is-active" : "", "aria-pressed": kpiDetailView === "met", onClick: () => setKpiDetailView("met"), children: "Ver KPI's cumplidos" })] }), _jsx("span", { className: `supervision-task-kpi-alert-count ${kpiDetailView === "met" ? "is-met" : ""}`, children: displayedKpiCountLabel })] })] }), displayedKpiMetrics.length > 0 ? (_jsxs("section", { className: "supervision-task-kpi-detail-period", children: [_jsxs("header", { children: [_jsx("strong", { children: detailPeriodTitle }), _jsxs("span", { children: [detailPeriodRange, " - ", displayedKpiCountLabel] })] }), _jsx("div", { className: "supervision-kpi-list", children: displayedKpiMetrics.map((metric) => (_jsx(KpiMetricRow, { metric: metric, periods: kpiAlerts, weekReference: kpiWeekReference, view: kpiDetailView }, metric.id))) })] })) : (_jsx(EmptyState, { children: kpiDetailView === "unmet"
+                                    ? "Sin KPI's incumplidos para esta persona."
+                                    : "Sin KPI's cumplidos para esta persona en la semana actual o pasada." }))] })] })) : null] }));
 }
 function TaskOverviewPanel(props) {
     const { overview, kpiAlertsByUser, kpiWeekReference, savingObservedUserId, onToggleObserved } = props;
@@ -457,13 +529,17 @@ function TaskOverviewPanel(props) {
 function TermBucketPanel({ bucket }) {
     return (_jsxs("article", { className: "supervision-bucket-card", children: [_jsxs("header", { className: "supervision-bucket-head", children: [_jsxs("div", { children: [_jsx("h3", { children: bucket.label }), _jsx("span", { children: formatDateRange(bucket.startDate, bucket.endDate) })] }), _jsx("strong", { children: bucket.total })] }), _jsx("div", { className: "supervision-group-list", children: bucket.teams.length === 0 ? (_jsx(EmptyState, { children: "Sin terminos en esta ventana." })) : (bucket.teams.map((team) => (_jsxs("section", { className: "supervision-user-group", children: [_jsxs("div", { className: "supervision-group-head", children: [_jsxs("div", { children: [_jsx("h4", { children: team.teamLabel }), _jsxs("span", { children: [team.total, " terminos"] })] }), _jsx("strong", { children: team.total })] }), _jsx("div", { className: "supervision-row-list", children: team.terms.map((term) => (_jsxs(Link, { className: "supervision-list-row is-term", to: term.originPath, children: [_jsxs("div", { children: [_jsx("strong", { children: term.termLabel }), _jsx(EntityMeta, { clientName: term.clientName, subject: term.subject, sourceLabel: term.sourceLabel }), _jsx("small", { children: term.responsible || "Sin responsable" })] }), _jsx("span", { children: formatShortDate(term.termDate) })] }, term.id))) })] }, team.moduleId)))) })] }));
 }
-function KpiMetricRow({ metric, periods, weekReference }) {
-    const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek");
-    const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek");
-    return (_jsxs("section", { className: `supervision-kpi-metric is-${metric.status}`, children: [_jsxs("div", { className: "supervision-kpi-metric-head", children: [_jsx("strong", { className: "supervision-kpi-metric-title", children: metric.label }), _jsx("span", { className: `kpis-status-badge is-${metric.status}`, children: KPI_STATUS_LABELS[metric.status] })] }), _jsx("div", { className: "supervision-kpi-values", children: _jsx("span", { children: metric.actualLabel }) }), _jsx("div", { className: "kpis-progress-track", "aria-label": `Avance ${metric.progressPct}%`, children: _jsx("span", { style: { width: `${metric.progressPct}%` } }) }), metric.incidents.length > 0 ? (_jsxs("small", { children: [metric.incidents.length, " incidencias detectadas"] })) : (_jsx("small", { children: metric.helper })), _jsxs("div", { className: "supervision-kpi-week-reference", children: [_jsx(KpiWeekIncidents, { incidents: currentWeekIncidents, label: "Semana actual", startDate: weekReference.currentWeek.startDate, endDate: weekReference.currentWeek.endDate }), _jsx(KpiWeekIncidents, { incidents: lastWeekIncidents, label: "Semana pasada", startDate: weekReference.lastWeek.startDate, endDate: weekReference.lastWeek.endDate })] })] }));
+function KpiMetricRow({ metric, periods, weekReference, view }) {
+    const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek", view);
+    const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek", view);
+    const emptyLabel = view === "met" ? "Sin KPI's cumplidos registrados." : "Sin incidencias registradas.";
+    const statusLabel = metric.status === "not-configured" && metricHasNonEvaluatedDays(metric)
+        ? "No evaluado"
+        : KPI_STATUS_LABELS[metric.status];
+    return (_jsxs("section", { className: `supervision-kpi-metric is-${metric.status}`, children: [_jsxs("div", { className: "supervision-kpi-metric-head", children: [_jsx("strong", { className: "supervision-kpi-metric-title", children: metric.label }), _jsx("span", { className: `kpis-status-badge is-${metric.status}`, children: statusLabel })] }), _jsx("div", { className: "supervision-kpi-values", children: _jsx("span", { children: metric.actualLabel }) }), _jsx("div", { className: "kpis-progress-track", "aria-label": `Avance ${metric.progressPct}%`, children: _jsx("span", { style: { width: `${metric.progressPct}%` } }) }), metric.incidents.length > 0 ? (_jsxs("small", { children: [metric.incidents.length, " incidencias detectadas"] })) : (_jsx("small", { children: metric.helper })), _jsxs("div", { className: "supervision-kpi-week-reference", children: [_jsx(KpiWeekIncidents, { incidents: currentWeekIncidents, label: "Semana actual", startDate: weekReference.currentWeek.startDate, endDate: weekReference.currentWeek.endDate, emptyLabel: emptyLabel }), _jsx(KpiWeekIncidents, { incidents: lastWeekIncidents, label: "Semana pasada", startDate: weekReference.lastWeek.startDate, endDate: weekReference.lastWeek.endDate, emptyLabel: emptyLabel })] })] }));
 }
 function KpiWeekIncidents(props) {
-    return (_jsxs("section", { className: "supervision-kpi-week-incident-group", children: [_jsxs("strong", { children: [props.label, " (", formatCompactDateRange(props.startDate, props.endDate), "):"] }), props.incidents.length > 0 ? (_jsx("ul", { children: props.incidents.map((incident) => (_jsxs("li", { className: `is-${incident.status}`, children: [_jsx("span", { children: incident.label }), incident.description ? _jsx("small", { children: incident.description }) : null] }, incident.key))) })) : (_jsx("span", { children: "Sin incidencias registradas." }))] }));
+    return (_jsxs("section", { className: "supervision-kpi-week-incident-group", children: [_jsxs("strong", { children: [props.label, " (", formatCompactDateRange(props.startDate, props.endDate), "):"] }), props.incidents.length > 0 ? (_jsx("ul", { children: props.incidents.map((incident) => (_jsxs("li", { className: `is-${incident.status}`, children: [_jsx("span", { children: incident.label }), incident.description ? _jsx("small", { children: incident.description }) : null] }, incident.key))) })) : (_jsx("span", { children: props.emptyLabel }))] }));
 }
 export function GeneralSupervisionPage() {
     const { user } = useAuth();

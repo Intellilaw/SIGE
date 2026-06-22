@@ -41,6 +41,9 @@ type FinanceRecordPatchPayload = {
   paymentDate1?: string | null;
   paymentDate2?: string | null;
   paymentDate3?: string | null;
+  paymentMethod?: FinanceRecord["paymentMethod"];
+  paymentMethod2?: FinanceRecord["paymentMethod2"];
+  paymentMethod3?: FinanceRecord["paymentMethod3"];
   expenseNotes1?: string | null;
   expenseNotes2?: string | null;
   expenseNotes3?: string | null;
@@ -67,8 +70,11 @@ type CopyResult = {
   copied: number;
 };
 
+type FinancePaymentMethodField = "paymentMethod" | "paymentMethod2" | "paymentMethod3";
+
 const MONTHLY_COLUMN_WIDTHS = [
   "56px",
+  "64px",
   "120px",
   "240px",
   "140px",
@@ -82,6 +88,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "280px",
   "180px",
   "180px",
+  "170px",
   "160px",
   "150px",
   "150px",
@@ -116,6 +123,13 @@ const MONTHLY_COLUMN_WIDTHS = [
   "320px",
   "110px"
 ] as const;
+
+const PAYMENT_METHOD_OPTIONS: Array<{ value: FinanceRecord["paymentMethod"]; label: string }> = [
+  { value: "blank", label: "" },
+  { value: "T", label: "T" },
+  { value: "E_RECEIVED", label: "E recibido" },
+  { value: "E_PENDING", label: "E pendiente" }
+];
 
 const ACTIVE_COLUMN_WIDTHS = [
   "120px",
@@ -409,6 +423,10 @@ function isSalesTeamUser(user?: {
     normalizedAssignments.includes("ventas");
 }
 
+function isEmrtUser(user?: { shortName?: string; username?: string } | null) {
+  return [user?.shortName, user?.username].some((value) => normalizeComparableText(value) === "emrt");
+}
+
 function getDefaultPercentages(team?: FinanceRecord["responsibleTeam"] | null) {
   return {
     pctLitigation: team === "LITIGATION" ? 100 : 0,
@@ -419,8 +437,46 @@ function getDefaultPercentages(team?: FinanceRecord["responsibleTeam"] | null) {
   };
 }
 
+function isFinancePaymentMethodReceived(value?: FinanceRecord["paymentMethod"] | null) {
+  return value === "T" || value === "E_RECEIVED";
+}
+
+function hasPaymentDate(value?: string | null) {
+  return Boolean(toDateInput(value));
+}
+
+function getReceivedPaymentsMxn(
+  record: Pick<
+    FinanceRecord,
+    | "paidThisMonthMxn"
+    | "payment2Mxn"
+    | "payment3Mxn"
+    | "paymentDate1"
+    | "paymentDate2"
+    | "paymentDate3"
+    | "paymentMethod"
+    | "paymentMethod2"
+    | "paymentMethod3"
+  >
+) {
+  const payment1Mxn =
+    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+      ? record.paidThisMonthMxn
+      : 0;
+  const payment2Mxn =
+    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+      ? record.payment2Mxn
+      : 0;
+  const payment3Mxn =
+    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+      ? record.payment3Mxn
+      : 0;
+
+  return payment1Mxn + payment2Mxn + payment3Mxn;
+}
+
 function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
-  const totalPaidMxn = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+  const totalPaidMxn = getReceivedPaymentsMxn(record);
   const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
   const netFeesMxn = totalPaidMxn - totalExpensesMxn;
   const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
@@ -583,13 +639,14 @@ export function FinancesPage() {
   const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
   const isSalesMonthlyViewer = isSalesTeamUser(user) && !canWriteFinances && !isSuperadmin;
   const canDeleteFinanceRecords = isSuperadmin || canWriteFinances;
+  const canSelectReceivedCash = isEmrtUser(user);
   const pageRef = useRef<HTMLElement | null>(null);
   const tabsPanelRef = useRef<HTMLElement | null>(null);
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
-  const [activeTab, setActiveTab] = useState<FinanceTab>("active-matters");
+  const [activeTab, setActiveTab] = useState<FinanceTab>("monthly-view");
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [records, setRecords] = useState<FinanceRecord[]>([]);
@@ -1119,7 +1176,20 @@ export function FinancesPage() {
 
     try {
       const updated = await apiPatch<FinanceRecord>(`/finances/records/${recordId}`, patch);
-      setRecords((current) => current.map((record) => (record.id === recordId ? updated : record)));
+      setRecords((current) => current.map((record) => {
+        if (record.id !== recordId) {
+          return record;
+        }
+
+        const nextRecord = { ...record, ...updated };
+        (["paymentMethod", "paymentMethod2", "paymentMethod3"] as const).forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(patch, field) && !Object.prototype.hasOwnProperty.call(updated, field)) {
+            nextRecord[field] = patch[field] ?? record[field];
+          }
+        });
+
+        return nextRecord;
+      }));
     } catch (caughtError) {
       setError(toErrorMessage(caughtError));
     }
@@ -1385,6 +1455,7 @@ export function FinancesPage() {
       <thead>
         <tr>
           <th><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllRecords} /></th>
+          <th className="finance-row-index">No.</th>
           <th>No. Cliente</th>
           <th>Cliente</th>
           <th>No. Cotizacion</th>
@@ -1398,6 +1469,7 @@ export function FinancesPage() {
           <th>Detalle Fecha</th>
           <th>Pagado este mes</th>
           <th>Fecha Pago Real</th>
+          <th>Método de pago</th>
           <th>Adeudado hoy</th>
           <th>Alta probabilidad de cobro</th>
           <th>Baja probabilidad de cobro</th>
@@ -1435,6 +1507,35 @@ export function FinancesPage() {
       </thead>
     );
 
+    const renderPaymentMethodSelect = (
+      record: FinanceRecord,
+      field: FinancePaymentMethodField,
+      paymentDate?: string | null
+    ) => {
+      if (!hasPaymentDate(paymentDate)) {
+        return <div aria-hidden="true" className="finance-payment-method-placeholder" />;
+      }
+
+      return (
+        <select
+          className="finance-input"
+          value={record[field] ?? "blank"}
+          onChange={(event) => {
+            const paymentMethod = event.target.value as FinanceRecord[FinancePaymentMethodField];
+            const patch = { [field]: paymentMethod } as FinanceRecordPatchPayload;
+            updateRecordLocal(record.id, patch);
+            void persistRecordPatch(record.id, patch);
+          }}
+        >
+          {PAYMENT_METHOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value} disabled={option.value === "E_RECEIVED" && !canSelectReceivedCash}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      );
+    };
+
     return (
       <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances}>
         <div className="finance-table-shell finance-table-shell-sticky">
@@ -1446,7 +1547,7 @@ export function FinancesPage() {
               {renderMonthlyColGroup()}
               {renderMonthlyHeader()}
               <tbody>
-            {filteredRecords.map((record) => {
+            {filteredRecords.map((record, index) => {
               const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
               const isSelected = selectedIds.has(record.id);
               const rowClassName = `${shouldHighlight ? "finance-row-danger" : ""} ${isSelected ? "finance-row-selected" : ""}`.trim();
@@ -1454,6 +1555,7 @@ export function FinancesPage() {
               return (
                 <tr className={rowClassName} key={record.id} title={reason}>
                   <td className="finance-cell-checkbox"><input type="checkbox" checked={isSelected} onChange={() => toggleRecordSelection(record.id)} /></td>
+                  <td className="finance-row-index">{index + 1}</td>
                   <td><input className="finance-input finance-input-readonly" value={effectiveClientNumber} readOnly /></td>
                   <td><input className="finance-input finance-input-readonly" value={record.clientName} readOnly /></td>
                   <td><input className="finance-input finance-input-readonly" value={record.quoteNumber ?? ""} readOnly /></td>
@@ -1497,6 +1599,13 @@ export function FinancesPage() {
                       <input className="finance-input" type="date" value={toDateInput(record.paymentDate1)} onChange={(event) => updateRecordLocal(record.id, { paymentDate1: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate1: event.target.value || null })} />
                       <input className="finance-input" type="date" value={toDateInput(record.paymentDate2)} onChange={(event) => updateRecordLocal(record.id, { paymentDate2: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate2: event.target.value || null })} />
                       <input className="finance-input" type="date" value={toDateInput(record.paymentDate3)} onChange={(event) => updateRecordLocal(record.id, { paymentDate3: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate3: event.target.value || null })} />
+                    </div>
+                  </td>
+                  <td>
+                    <div className="finance-stack">
+                      {renderPaymentMethodSelect(record, "paymentMethod", record.paymentDate1)}
+                      {renderPaymentMethodSelect(record, "paymentMethod2", record.paymentDate2)}
+                      {renderPaymentMethodSelect(record, "paymentMethod3", record.paymentDate3)}
                     </div>
                   </td>
                   <td><CurrencyInput className={stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""} value={stats.dueTodayMxn} readOnly /></td>
@@ -1562,17 +1671,18 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={47}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={49}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
             <tr className="finance-total-row">
-              <td colSpan={7}>Totales</td>
+              <td colSpan={8}>Totales</td>
               <td>{formatCurrency(totals.totalMatterMxn)}</td>
               <td />
               <td>{formatCurrency(totals.conceptFeesMxn)}</td>
               <td colSpan={2} />
               <td>{formatCurrency(totals.totalPaidMxn)}</td>
+              <td />
               <td />
               <td>{formatCurrency(totals.dueTodayMxn)}</td>
               <td />

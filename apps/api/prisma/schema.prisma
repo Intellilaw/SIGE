@@ -55,6 +55,7 @@ model Organization {
   userTeams                        UserTeam[]
   systemModuleSettings             SystemModuleSetting[]
   generalSupervisionObservedUsers  GeneralSupervisionObservedUser[]
+  kpiDailySnapshots                KpiDailySnapshot[]
   auditLogs                        AuditLog[]
 
   @@index([isActive, name])
@@ -821,6 +822,9 @@ model FinanceRecord {
   paymentDate1               DateTime?
   paymentDate2               DateTime?
   paymentDate3               DateTime?
+  paymentMethod              String       @default("blank")
+  paymentMethod2             String       @default("blank")
+  paymentMethod3             String       @default("blank")
   expenseNotes1              String?
   expenseNotes2              String?
   expenseNotes3              String?
@@ -1100,6 +1104,30 @@ model Holiday {
   @@unique([organizationId, authorityShortName, date])
   @@index([organizationId, date])
   @@index([organizationId, authorityShortName, date])
+}
+
+model KpiDailySnapshot {
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  userKey        String
+  metricId       String
+  snapshotDate   DateTime     @db.Date
+  status         String
+  value          Int          @default(0)
+  target         Int          @default(0)
+  unit           String
+  actualLabel    String
+  targetLabel    String
+  helper         String?
+  incidents      Json         @default("[]")
+  sourceData     Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userKey, metricId, snapshotDate])
+  @@index([organizationId, userKey, snapshotDate])
+  @@index([organizationId, metricId, snapshotDate])
 }
 
 model AuditLog {

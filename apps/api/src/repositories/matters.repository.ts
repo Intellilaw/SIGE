@@ -47,7 +47,8 @@ function normalizeIdentifier(value?: string | null) {
 }
 
 function normalizeHolidayAuthority(value?: string | null) {
-  const normalized = normalizeOptionalText(value);
+  const normalizedValue = normalizeOptionalText(value);
+  const normalized = normalizedValue === "PJCDMX" ? "TSJCDMX" : normalizedValue;
   if (!normalized) {
     return null;
   }

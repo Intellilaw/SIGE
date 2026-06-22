@@ -1,8 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { ExternalContract, TaskModuleDefinition, TaskTerm, TaskTrackingRecord } from "@sige/contracts";
+import type {
+  Client,
+  ExternalContract,
+  Matter,
+  TaskDistributionHistory,
+  TaskModuleDefinition,
+  TaskTerm,
+  TaskTrackingRecord
+} from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
+import {
+  buildExecutionTermTaskMap,
+  buildExecutionTrackingRecordTaskMap,
+  collectExecutionHolidayFetchPlan,
+  evaluateExecutionMatterRow,
+  fetchExecutionHolidayDateKeysByAuthority,
+  getEffectiveClientNumber,
+  getExecutionMatterTasks,
+  mergeExecutionTaskMaps,
+  serializeExecutionHolidayFetchPlan,
+  sortActiveExecutionMatters,
+  type HolidayDateKeysByAuthority
+} from "../execution/execution-row-utils";
 import { externalContractMilestoneKindLabel, getAllExternalContractMilestones } from "../modules/external-contract-milestones";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID, type TaskDashboardMember } from "./task-dashboard-config";
 import {
@@ -10,6 +31,7 @@ import {
   findTaskModuleDescriptorBySlug
 } from "./task-module-descriptors";
 import {
+  buildDistributionHistoryTaskNameMap,
   getEffectiveTrackingResponsible,
   getLitigationWritingFollowUpTaskLabel,
   hasValidTrackingResponsible,
@@ -34,6 +56,8 @@ interface DashboardRow {
   originLabel: string;
   originPath: string;
   actionLabel: string;
+  secondaryActionLabel?: string;
+  secondaryActionPath?: string;
   highlighted: boolean;
 }
 
@@ -49,6 +73,7 @@ const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: str
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const SETTLEMENTS_MODULE_ID = "settlements";
+const LITIGATION_MODULE_ID = "litigation";
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
 const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
@@ -470,6 +495,10 @@ export function TasksTeamPage() {
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [externalContracts, setExternalContracts] = useState<ExternalContract[]>([]);
+  const [executionMatters, setExecutionMatters] = useState<Matter[]>([]);
+  const [executionClients, setExecutionClients] = useState<Client[]>([]);
+  const [executionDistributionHistory, setExecutionDistributionHistory] = useState<TaskDistributionHistory[]>([]);
+  const [executionHolidayDateKeysByAuthority, setExecutionHolidayDateKeysByAuthority] = useState<HolidayDateKeysByAuthority>({});
   const [loading, setLoading] = useState(true);
   const [expandedView, setExpandedView] = useState<{ memberId: string; timeframe: DashboardTimeframe } | null>(null);
 
@@ -527,6 +556,10 @@ export function TasksTeamPage() {
       setTrackingRecords([]);
       setTerms([]);
       setExternalContracts([]);
+      setExecutionMatters([]);
+      setExecutionClients([]);
+      setExecutionDistributionHistory([]);
+      setExecutionHolidayDateKeysByAuthority({});
       setLoading(false);
       return;
     }
@@ -537,18 +570,48 @@ export function TasksTeamPage() {
       setLoading(true);
 
       try {
+        const shouldLoadExecutionMissingRows = currentModule.moduleId === LITIGATION_MODULE_ID;
         const externalContractsPromise = currentModule.moduleId === SETTLEMENTS_MODULE_ID
           ? apiGet<ExternalContract[]>("/external-contracts").catch(() => [])
           : Promise.resolve<ExternalContract[]>([]);
-        const [loadedTracking, loadedTerms, loadedExternalContracts] = await Promise.all([
+        const executionMattersPromise = shouldLoadExecutionMissingRows
+          ? apiGet<Matter[]>("/matters").catch(() => [])
+          : Promise.resolve<Matter[]>([]);
+        const executionClientsPromise = shouldLoadExecutionMissingRows
+          ? apiGet<Client[]>("/clients").catch(() => [])
+          : Promise.resolve<Client[]>([]);
+        const executionDistributionHistoryPromise = shouldLoadExecutionMissingRows
+          ? apiGet<TaskDistributionHistory[]>(`/tasks/distributions?moduleId=${currentModule.moduleId}`).catch(() => [])
+          : Promise.resolve<TaskDistributionHistory[]>([]);
+        const [
+          loadedTracking,
+          loadedTerms,
+          loadedExternalContracts,
+          loadedExecutionMatters,
+          loadedExecutionClients,
+          loadedExecutionDistributionHistory
+        ] = await Promise.all([
           apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
           apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`),
-          externalContractsPromise
+          externalContractsPromise,
+          executionMattersPromise,
+          executionClientsPromise,
+          executionDistributionHistoryPromise
         ]);
 
         setTrackingRecords(loadedTracking);
         setTerms(loadedTerms);
         setExternalContracts(loadedExternalContracts);
+        setExecutionClients(loadedExecutionClients);
+        setExecutionMatters(
+          shouldLoadExecutionMissingRows
+            ? sortActiveExecutionMatters(
+              loadedExecutionMatters.filter((matter) => matter.responsibleTeam === currentModule.team),
+              loadedExecutionClients
+            )
+            : []
+        );
+        setExecutionDistributionHistory(loadedExecutionDistributionHistory);
       } finally {
         setLoading(false);
       }
@@ -594,6 +657,64 @@ export function TasksTeamPage() {
 
     return { byId, bySourceRecordId };
   }, [terms]);
+
+  const executionTrackLabels = useMemo(
+    () => new Map(module?.definition.tracks.map((track) => [track.id, track.label]) ?? []),
+    [module]
+  );
+  const executionSourcePrefix = module?.shortLabel ?? "Ejecucion";
+  const executionTaskNamesByRecordId = useMemo(
+    () => buildDistributionHistoryTaskNameMap(executionDistributionHistory),
+    [executionDistributionHistory]
+  );
+  const activeExecutionTaskMap = useMemo(
+    () => mergeExecutionTaskMaps(
+      buildExecutionTrackingRecordTaskMap(
+        trackingRecords,
+        executionTrackLabels,
+        executionSourcePrefix,
+        executionTaskNamesByRecordId
+      ),
+      buildExecutionTermTaskMap(terms, executionSourcePrefix)
+    ),
+    [executionSourcePrefix, executionTaskNamesByRecordId, executionTrackLabels, terms, trackingRecords]
+  );
+  const executionHolidayFetchPlan = useMemo(
+    () => collectExecutionHolidayFetchPlan(executionMatters, activeExecutionTaskMap),
+    [activeExecutionTaskMap, executionMatters]
+  );
+  const executionHolidayFetchSignature = useMemo(
+    () => serializeExecutionHolidayFetchPlan(executionHolidayFetchPlan),
+    [executionHolidayFetchPlan]
+  );
+
+  useEffect(() => {
+    if (module?.moduleId !== LITIGATION_MODULE_ID || !executionHolidayFetchSignature) {
+      setExecutionHolidayDateKeysByAuthority({});
+      return;
+    }
+
+    let active = true;
+
+    async function loadExecutionHolidayDates() {
+      try {
+        const dateKeys = await fetchExecutionHolidayDateKeysByAuthority(executionHolidayFetchPlan);
+        if (active) {
+          setExecutionHolidayDateKeysByAuthority(dateKeys);
+        }
+      } catch {
+        if (active) {
+          setExecutionHolidayDateKeysByAuthority({});
+        }
+      }
+    }
+
+    void loadExecutionHolidayDates();
+
+    return () => {
+      active = false;
+    };
+  }, [executionHolidayFetchPlan, executionHolidayFetchSignature, module?.moduleId]);
 
   const externalContractMilestones = useMemo(
     () => module?.moduleId === SETTLEMENTS_MODULE_ID ? getAllExternalContractMilestones(externalContracts) : [],
@@ -727,10 +848,68 @@ export function TasksTeamPage() {
       .filter((row) => belongsToTimeframe({ state: "open", date: row.displayDate }, timeframe));
   }
 
+  function buildExecutionMissingRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
+    if (
+      module?.moduleId !== LITIGATION_MODULE_ID ||
+      !legacyConfig ||
+      timeframe !== "hoy" ||
+      member.id !== LITIGATION_COLLABORATOR_MEMBER_ID
+    ) {
+      return [];
+    }
+
+    const today = getLocalDateInput();
+
+    return executionMatters.flatMap((matter, index) => {
+      const clientNumber = getEffectiveClientNumber(matter, executionClients);
+      const matterTasks = getExecutionMatterTasks(matter, activeExecutionTaskMap);
+      const validation = evaluateExecutionMatterRow(
+        matter,
+        clientNumber,
+        matterTasks,
+        executionHolidayDateKeysByAuthority
+      );
+
+      if (validation.missing.length === 0) {
+        return [];
+      }
+
+      const rowNumber = index + 1;
+      const managerParams = new URLSearchParams({ tab: "active" });
+      const clientName = normalizeText(matter.clientName);
+      if (clientName) {
+        managerParams.set("client", clientName);
+      }
+
+      const executionParams = new URLSearchParams({
+        matterId: matter.id,
+        focus: "missing"
+      });
+
+      return [{
+        taskId: `execution-missing-${matter.id}`,
+        clientNumber: clientNumber || "-",
+        clientName: matter.clientName || "-",
+        subject: matter.subject || "-",
+        specificProcess: matter.specificProcess || "-",
+        taskLabel: `Arreglar fila ${rowNumber}`,
+        typeLabel: "Faltantes en ejecución",
+        displayDate: today,
+        originLabel: "Ejecución / Litigio",
+        originPath: `/app/tasks/${legacyConfig.slug}/distribuidor?${managerParams.toString()}`,
+        actionLabel: "Ir al Manager",
+        secondaryActionLabel: "Ir a la fila con faltantes",
+        secondaryActionPath: `/app/execution/${legacyConfig.slug}?${executionParams.toString()}`,
+        highlighted: true
+      }];
+    });
+  }
+
   function buildRows(member: TaskDashboardMember, timeframe: DashboardTimeframe) {
     return [
       ...buildTrackingRows(member, timeframe),
       ...buildTermVerificationRows(member, timeframe),
+      ...buildExecutionMissingRows(member, timeframe),
       ...buildExternalContractMilestoneRows(timeframe)
     ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
   }
@@ -899,9 +1078,20 @@ export function TasksTeamPage() {
                                 <td>{row.displayDate || "-"}</td>
                                 <td>{row.originLabel}</td>
                                 <td>
-                                  <button type="button" className="secondary-button matter-inline-button" onClick={() => navigate(row.originPath)}>
-                                    {row.actionLabel}
-                                  </button>
+                                  <div className="tasks-dashboard-actions">
+                                    <button type="button" className="secondary-button matter-inline-button" onClick={() => navigate(row.originPath)}>
+                                      {row.actionLabel}
+                                    </button>
+                                    {row.secondaryActionPath ? (
+                                      <button
+                                        type="button"
+                                        className="secondary-button matter-inline-button"
+                                        onClick={() => navigate(row.secondaryActionPath ?? row.originPath)}
+                                      >
+                                        {row.secondaryActionLabel ?? "Ir"}
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 </td>
                               </tr>
                             ))

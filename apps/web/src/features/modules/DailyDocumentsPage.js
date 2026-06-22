@@ -38,6 +38,24 @@ const grantorTypeLabels = {
     physical: "Persona física",
     moral: "Persona moral"
 };
+const moneyCurrencyLabels = {
+    MXN: "Pesos (MXN)",
+    USD: "Dólares (USD)"
+};
+const moneyCurrencyLegalNames = {
+    MXN: "Moneda Nacional",
+    USD: "Dólares de los Estados Unidos de América"
+};
+const interestPeriodLabels = {
+    daily: "Diario",
+    monthly: "Mensual",
+    annual: "Anual"
+};
+const interestPeriodText = {
+    daily: "diario",
+    monthly: "mensual",
+    annual: "anual"
+};
 const receiptDocumentKindLabels = {
     original: "Original/copia certificada",
     simple: "Copia simple"
@@ -156,16 +174,63 @@ function formatDateField(values, fieldName, fallback = blankDateMarker) {
 function formatPlaceDate(values) {
     return `${value(values, "place", "lugar pendiente")}, ${formatDateField(values, "date")}`;
 }
-function amountLabel(values) {
-    const amount = Number(values.amount || 0);
+function parseMoneyAmount(rawAmount) {
+    const normalizedAmount = normalizeText(rawAmount)
+        .replace(/\$/g, "")
+        .replace(/,/g, "")
+        .replace(/\s*(?:m\.?n\.?|mxn|usd)\s*$/i, "")
+        .trim();
+    return Number(normalizedAmount || 0);
+}
+function formatMoneyInputValue(rawAmount, forceDecimals = false) {
+    const normalizedAmount = normalizeText(rawAmount)
+        .replace(/\$/g, "")
+        .replace(/,/g, "")
+        .replace(/[^\d.]/g, "");
+    if (!normalizedAmount) {
+        return "";
+    }
+    const hasDecimalPoint = normalizedAmount.includes(".");
+    const [rawIntegerPart, ...rawDecimalParts] = normalizedAmount.split(".");
+    const integerPart = rawIntegerPart.replace(/^0+(?=\d)/g, "") || "0";
+    const decimalPart = rawDecimalParts.join("").slice(0, 2);
+    const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    if (forceDecimals) {
+        return `${groupedInteger}.${decimalPart.padEnd(2, "0")}`;
+    }
+    return hasDecimalPoint ? `${groupedInteger}.${decimalPart}` : groupedInteger;
+}
+function getMoneyCurrency(values) {
+    return values.currency === "USD" ? "USD" : "MXN";
+}
+function formatPercentageInputValue(rawPercentage) {
+    return normalizeText(rawPercentage)
+        .replace(/,/g, ".")
+        .replace(/[^\d.]/g, "")
+        .replace(/(\..*)\./g, "$1")
+        .slice(0, 6);
+}
+function promissoryNoteDefaultInterestRate(values) {
+    const interestRate = formatPercentageInputValue(values.defaultInterestRate) || "5";
+    return `${interestRate}%`;
+}
+function getInterestPeriod(values) {
+    if (values.interestPeriod === "daily" || values.interestPeriod === "annual") {
+        return values.interestPeriod;
+    }
+    return "monthly";
+}
+function amountLabel(values, options) {
+    const amount = parseMoneyAmount(values.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
         return value(values, "amount", "cantidad pendiente");
     }
-    return new Intl.NumberFormat("es-MX", {
-        style: "currency",
-        currency: "MXN",
-        minimumFractionDigits: 2
+    const currency = getMoneyCurrency(values);
+    const formattedAmount = new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
     }).format(amount);
+    return `$${formattedAmount}${options?.includeCurrencyCode ? ` ${currency}` : ""}`;
 }
 function moneyReceiptAmountLabel(values) {
     return `${amountLabel(values)} M.N.`;
@@ -319,7 +384,8 @@ function getPromissoryNoteDebtor(values) {
 }
 function promissoryNoteAmountText(values) {
     const amountInWords = value(values, "amountInWords", "cantidad con letra pendiente");
-    return `${amountLabel(values)} (${amountInWords}, Moneda Nacional)`;
+    const currency = getMoneyCurrency(values);
+    return `${amountLabel(values, { includeCurrencyCode: true })} (${amountInWords}, ${moneyCurrencyLegalNames[currency]})`;
 }
 const dailyDocumentTemplates = [
     {
@@ -467,7 +533,7 @@ const dailyDocumentTemplates = [
                 placeholder: "Iguala mensual correspondiente a abril de 2021"
             },
             { name: "paymentType", label: "Pago parcial / pago total", type: "payment-type", defaultValue: "Pago total" },
-            { name: "amount", label: "Monto", type: "number", placeholder: "1500.00" },
+            { name: "amount", label: "Monto", type: "currency", placeholder: "1,500.00" },
             { name: "receivedBy", label: "Nombre de quien recibe", placeholder: "Ma. Del Carmen Hernández" },
             { name: "date", label: "Fecha de recibido", type: "date" }
         ],
@@ -607,13 +673,21 @@ const dailyDocumentTemplates = [
             ...basePlaceDateFields,
             { name: "paymentPlace", label: "Lugar de pago", placeholder: "Ciudad de México", defaultValue: "Ciudad de México" },
             { name: "dueDate", label: "Fecha de pago / vencimiento", type: "date" },
-            { name: "amount", label: "Cantidad con número", type: "number", placeholder: "150000.00" },
+            { name: "amount", label: "Cantidad con número", type: "currency", placeholder: "150,000.00" },
+            { name: "currency", label: "Moneda", type: "currency-type", defaultValue: "MXN" },
             { name: "amountInWords", label: "Cantidad con letra", placeholder: "Ciento cincuenta mil pesos 00/100" },
             {
                 name: "defaultInterestRate",
-                label: "Interés moratorio mensual",
-                placeholder: "5% (cinco por ciento)",
-                defaultValue: "5% (cinco por ciento)"
+                label: "Interés moratorio",
+                type: "percentage",
+                placeholder: "5",
+                defaultValue: "5"
+            },
+            {
+                name: "interestPeriod",
+                label: "Periodicidad del interés",
+                type: "interest-period",
+                defaultValue: "monthly"
             },
             {
                 name: "creditors",
@@ -657,7 +731,7 @@ const dailyDocumentTemplates = [
                 paragraphs: [
                     `${formatPlaceDate(values)}.`,
                     `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatDateField(values, "dueDate")}, la cantidad de ${promissoryNoteAmountText(values)}.`,
-                    `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${value(values, "defaultInterestRate", "5% (cinco por ciento)")} mensual, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
+                    `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${promissoryNoteDefaultInterestRate(values)} ${interestPeriodText[getInterestPeriod(values)]}, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
                     `DOMICILIO DEL DEUDOR: ${debtorAddress}.`,
                     "ACEPTO,"
                 ],
@@ -2168,6 +2242,19 @@ export function DailyDocumentsPage() {
                                                 }
                                                 if (field.type === "payment-type") {
                                                     return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsxs("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "Pago total", children: [_jsx("option", { value: "Pago total", children: "Pago total" }), _jsx("option", { value: "Pago parcial", children: "Pago parcial" })] })] }, field.name));
+                                                }
+                                                if (field.type === "currency-type") {
+                                                    return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsx("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "MXN", children: ["MXN", "USD"].map((currency) => (_jsx("option", { value: currency, children: moneyCurrencyLabels[currency] }, currency))) })] }, field.name));
+                                                }
+                                                if (field.type === "interest-period") {
+                                                    return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsx("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "monthly", children: ["daily", "monthly", "annual"].map((period) => (_jsx("option", { value: period, children: interestPeriodLabels[period] }, period))) })] }, field.name));
+                                                }
+                                                if (field.type === "percentage") {
+                                                    return (_jsxs("label", { className: "form-field daily-doc-percentage-field", children: [_jsx("span", { children: field.label }), _jsxs("div", { className: "money-input-control daily-doc-percentage-control has-suffix", children: [_jsx("input", { disabled: savingAssignment, inputMode: "decimal", onChange: (event) => updateValue(field.name, formatPercentageInputValue(event.target.value)), placeholder: field.placeholder, type: "text", value: formatPercentageInputValue(values[field.name] ?? "") }), _jsx("span", { className: "money-input-suffix", children: "Por ciento" })] })] }, field.name));
+                                                }
+                                                if (field.type === "currency") {
+                                                    const fieldCurrency = selectedTemplate.id === "promissory-note" ? getMoneyCurrency(values) : "MXN";
+                                                    return (_jsxs("label", { className: "form-field daily-doc-currency-field", children: [_jsx("span", { children: field.label }), _jsxs("div", { className: "money-input-control has-suffix", children: [_jsx("span", { className: "money-input-prefix", children: "$" }), _jsx("input", { disabled: savingAssignment, inputMode: "decimal", onBlur: (event) => updateValue(field.name, formatMoneyInputValue(event.target.value, true)), onChange: (event) => updateValue(field.name, formatMoneyInputValue(event.target.value)), placeholder: field.placeholder, type: "text", value: formatMoneyInputValue(values[field.name] ?? "") }), _jsx("span", { className: "money-input-suffix", children: fieldCurrency })] })] }, field.name));
                                                 }
                                                 if (field.type === "date") {
                                                     return (_jsxs("div", { className: "form-field daily-doc-date-field", children: [_jsx("span", { children: field.label }), _jsxs("div", { className: "daily-doc-date-controls", children: [_jsx("input", { "aria-label": field.label, disabled: savingAssignment || isDateBlank(values, field.name), onChange: (event) => updateValue(field.name, event.target.value), type: "date", value: values[field.name] ?? "" }), _jsxs("label", { className: "checkbox-row daily-doc-date-blank-toggle", children: [_jsx("input", { checked: isDateBlank(values, field.name), disabled: savingAssignment, onChange: (event) => updateValue(blankDateFlagName(field.name), event.target.checked ? "true" : ""), type: "checkbox" }), _jsx("span", { children: "Dejar fecha en blanco" })] })] })] }, field.name));

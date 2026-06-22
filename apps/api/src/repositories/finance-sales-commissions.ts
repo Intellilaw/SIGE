@@ -32,6 +32,9 @@ type FinancePaymentHistoryRecord = {
   paymentDate1: Date | null;
   paymentDate2: Date | null;
   paymentDate3: Date | null;
+  paymentMethod: string;
+  paymentMethod2: string;
+  paymentMethod3: string;
   createdAt: Date;
 };
 
@@ -52,6 +55,14 @@ function getPaymentSortTime(record: FinancePaymentHistoryRecord, paymentDate: Da
   return Date.UTC(record.year, record.month - 1, slot);
 }
 
+function isFinancePaymentMethodReceived(value?: string | null) {
+  return value === "T" || value === "E_RECEIVED";
+}
+
+function hasPaymentDate(value: Date | null) {
+  return Boolean(value && !Number.isNaN(value.getTime()));
+}
+
 function getSalesPaymentEvents(record: FinancePaymentHistoryRecord): FinanceSalesPaymentEvent[] {
   const quoteKey = getQuoteCommissionKey(record.quoteNumber);
   if (!quoteKey) {
@@ -59,9 +70,30 @@ function getSalesPaymentEvents(record: FinancePaymentHistoryRecord): FinanceSale
   }
 
   return [
-    { amountMxn: Number(record.paidThisMonthMxn), paymentDate: record.paymentDate1, slot: 1 },
-    { amountMxn: Number(record.payment2Mxn), paymentDate: record.paymentDate2, slot: 2 },
-    { amountMxn: Number(record.payment3Mxn), paymentDate: record.paymentDate3, slot: 3 }
+    {
+      amountMxn:
+        hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+          ? Number(record.paidThisMonthMxn)
+          : 0,
+      paymentDate: record.paymentDate1,
+      slot: 1
+    },
+    {
+      amountMxn:
+        hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+          ? Number(record.payment2Mxn)
+          : 0,
+      paymentDate: record.paymentDate2,
+      slot: 2
+    },
+    {
+      amountMxn:
+        hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+          ? Number(record.payment3Mxn)
+          : 0,
+      paymentDate: record.paymentDate3,
+      slot: 3
+    }
   ]
     .filter((payment) => payment.amountMxn > 0)
     .map((payment) => ({
@@ -125,6 +157,9 @@ export async function attachSalesCommissionsToFinanceRecords(
       paymentDate1: true,
       paymentDate2: true,
       paymentDate3: true,
+      paymentMethod: true,
+      paymentMethod2: true,
+      paymentMethod3: true,
       createdAt: true
     }
   });

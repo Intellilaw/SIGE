@@ -58,10 +58,13 @@ const ALL_AUTHORITIES_OPTION = "ALL_AUTHORITIES" as const;
 const ALL_AUTHORITIES_LABEL = "Todos los \u00f3rganos";
 const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME: Record<ExecutionHolidayAuthorityShortName, HolidayAuthorityShortName> = {
   PJF: "PJF",
-  PJCDMX: "TSJCDMX",
+  TSJCDMX: "TSJCDMX",
   PJEdoMex: "PJEdoMex",
   TFJA: "TFJA",
   TJACDMX: "TJACDMX",
+  FGJCDMX: "FGJCDMX",
+  FGR: "FGR",
+  TFCyA: "TFCyA",
   SAT: "SAT",
   APF: "APF",
   APCDMX: "APCDMX"

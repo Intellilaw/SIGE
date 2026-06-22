@@ -93,6 +93,7 @@ const EMPTY_CALCULATION: SectionCalculation = {
   deductionMxn: 0,
   netTotalMxn: 0
 };
+const EMPTY_TOTALS_RECEIVER_EXCLUSION_KEYS = new Set<string>();
 const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
 const SALES_COMMISSION_SECTION = "Ventas";
 const SALES_COMMISSION_RATE = 0.01;
@@ -161,20 +162,31 @@ function normalizeIdentityText(value?: string | null) {
     .trim();
 }
 
-function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"]) {
-  const canWriteCommissionExclusions = Boolean(user?.permissions?.includes("commissions:exclusions:write"));
-  const hasSuperadminAccess = Boolean(
+function hasSuperadminAccess(user: ReturnType<typeof useAuth>["user"]) {
+  return Boolean(
     user?.permissions?.includes("*") ||
     user?.role === "SUPERADMIN" ||
     user?.legacyRole === "SUPERADMIN"
   );
+}
+
+function isEduardoRusconiUser(user: ReturnType<typeof useAuth>["user"]) {
   const emailLocalPart = user?.email?.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user?.email;
-  const isEduardoRusconi = [user?.shortName, user?.username, user?.displayName, user?.email, emailLocalPart].some((value) => {
+
+  return [user?.shortName, user?.username, user?.displayName, user?.email, emailLocalPart].some((value) => {
     const normalized = normalizeIdentityText(value);
     return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
   });
+}
 
-  return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
+function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"]) {
+  const canWriteCommissionExclusions = Boolean(user?.permissions?.includes("commissions:exclusions:write"));
+
+  return canWriteCommissionExclusions || (hasSuperadminAccess(user) && isEduardoRusconiUser(user));
+}
+
+function canManageCommissionTotalsReceiverExclusions(user: ReturnType<typeof useAuth>["user"]) {
+  return hasSuperadminAccess(user) && isEduardoRusconiUser(user);
 }
 
 function isLegalFlowTenant(user: ReturnType<typeof useAuth>["user"]) {
@@ -198,6 +210,18 @@ function buildCommissionExclusionKey(input: {
     normalizeText(input.section),
     input.group,
     input.financeRecordId
+  ].join("::");
+}
+
+function buildCommissionTotalsReceiverExclusionKey(input: {
+  year: number;
+  month: number;
+  section: string;
+}) {
+  return [
+    input.year,
+    input.month,
+    normalizeText(input.section)
   ].join("::");
 }
 
@@ -319,8 +343,46 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
 
+function isFinancePaymentMethodReceived(value?: FinanceRecord["paymentMethod"] | null) {
+  return value === "T" || value === "E_RECEIVED";
+}
+
+function hasPaymentDate(value?: string | null) {
+  return Boolean(value);
+}
+
+function getReceivedPaymentsMxn(
+  record: Pick<
+    FinanceRecord,
+    | "paidThisMonthMxn"
+    | "payment2Mxn"
+    | "payment3Mxn"
+    | "paymentDate1"
+    | "paymentDate2"
+    | "paymentDate3"
+    | "paymentMethod"
+    | "paymentMethod2"
+    | "paymentMethod3"
+  >
+) {
+  const payment1Mxn =
+    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+      ? record.paidThisMonthMxn
+      : 0;
+  const payment2Mxn =
+    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+      ? record.payment2Mxn
+      : 0;
+  const payment3Mxn =
+    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+      ? record.payment3Mxn
+      : 0;
+
+  return payment1Mxn + payment2Mxn + payment3Mxn;
+}
+
 function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
-  const totalPaidMxn = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+  const totalPaidMxn = getReceivedPaymentsMxn(record);
   const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
   const netFeesMxn = totalPaidMxn - totalExpensesMxn;
   const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
@@ -937,8 +999,23 @@ function CommissionGroupTable(props: {
 
 function CommissionTotalsTable(props: {
   rows: CommissionTotalsRow[];
+  year: number;
+  month: number;
+  excludedReceiverKeys: Set<string>;
+  canManageReceiverExclusions: boolean;
+  onToggleReceiverExclusion: (section: string, excluded: boolean) => void;
 }) {
-  const totalCommissionsMxn = props.rows.reduce((sum, row) => sum + row.calculation.totalCommissionsMxn, 0);
+  const isReceiverExcluded = (section: string) => props.excludedReceiverKeys.has(
+    buildCommissionTotalsReceiverExclusionKey({
+      year: props.year,
+      month: props.month,
+      section
+    })
+  );
+  const totalCommissionsMxn = props.rows.reduce(
+    (sum, row) => sum + (isReceiverExcluded(row.section) ? 0 : row.calculation.totalCommissionsMxn),
+    0
+  );
 
   return (
     <section className="panel">
@@ -955,12 +1032,37 @@ function CommissionTotalsTable(props: {
             </tr>
           </thead>
           <tbody>
-            {props.rows.map((row) => (
-              <tr key={row.section}>
-                <td>{row.section}</td>
-                <td className="commissions-total-strong">{formatCurrency(row.calculation.totalCommissionsMxn)}</td>
-              </tr>
-            ))}
+            {props.rows.map((row) => {
+              const excluded = isReceiverExcluded(row.section);
+
+              return (
+                <tr className={excluded ? "commissions-row-excluded" : undefined} key={row.section}>
+                  <td>
+                    <div className="commissions-total-receiver-cell">
+                      {props.canManageReceiverExclusions ? (
+                        <label
+                          className="commissions-total-exclusion-toggle"
+                          title={excluded ? "Incluir receptor en el Total general" : "Excluir receptor del Total general"}
+                        >
+                          <input
+                            aria-label={`${excluded ? "Incluir" : "Excluir"} ${row.section} del Total general`}
+                            checked={excluded}
+                            onChange={(event) => props.onToggleReceiverExclusion(row.section, event.target.checked)}
+                            type="checkbox"
+                          />
+                        </label>
+                      ) : null}
+                      <span className={excluded ? "commissions-amount-excluded" : undefined}>{row.section}</span>
+                    </div>
+                  </td>
+                  <td className="commissions-total-strong">
+                    <span className={excluded ? "commissions-amount-excluded" : undefined}>
+                      {formatCurrency(row.calculation.totalCommissionsMxn)}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr>
@@ -1078,6 +1180,7 @@ export function CommissionsPage() {
   const [snapshots, setSnapshots] = useState<CommissionSnapshot[]>([]);
   const [exclusions, setExclusions] = useState<CommissionExclusion[]>([]);
   const [savingExclusionKeys, setSavingExclusionKeys] = useState<Set<string>>(new Set());
+  const [excludedTotalsReceiverKeys, setExcludedTotalsReceiverKeys] = useState<Set<string>>(new Set());
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(true);
   const [savingSnapshot, setSavingSnapshot] = useState(false);
@@ -1094,6 +1197,7 @@ export function CommissionsPage() {
   const canWriteOwnCommissionSection = hasPermission(user, "commissions:own-section:write");
   const canReadClients = hasPermission(user, "clients:read");
   const canManageExclusions = canManageCommissionExclusions(user);
+  const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
   const isLegalFlow = isLegalFlowTenant(user);
   const availableCommissionSections = useMemo(
     () => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...COMMISSION_SECTIONS],
@@ -1230,8 +1334,21 @@ export function CommissionsPage() {
     selectedMonth,
     selectedYear
   ]);
+  const effectiveExcludedTotalsReceiverKeys = canManageTotalsReceiverExclusions
+    ? excludedTotalsReceiverKeys
+    : EMPTY_TOTALS_RECEIVER_EXCLUSION_KEYS;
+  const includedCommissionTotalsRows = useMemo(
+    () => commissionTotalsRows.filter((row) => !effectiveExcludedTotalsReceiverKeys.has(
+      buildCommissionTotalsReceiverExclusionKey({
+        year: selectedYear,
+        month: selectedMonth,
+        section: row.section
+      })
+    )),
+    [commissionTotalsRows, effectiveExcludedTotalsReceiverKeys, selectedMonth, selectedYear]
+  );
   const commissionTotalsSummary = useMemo(
-    () => commissionTotalsRows.reduce(
+    () => includedCommissionTotalsRows.reduce(
       (acc, row) => ({
         group1PayableMxn: acc.group1PayableMxn + row.calculation.group1PayableMxn,
         group2TotalMxn: acc.group2TotalMxn + row.calculation.group2TotalMxn,
@@ -1245,8 +1362,32 @@ export function CommissionsPage() {
         totalCommissionsMxn: 0
       }
     ),
-    [commissionTotalsRows]
+    [includedCommissionTotalsRows]
   );
+
+  function handleToggleCommissionTotalsReceiverExclusion(section: string, excluded: boolean) {
+    if (!canManageTotalsReceiverExclusions) {
+      return;
+    }
+
+    const exclusionKey = buildCommissionTotalsReceiverExclusionKey({
+      year: selectedYear,
+      month: selectedMonth,
+      section
+    });
+
+    setExcludedTotalsReceiverKeys((current) => {
+      const next = new Set(current);
+
+      if (excluded) {
+        next.add(exclusionKey);
+      } else {
+        next.delete(exclusionKey);
+      }
+
+      return next;
+    });
+  }
 
   async function handleToggleCommissionExclusion(row: CommissionBreakdownEntry, excluded: boolean) {
     if (!canManageExclusions || !activeSection) {
@@ -1609,7 +1750,14 @@ export function CommissionsPage() {
                   <div className="centered-inline-message">Cargando informacion de comisiones...</div>
                 </section>
               ) : isTotalsActiveSection ? (
-                <CommissionTotalsTable rows={commissionTotalsRows} />
+                <CommissionTotalsTable
+                  rows={commissionTotalsRows}
+                  year={selectedYear}
+                  month={selectedMonth}
+                  excludedReceiverKeys={effectiveExcludedTotalsReceiverKeys}
+                  canManageReceiverExclusions={canManageTotalsReceiverExclusions}
+                  onToggleReceiverExclusion={handleToggleCommissionTotalsReceiverExclusion}
+                />
               ) : (
                 <>
                   <div className="commissions-group-grid">

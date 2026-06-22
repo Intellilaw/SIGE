@@ -28,7 +28,10 @@ const teamSchema = z.enum([
   "ADMIN_OPERATIONS"
 ]);
 
-const executionHolidayAuthoritySchema = z.enum(EXECUTION_HOLIDAY_AUTHORITIES);
+const executionHolidayAuthoritySchema = z.preprocess(
+  (value) => (value === "PJCDMX" ? "TSJCDMX" : value),
+  z.enum(EXECUTION_HOLIDAY_AUTHORITIES)
+);
 
 const matterSchema = z.object({
   clientId: z.string().nullable().optional(),

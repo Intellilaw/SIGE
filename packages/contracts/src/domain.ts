@@ -658,6 +658,9 @@ export const HOLIDAY_AUTHORITIES = [
   { shortName: "PJEdoMex", name: "Poder Judicial del Estado de M\u00e9xico" },
   { shortName: "TFJA", name: "Tribunal Federal de Justicia Administrativa" },
   { shortName: "TJACDMX", name: "Tribunal de Justicia Administrativa de la Ciudad de M\u00e9xico" },
+  { shortName: "FGJCDMX", name: "Fiscal\u00eda General de Justicia de la CDMX" },
+  { shortName: "FGR", name: "Fiscal\u00eda General de la Rep\u00fablica" },
+  { shortName: "TFCyA", name: "Tribunal Federal de Conciliaci\u00f3n y Arbitraje" },
   { shortName: "SAT", name: "Sistema de Administraci\u00f3n Tributaria" },
   { shortName: "APF", name: "Administraci\u00f3n P\u00fablica Federal" },
   { shortName: "APCDMX", name: "Administraci\u00f3n P\u00fablica de la Ciudad de M\u00e9xico" },
@@ -669,10 +672,13 @@ export type HolidaySource = "MANUAL" | "WEEKEND" | "LFT_OFFICIAL";
 
 export const EXECUTION_HOLIDAY_AUTHORITIES = [
   "PJF",
-  "PJCDMX",
+  "TSJCDMX",
   "PJEdoMex",
   "TFJA",
   "TJACDMX",
+  "FGJCDMX",
+  "FGR",
+  "TFCyA",
   "SAT",
   "APF",
   "APCDMX"
@@ -931,6 +937,8 @@ export interface FinanceRecordStats {
   netProfitMxn: number;
 }
 
+export type FinancePaymentMethod = "blank" | "T" | "E_RECEIVED" | "E_PENDING";
+
 export interface FinanceRecord {
   id: string;
   year: number;
@@ -954,6 +962,9 @@ export interface FinanceRecord {
   paymentDate1?: string;
   paymentDate2?: string;
   paymentDate3?: string;
+  paymentMethod: FinancePaymentMethod;
+  paymentMethod2: FinancePaymentMethod;
+  paymentMethod3: FinancePaymentMethod;
   expenseNotes1?: string;
   expenseNotes2?: string;
   expenseNotes3?: string;
@@ -1076,7 +1087,7 @@ export type KpiMetricStatus = "met" | "warning" | "missed" | "not-configured";
 
 export interface KpiIncident {
   id: string;
-  sourceType: "tracking-record" | "term";
+  sourceType: "tracking-record" | "term" | "matter";
   moduleId: string;
   tableCode?: string;
   tableLabel: string;

@@ -10,6 +10,8 @@ type DailyDocumentField = {
   label: string;
   type?:
     | "text"
+    | "currency"
+    | "percentage"
     | "date"
     | "number"
     | "textarea"
@@ -17,6 +19,8 @@ type DailyDocumentField = {
     | "document-list"
     | "grantor-type"
     | "payment-type"
+    | "currency-type"
+    | "interest-period"
     | "creditor-list";
   placeholder?: string;
   defaultValue?: string;
@@ -35,6 +39,8 @@ type DailyDocumentTemplate = {
 type DailyDocumentValues = Record<string, string>;
 
 type GrantorType = "physical" | "moral";
+type MoneyCurrency = "MXN" | "USD";
+type InterestPeriod = "daily" | "monthly" | "annual";
 type ReceiptDocumentKind = "original" | "simple";
 
 type AssignedDocumentsGroup = {
@@ -140,6 +146,24 @@ const laborPowerAttorneyFallback = "APODERADOS PENDIENTES";
 const grantorTypeLabels: Record<GrantorType, string> = {
   physical: "Persona física",
   moral: "Persona moral"
+};
+const moneyCurrencyLabels: Record<MoneyCurrency, string> = {
+  MXN: "Pesos (MXN)",
+  USD: "Dólares (USD)"
+};
+const moneyCurrencyLegalNames: Record<MoneyCurrency, string> = {
+  MXN: "Moneda Nacional",
+  USD: "Dólares de los Estados Unidos de América"
+};
+const interestPeriodLabels: Record<InterestPeriod, string> = {
+  daily: "Diario",
+  monthly: "Mensual",
+  annual: "Anual"
+};
+const interestPeriodText: Record<InterestPeriod, string> = {
+  daily: "diario",
+  monthly: "mensual",
+  annual: "anual"
 };
 const receiptDocumentKindLabels: Record<ReceiptDocumentKind, string> = {
   original: "Original/copia certificada",
@@ -296,18 +320,79 @@ function formatPlaceDate(values: DailyDocumentValues) {
   return `${value(values, "place", "lugar pendiente")}, ${formatDateField(values, "date")}`;
 }
 
-function amountLabel(values: DailyDocumentValues) {
-  const amount = Number(values.amount || 0);
+function parseMoneyAmount(rawAmount?: string | null) {
+  const normalizedAmount = normalizeText(rawAmount)
+    .replace(/\$/g, "")
+    .replace(/,/g, "")
+    .replace(/\s*(?:m\.?n\.?|mxn|usd)\s*$/i, "")
+    .trim();
+
+  return Number(normalizedAmount || 0);
+}
+
+function formatMoneyInputValue(rawAmount?: string | null, forceDecimals = false) {
+  const normalizedAmount = normalizeText(rawAmount)
+    .replace(/\$/g, "")
+    .replace(/,/g, "")
+    .replace(/[^\d.]/g, "");
+
+  if (!normalizedAmount) {
+    return "";
+  }
+
+  const hasDecimalPoint = normalizedAmount.includes(".");
+  const [rawIntegerPart, ...rawDecimalParts] = normalizedAmount.split(".");
+  const integerPart = rawIntegerPart.replace(/^0+(?=\d)/g, "") || "0";
+  const decimalPart = rawDecimalParts.join("").slice(0, 2);
+  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+  if (forceDecimals) {
+    return `${groupedInteger}.${decimalPart.padEnd(2, "0")}`;
+  }
+
+  return hasDecimalPoint ? `${groupedInteger}.${decimalPart}` : groupedInteger;
+}
+
+function getMoneyCurrency(values: DailyDocumentValues): MoneyCurrency {
+  return values.currency === "USD" ? "USD" : "MXN";
+}
+
+function formatPercentageInputValue(rawPercentage?: string | null) {
+  return normalizeText(rawPercentage)
+    .replace(/,/g, ".")
+    .replace(/[^\d.]/g, "")
+    .replace(/(\..*)\./g, "$1")
+    .slice(0, 6);
+}
+
+function promissoryNoteDefaultInterestRate(values: DailyDocumentValues) {
+  const interestRate = formatPercentageInputValue(values.defaultInterestRate) || "5";
+
+  return `${interestRate}%`;
+}
+
+function getInterestPeriod(values: DailyDocumentValues): InterestPeriod {
+  if (values.interestPeriod === "daily" || values.interestPeriod === "annual") {
+    return values.interestPeriod;
+  }
+
+  return "monthly";
+}
+
+function amountLabel(values: DailyDocumentValues, options?: { includeCurrencyCode?: boolean }) {
+  const amount = parseMoneyAmount(values.amount);
 
   if (!Number.isFinite(amount) || amount <= 0) {
     return value(values, "amount", "cantidad pendiente");
   }
 
-  return new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: "MXN",
-    minimumFractionDigits: 2
+  const currency = getMoneyCurrency(values);
+  const formattedAmount = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
   }).format(amount);
+
+  return `$${formattedAmount}${options?.includeCurrencyCode ? ` ${currency}` : ""}`;
 }
 
 function moneyReceiptAmountLabel(values: DailyDocumentValues) {
@@ -502,8 +587,9 @@ function getPromissoryNoteDebtor(values: DailyDocumentValues) {
 
 function promissoryNoteAmountText(values: DailyDocumentValues) {
   const amountInWords = value(values, "amountInWords", "cantidad con letra pendiente");
+  const currency = getMoneyCurrency(values);
 
-  return `${amountLabel(values)} (${amountInWords}, Moneda Nacional)`;
+  return `${amountLabel(values, { includeCurrencyCode: true })} (${amountInWords}, ${moneyCurrencyLegalNames[currency]})`;
 }
 
 const dailyDocumentTemplates: DailyDocumentTemplate[] = [
@@ -664,7 +750,7 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
         placeholder: "Iguala mensual correspondiente a abril de 2021"
       },
       { name: "paymentType", label: "Pago parcial / pago total", type: "payment-type", defaultValue: "Pago total" },
-      { name: "amount", label: "Monto", type: "number", placeholder: "1500.00" },
+      { name: "amount", label: "Monto", type: "currency", placeholder: "1,500.00" },
       { name: "receivedBy", label: "Nombre de quien recibe", placeholder: "Ma. Del Carmen Hernández" },
       { name: "date", label: "Fecha de recibido", type: "date" }
     ],
@@ -818,13 +904,21 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
       ...basePlaceDateFields,
       { name: "paymentPlace", label: "Lugar de pago", placeholder: "Ciudad de México", defaultValue: "Ciudad de México" },
       { name: "dueDate", label: "Fecha de pago / vencimiento", type: "date" },
-      { name: "amount", label: "Cantidad con número", type: "number", placeholder: "150000.00" },
+      { name: "amount", label: "Cantidad con número", type: "currency", placeholder: "150,000.00" },
+      { name: "currency", label: "Moneda", type: "currency-type", defaultValue: "MXN" },
       { name: "amountInWords", label: "Cantidad con letra", placeholder: "Ciento cincuenta mil pesos 00/100" },
       {
         name: "defaultInterestRate",
-        label: "Interés moratorio mensual",
-        placeholder: "5% (cinco por ciento)",
-        defaultValue: "5% (cinco por ciento)"
+        label: "Interés moratorio",
+        type: "percentage",
+        placeholder: "5",
+        defaultValue: "5"
+      },
+      {
+        name: "interestPeriod",
+        label: "Periodicidad del interés",
+        type: "interest-period",
+        defaultValue: "monthly"
       },
       {
         name: "creditors",
@@ -872,11 +966,9 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
             values,
             "dueDate"
           )}, la cantidad de ${promissoryNoteAmountText(values)}.`,
-          `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${value(
-            values,
-            "defaultInterestRate",
-            "5% (cinco por ciento)"
-          )} mensual, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
+          `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${promissoryNoteDefaultInterestRate(
+            values
+          )} ${interestPeriodText[getInterestPeriod(values)]}, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
           `DOMICILIO DEL DEUDOR: ${debtorAddress}.`,
           "ACEPTO,"
         ],
@@ -3205,6 +3297,86 @@ export function DailyDocumentsPage() {
                           <option value="Pago total">Pago total</option>
                           <option value="Pago parcial">Pago parcial</option>
                         </select>
+                      </label>
+                    );
+                  }
+
+                  if (field.type === "currency-type") {
+                    return (
+                      <label className="form-field" key={field.name}>
+                        <span>{field.label}</span>
+                        <select
+                          disabled={savingAssignment}
+                          onChange={(event) => updateValue(field.name, event.target.value)}
+                          value={values[field.name] ?? "MXN"}
+                        >
+                          {(["MXN", "USD"] as MoneyCurrency[]).map((currency) => (
+                            <option key={currency} value={currency}>
+                              {moneyCurrencyLabels[currency]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  }
+
+                  if (field.type === "interest-period") {
+                    return (
+                      <label className="form-field" key={field.name}>
+                        <span>{field.label}</span>
+                        <select
+                          disabled={savingAssignment}
+                          onChange={(event) => updateValue(field.name, event.target.value)}
+                          value={values[field.name] ?? "monthly"}
+                        >
+                          {(["daily", "monthly", "annual"] as InterestPeriod[]).map((period) => (
+                            <option key={period} value={period}>
+                              {interestPeriodLabels[period]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  }
+
+                  if (field.type === "percentage") {
+                    return (
+                      <label className="form-field daily-doc-percentage-field" key={field.name}>
+                        <span>{field.label}</span>
+                        <div className="money-input-control daily-doc-percentage-control has-suffix">
+                          <input
+                            disabled={savingAssignment}
+                            inputMode="decimal"
+                            onChange={(event) => updateValue(field.name, formatPercentageInputValue(event.target.value))}
+                            placeholder={field.placeholder}
+                            type="text"
+                            value={formatPercentageInputValue(values[field.name] ?? "")}
+                          />
+                          <span className="money-input-suffix">Por ciento</span>
+                        </div>
+                      </label>
+                    );
+                  }
+
+                  if (field.type === "currency") {
+                    const fieldCurrency = selectedTemplate.id === "promissory-note" ? getMoneyCurrency(values) : "MXN";
+
+                    return (
+                      <label className="form-field daily-doc-currency-field" key={field.name}>
+                        <span>{field.label}</span>
+                        <div className="money-input-control has-suffix">
+                          <span className="money-input-prefix">$</span>
+                          <input
+                            disabled={savingAssignment}
+                            inputMode="decimal"
+                            onBlur={(event) => updateValue(field.name, formatMoneyInputValue(event.target.value, true))}
+                            onChange={(event) => updateValue(field.name, formatMoneyInputValue(event.target.value))}
+                            placeholder={field.placeholder}
+                            type="text"
+                            value={formatMoneyInputValue(values[field.name] ?? "")}
+                          />
+                          <span className="money-input-suffix">{fieldCurrency}</span>
+                        </div>
                       </label>
                     );
                   }

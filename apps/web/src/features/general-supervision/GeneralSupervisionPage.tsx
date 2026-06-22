@@ -128,6 +128,8 @@ interface KpiWeekIncidentItem {
   description?: string;
 }
 
+type KpiDetailView = "unmet" | "met";
+
 interface GeneralSupervisionOverview {
   generatedAt: string;
   today: string;
@@ -156,6 +158,7 @@ const KPI_STATUS_LABELS: Record<KpiMetric["status"], string> = {
 };
 
 const KPI_ALERT_STATUSES: KpiMetricStatus[] = ["missed", "warning"];
+const NON_EVALUATED_KPI_DAY_UNIT = "dias-no-evaluados";
 
 function formatDate(value?: string) {
   if (!value) {
@@ -489,15 +492,29 @@ function buildKpiAlertsByUser(periods: SupervisionKpiPeriod[]) {
 }
 
 function summarizeDailyStatus(dailyBreakdown: KpiMetric["dailyBreakdown"]): KpiMetricStatus {
-  if (dailyBreakdown.some((day) => day.status === "missed")) {
+  const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
+
+  if (evaluatedDays.length === 0) {
+    return "not-configured";
+  }
+
+  if (evaluatedDays.some((day) => day.status === "missed")) {
     return "missed";
   }
 
-  if (dailyBreakdown.some((day) => day.status === "warning")) {
+  if (evaluatedDays.some((day) => day.status === "warning")) {
     return "warning";
   }
 
   return "met";
+}
+
+function isNonEvaluatedKpiDay(day: KpiMetric["dailyBreakdown"][number]) {
+  return day.status === "not-configured" && day.unit === NON_EVALUATED_KPI_DAY_UNIT;
+}
+
+function metricHasNonEvaluatedDays(metric: KpiMetric) {
+  return metric.dailyBreakdown.some(isNonEvaluatedKpiDay);
 }
 
 function pluralizeDays(count: number) {
@@ -505,22 +522,29 @@ function pluralizeDays(count: number) {
 }
 
 function buildRangeMetric(metric: KpiMetric, dailyBreakdown: KpiMetric["dailyBreakdown"]): KpiMetric {
-  const missedDays = dailyBreakdown.filter((day) => day.status === "missed").length;
-  const warningDays = dailyBreakdown.filter((day) => day.status === "warning").length;
-  const metDays = dailyBreakdown.filter((day) => day.status === "met").length;
-  const incidents = dailyBreakdown.flatMap((day) => day.incidents);
+  const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
+  const nonEvaluatedDays = dailyBreakdown.filter(isNonEvaluatedKpiDay);
+  const missedDays = evaluatedDays.filter((day) => day.status === "missed").length;
+  const warningDays = evaluatedDays.filter((day) => day.status === "warning").length;
+  const metDays = evaluatedDays.filter((day) => day.status === "met").length;
+  const incidents = evaluatedDays.flatMap((day) => day.incidents);
+  const actualLabel = [
+    missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
+    warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
+    missedDays === 0 && warningDays === 0 && metDays > 0 ? `${pluralizeDays(metDays)} cumplidos` : "",
+    nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
+  ].filter(Boolean).join(" / ") || "Sin dias evaluados";
 
   return {
     ...metric,
     status: summarizeDailyStatus(dailyBreakdown),
-    value: dailyBreakdown.reduce((total, day) => total + day.value, 0),
-    target: dailyBreakdown.reduce((total, day) => total + day.target, 0),
-    actualLabel: [
-      missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
-      warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
-      missedDays === 0 && warningDays === 0 ? `${pluralizeDays(metDays)} cumplidos` : ""
+    value: evaluatedDays.reduce((total, day) => total + day.value, 0),
+    target: evaluatedDays.reduce((total, day) => total + day.target, 0),
+    actualLabel,
+    targetLabel: [
+      `${pluralizeDays(evaluatedDays.length)} habiles evaluados`,
+      nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
     ].filter(Boolean).join(" / "),
-    targetLabel: `${pluralizeDays(dailyBreakdown.length)} habiles evaluados`,
     progressPct: metric.progressPct,
     helper: `Periodo evaluado: ${formatDateRange(dailyBreakdown[0]?.date ?? "", dailyBreakdown.at(-1)?.date ?? "")}`,
     incidents,
@@ -593,10 +617,6 @@ function countKpiAlerts(periods: SupervisionKpiPeriod[]) {
   return periods.reduce((total, period) => total + period.totalMetrics, 0);
 }
 
-function countUserKpiAlerts(periods: SupervisionUserKpiAlertPeriod[]) {
-  return periods.reduce((total, period) => total + period.totalMetrics, 0);
-}
-
 function getMetricPeriod(
   periods: SupervisionUserKpiAlertPeriod[],
   metricId: string,
@@ -643,17 +663,30 @@ function formatKpiIncident(incident: KpiIncident) {
 function getKpiWeekIncidentItems(
   periods: SupervisionUserKpiAlertPeriod[],
   metricId: string,
-  periodKey: SupervisionKpiPeriod["key"]
+  periodKey: SupervisionKpiPeriod["key"],
+  view: KpiDetailView
 ) {
   const metric = getMetricPeriod(periods, metricId, periodKey);
   const items = new Map<string, KpiWeekIncidentItem>();
+  const includedStatuses: KpiMetricStatus[] = view === "met" ? ["met"] : KPI_ALERT_STATUSES;
 
   metric?.dailyBreakdown
-    .filter((day) => KPI_ALERT_STATUSES.includes(day.status))
+    .filter((day) => includedStatuses.includes(day.status) || isNonEvaluatedKpiDay(day))
     .forEach((day) => {
+      if (isNonEvaluatedKpiDay(day)) {
+        const key = [day.date, metric.id, day.status, day.unit].join(":");
+        items.set(key, {
+          key,
+          status: day.status,
+          label: `${formatShortDate(day.date)} - ${day.actualLabel}`,
+          description: day.helper
+        });
+        return;
+      }
+
       const dayIncidents = getUniqueKpiIncidents(day.incidents);
 
-      if (dayIncidents.length > 0) {
+      if (view === "unmet" && dayIncidents.length > 0) {
         dayIncidents.forEach((incident) => {
           const key = getKpiIncidentKey(incident);
           items.set(key, {
@@ -678,11 +711,15 @@ function getKpiWeekIncidentItems(
   return Array.from(items.values()).sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function getKpiAlertMetrics(periods: SupervisionUserKpiAlertPeriod[]) {
+function getKpiUnmetMetrics(periods: SupervisionUserKpiAlertPeriod[]) {
   const metricsById = new Map<string, { metric: KpiMetric; periodKey: SupervisionKpiPeriod["key"] }>();
 
   periods.forEach((period) => {
     period.metrics.forEach((metric) => {
+      if (!KPI_ALERT_STATUSES.includes(metric.status) && !metricHasNonEvaluatedDays(metric)) {
+        return;
+      }
+
       const current = metricsById.get(metric.id);
       if (!current || period.key === "currentWeek") {
         metricsById.set(metric.id, { metric, periodKey: period.key });
@@ -695,6 +732,47 @@ function getKpiAlertMetrics(periods: SupervisionUserKpiAlertPeriod[]) {
     .map((entry) => entry.metric);
 }
 
+function getKpiMetMetrics(periods: SupervisionUserKpiAlertPeriod[]) {
+  const metricsById = new Map<string, { metric: KpiMetric; periodKey: SupervisionKpiPeriod["key"] }>();
+
+  periods.forEach((period) => {
+    period.metrics.forEach((metric) => {
+      if (metric.status !== "met" && !metricHasNonEvaluatedDays(metric)) {
+        return;
+      }
+
+      const current = metricsById.get(metric.id);
+      if (!current || period.key === "currentWeek") {
+        metricsById.set(metric.id, { metric, periodKey: period.key });
+      }
+    });
+  });
+
+  return Array.from(metricsById.values())
+    .sort((left, right) => left.metric.label.localeCompare(right.metric.label))
+    .map((entry) => entry.metric);
+}
+
+function getKpiDetailCountLabel(view: KpiDetailView, metrics: KpiMetric[]) {
+  const primaryCount = view === "unmet"
+    ? metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status)).length
+    : metrics.filter((metric) => metric.status === "met").length;
+  const nonEvaluatedOnlyCount = metrics.filter((metric) => {
+    const isPrimary = view === "unmet"
+      ? KPI_ALERT_STATUSES.includes(metric.status)
+      : metric.status === "met";
+
+    return !isPrimary && metricHasNonEvaluatedDays(metric);
+  }).length;
+  const primaryLabel = view === "unmet"
+    ? `${primaryCount} alertas`
+    : `${primaryCount} cumplidos`;
+
+  return nonEvaluatedOnlyCount > 0
+    ? `${primaryLabel} / ${nonEvaluatedOnlyCount} sin evaluacion`
+    : primaryLabel;
+}
+
 function TaskUserRow(props: {
   user: SupervisionTaskUserSummary;
   kpiAlerts: SupervisionUserKpiAlertPeriod[];
@@ -705,13 +783,20 @@ function TaskUserRow(props: {
 }) {
   const { user, kpiAlerts, kpiWeekReference, muted = false, saving, onToggleObserved } = props;
   const [showDetail, setShowDetail] = useState(false);
+  const [kpiDetailView, setKpiDetailView] = useState<KpiDetailView>("unmet");
   const canToggle = canToggleUserObservation(user);
   const isObserved = isObservedTaskUser(user);
   const completedThisMonth = getCompletedThisMonth(user);
   const kpiMetDays = getKpiMetDays(user);
   const kpiMissedDays = getKpiMissedDays(user);
-  const kpiAlertCount = countUserKpiAlerts(kpiAlerts);
-  const kpiAlertMetrics = getKpiAlertMetrics(kpiAlerts);
+  const kpiUnmetMetrics = getKpiUnmetMetrics(kpiAlerts);
+  const kpiMetMetrics = getKpiMetMetrics(kpiAlerts);
+  const displayedKpiMetrics = kpiDetailView === "unmet" ? kpiUnmetMetrics : kpiMetMetrics;
+  const displayedKpiCountLabel = getKpiDetailCountLabel(kpiDetailView, displayedKpiMetrics);
+  const detailPeriodTitle = kpiDetailView === "met" ? "Semanas evaluadas" : "Semana actual";
+  const detailPeriodRange = kpiDetailView === "met"
+    ? `${formatDateRange(kpiWeekReference.lastWeek.startDate, kpiWeekReference.lastWeek.endDate)} / ${formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate)}`
+    : formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate);
   const detailId = `supervision-detail-${user.userId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
   return (
@@ -800,32 +885,56 @@ function TaskUserRow(props: {
               <div>
                 <strong>Key Performance Indicators</strong>
               </div>
-              <span className="supervision-task-kpi-alert-count">{kpiAlertCount} alertas</span>
+              <div className="supervision-task-kpi-card-actions">
+                <div className="supervision-kpi-view-toggle" role="group" aria-label="Vista de KPI">
+                  <button
+                    type="button"
+                    className={kpiDetailView === "unmet" ? "is-active" : ""}
+                    aria-pressed={kpiDetailView === "unmet"}
+                    onClick={() => setKpiDetailView("unmet")}
+                  >
+                    Ver KPI's incumplidos
+                  </button>
+                  <button
+                    type="button"
+                    className={kpiDetailView === "met" ? "is-active" : ""}
+                    aria-pressed={kpiDetailView === "met"}
+                    onClick={() => setKpiDetailView("met")}
+                  >
+                    Ver KPI's cumplidos
+                  </button>
+                </div>
+                <span className={`supervision-task-kpi-alert-count ${kpiDetailView === "met" ? "is-met" : ""}`}>
+                  {displayedKpiCountLabel}
+                </span>
+              </div>
             </header>
-            {kpiAlertMetrics.length > 0 ? (
+            {displayedKpiMetrics.length > 0 ? (
               <section className="supervision-task-kpi-detail-period">
                 <header>
-                  <strong>Semana actual</strong>
+                  <strong>{detailPeriodTitle}</strong>
                   <span>
-                    {formatDateRange(
-                      kpiWeekReference.currentWeek.startDate,
-                      kpiWeekReference.currentWeek.endDate
-                    )} - {kpiAlertCount} alertas
+                    {detailPeriodRange} - {displayedKpiCountLabel}
                   </span>
                 </header>
                 <div className="supervision-kpi-list">
-                  {kpiAlertMetrics.map((metric) => (
+                  {displayedKpiMetrics.map((metric) => (
                     <KpiMetricRow
                       key={metric.id}
                       metric={metric}
                       periods={kpiAlerts}
                       weekReference={kpiWeekReference}
+                      view={kpiDetailView}
                     />
                   ))}
                 </div>
               </section>
             ) : (
-              <EmptyState>Sin KPI's no cumplidos para esta persona.</EmptyState>
+              <EmptyState>
+                {kpiDetailView === "unmet"
+                  ? "Sin KPI's incumplidos para esta persona."
+                  : "Sin KPI's cumplidos para esta persona en la semana actual o pasada."}
+              </EmptyState>
             )}
           </section>
         </div>
@@ -981,20 +1090,26 @@ function TermBucketPanel({ bucket }: { bucket: SupervisionTermBucket }) {
 function KpiMetricRow({
   metric,
   periods,
-  weekReference
+  weekReference,
+  view
 }: {
   metric: KpiMetric;
   periods: SupervisionUserKpiAlertPeriod[];
   weekReference: SupervisionKpiWeekReference;
+  view: KpiDetailView;
 }) {
-  const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek");
-  const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek");
+  const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek", view);
+  const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek", view);
+  const emptyLabel = view === "met" ? "Sin KPI's cumplidos registrados." : "Sin incidencias registradas.";
+  const statusLabel = metric.status === "not-configured" && metricHasNonEvaluatedDays(metric)
+    ? "No evaluado"
+    : KPI_STATUS_LABELS[metric.status];
 
   return (
     <section className={`supervision-kpi-metric is-${metric.status}`}>
       <div className="supervision-kpi-metric-head">
         <strong className="supervision-kpi-metric-title">{metric.label}</strong>
-        <span className={`kpis-status-badge is-${metric.status}`}>{KPI_STATUS_LABELS[metric.status]}</span>
+        <span className={`kpis-status-badge is-${metric.status}`}>{statusLabel}</span>
       </div>
       <div className="supervision-kpi-values">
         <span>{metric.actualLabel}</span>
@@ -1013,12 +1128,14 @@ function KpiMetricRow({
           label="Semana actual"
           startDate={weekReference.currentWeek.startDate}
           endDate={weekReference.currentWeek.endDate}
+          emptyLabel={emptyLabel}
         />
         <KpiWeekIncidents
           incidents={lastWeekIncidents}
           label="Semana pasada"
           startDate={weekReference.lastWeek.startDate}
           endDate={weekReference.lastWeek.endDate}
+          emptyLabel={emptyLabel}
         />
       </div>
     </section>
@@ -1030,6 +1147,7 @@ function KpiWeekIncidents(props: {
   startDate: string;
   endDate: string;
   incidents: KpiWeekIncidentItem[];
+  emptyLabel: string;
 }) {
   return (
     <section className="supervision-kpi-week-incident-group">
@@ -1044,7 +1162,7 @@ function KpiWeekIncidents(props: {
           ))}
         </ul>
       ) : (
-        <span>Sin incidencias registradas.</span>
+        <span>{props.emptyLabel}</span>
       )}
     </section>
   );

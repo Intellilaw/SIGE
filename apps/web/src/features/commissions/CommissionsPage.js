@@ -37,6 +37,7 @@ const EMPTY_CALCULATION = {
     deductionMxn: 0,
     netTotalMxn: 0
 };
+const EMPTY_TOTALS_RECEIVER_EXCLUSION_KEYS = new Set();
 const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
 const SALES_COMMISSION_SECTION = "Ventas";
 const SALES_COMMISSION_RATE = 0.01;
@@ -95,17 +96,24 @@ function normalizeIdentityText(value) {
         .replace(/\s+/g, " ")
         .trim();
 }
-function canManageCommissionExclusions(user) {
-    const canWriteCommissionExclusions = Boolean(user?.permissions?.includes("commissions:exclusions:write"));
-    const hasSuperadminAccess = Boolean(user?.permissions?.includes("*") ||
+function hasSuperadminAccess(user) {
+    return Boolean(user?.permissions?.includes("*") ||
         user?.role === "SUPERADMIN" ||
         user?.legacyRole === "SUPERADMIN");
+}
+function isEduardoRusconiUser(user) {
     const emailLocalPart = user?.email?.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user?.email;
-    const isEduardoRusconi = [user?.shortName, user?.username, user?.displayName, user?.email, emailLocalPart].some((value) => {
+    return [user?.shortName, user?.username, user?.displayName, user?.email, emailLocalPart].some((value) => {
         const normalized = normalizeIdentityText(value);
         return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
     });
-    return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
+}
+function canManageCommissionExclusions(user) {
+    const canWriteCommissionExclusions = Boolean(user?.permissions?.includes("commissions:exclusions:write"));
+    return canWriteCommissionExclusions || (hasSuperadminAccess(user) && isEduardoRusconiUser(user));
+}
+function canManageCommissionTotalsReceiverExclusions(user) {
+    return hasSuperadminAccess(user) && isEduardoRusconiUser(user);
 }
 function isLegalFlowTenant(user) {
     return Boolean(user?.organizationId === "org-legalflow" ||
@@ -119,6 +127,13 @@ function buildCommissionExclusionKey(input) {
         normalizeText(input.section),
         input.group,
         input.financeRecordId
+    ].join("::");
+}
+function buildCommissionTotalsReceiverExclusionKey(input) {
+    return [
+        input.year,
+        input.month,
+        normalizeText(input.section)
     ].join("::");
 }
 function formatCurrency(value) {
@@ -210,8 +225,26 @@ function toDateKey(value) {
 function getErrorMessage(error) {
     return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
+function isFinancePaymentMethodReceived(value) {
+    return value === "T" || value === "E_RECEIVED";
+}
+function hasPaymentDate(value) {
+    return Boolean(value);
+}
+function getReceivedPaymentsMxn(record) {
+    const payment1Mxn = hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+        ? record.paidThisMonthMxn
+        : 0;
+    const payment2Mxn = hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+        ? record.payment2Mxn
+        : 0;
+    const payment3Mxn = hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+        ? record.payment3Mxn
+        : 0;
+    return payment1Mxn + payment2Mxn + payment3Mxn;
+}
 function calculateFinanceStats(record) {
-    const totalPaidMxn = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+    const totalPaidMxn = getReceivedPaymentsMxn(record);
     const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
     const netFeesMxn = totalPaidMxn - totalExpensesMxn;
     const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
@@ -615,8 +648,16 @@ function CommissionGroupTable(props) {
                             })) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { colSpan: totalLabelColumns, children: "Total rubro" }), _jsx("td", { children: formatCurrency(total) }), props.showExclusionControls ? _jsx("td", { className: "commissions-exclusion-cell", "aria-label": "Excluir gasto" }) : null] }) })] }) })] }));
 }
 function CommissionTotalsTable(props) {
-    const totalCommissionsMxn = props.rows.reduce((sum, row) => sum + row.calculation.totalCommissionsMxn, 0);
-    return (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Comisiones a pagar por receptor" }), _jsxs("span", { children: [props.rows.length, " secciones"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table commissions-totals-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Receptor" }), _jsx("th", { children: "Comision a pagar" })] }) }), _jsx("tbody", { children: props.rows.map((row) => (_jsxs("tr", { children: [_jsx("td", { children: row.section }), _jsx("td", { className: "commissions-total-strong", children: formatCurrency(row.calculation.totalCommissionsMxn) })] }, row.section))) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { children: "Total general" }), _jsx("td", { children: formatCurrency(totalCommissionsMxn) })] }) })] }) })] }));
+    const isReceiverExcluded = (section) => props.excludedReceiverKeys.has(buildCommissionTotalsReceiverExclusionKey({
+        year: props.year,
+        month: props.month,
+        section
+    }));
+    const totalCommissionsMxn = props.rows.reduce((sum, row) => sum + (isReceiverExcluded(row.section) ? 0 : row.calculation.totalCommissionsMxn), 0);
+    return (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Comisiones a pagar por receptor" }), _jsxs("span", { children: [props.rows.length, " secciones"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table commissions-totals-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Receptor" }), _jsx("th", { children: "Comision a pagar" })] }) }), _jsx("tbody", { children: props.rows.map((row) => {
+                                const excluded = isReceiverExcluded(row.section);
+                                return (_jsxs("tr", { className: excluded ? "commissions-row-excluded" : undefined, children: [_jsx("td", { children: _jsxs("div", { className: "commissions-total-receiver-cell", children: [props.canManageReceiverExclusions ? (_jsx("label", { className: "commissions-total-exclusion-toggle", title: excluded ? "Incluir receptor en el Total general" : "Excluir receptor del Total general", children: _jsx("input", { "aria-label": `${excluded ? "Incluir" : "Excluir"} ${row.section} del Total general`, checked: excluded, onChange: (event) => props.onToggleReceiverExclusion(row.section, event.target.checked), type: "checkbox" }) })) : null, _jsx("span", { className: excluded ? "commissions-amount-excluded" : undefined, children: row.section })] }) }), _jsx("td", { className: "commissions-total-strong", children: _jsx("span", { className: excluded ? "commissions-amount-excluded" : undefined, children: formatCurrency(row.calculation.totalCommissionsMxn) }) })] }, row.section));
+                            }) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { children: "Total general" }), _jsx("td", { children: formatCurrency(totalCommissionsMxn) })] }) })] }) })] }));
 }
 function SnapshotDetailModal(props) {
     const data = props.snapshot.snapshotData;
@@ -642,6 +683,7 @@ export function CommissionsPage() {
     const [snapshots, setSnapshots] = useState([]);
     const [exclusions, setExclusions] = useState([]);
     const [savingExclusionKeys, setSavingExclusionKeys] = useState(new Set());
+    const [excludedTotalsReceiverKeys, setExcludedTotalsReceiverKeys] = useState(new Set());
     const [loadingBoard, setLoadingBoard] = useState(true);
     const [loadingSnapshots, setLoadingSnapshots] = useState(true);
     const [savingSnapshot, setSavingSnapshot] = useState(false);
@@ -658,6 +700,7 @@ export function CommissionsPage() {
     const canWriteOwnCommissionSection = hasPermission(user, "commissions:own-section:write");
     const canReadClients = hasPermission(user, "clients:read");
     const canManageExclusions = canManageCommissionExclusions(user);
+    const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
     const isLegalFlow = isLegalFlowTenant(user);
     const availableCommissionSections = useMemo(() => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...COMMISSION_SECTIONS], [isLegalFlow]);
     const visibleSections = useMemo(() => {
@@ -762,7 +805,15 @@ export function CommissionsPage() {
         selectedMonth,
         selectedYear
     ]);
-    const commissionTotalsSummary = useMemo(() => commissionTotalsRows.reduce((acc, row) => ({
+    const effectiveExcludedTotalsReceiverKeys = canManageTotalsReceiverExclusions
+        ? excludedTotalsReceiverKeys
+        : EMPTY_TOTALS_RECEIVER_EXCLUSION_KEYS;
+    const includedCommissionTotalsRows = useMemo(() => commissionTotalsRows.filter((row) => !effectiveExcludedTotalsReceiverKeys.has(buildCommissionTotalsReceiverExclusionKey({
+        year: selectedYear,
+        month: selectedMonth,
+        section: row.section
+    }))), [commissionTotalsRows, effectiveExcludedTotalsReceiverKeys, selectedMonth, selectedYear]);
+    const commissionTotalsSummary = useMemo(() => includedCommissionTotalsRows.reduce((acc, row) => ({
         group1PayableMxn: acc.group1PayableMxn + row.calculation.group1PayableMxn,
         group2TotalMxn: acc.group2TotalMxn + row.calculation.group2TotalMxn,
         group3TotalMxn: acc.group3TotalMxn + row.calculation.group3TotalMxn,
@@ -772,7 +823,27 @@ export function CommissionsPage() {
         group2TotalMxn: 0,
         group3TotalMxn: 0,
         totalCommissionsMxn: 0
-    }), [commissionTotalsRows]);
+    }), [includedCommissionTotalsRows]);
+    function handleToggleCommissionTotalsReceiverExclusion(section, excluded) {
+        if (!canManageTotalsReceiverExclusions) {
+            return;
+        }
+        const exclusionKey = buildCommissionTotalsReceiverExclusionKey({
+            year: selectedYear,
+            month: selectedMonth,
+            section
+        });
+        setExcludedTotalsReceiverKeys((current) => {
+            const next = new Set(current);
+            if (excluded) {
+                next.add(exclusionKey);
+            }
+            else {
+                next.delete(exclusionKey);
+            }
+            return next;
+        });
+    }
     async function handleToggleCommissionExclusion(row, excluded) {
         if (!canManageExclusions || !activeSection) {
             return;
@@ -947,7 +1018,7 @@ export function CommissionsPage() {
                                                     ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
                                                     : sectionCalculation.group1NetMxn < 0
                                                         ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
-                                                        : undefined }))] })] }), loadingBoard ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando informacion de comisiones..." }) })) : isTotalsActiveSection ? (_jsx(CommissionTotalsTable, { rows: commissionTotalsRows })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-group-grid", children: [_jsx(CommissionGroupTable, { title: "PRIMER GRUPO: Comisiones de Ejecucion", toneClass: "tone-primary", rows: sectionCalculation.executionRecords, showBaseNet: isSalesActiveSection, baseNetLabel: isSalesActiveSection ? "Primer pago recibido" : undefined, amountLabel: isSalesActiveSection ? "1%" : undefined, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "SEGUNDO GRUPO: Comisiones de Cliente (20%)", toneClass: "tone-secondary", rows: sectionCalculation.clientRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "TERCER GRUPO: Comisiones de Cierre (10%)", toneClass: "tone-tertiary", rows: sectionCalculation.closingRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion })] }), shouldShowDeductionPanel ? (_jsxs("section", { className: "panel commissions-deduction-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Deduccion de gastos sobre Grupo 1 (", Math.round(sectionCalculation.deductionRate * 100), "%)"] }), _jsx("span", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), usesTeamGroup1Breakdown ? (_jsx("p", { className: "muted commissions-caption", children: "Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo positivo." })) : (_jsxs("p", { className: "muted commissions-caption", children: ["El total de gastos atribuibles a tu equipo este mes asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionBaseMxn) }), ". De dicha suma, el", " ", Math.round(sectionCalculation.deductionRate * 100), "%, que asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) }), ", se restara unicamente de las comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque el Grupo 1 quede con saldo negativo."] })), _jsxs("div", { className: "commissions-deduction-summary", children: [_jsxs("span", { children: ["Comisiones brutas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1GrossMxn) })] }), _jsxs("span", { children: ["(-) Deduccion Gastos: ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), _jsxs("span", { children: ["Comisiones netas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1NetMxn) })] }), _jsxs("span", { children: ["Grupo 1 aplicado al total: ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1PayableMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 2 (20%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group2TotalMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 3 (10%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group3TotalMxn) })] }), _jsxs("span", { children: ["Comisiones totales: ", _jsx("strong", { children: formatCurrency(sectionCalculation.totalCommissionsMxn) })] })] })] })) : null] }))] })] })) : (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No tienes asignado un rol de comisiones o no cuentas con permisos para esta pestana." }) }))) : null, activeTab === "receivers" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Receptores de comisiones" }), _jsxs("span", { children: [receivers.length, " registros"] })] }), canWriteCommissions ? (_jsxs("div", { className: "commissions-receiver-form", children: [_jsxs("label", { className: "form-field commissions-receiver-input", children: [_jsx("span", { children: "Nuevo receptor" }), _jsx("input", { type: "text", value: newReceiverName, onChange: (event) => setNewReceiverName(event.target.value), placeholder: "Ej. Juan Perez o un puesto", onKeyDown: (event) => {
+                                                        : undefined }))] })] }), loadingBoard ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando informacion de comisiones..." }) })) : isTotalsActiveSection ? (_jsx(CommissionTotalsTable, { rows: commissionTotalsRows, year: selectedYear, month: selectedMonth, excludedReceiverKeys: effectiveExcludedTotalsReceiverKeys, canManageReceiverExclusions: canManageTotalsReceiverExclusions, onToggleReceiverExclusion: handleToggleCommissionTotalsReceiverExclusion })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-group-grid", children: [_jsx(CommissionGroupTable, { title: "PRIMER GRUPO: Comisiones de Ejecucion", toneClass: "tone-primary", rows: sectionCalculation.executionRecords, showBaseNet: isSalesActiveSection, baseNetLabel: isSalesActiveSection ? "Primer pago recibido" : undefined, amountLabel: isSalesActiveSection ? "1%" : undefined, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "SEGUNDO GRUPO: Comisiones de Cliente (20%)", toneClass: "tone-secondary", rows: sectionCalculation.clientRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "TERCER GRUPO: Comisiones de Cierre (10%)", toneClass: "tone-tertiary", rows: sectionCalculation.closingRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion })] }), shouldShowDeductionPanel ? (_jsxs("section", { className: "panel commissions-deduction-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Deduccion de gastos sobre Grupo 1 (", Math.round(sectionCalculation.deductionRate * 100), "%)"] }), _jsx("span", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), usesTeamGroup1Breakdown ? (_jsx("p", { className: "muted commissions-caption", children: "Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo positivo." })) : (_jsxs("p", { className: "muted commissions-caption", children: ["El total de gastos atribuibles a tu equipo este mes asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionBaseMxn) }), ". De dicha suma, el", " ", Math.round(sectionCalculation.deductionRate * 100), "%, que asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) }), ", se restara unicamente de las comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque el Grupo 1 quede con saldo negativo."] })), _jsxs("div", { className: "commissions-deduction-summary", children: [_jsxs("span", { children: ["Comisiones brutas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1GrossMxn) })] }), _jsxs("span", { children: ["(-) Deduccion Gastos: ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), _jsxs("span", { children: ["Comisiones netas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1NetMxn) })] }), _jsxs("span", { children: ["Grupo 1 aplicado al total: ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1PayableMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 2 (20%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group2TotalMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 3 (10%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group3TotalMxn) })] }), _jsxs("span", { children: ["Comisiones totales: ", _jsx("strong", { children: formatCurrency(sectionCalculation.totalCommissionsMxn) })] })] })] })) : null] }))] })] })) : (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No tienes asignado un rol de comisiones o no cuentas con permisos para esta pestana." }) }))) : null, activeTab === "receivers" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Receptores de comisiones" }), _jsxs("span", { children: [receivers.length, " registros"] })] }), canWriteCommissions ? (_jsxs("div", { className: "commissions-receiver-form", children: [_jsxs("label", { className: "form-field commissions-receiver-input", children: [_jsx("span", { children: "Nuevo receptor" }), _jsx("input", { type: "text", value: newReceiverName, onChange: (event) => setNewReceiverName(event.target.value), placeholder: "Ej. Juan Perez o un puesto", onKeyDown: (event) => {
                                             if (event.key === "Enter") {
                                                 event.preventDefault();
                                                 void handleCreateReceiver();

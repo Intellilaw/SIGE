@@ -42,6 +42,9 @@ const financeRecordFieldsSchema = z.object({
   paymentDate1: z.string().nullable().optional(),
   paymentDate2: z.string().nullable().optional(),
   paymentDate3: z.string().nullable().optional(),
+  paymentMethod: z.enum(["blank", "T", "E_RECEIVED", "E_PENDING"]).optional(),
+  paymentMethod2: z.enum(["blank", "T", "E_RECEIVED", "E_PENDING"]).optional(),
+  paymentMethod3: z.enum(["blank", "T", "E_RECEIVED", "E_PENDING"]).optional(),
   expenseNotes1: z.string().nullable().optional(),
   expenseNotes2: z.string().nullable().optional(),
   expenseNotes3: z.string().nullable().optional(),
@@ -105,6 +108,29 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return `matter:${clientName}|${subject}`;
+  }
+
+  function isEmrtUser(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    return [user.shortName, user.username].some((value) => normalizeComparableText(value) === "emrt");
+  }
+
+  function enforcePaymentMethodPermission(
+    request: FastifyRequest,
+    payload: {
+      paymentMethod?: FinanceRecord["paymentMethod"];
+      paymentMethod2?: FinanceRecord["paymentMethod2"];
+      paymentMethod3?: FinanceRecord["paymentMethod3"];
+    }
+  ) {
+    const hasReceivedCash = [payload.paymentMethod, payload.paymentMethod2, payload.paymentMethod3].includes("E_RECEIVED");
+    if (hasReceivedCash && !isEmrtUser(request)) {
+      throw new app.errors.AppError(
+        403,
+        "FORBIDDEN_PAYMENT_METHOD",
+        "Only EMRT can mark a cash payment as received."
+      );
+    }
   }
 
   function getEffectivePermissions(request: FastifyRequest) {
@@ -171,12 +197,14 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/finances/records", { preHandler: writeGuards }, async (request) => {
     const payload = createFinanceRecordSchema.parse(request.body ?? {});
+    enforcePaymentMethodPermission(request, payload);
     return service.createRecord(payload.year, payload.month, payload);
   });
 
   app.patch("/finances/records/:recordId", { preHandler: writeGuards }, async (request) => {
     const params = recordIdParamsSchema.parse(request.params);
     const payload = financeRecordFieldsSchema.parse(request.body ?? {});
+    enforcePaymentMethodPermission(request, payload);
     return service.updateRecord(params.recordId, payload);
   });
 

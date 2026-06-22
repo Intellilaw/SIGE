@@ -362,6 +362,19 @@ function getFinanceMatterTypeLabel(type: FinanceRecord["matterType"]) {
   return type === "RETAINER" ? "Iguala" : "Unico";
 }
 
+function getReceivedFinanceIncome(record: FinanceRecord) {
+  const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || record.paymentMethod === "E_RECEIVED")
+    ? record.paidThisMonthMxn
+    : 0;
+  const payment2Mxn = record.paymentDate2 && (record.paymentMethod2 === "T" || record.paymentMethod2 === "E_RECEIVED")
+    ? record.payment2Mxn
+    : 0;
+  const payment3Mxn = record.paymentDate3 && (record.paymentMethod3 === "T" || record.paymentMethod3 === "E_RECEIVED")
+    ? record.payment3Mxn
+    : 0;
+  return primaryPaymentMxn + payment2Mxn + payment3Mxn;
+}
+
 function formatDateList(values: Array<string | null | undefined>) {
   const dates = values.map(toDateInput).filter(Boolean);
   return dates.length > 0 ? dates.join(" / ") : "-";
@@ -1230,7 +1243,7 @@ export function MobileFinancesPage() {
   const monthTotals = useMemo(() => {
     return records.reduce(
       (totals, record) => {
-        const income = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+        const income = getReceivedFinanceIncome(record);
         const expenses = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
         return {
           income: totals.income + income,
@@ -1608,7 +1621,7 @@ export function MobileFinancesPage() {
         ) : (
           <div className="mobile-card-list">
             {visibleRecords.map((record) => {
-              const income = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+              const income = getReceivedFinanceIncome(record);
               const expenses = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
 
               return (

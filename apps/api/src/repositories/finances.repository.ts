@@ -30,6 +30,7 @@ type PercentagePayload = Pick<
 >;
 
 const VALID_CONTRACT_STATUS = new Set<ContractSignedStatus>(["YES", "NO", "NOT_REQUIRED"]);
+const VALID_PAYMENT_METHODS = new Set<FinanceRecord["paymentMethod"]>(["blank", "T", "E_RECEIVED", "E_PENDING"]);
 const FINANCE_RECORD_BASE_SELECT = {
   id: true,
   year: true,
@@ -53,6 +54,9 @@ const FINANCE_RECORD_BASE_SELECT = {
   paymentDate1: true,
   paymentDate2: true,
   paymentDate3: true,
+  paymentMethod: true,
+  paymentMethod2: true,
+  paymentMethod3: true,
   expenseNotes1: true,
   expenseNotes2: true,
   expenseNotes3: true,
@@ -123,6 +127,50 @@ function normalizeContractSignedStatus(value?: string | null): ContractSignedSta
   }
 
   return "NO";
+}
+
+function normalizeFinancePaymentMethod(value?: string | null): FinanceRecord["paymentMethod"] {
+  return VALID_PAYMENT_METHODS.has(value as FinanceRecord["paymentMethod"])
+    ? (value as FinanceRecord["paymentMethod"])
+    : "blank";
+}
+
+function isFinancePaymentMethodReceived(value?: FinanceRecord["paymentMethod"] | null) {
+  return value === "T" || value === "E_RECEIVED";
+}
+
+function hasPaymentDate(value?: string | null) {
+  return Boolean(value);
+}
+
+function getReceivedPaymentsMxn(
+  record: Pick<
+    FinanceRecord,
+    | "paidThisMonthMxn"
+    | "payment2Mxn"
+    | "payment3Mxn"
+    | "paymentDate1"
+    | "paymentDate2"
+    | "paymentDate3"
+    | "paymentMethod"
+    | "paymentMethod2"
+    | "paymentMethod3"
+  >
+) {
+  const payment1Mxn =
+    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+      ? record.paidThisMonthMxn
+      : 0;
+  const payment2Mxn =
+    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+      ? record.payment2Mxn
+      : 0;
+  const payment3Mxn =
+    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+      ? record.payment3Mxn
+      : 0;
+
+  return payment1Mxn + payment2Mxn + payment3Mxn;
 }
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
@@ -260,7 +308,7 @@ function getMonthName(month: number) {
 }
 
 function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
-  const totalPaidMxn = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+  const totalPaidMxn = getReceivedPaymentsMxn(record);
   const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
   const netFeesMxn = totalPaidMxn - totalExpensesMxn;
   const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
@@ -405,6 +453,9 @@ export class PrismaFinanceRepository implements FinanceRepository {
       paymentDate1: parseDateValue(payload.paymentDate1),
       paymentDate2: parseDateValue(payload.paymentDate2),
       paymentDate3: parseDateValue(payload.paymentDate3),
+      paymentMethod: normalizeFinancePaymentMethod(payload.paymentMethod),
+      paymentMethod2: normalizeFinancePaymentMethod(payload.paymentMethod2),
+      paymentMethod3: normalizeFinancePaymentMethod(payload.paymentMethod3),
       expenseNotes1: normalizeOptionalText(payload.expenseNotes1),
       expenseNotes2: normalizeOptionalText(payload.expenseNotes2),
       expenseNotes3: normalizeOptionalText(payload.expenseNotes3),
@@ -498,6 +549,15 @@ export class PrismaFinanceRepository implements FinanceRepository {
     }
     if (hasOwn(payload, "paymentDate3")) {
       data.paymentDate3 = parseDateValue(payload.paymentDate3);
+    }
+    if (hasOwn(payload, "paymentMethod")) {
+      data.paymentMethod = normalizeFinancePaymentMethod(payload.paymentMethod);
+    }
+    if (hasOwn(payload, "paymentMethod2")) {
+      data.paymentMethod2 = normalizeFinancePaymentMethod(payload.paymentMethod2);
+    }
+    if (hasOwn(payload, "paymentMethod3")) {
+      data.paymentMethod3 = normalizeFinancePaymentMethod(payload.paymentMethod3);
     }
     if (hasOwn(payload, "expenseNotes1")) {
       data.expenseNotes1 = normalizeOptionalText(payload.expenseNotes1);
@@ -662,7 +722,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
       });
 
       for (const record of sourceRecords) {
-        const totalPaidMxn = record.paidThisMonthMxn + record.payment2Mxn + record.payment3Mxn;
+        const totalPaidMxn = getReceivedPaymentsMxn(record);
         const data: Prisma.FinanceRecordUncheckedCreateInput = {
           year: nextYear,
           month: nextMonth,
@@ -685,6 +745,9 @@ export class PrismaFinanceRepository implements FinanceRepository {
           paymentDate1: null,
           paymentDate2: null,
           paymentDate3: null,
+          paymentMethod: "blank",
+          paymentMethod2: "blank",
+          paymentMethod3: "blank",
           expenseNotes1: null,
           expenseNotes2: null,
           expenseNotes3: null,

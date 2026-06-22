@@ -1,7 +1,11 @@
+import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import {
   buildLegalFlowSalesTasks,
   deriveEffectivePermissions,
+  EXECUTION_HOLIDAY_AUTHORITIES,
+  getExecutionMatterMissingFields,
   LEGALFLOW_SALES_PRODUCTS,
   LEGALFLOW_SALES_START_DATE,
   type KpiIncident,
@@ -20,7 +24,14 @@ const LITIGATION_MODULE_ID = "litigation";
 const BRIEF_TABLE_ALIASES = ["escritos-fondo", "escritos_fondo"];
 const WRIT_TABLE_ALIASES = ["escritos", "escritos_kpi"];
 const PREVENTION_TABLE_ALIASES = ["desahogo-prevenciones", "desahogo_prevenciones"];
+const DEFAULT_ORGANIZATION_ID = "org-rusconi";
+const BUSINESS_TIME_ZONE = "America/Mexico_City";
 const KPI_HISTORY_BASELINE_DATE_KEY = "2026-06-17";
+const LAMR_KPI_USER_KEY = "LAMR";
+const LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID = "lamr-filas-incompletas-ejecucion";
+const LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD = 2;
+const NON_EVALUATED_KPI_DAY_UNIT = "dias-no-evaluados";
+const KPI_HOLIDAY_ORGAN_AUTHORITIES = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
 const TERM_MARKED_AT_DATA_KEY = "termMarkedAt";
 const VERIFICATION_DATES_DATA_KEY = "verificationDates";
 const WRITING_PRESENTED_AT_DATA_KEY = "writingPresentedAt";
@@ -84,6 +95,13 @@ const KPI_EXCLUDED_DISPLAY_NAME_KEYS = new Set([
   "veronica mariana salas elisea"
 ]);
 
+const businessDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
+
 interface UserRecord {
   id: string;
   email: string;
@@ -112,6 +130,7 @@ interface TrackingRecord {
   moduleId: string;
   tableCode: string;
   sourceTable: string;
+  matterId: string | null;
   clientName: string;
   subject: string;
   matterNumber: string | null;
@@ -136,6 +155,7 @@ interface TermRecord {
   moduleId: string;
   sourceTable: string | null;
   sourceRecordId: string | null;
+  matterId: string | null;
   clientName: string;
   subject: string;
   matterNumber: string | null;
@@ -170,6 +190,11 @@ interface GlobalVacationDayRecord {
   vacationDates: unknown;
 }
 
+interface HolidayRecord {
+  date: Date;
+  authorityShortName: string;
+}
+
 interface SalesDailyReportRecord {
   id: string;
   productId: string;
@@ -177,6 +202,43 @@ interface SalesDailyReportRecord {
   content: string;
   submittedAt: Date | null;
   updatedAt: Date;
+}
+
+interface ClientRecord {
+  id: string;
+  clientNumber: string;
+  name: string;
+}
+
+interface MatterRecord {
+  id: string;
+  matterNumber: string;
+  clientNumber: string | null;
+  clientName: string;
+  quoteNumber: string | null;
+  subject: string;
+  responsibleTeam: string | null;
+  communicationChannel: string;
+  matterIdentifier: string | null;
+  executionLinkedModule: string | null;
+  milestone: string | null;
+  deletedAt: Date | null;
+}
+
+interface KpiDailySnapshotRecord {
+  id: string;
+  userKey: string;
+  metricId: string;
+  snapshotDate: Date;
+  status: string;
+  value: number;
+  target: number;
+  unit: string;
+  actualLabel: string;
+  targetLabel: string;
+  helper: string | null;
+  incidents: unknown;
+  sourceData: unknown;
 }
 
 interface PeriodContext {
@@ -189,6 +251,7 @@ interface PeriodContext {
   periodComplete: boolean;
   holidayKeys: Set<string>;
   excludedDateKeys: Set<string>;
+  excludedDateLabels: Map<string, string>;
   evaluatedDateKeys: string[];
 }
 
@@ -218,6 +281,9 @@ interface KpiUserConfig {
     aliases: string[];
     trackingRecords: TrackingRecord[];
     terms: TermRecord[];
+    matters: MatterRecord[];
+    clients: ClientRecord[];
+    kpiDailySnapshots: KpiDailySnapshotRecord[];
     salesDailyReports: SalesDailyReportRecord[];
     period: PeriodContext;
   }) => KpiMetric[];
@@ -254,6 +320,14 @@ function toDateKey(value?: Date | string | null) {
   }
 
   return value.toISOString().slice(0, 10);
+}
+
+function getBusinessDateKey(date = new Date()) {
+  const parts = Object.fromEntries(
+    businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value])
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function dateFromKey(value: string) {
@@ -315,9 +389,110 @@ function getBusinessDateKeys(startKey: string, endKey: string, holidayKeys: Set<
   });
 }
 
+function getWeekdayDateKeys(startKey: string, endKey: string) {
+  return enumerateDateKeys(startKey, endKey).filter((key) => {
+    const day = dateFromKey(key).getUTCDay();
+    return day !== 0 && day !== 6;
+  });
+}
+
+function buildKpiHolidayKeys(holidays: HolidayRecord[]) {
+  const authoritiesByDate = new Map<string, Set<string>>();
+
+  holidays.forEach((holiday) => {
+    if (!KPI_HOLIDAY_ORGAN_AUTHORITIES.has(holiday.authorityShortName)) {
+      return;
+    }
+
+    const dateKey = toDateKey(holiday.date);
+    const authorities = authoritiesByDate.get(dateKey) ?? new Set<string>();
+    authorities.add(holiday.authorityShortName);
+    authoritiesByDate.set(dateKey, authorities);
+  });
+
+  return new Set(
+    Array.from(authoritiesByDate.entries())
+      .filter(([, authorities]) =>
+        EXECUTION_HOLIDAY_AUTHORITIES.every((authority) => authorities.has(authority))
+      )
+      .map(([dateKey]) => dateKey)
+  );
+}
+
+function buildKpiHolidayLabels(holidayKeys: Set<string>) {
+  return new Map(Array.from(holidayKeys).map((dateKey) => [
+    dateKey,
+    "Dia inhabil para todos los organos"
+  ]));
+}
+
 function isBusinessDateKey(dateKey: string, period: PeriodContext) {
   const day = dateFromKey(dateKey).getUTCDay();
   return day !== 0 && day !== 6 && !period.holidayKeys.has(dateKey) && !period.excludedDateKeys.has(dateKey);
+}
+
+function isBusinessDateKeyForHolidaySet(dateKey: string, holidayKeys: Set<string>) {
+  const day = dateFromKey(dateKey).getUTCDay();
+  return day !== 0 && day !== 6 && !holidayKeys.has(dateKey);
+}
+
+function isKpiMetricStatus(value: unknown): value is KpiMetricStatus {
+  return value === "met" || value === "warning" || value === "missed" || value === "not-configured";
+}
+
+function parseKpiIncidents(value: unknown): KpiIncident[] {
+  return Array.isArray(value) ? value as KpiIncident[] : [];
+}
+
+function getExcludedDateLabel(dateKey: string, period: PeriodContext) {
+  return period.excludedDateLabels.get(dateKey)
+    ?? (period.holidayKeys.has(dateKey) ? "Dia inhabil" : "Dia no evaluado");
+}
+
+function buildNonEvaluatedDailyBreakdown(period: PeriodContext) {
+  const evaluatedKeys = new Set(period.evaluatedDateKeys);
+
+  return getWeekdayDateKeys(period.startKey, period.cutoffKey)
+    .filter((dateKey) => !evaluatedKeys.has(dateKey))
+    .filter((dateKey) => period.holidayKeys.has(dateKey) || period.excludedDateKeys.has(dateKey))
+    .map((dateKey) => {
+      const label = getExcludedDateLabel(dateKey, period);
+
+      return {
+        date: dateKey,
+        status: "not-configured",
+        value: 0,
+        target: 0,
+        unit: NON_EVALUATED_KPI_DAY_UNIT,
+        actualLabel: label,
+        targetLabel: "No evaluado",
+        helper: `${label}: este dia no cuenta como KPI cumplido ni como KPI incumplido.`,
+        incidents: []
+      } satisfies KpiMetric["dailyBreakdown"][number];
+    });
+}
+
+function isNonEvaluatedKpiDay(day: KpiMetric["dailyBreakdown"][number]) {
+  return day.status === "not-configured" && day.unit === NON_EVALUATED_KPI_DAY_UNIT;
+}
+
+function withNonEvaluatedDays(
+  period: PeriodContext,
+  dailyBreakdown: Array<KpiMetric["dailyBreakdown"][number]>
+) {
+  return [...dailyBreakdown, ...buildNonEvaluatedDailyBreakdown(period)]
+    .sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function isMissingKpiDailySnapshotTableError(error: unknown) {
+  const record = getDataRecord(error);
+  const meta = getDataRecord(record.meta);
+  const code = String(record.code ?? meta.code ?? "");
+  const message = String(record.message ?? "");
+  const metaMessage = String(meta.message ?? "");
+
+  return (code === "42P01" || code === "P2010")
+    && (message.includes("KpiDailySnapshot") || metaMessage.includes("KpiDailySnapshot"));
 }
 
 function addBusinessDaysKey(startKey: string, days: number, period: PeriodContext) {
@@ -508,16 +683,40 @@ function buildVacationKeysByUser(vacationEvents: VacationEventRecord[], startKey
   return keysByUser;
 }
 
-function buildUserPeriod(period: PeriodContext, vacationKeys: Set<string>, holidayKeys: Set<string>): PeriodContext {
+function buildUserPeriod(
+  period: PeriodContext,
+  vacationKeys: Set<string>,
+  holidayKeys: Set<string>,
+  options?: {
+    personalVacationKeys?: Set<string>;
+    globalVacationKeys?: Set<string>;
+  }
+): PeriodContext {
   if (vacationKeys.size === 0) {
     return period;
   }
+
+  const excludedDateLabels = new Map(period.excludedDateLabels);
+  vacationKeys.forEach((dateKey) => {
+    if (options?.personalVacationKeys?.has(dateKey)) {
+      excludedDateLabels.set(dateKey, "Vacaciones");
+      return;
+    }
+
+    if (options?.globalVacationKeys?.has(dateKey)) {
+      excludedDateLabels.set(dateKey, "Vacaciones generales");
+      return;
+    }
+
+    excludedDateLabels.set(dateKey, "Dia no evaluado");
+  });
 
   return {
     ...period,
     businessDaysInPeriod: countBusinessDays(period.startKey, period.endKey, holidayKeys, vacationKeys),
     businessDaysElapsed: countBusinessDays(period.startKey, period.cutoffKey, holidayKeys, vacationKeys),
     excludedDateKeys: vacationKeys,
+    excludedDateLabels,
     evaluatedDateKeys: getBusinessDateKeys(period.startKey, period.cutoffKey, holidayKeys, vacationKeys)
   };
 }
@@ -704,6 +903,77 @@ function termToDeadlineSource(term: TermRecord): DeadlineSource {
   };
 }
 
+function getMatterReferenceKeys(matter: MatterRecord) {
+  return new Set(
+    [matter.id, matter.matterNumber, matter.matterIdentifier]
+      .map(normalizeText)
+      .filter(Boolean)
+  );
+}
+
+function sourceMatchesMatter(
+  source: Pick<TrackingRecord | TermRecord, "matterId" | "matterNumber" | "matterIdentifier">,
+  matterKeys: Set<string>
+) {
+  return [source.matterId, source.matterNumber, source.matterIdentifier]
+    .map(normalizeText)
+    .some((key) => matterKeys.has(key));
+}
+
+function getPendingMatterTaskCount(input: {
+  matter: MatterRecord;
+  trackingRecords: TrackingRecord[];
+  terms: TermRecord[];
+}) {
+  const matterKeys = getMatterReferenceKeys(input.matter);
+  const taskIdentities = new Set<string>();
+
+  input.trackingRecords
+    .filter((record) => record.moduleId === LITIGATION_MODULE_ID && !record.deletedAt)
+    .filter((record) => record.status === "pendiente")
+    .filter((record) => sourceMatchesMatter(record, matterKeys))
+    .forEach((record) => taskIdentities.add(`tracking:${record.id}`));
+
+  input.terms
+    .filter((term) => term.moduleId === LITIGATION_MODULE_ID && !term.deletedAt && !term.sourceRecordId)
+    .filter((term) => term.status === "pendiente")
+    .filter((term) => sourceMatchesMatter(term, matterKeys))
+    .forEach((term) => taskIdentities.add(`term:${term.id}`));
+
+  return taskIdentities.size;
+}
+
+function getClientNumberForMatter(matter: MatterRecord, clients: ClientRecord[]) {
+  const normalizedClientName = normalizeText(matter.clientName);
+  const matchedClient = normalizedClientName
+    ? clients.find((client) => normalizeText(client.name) === normalizedClientName)
+    : undefined;
+
+  return matchedClient?.clientNumber ?? matter.clientNumber ?? "";
+}
+
+function buildMatterIncident(input: {
+  matter: MatterRecord;
+  missing: string[];
+  dateKey: string;
+}): KpiIncident {
+  return {
+    id: input.matter.id,
+    sourceType: "matter",
+    moduleId: input.matter.executionLinkedModule ?? LITIGATION_MODULE_ID,
+    tableCode: "execution",
+    tableLabel: "Ejecucion",
+    clientName: input.matter.clientName || "-",
+    subject: input.matter.subject || "-",
+    matterIdentifier: input.matter.matterIdentifier ?? input.matter.matterNumber,
+    taskName: "Fila incompleta en Ejecucion",
+    responsible: "LAMR",
+    dueDate: input.dateKey,
+    status: "pendiente",
+    reason: `Faltantes: ${input.missing.join(", ")}`
+  };
+}
+
 function buildIncident(source: DeadlineSource, reason: string): KpiIncident {
   return {
     id: source.id,
@@ -846,7 +1116,7 @@ function buildProductionDailyBreakdown(input: {
 
   let accumulatedValue = 0;
 
-  return input.period.evaluatedDateKeys.map((dateKey, index) => {
+  const dailyBreakdown = input.period.evaluatedDateKeys.map((dateKey, index) => {
     const dayValue = recordsByDate.get(dateKey)?.length ?? 0;
     accumulatedValue += dayValue;
     const businessDayIndex = index + 1;
@@ -882,6 +1152,8 @@ function buildProductionDailyBreakdown(input: {
       incidents: []
     } satisfies KpiMetric["dailyBreakdown"][number];
   });
+
+  return withNonEvaluatedDays(input.period, dailyBreakdown);
 }
 
 function getIncidentDateKey(incident: KpiIncident) {
@@ -897,7 +1169,7 @@ function buildDeadlineDailyBreakdown(input: {
     .filter((dateKey) => isDateInRange(dateKey, input.period.startKey, input.period.cutoffKey));
   const dateKeys = Array.from(new Set([...input.period.evaluatedDateKeys, ...incidentDateKeys])).sort();
 
-  return dateKeys.map((dateKey) => {
+  const dailyBreakdown = dateKeys.map((dateKey) => {
     const incidents = input.incidents.filter((incident) => getIncidentDateKey(incident) === dateKey);
 
     return {
@@ -914,6 +1186,8 @@ function buildDeadlineDailyBreakdown(input: {
       incidents
     } satisfies KpiMetric["dailyBreakdown"][number];
   });
+
+  return withNonEvaluatedDays(input.period, dailyBreakdown);
 }
 
 function buildDatedIncident(input: {
@@ -1035,7 +1309,7 @@ function buildTermVerificationMetric(input: {
     .map((incident) => incident.dueDate ?? "")
     .filter((dateKey) => isDateInRange(dateKey, input.period.startKey, input.period.cutoffKey));
   const dateKeys = Array.from(new Set([...input.period.evaluatedDateKeys, ...incidentDateKeys])).sort();
-  const dailyBreakdown = dateKeys.map((dateKey) => {
+  const dailyBreakdown = withNonEvaluatedDays(input.period, dateKeys.map((dateKey) => {
     const dueToday = verificationSources.filter((source) => source.dueKey === dateKey);
     const incidentsToday = incidents.filter((incident) => incident.dueDate === dateKey);
     const verifiedToday = dueToday.length - incidentsToday.length;
@@ -1053,7 +1327,7 @@ function buildTermVerificationMetric(input: {
         : "Las verificaciones vencidas al corte del dia estan en meta.",
       incidents: incidentsToday
     } satisfies KpiMetric["dailyBreakdown"][number];
-  });
+  }));
 
   return {
     id: input.id,
@@ -1128,7 +1402,7 @@ function buildBriefBeBlRegistrationMetric(input: {
     .map((incident) => incident.dueDate ?? "")
     .filter((dateKey) => isDateInRange(dateKey, input.period.startKey, input.period.cutoffKey));
   const dateKeys = Array.from(new Set([...input.period.evaluatedDateKeys, ...incidentDateKeys])).sort();
-  const dailyBreakdown = dateKeys.map((dateKey) => {
+  const dailyBreakdown = withNonEvaluatedDays(input.period, dateKeys.map((dateKey) => {
     const dueToday = sources.filter((source) => source.dueKey === dateKey);
     const incidentsToday = incidents.filter((incident) => incident.dueDate === dateKey);
     const completedToday = dueToday.length - incidentsToday.length;
@@ -1146,7 +1420,7 @@ function buildBriefBeBlRegistrationMetric(input: {
         : "Las altas en BE y BL vencidas al corte del dia estan en meta.",
       incidents: incidentsToday
     } satisfies KpiMetric["dailyBreakdown"][number];
-  });
+  }));
 
   return {
     id: "escritos-fondo-be-bl-dia-habil",
@@ -1280,6 +1554,259 @@ function buildDeadlineMetric(input: {
   } satisfies KpiMetric;
 }
 
+interface ExecutionIncompleteRow {
+  matter: MatterRecord;
+  missing: string[];
+}
+
+interface ExecutionIncompleteRowsEvaluation {
+  dateKey: string;
+  status: KpiMetricStatus;
+  value: number;
+  target: number;
+  unit: string;
+  actualLabel: string;
+  targetLabel: string;
+  helper: string;
+  incidents: KpiIncident[];
+  sourceData: {
+    incompleteRows: Array<{
+      matterId: string;
+      matterNumber: string;
+      clientName: string;
+      subject: string;
+      matterIdentifier: string | null;
+      missing: string[];
+    }>;
+  };
+}
+
+function getExecutionIncompleteRows(input: {
+  matters: MatterRecord[];
+  clients: ClientRecord[];
+  trackingRecords: TrackingRecord[];
+  terms: TermRecord[];
+}) {
+  return input.matters
+    .filter((matter) => !matter.deletedAt)
+    .filter((matter) => matter.responsibleTeam === "LITIGATION" || matter.executionLinkedModule === LITIGATION_MODULE_ID)
+    .map((matter) => {
+      const missing = getExecutionMatterMissingFields({
+        clientNumber: getClientNumberForMatter(matter, input.clients),
+        clientName: matter.clientName,
+        quoteNumber: matter.quoteNumber,
+        subject: matter.subject,
+        matterIdentifier: matter.matterIdentifier,
+        communicationChannel: matter.communicationChannel,
+        milestone: matter.milestone,
+        taskCount: getPendingMatterTaskCount({
+          matter,
+          trackingRecords: input.trackingRecords,
+          terms: input.terms
+        })
+      });
+
+      return {
+        matter,
+        missing
+      };
+    })
+    .filter((row) => row.missing.length > 0) satisfies ExecutionIncompleteRow[];
+}
+
+function buildExecutionIncompleteRowsEvaluation(input: {
+  matters: MatterRecord[];
+  clients: ClientRecord[];
+  trackingRecords: TrackingRecord[];
+  terms: TermRecord[];
+  dateKey: string;
+  isOpenBusinessDay: boolean;
+}) {
+  const incompleteRows = getExecutionIncompleteRows(input);
+  const value = incompleteRows.length;
+  const status: KpiMetricStatus = !input.dateKey || value <= LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD
+    ? "met"
+    : input.isOpenBusinessDay
+      ? "warning"
+      : "missed";
+  const incidents = value > LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD && input.dateKey
+    ? incompleteRows.map((row) => buildMatterIncident({
+      matter: row.matter,
+      missing: row.missing,
+      dateKey: input.dateKey
+    }))
+    : [];
+
+  return {
+    dateKey: input.dateKey,
+    status,
+    value,
+    target: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+    unit: "filas",
+    actualLabel: `${value} filas incompletas`,
+    targetLabel: `Maximo ${LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD} filas incompletas`,
+    helper: value <= LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD
+      ? "El modulo de Ejecucion estuvo dentro del maximo permitido de filas incompletas."
+      : input.isOpenBusinessDay
+        ? "El dia sigue abierto; hay mas filas incompletas que el maximo permitido."
+        : "Hay mas filas incompletas que el maximo permitido al cierre.",
+    incidents,
+    sourceData: {
+      incompleteRows: incompleteRows.map((row) => ({
+        matterId: row.matter.id,
+        matterNumber: row.matter.matterNumber,
+        clientName: row.matter.clientName,
+        subject: row.matter.subject,
+        matterIdentifier: row.matter.matterIdentifier,
+        missing: row.missing
+      }))
+    }
+  } satisfies ExecutionIncompleteRowsEvaluation;
+}
+
+function executionEvaluationToDailyMetric(evaluation: ExecutionIncompleteRowsEvaluation) {
+  return {
+    date: evaluation.dateKey,
+    status: evaluation.status,
+    value: evaluation.value,
+    target: evaluation.target,
+    unit: evaluation.unit,
+    actualLabel: evaluation.actualLabel,
+    targetLabel: evaluation.targetLabel,
+    helper: evaluation.helper,
+    incidents: evaluation.incidents
+  } satisfies KpiMetric["dailyBreakdown"][number];
+}
+
+function snapshotToDailyMetric(snapshot: KpiDailySnapshotRecord) {
+  const status = isKpiMetricStatus(snapshot.status)
+    ? snapshot.status
+    : snapshot.value <= snapshot.target
+      ? "met"
+      : "missed";
+
+  return {
+    date: toDateKey(snapshot.snapshotDate),
+    status,
+    value: snapshot.value,
+    target: snapshot.target,
+    unit: snapshot.unit,
+    actualLabel: snapshot.actualLabel,
+    targetLabel: snapshot.targetLabel,
+    helper: snapshot.helper ?? "Snapshot diario guardado al cierre del dia.",
+    incidents: parseKpiIncidents(snapshot.incidents)
+  } satisfies KpiMetric["dailyBreakdown"][number];
+}
+
+function buildMissingExecutionSnapshotDailyMetric(dateKey: string) {
+  return {
+    date: dateKey,
+    status: "not-configured",
+    value: 0,
+    target: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+    unit: NON_EVALUATED_KPI_DAY_UNIT,
+    actualLabel: "Sin snapshot diario",
+    targetLabel: "No evaluado",
+    helper: "No hay snapshot de cierre guardado para este dia; no cuenta como KPI cumplido ni como KPI incumplido.",
+    incidents: []
+  } satisfies KpiMetric["dailyBreakdown"][number];
+}
+
+function summarizeDailyStatus(dailyBreakdown: Array<KpiMetric["dailyBreakdown"][number]>): KpiMetricStatus {
+  const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
+
+  if (evaluatedDays.length === 0) {
+    return "not-configured";
+  }
+
+  if (evaluatedDays.some((day) => day.status === "missed")) {
+    return "missed";
+  }
+
+  if (evaluatedDays.some((day) => day.status === "warning")) {
+    return "warning";
+  }
+
+  return "met";
+}
+
+function buildExecutionIncompleteRowsMetric(input: {
+  matters: MatterRecord[];
+  clients: ClientRecord[];
+  trackingRecords: TrackingRecord[];
+  terms: TermRecord[];
+  kpiDailySnapshots: KpiDailySnapshotRecord[];
+  period: PeriodContext;
+}) {
+  const liveDateKey = input.period.cutoffKey >= input.period.startKey ? input.period.cutoffKey : "";
+  const liveEvaluation = liveDateKey
+    ? buildExecutionIncompleteRowsEvaluation({
+      matters: input.matters,
+      clients: input.clients,
+      trackingRecords: input.trackingRecords,
+      terms: input.terms,
+      dateKey: liveDateKey,
+      isOpenBusinessDay: liveDateKey === input.period.todayKey && !input.period.periodComplete
+    })
+    : null;
+  const snapshotsByDate = new Map(
+    input.kpiDailySnapshots
+      .filter((snapshot) => snapshot.userKey === LAMR_KPI_USER_KEY)
+      .filter((snapshot) => snapshot.metricId === LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID)
+      .map((snapshot) => [toDateKey(snapshot.snapshotDate), snapshot])
+  );
+  const dailyBreakdown = withNonEvaluatedDays(input.period, input.period.evaluatedDateKeys
+    .filter((dateKey) => dateKey >= KPI_HISTORY_BASELINE_DATE_KEY)
+    .flatMap((dateKey) => {
+      const snapshot = snapshotsByDate.get(dateKey);
+      if (snapshot) {
+        return [snapshotToDailyMetric(snapshot)];
+      }
+
+      if (
+        liveEvaluation
+        && dateKey === liveEvaluation.dateKey
+        && dateKey === input.period.todayKey
+      ) {
+        return [executionEvaluationToDailyMetric(liveEvaluation)];
+      }
+
+      return [buildMissingExecutionSnapshotDailyMetric(dateKey)];
+    }));
+  const status = summarizeDailyStatus(dailyBreakdown);
+  const currentDay = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day)).at(-1) ?? null;
+  const value = currentDay?.value ?? 0;
+  const progressPct = currentDay
+    ? currentDay.value <= currentDay.target
+      ? 100
+      : clampProgress((currentDay.target / currentDay.value) * 100)
+    : 0;
+  const incidents = dailyBreakdown
+    .filter((day) => day.status === "missed" || day.status === "warning")
+    .flatMap((day) => day.incidents);
+
+  return {
+    id: LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID,
+    label: "Filas incompletas en Ejecucion",
+    description: "Al cierre del dia debe haber como maximo 2 filas incompletas en el modulo de Ejecucion.",
+    kind: "deadline",
+    status,
+    value,
+    target: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+    unit: "filas",
+    progressPct,
+    targetLabel: `Maximo ${LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD} filas incompletas`,
+    actualLabel: currentDay?.actualLabel ?? "Sin snapshot diario",
+    helper: dailyBreakdown.length > 0
+      ? "Los dias cerrados se leen desde snapshots diarios del cierre; el dia abierto solo aparece si esta en observacion."
+      : "Sin snapshots diarios disponibles para el periodo evaluado.",
+    sourceDescription: "Modulo de Ejecucion: asuntos activos de Litigio y columna Faltantes.",
+    sourceTables: ["execution_matters"],
+    incidents,
+    dailyBreakdown
+  } satisfies KpiMetric;
+}
+
 function buildSalesDailyReportMetric(input: {
   salesDailyReports: SalesDailyReportRecord[];
   period: PeriodContext;
@@ -1303,7 +1830,7 @@ function buildSalesDailyReportMetric(input: {
       ? "missed"
       : "warning";
 
-  const dailyBreakdown = expectedTasks.map((task) => {
+  const dailyBreakdown = withNonEvaluatedDays(input.period, expectedTasks.map((task) => {
     const product = productById.get(task.productId);
     const report = reportByProductAndDate.get(`${task.productId}:${task.dueDate}`);
     const value = report ? 1 : 0;
@@ -1326,7 +1853,7 @@ function buildSalesDailyReportMetric(input: {
         : `No se encontro reporte guardado en Ventas para ${product?.name ?? task.productId}.`,
       incidents: []
     } satisfies KpiMetric["dailyBreakdown"][number];
-  });
+  }));
 
   return {
     id: "ijrr-reporte-actividad-diario-ventas",
@@ -1392,7 +1919,7 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
   {
     key: "LAMR",
     aliases: ["LAMR", "Alejandra Mejia", "Alejandra Mejía", "Litigio (colaborador)"],
-    buildMetrics: ({ aliases, trackingRecords, terms, period }) => [
+    buildMetrics: ({ aliases, trackingRecords, terms, matters, clients, kpiDailySnapshots, period }) => [
       buildProductionMetric({
         id: "lamr-escritos-diarios",
         label: "Escritos no de fondo diarios",
@@ -1449,6 +1976,14 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         verificationLabel: "LAMR",
         trackingRecords,
         terms,
+        period
+      }),
+      buildExecutionIncompleteRowsMetric({
+        matters,
+        clients,
+        trackingRecords,
+        terms,
+        kpiDailySnapshots,
         period
       })
     ]
@@ -1534,6 +2069,156 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
 export class PrismaKpisRepository implements KpisRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
+  public async captureExecutionIncompleteRowsSnapshot(dateKey = getBusinessDateKey()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      throw new Error(`Invalid KPI snapshot date: ${dateKey}`);
+    }
+
+    const holidayRecords = await this.prisma.holiday.findMany({
+      select: { date: true, authorityShortName: true },
+      where: {
+        date: {
+          gte: dateFromKey(dateKey),
+          lte: dateFromKey(dateKey)
+        }
+      }
+    });
+    const holidayKeys = buildKpiHolidayKeys(holidayRecords);
+
+    if (!isBusinessDateKeyForHolidaySet(dateKey, holidayKeys)) {
+      return {
+        dateKey,
+        skipped: true,
+        reason: "not-business-day"
+      };
+    }
+
+    const [trackingRecords, terms, matters, clients] = await Promise.all([
+      this.prisma.taskTrackingRecord.findMany({
+        where: {
+          moduleId: LITIGATION_MODULE_ID,
+          deletedAt: null
+        },
+        orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
+      }),
+      this.prisma.taskTerm.findMany({
+        where: {
+          moduleId: LITIGATION_MODULE_ID,
+          deletedAt: null
+        },
+        orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
+      }),
+      this.prisma.matter.findMany({
+        select: {
+          id: true,
+          matterNumber: true,
+          clientNumber: true,
+          clientName: true,
+          quoteNumber: true,
+          subject: true,
+          responsibleTeam: true,
+          communicationChannel: true,
+          matterIdentifier: true,
+          executionLinkedModule: true,
+          milestone: true,
+          deletedAt: true
+        },
+        where: {
+          deletedAt: null,
+          OR: [
+            { responsibleTeam: "LITIGATION" },
+            { executionLinkedModule: LITIGATION_MODULE_ID }
+          ]
+        },
+        orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.client.findMany({
+        select: {
+          id: true,
+          clientNumber: true,
+          name: true
+        },
+        where: {
+          deletedAt: null
+        },
+        orderBy: [{ clientNumber: "asc" }]
+      })
+    ]);
+
+    const evaluation = buildExecutionIncompleteRowsEvaluation({
+      matters: matters as MatterRecord[],
+      clients: clients as ClientRecord[],
+      trackingRecords: trackingRecords as TrackingRecord[],
+      terms: terms as TermRecord[],
+      dateKey,
+      isOpenBusinessDay: false
+    });
+    const snapshotDate = dateFromKey(dateKey);
+    const snapshotId = randomUUID();
+    const now = new Date();
+    const snapshots = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      INSERT INTO "KpiDailySnapshot" (
+        "id",
+        "organizationId",
+        "userKey",
+        "metricId",
+        "snapshotDate",
+        "status",
+        "value",
+        "target",
+        "unit",
+        "actualLabel",
+        "targetLabel",
+        "helper",
+        "incidents",
+        "sourceData",
+        "createdAt",
+        "updatedAt"
+      )
+      VALUES (
+        ${snapshotId},
+        ${DEFAULT_ORGANIZATION_ID},
+        ${LAMR_KPI_USER_KEY},
+        ${LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID},
+        CAST(${snapshotDate} AS date),
+        ${evaluation.status},
+        ${evaluation.value},
+        ${evaluation.target},
+        ${evaluation.unit},
+        ${evaluation.actualLabel},
+        ${evaluation.targetLabel},
+        ${evaluation.helper},
+        CAST(${JSON.stringify(evaluation.incidents)} AS jsonb),
+        CAST(${JSON.stringify(evaluation.sourceData)} AS jsonb),
+        ${now},
+        ${now}
+      )
+      ON CONFLICT ("organizationId", "userKey", "metricId", "snapshotDate")
+      DO UPDATE SET
+        "status" = EXCLUDED."status",
+        "value" = EXCLUDED."value",
+        "target" = EXCLUDED."target",
+        "unit" = EXCLUDED."unit",
+        "actualLabel" = EXCLUDED."actualLabel",
+        "targetLabel" = EXCLUDED."targetLabel",
+        "helper" = EXCLUDED."helper",
+        "incidents" = EXCLUDED."incidents",
+        "sourceData" = EXCLUDED."sourceData",
+        "updatedAt" = EXCLUDED."updatedAt"
+      RETURNING "id"
+    `);
+    const snapshot = snapshots[0];
+
+    return {
+      dateKey,
+      skipped: false,
+      snapshotId: snapshot?.id ?? snapshotId,
+      status: evaluation.status,
+      value: evaluation.value,
+      incidentCount: evaluation.incidents.length
+    };
+  }
+
   public async getOverview(year: number, month: number, accessScope: KpiAccessScope): Promise<KpiOverview> {
     const startKey = getMonthStartKey(year, month);
     const endKey = getMonthEndKey(year, month);
@@ -1548,10 +2233,10 @@ export class PrismaKpisRepository implements KpisRepository {
   private async getOverviewForPeriod(startKey: string, endKey: string, accessScope: KpiAccessScope): Promise<KpiOverview> {
     const year = Number(startKey.slice(0, 4));
     const month = Number(startKey.slice(5, 7));
-    const todayKey = toDateKey(new Date());
+    const todayKey = getBusinessDateKey();
     const cutoffKey = getCutoffKey(startKey, endKey, todayKey);
 
-    const [users, userTeams, trackingRecords, terms, salesDailyReports, holidays, vacationEvents, globalVacationDays] = await Promise.all([
+    const [users, userTeams, trackingRecords, terms, matters, clients, kpiDailySnapshots, salesDailyReports, holidays, vacationEvents, globalVacationDays] = await Promise.all([
       this.prisma.user.findMany({
         where: { isActive: true },
         orderBy: [{ legacyTeam: "asc" }, { team: "asc" }, { displayName: "asc" }]
@@ -1576,6 +2261,42 @@ export class PrismaKpisRepository implements KpisRepository {
         },
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
       }),
+      this.prisma.matter.findMany({
+        select: {
+          id: true,
+          matterNumber: true,
+          clientNumber: true,
+          clientName: true,
+          quoteNumber: true,
+          subject: true,
+          responsibleTeam: true,
+          communicationChannel: true,
+          matterIdentifier: true,
+          executionLinkedModule: true,
+          milestone: true,
+          deletedAt: true
+        },
+        where: {
+          deletedAt: null,
+          OR: [
+            { responsibleTeam: "LITIGATION" },
+            { executionLinkedModule: LITIGATION_MODULE_ID }
+          ]
+        },
+        orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.client.findMany({
+        select: {
+          id: true,
+          clientNumber: true,
+          name: true
+        },
+        where: {
+          deletedAt: null
+        },
+        orderBy: [{ clientNumber: "asc" }]
+      }),
+      this.listKpiDailySnapshots(startKey, cutoffKey),
       this.prisma.salesDailyReport.findMany({
         where: {
           reportDate: {
@@ -1587,7 +2308,8 @@ export class PrismaKpisRepository implements KpisRepository {
       }),
       this.prisma.holiday.findMany({
         select: {
-          date: true
+          date: true,
+          authorityShortName: true
         },
         where: {
           date: {
@@ -1632,7 +2354,8 @@ export class PrismaKpisRepository implements KpisRepository {
     const activeTeamKeys = new Set(activeTeamCatalog.map((team) => team.key));
     const teamLabelByKey = new Map(teamCatalog.map((team) => [team.key, team.label]));
 
-    const holidayKeys = new Set(holidays.map((holiday) => toDateKey(holiday.date)));
+    const holidayKeys = buildKpiHolidayKeys(holidays as HolidayRecord[]);
+    const holidayLabels = buildKpiHolidayLabels(holidayKeys);
     const vacationKeysByUser = buildVacationKeysByUser(vacationEvents as VacationEventRecord[], startKey, endKey);
     const globalVacationKeys = new Set(
       (globalVacationDays as GlobalVacationDayRecord[]).flatMap((day) => {
@@ -1658,6 +2381,7 @@ export class PrismaKpisRepository implements KpisRepository {
       periodComplete: endKey < todayKey,
       holidayKeys,
       excludedDateKeys: new Set(),
+      excludedDateLabels: holidayLabels,
       evaluatedDateKeys: getBusinessDateKeys(startKey, cutoffKey, holidayKeys)
     };
 
@@ -1670,13 +2394,20 @@ export class PrismaKpisRepository implements KpisRepository {
           ...globalVacationKeys,
           ...(vacationKeysByUser.get(user.id) ?? new Set<string>())
         ]);
-        const userPeriod = buildUserPeriod(period, vacationKeys, holidayKeys);
+        const personalVacationKeys = vacationKeysByUser.get(user.id) ?? new Set<string>();
+        const userPeriod = buildUserPeriod(period, vacationKeys, holidayKeys, {
+          personalVacationKeys,
+          globalVacationKeys
+        });
         const metrics = config
           ? config.buildMetrics({
               user,
               aliases,
               trackingRecords: trackingRecords as TrackingRecord[],
               terms: terms as TermRecord[],
+              matters: matters as MatterRecord[],
+              clients: clients as ClientRecord[],
+              kpiDailySnapshots: kpiDailySnapshots as KpiDailySnapshotRecord[],
               salesDailyReports: salesDailyReports as SalesDailyReportRecord[],
               period: userPeriod
             })
@@ -1715,6 +2446,43 @@ export class PrismaKpisRepository implements KpisRepository {
       sourceNote: "Los KPI's se alimentan automaticamente desde usuarios, tablas de seguimiento, terminos, reportes de ventas en RDS, dias inhabiles y vacaciones registradas; no reciben captura manual.",
       teams: this.groupUsersByTeam(visibleUserSummaries, visibleTeams, teamLabelByKey)
     };
+  }
+
+  private async listKpiDailySnapshots(startKey: string, endKey: string): Promise<KpiDailySnapshotRecord[]> {
+    if (endKey < startKey) {
+      return [];
+    }
+
+    try {
+      return await this.prisma.$queryRaw<KpiDailySnapshotRecord[]>(Prisma.sql`
+        SELECT
+          "id",
+          "userKey",
+          "metricId",
+          "snapshotDate",
+          "status",
+          "value",
+          "target",
+          "unit",
+          "actualLabel",
+          "targetLabel",
+          "helper",
+          "incidents",
+          "sourceData"
+        FROM "KpiDailySnapshot"
+        WHERE "snapshotDate" >= CAST(${dateFromKey(startKey)} AS date)
+          AND "snapshotDate" <= CAST(${dateFromKey(endKey)} AS date)
+          AND "metricId" = ${LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID}
+          AND "userKey" = ${LAMR_KPI_USER_KEY}
+        ORDER BY "snapshotDate" ASC, "userKey" ASC, "metricId" ASC
+      `);
+    } catch (error) {
+      if (isMissingKpiDailySnapshotTableError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
   }
 
   private filterTeamsByAccessScope(

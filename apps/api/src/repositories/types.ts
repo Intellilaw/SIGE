@@ -738,6 +738,9 @@ export interface FinanceRecordWriteRecord {
   paymentDate1?: string | null;
   paymentDate2?: string | null;
   paymentDate3?: string | null;
+  paymentMethod?: FinanceRecord["paymentMethod"];
+  paymentMethod2?: FinanceRecord["paymentMethod2"];
+  paymentMethod3?: FinanceRecord["paymentMethod3"];
   expenseNotes1?: string | null;
   expenseNotes2?: string | null;
   expenseNotes3?: string | null;

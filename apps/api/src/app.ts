@@ -22,6 +22,7 @@ import { GeneralExpensesService } from "./modules/general-expenses/general-expen
 import { GeneralSupervisionService } from "./modules/general-supervision/general-supervision.service";
 import { HolidaysService } from "./modules/holidays/holidays.service";
 import { InternalContractsService } from "./modules/internal-contracts/internal-contracts.service";
+import { startKpiDailySnapshotScheduler } from "./modules/kpis/kpi-daily-snapshot-scheduler.js";
 import { KpisService } from "./modules/kpis/kpis.service";
 import { LaborFilesService } from "./modules/labor-files/labor-files.service";
 import { LeadsService } from "./modules/leads/leads.service";
@@ -204,6 +205,7 @@ export async function buildApp() {
     null,
     app.log
   );
+  const kpisRepository = new PrismaKpisRepository(prisma);
   app.decorate("repositories", {
     auth: authRepository,
     budgetPlanning: new PrismaBudgetPlanningRepository(prisma),
@@ -225,7 +227,7 @@ export async function buildApp() {
     generalExpenses: new PrismaGeneralExpensesRepository(prisma),
     holidays: new PrismaHolidaysRepository(prisma),
     internalContracts: new PrismaInternalContractsRepository(prisma),
-    kpis: new PrismaKpisRepository(prisma),
+    kpis: kpisRepository,
     laborFiles: new ResilientLaborFilesRepository(
       new PrismaLaborFilesRepository(prisma),
       null,
@@ -330,9 +332,11 @@ export async function buildApp() {
   if (env.APP_ENV !== "test") {
     const stopTasksMaintenance = startTasksMaintenanceScheduler(prisma, app.log);
     const stopExternalContractInpcSync = startExternalContractInpcScheduler(prisma, app.log);
+    const stopKpiDailySnapshots = startKpiDailySnapshotScheduler(kpisRepository, app.log);
     app.addHook("onClose", async () => {
       stopTasksMaintenance();
       stopExternalContractInpcSync();
+      stopKpiDailySnapshots();
     });
   }
 

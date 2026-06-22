@@ -21,6 +21,10 @@ const STATUS_LABELS = {
     missed: "Fuera de meta",
     "not-configured": "Sin configurar"
 };
+const NON_EVALUATED_KPI_DAY_UNIT = "dias-no-evaluados";
+function isNonEvaluatedKpiDay(day) {
+    return day.status === "not-configured" && day.unit === NON_EVALUATED_KPI_DAY_UNIT;
+}
 function getCurrentPeriod() {
     const date = new Date();
     return {
@@ -45,7 +49,7 @@ function getErrorMessage(error) {
     return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
 function KpiStatusBadge(props) {
-    return (_jsx("span", { className: `kpis-status-badge is-${props.status}`, children: STATUS_LABELS[props.status] }));
+    return (_jsx("span", { className: `kpis-status-badge is-${props.status}`, children: props.label ?? STATUS_LABELS[props.status] }));
 }
 function KpiMetricRow(props) {
     const { metric } = props;
@@ -55,7 +59,15 @@ function KpiDailyMetricTable(props) {
     const { metric } = props;
     const failedDays = metric.dailyBreakdown.filter((entry) => entry.status === "missed").length;
     const warningDays = metric.dailyBreakdown.filter((entry) => entry.status === "warning").length;
-    return (_jsxs("section", { className: "kpis-daily-metric", children: [_jsxs("div", { className: "kpis-daily-metric-head", children: [_jsxs("div", { children: [_jsx("strong", { children: metric.label }), _jsx("p", { children: metric.description })] }), _jsx("span", { className: failedDays > 0 ? "is-alert" : warningDays > 0 ? "is-warning" : "", children: failedDays > 0 ? `${failedDays} dias con falla` : warningDays > 0 ? `${warningDays} en observacion` : "Sin fallas" })] }), metric.dailyBreakdown.length > 0 ? (_jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table kpis-daily-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Dia" }), _jsx("th", { children: "Resultado" }), _jsx("th", { children: "Real" }), _jsx("th", { children: "Meta del dia/corte" }), _jsx("th", { children: "Detalle" })] }) }), _jsx("tbody", { children: metric.dailyBreakdown.map((entry) => (_jsxs("tr", { className: `kpis-daily-row is-${entry.status}`, children: [_jsx("td", { children: formatDate(entry.date) }), _jsx("td", { children: _jsx(KpiStatusBadge, { status: entry.status }) }), _jsx("td", { children: entry.actualLabel }), _jsx("td", { children: entry.targetLabel }), _jsx("td", { children: _jsxs("div", { className: "kpis-daily-detail", children: [_jsx("span", { children: entry.helper }), entry.incidents.length > 0 ? (_jsx("ul", { children: entry.incidents.map((incident) => (_jsxs("li", { children: [incident.clientName, " - ", incident.taskName] }, `${incident.sourceType}-${incident.id}-${incident.reason}`))) })) : null] }) })] }, `${metric.id}-${entry.date}`))) })] }) })) : (_jsx("div", { className: "kpis-empty-user", children: "No hay dias habiles evaluados para esta metrica en el periodo seleccionado." }))] }));
+    const nonEvaluatedDays = metric.dailyBreakdown.filter(isNonEvaluatedKpiDay).length;
+    const summaryLabel = failedDays > 0
+        ? `${failedDays} dias con falla`
+        : warningDays > 0
+            ? `${warningDays} en observacion`
+            : nonEvaluatedDays > 0
+                ? `${nonEvaluatedDays} no evaluados`
+                : "Sin fallas";
+    return (_jsxs("section", { className: "kpis-daily-metric", children: [_jsxs("div", { className: "kpis-daily-metric-head", children: [_jsxs("div", { children: [_jsx("strong", { children: metric.label }), _jsx("p", { children: metric.description })] }), _jsx("span", { className: failedDays > 0 ? "is-alert" : warningDays > 0 ? "is-warning" : "", children: summaryLabel })] }), metric.dailyBreakdown.length > 0 ? (_jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table kpis-daily-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Dia" }), _jsx("th", { children: "Resultado" }), _jsx("th", { children: "Real" }), _jsx("th", { children: "Meta del dia/corte" }), _jsx("th", { children: "Detalle" })] }) }), _jsx("tbody", { children: metric.dailyBreakdown.map((entry) => (_jsxs("tr", { className: `kpis-daily-row is-${entry.status}`, children: [_jsx("td", { children: formatDate(entry.date) }), _jsx("td", { children: _jsx(KpiStatusBadge, { status: entry.status, label: isNonEvaluatedKpiDay(entry) ? "No evaluado" : undefined }) }), _jsx("td", { children: entry.actualLabel }), _jsx("td", { children: entry.targetLabel }), _jsx("td", { children: _jsxs("div", { className: "kpis-daily-detail", children: [_jsx("span", { children: entry.helper }), entry.incidents.length > 0 ? (_jsx("ul", { children: entry.incidents.map((incident) => (_jsxs("li", { children: [incident.clientName, " - ", incident.taskName] }, `${incident.sourceType}-${incident.id}-${incident.reason}`))) })) : null] }) })] }, `${metric.id}-${entry.date}`))) })] }) })) : (_jsx("div", { className: "kpis-empty-user", children: "No hay dias habiles evaluados para esta metrica en el periodo seleccionado." }))] }));
 }
 function KpiDefinitionList(props) {
     return (_jsxs("section", { className: "kpis-user-section", children: [_jsxs("div", { className: "kpis-user-section-head", children: [_jsx("h4", { children: "KPI's definidos" }), _jsx("span", { children: props.metrics.length })] }), _jsx("div", { className: "kpis-definition-list", children: props.metrics.map((metric) => (_jsxs("div", { className: "kpis-definition-item", children: [_jsx("strong", { children: metric.label }), _jsx("p", { children: metric.description }), _jsx("small", { children: metric.targetLabel })] }, `${metric.id}-definition`))) })] }));

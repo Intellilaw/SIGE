@@ -34,6 +34,7 @@ type TelegramContext = {
   groupName?: string | null;
   source?: string | null;
   lastSeenAt?: string | null;
+  missingReason?: string | null;
   text: string;
   hasOperationalContext: boolean;
 };
@@ -161,6 +162,16 @@ async function fetchBotJson(path: string) {
 }
 
 async function fetchTelegramContext(groupId: string, groupName?: string | null): Promise<TelegramContext> {
+  if (!normalizeText(env.INTELLILAW_BOT_API_URL)) {
+    return {
+      groupId,
+      groupName,
+      missingReason: "no esta configurada la URL del bridge del bot de Telegram",
+      text: "",
+      hasOperationalContext: false
+    };
+  }
+
   const candidates = getTelegramGroupIdCandidates(groupId);
 
   for (const candidate of candidates) {
@@ -195,6 +206,7 @@ async function fetchTelegramContext(groupId: string, groupName?: string | null):
         groupName: resolvedTitle ?? groupName,
         source: normalizeText(payload?.source) || null,
         lastSeenAt: normalizeText(payload?.last_seen_at) || null,
+        missingReason: "el bot ubico el grupo, pero el bridge no entrego mensajes, historial ni resumen operativo",
         text: "",
         hasOperationalContext: false
       };
@@ -204,6 +216,7 @@ async function fetchTelegramContext(groupId: string, groupName?: string | null):
   return {
     groupId,
     groupName,
+    missingReason: "el bridge del bot no devolvio contexto, mensajes, historial ni metadata del grupo para el ID configurado",
     text: "",
     hasOperationalContext: false
   };
@@ -240,9 +253,10 @@ function buildMatterPayload(matter: Matter, tasks: RiMatterTaskContext[]) {
 function buildMissingContextInput(telegramContext: TelegramContext) {
   const groupName = telegramContext.groupName ? ` (${telegramContext.groupName})` : "";
   const lastSeen = telegramContext.lastSeenAt ? ` Ultimo registro del bot: ${telegramContext.lastSeenAt}.` : "";
+  const reason = telegramContext.missingReason ? ` Motivo: ${telegramContext.missingReason}.` : "";
 
   return truncate(
-    `RI-001: Falta contexto operativo suficiente del grupo de Telegram${groupName}; revisar manualmente el chat antes de definir nuevas tareas.${lastSeen}`,
+    `RI-001: Falta contexto operativo suficiente del grupo de Telegram${groupName}.${reason}${lastSeen} Revisar manualmente el chat antes de definir nuevas tareas.`,
     MAX_RI_INPUT_CHARS
   );
 }

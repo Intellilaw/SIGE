@@ -1531,7 +1531,9 @@ export function mapMatter(record: {
     expirationDate: record.expirationDate?.toISOString(),
     expirationRiOutput: record.expirationRiOutput ?? undefined,
     promotionCommand: (record.promotionCommand ?? undefined) as Matter["promotionCommand"],
-    holidayAuthorityShortName: (record.holidayAuthorityShortName ?? undefined) as Matter["holidayAuthorityShortName"],
+    holidayAuthorityShortName: (
+      (record.holidayAuthorityShortName === "PJCDMX" ? "TSJCDMX" : record.holidayAuthorityShortName) ?? undefined
+    ) as Matter["holidayAuthorityShortName"],
     internalTelegramGroupId: record.internalTelegramGroupId ?? undefined,
     internalTelegramGroupName: record.internalTelegramGroupName ?? undefined,
     nextAction: record.nextAction ?? undefined,
@@ -1589,6 +1591,19 @@ export function mapCommissionExclusion(record: {
   };
 }
 
+const FINANCE_PAYMENT_METHOD_VALUES = new Set<FinanceRecord["paymentMethod"]>([
+  "blank",
+  "T",
+  "E_RECEIVED",
+  "E_PENDING"
+]);
+
+function normalizeFinancePaymentMethod(value?: string | null): FinanceRecord["paymentMethod"] {
+  return FINANCE_PAYMENT_METHOD_VALUES.has(value as FinanceRecord["paymentMethod"])
+    ? (value as FinanceRecord["paymentMethod"])
+    : "blank";
+}
+
 export function mapFinanceRecord(record: {
   id: string;
   year: number;
@@ -1612,6 +1627,9 @@ export function mapFinanceRecord(record: {
   paymentDate1: Date | null;
   paymentDate2: Date | null;
   paymentDate3: Date | null;
+  paymentMethod: string;
+  paymentMethod2: string;
+  paymentMethod3: string;
   expenseNotes1: string | null;
   expenseNotes2: string | null;
   expenseNotes3: string | null;
@@ -1656,6 +1674,9 @@ export function mapFinanceRecord(record: {
     paymentDate1: record.paymentDate1?.toISOString(),
     paymentDate2: record.paymentDate2?.toISOString(),
     paymentDate3: record.paymentDate3?.toISOString(),
+    paymentMethod: normalizeFinancePaymentMethod(record.paymentMethod),
+    paymentMethod2: normalizeFinancePaymentMethod(record.paymentMethod2),
+    paymentMethod3: normalizeFinancePaymentMethod(record.paymentMethod3),
     expenseNotes1: record.expenseNotes1 ?? undefined,
     expenseNotes2: record.expenseNotes2 ?? undefined,
     expenseNotes3: record.expenseNotes3 ?? undefined,

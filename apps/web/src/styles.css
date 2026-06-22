@@ -1011,12 +1011,12 @@ textarea {
 }
 
 .daily-documents-page {
-  max-width: 1360px;
+  max-width: 1480px;
 }
 
 .daily-documents-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
   gap: 18px;
   align-items: start;
 }
@@ -1041,6 +1041,8 @@ textarea {
 .daily-doc-preview-panel {
   display: grid;
   gap: 18px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .daily-doc-template-list {
@@ -1085,10 +1087,21 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  min-width: 0;
 }
 
 .daily-doc-field-wide {
   grid-column: 1 / -1;
+}
+
+.daily-doc-field-grid > *,
+.daily-doc-form-panel .form-field,
+.daily-doc-form-panel input,
+.daily-doc-form-panel select,
+.daily-doc-form-panel textarea,
+.daily-doc-form-panel button {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .daily-doc-client-search,
@@ -1198,9 +1211,11 @@ textarea {
 
 .daily-doc-date-controls {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .daily-doc-date-controls input[type="date"] {
@@ -1208,6 +1223,7 @@ textarea {
 }
 
 .daily-doc-date-blank-toggle {
+  width: 100%;
   min-height: 46px;
   padding: 0 10px;
   border: 1px solid #d9e2ec;
@@ -1219,7 +1235,8 @@ textarea {
   color: #334e68;
   font-size: 0.82rem;
   font-weight: 800;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .daily-doc-additional-instructions {
@@ -2084,6 +2101,7 @@ textarea {
   border-radius: 14px;
   display: flex;
   min-width: 0;
+  width: 100%;
 }
 
 .form-field .money-input-prefix {
@@ -2105,6 +2123,8 @@ textarea {
 .form-field .money-input-control input {
   border: 0;
   border-radius: 0 14px 14px 0;
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
   min-width: 0;
   padding-left: 8px;
 }
@@ -2121,6 +2141,30 @@ textarea {
 .form-field .money-input-control:focus-within {
   border-color: #9fb7ff;
   box-shadow: 0 0 0 3px rgba(75, 111, 255, 0.12);
+}
+
+.daily-doc-percentage-control input {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  flex: 0 0 76px;
+  height: 100%;
+  max-width: 76px;
+  min-width: 76px;
+  text-align: right;
+  width: 76px;
+}
+
+.form-field .daily-doc-percentage-control {
+  box-sizing: border-box;
+  min-height: 52px;
+  overflow: hidden;
+  width: min(190px, 100%);
+}
+
+.daily-doc-percentage-control .money-input-suffix {
+  min-width: max-content;
+  padding-left: 8px;
 }
 
 .checkbox-field {
@@ -3881,11 +3925,33 @@ textarea {
 }
 
 .execution-table {
-  min-width: 3750px;
+  min-width: 4090px;
 }
 
 .execution-table thead th {
   background: #eef4fb;
+}
+
+.execution-table thead th:first-child,
+.execution-table .execution-row-index {
+  position: sticky;
+  left: 0;
+  min-width: 64px;
+  width: 64px;
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
+}
+
+.execution-table thead th:first-child {
+  z-index: 6;
+  background: #eef4fb;
+}
+
+.execution-table .execution-row-index {
+  z-index: 2;
+  background: #ffffff;
+  color: #52606d;
+  font-weight: 800;
+  text-align: center;
 }
 
 .execution-table .execution-wide-text-column {
@@ -3907,17 +3973,33 @@ textarea {
   background: #f7f3ea;
 }
 
+.execution-table-recycle thead th:first-child {
+  background: #f7f3ea;
+}
+
 .execution-row-danger td {
   background: rgba(180, 35, 24, 0.1);
+}
+
+.execution-row-danger .execution-row-index {
+  background: #f8e9e8;
 }
 
 .execution-row-next-business td {
   background: rgba(15, 118, 110, 0.1);
 }
 
+.execution-row-next-business .execution-row-index {
+  background: #e7f1f0;
+}
+
 .execution-row-focused td {
   background: rgba(255, 247, 221, 0.96) !important;
   box-shadow: inset 0 0 0 2px rgba(191, 128, 0, 0.28);
+}
+
+.execution-row-focused .execution-row-index {
+  background: #fff7dd !important;
 }
 
 .execution-actions-cell {
@@ -3964,6 +4046,27 @@ textarea {
   min-height: 52px;
   resize: vertical;
   font-family: inherit;
+}
+
+.execution-missing-cell {
+  min-width: 240px;
+  max-width: 300px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid #d9e2ec;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.9);
+  color: #667085;
+  font-weight: 800;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.execution-missing-cell.is-missing {
+  border-color: rgba(180, 35, 24, 0.24);
+  background: rgba(254, 228, 226, 0.7);
+  color: #b42318;
 }
 
 .execution-ri-input-cell {
@@ -5867,7 +5970,7 @@ textarea {
 }
 
 .finance-table-monthly-x-nav-spacer {
-  width: 8280px;
+  width: 8514px;
 }
 
 .finance-active-table-x-nav-spacer {
@@ -5917,7 +6020,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 8280px; font-size: 0.82rem; }
+.finance-table-monthly { min-width: 8514px; font-size: 0.82rem; }
 .finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
@@ -5948,6 +6051,36 @@ textarea {
   line-height: 1.4;
 }
 
+.finance-table-monthly .finance-row-index {
+  position: sticky;
+  left: 0;
+  min-width: 64px;
+  width: 64px;
+  text-align: center;
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
+}
+
+.finance-table-monthly thead .finance-row-index {
+  z-index: 3;
+  background: #1f3c88;
+}
+
+.finance-table-monthly tbody .finance-row-index,
+.finance-table-monthly tfoot .finance-row-index {
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.96);
+  color: #344054;
+  font-weight: 700;
+}
+
+.finance-table-monthly .finance-row-danger .finance-row-index {
+  background: #fff1f2;
+}
+
+.finance-table-monthly .finance-row-selected .finance-row-index {
+  background: #eff6ff;
+}
+
 .finance-input {
   width: 100%;
   min-height: 38px;
@@ -5960,6 +6093,7 @@ textarea {
 .finance-input-readonly { background: #f8fafc; color: #52606d; }
 .finance-input-number { text-align: right; }
 .finance-input-currency { font-variant-numeric: tabular-nums; }
+.finance-payment-method-placeholder { min-height: 38px; }
 
 .finance-stack,
 .finance-target-picker {
@@ -6468,6 +6602,34 @@ textarea {
 
 .commissions-totals-table td {
   overflow-wrap: anywhere;
+}
+
+.commissions-total-receiver-cell {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.commissions-total-receiver-cell span {
+  min-width: 0;
+}
+
+.commissions-total-exclusion-toggle {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.commissions-total-exclusion-toggle input {
+  accent-color: #1d4ed8;
+  height: 16px;
+  margin: 0;
+  width: 16px;
 }
 
 .commissions-totals-table td:not(:first-child),
@@ -7093,6 +7255,11 @@ textarea {
   background: rgba(255, 247, 237, 0.82);
 }
 
+.kpis-daily-row.is-not-configured td {
+  background: rgba(148, 163, 184, 0.08);
+  color: #64748b;
+}
+
 .kpis-daily-detail {
   display: grid;
   gap: 6px;
@@ -7541,7 +7708,7 @@ textarea {
   padding-bottom: 12px;
 }
 
-.supervision-task-kpi-card-head div {
+.supervision-task-kpi-card-head > div:first-child {
   display: grid;
   gap: 2px;
 }
@@ -7563,6 +7730,49 @@ textarea {
   color: #6d28d9 !important;
   padding: 7px 11px;
   white-space: nowrap;
+}
+
+.supervision-task-kpi-alert-count.is-met {
+  background: #dcfce7;
+  color: #047857 !important;
+}
+
+.supervision-task-kpi-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.supervision-kpi-view-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  border-radius: 999px;
+  background: rgba(237, 233, 254, 0.54);
+  padding: 4px;
+}
+
+.supervision-kpi-view-toggle button {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 900;
+  min-height: 31px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.supervision-kpi-view-toggle button.is-active {
+  background: #ffffff;
+  color: #6d28d9;
+  box-shadow: 0 7px 16px rgba(88, 28, 135, 0.12);
 }
 
 .supervision-task-kpi-detail-period {
@@ -7777,6 +7987,10 @@ textarea {
 
 .supervision-kpi-week-incident-group li.is-warning {
   color: #9a3412;
+}
+
+.supervision-kpi-week-incident-group li.is-not-configured {
+  color: #64748b;
 }
 
 .supervision-kpi-week-incident-group li small {
@@ -8973,6 +9187,10 @@ textarea {
   .supervision-task-kpi-card-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .supervision-task-kpi-card-actions {
+    justify-content: flex-start;
   }
 
   .daily-doc-actions {

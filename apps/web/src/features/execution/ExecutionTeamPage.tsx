@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
   MATTER_PROMOTION_COMMANDS,
+  getExecutionMatterMissingFields,
   type Client,
   type ExecutionHolidayAuthorityShortName,
   type Holiday,
@@ -20,6 +21,7 @@ import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelli
 import { buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
 import { findExecutionModuleDescriptorBySlug } from "./execution-config";
+import { evaluateExecutionMatterRow } from "./execution-row-utils";
 
 type MatterPatchPayload = {
   executionPrompt?: string | null;
@@ -71,10 +73,13 @@ const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set<string>(EXECUTION_HOLIDAY_AUTHOR
 const MATTER_PROMOTION_COMMAND_SET = new Set<string>(MATTER_PROMOTION_COMMANDS);
 const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME: Record<string, string> = {
   PJF: "PJF",
-  PJCDMX: "TSJCDMX",
+  TSJCDMX: "TSJCDMX",
   PJEdoMex: "PJEdoMex",
   TFJA: "TFJA",
   TJACDMX: "TJACDMX",
+  FGJCDMX: "FGJCDMX",
+  FGR: "FGR",
+  TFCyA: "TFCyA",
   SAT: "SAT",
   APF: "APF",
   APCDMX: "APCDMX"
@@ -237,7 +242,7 @@ function isDateKey(value: string) {
 }
 
 function getExecutionHolidayAuthority(value?: string | null) {
-  const normalized = normalizeText(value);
+  const normalized = normalizeText(value) === "PJCDMX" ? "TSJCDMX" : normalizeText(value);
   return EXECUTION_HOLIDAY_AUTHORITY_SET.has(normalized)
     ? (normalized as ExecutionHolidayAuthorityShortName)
     : "";
@@ -619,27 +624,63 @@ function getNextBusinessDate(
   return toLocalDateInput(date);
 }
 
+function addMissingField(missing: string[], field: string) {
+  if (!missing.includes(field)) {
+    missing.push(field);
+  }
+}
+
 function evaluateMatterRow(
   matter: Matter,
   clientNumber: string,
   tasks: MatterTaskView[],
   holidayDateKeysByAuthority: HolidayDateKeysByAuthority
 ) {
-  const missing: string[] = [];
-
-  if (!clientNumber) missing.push("No. Cliente");
-  if (!normalizeText(matter.clientName)) missing.push("Cliente");
-  if (!normalizeText(matter.quoteNumber)) missing.push("No. Cotizacion");
-  if (!normalizeText(matter.subject)) missing.push("Asunto");
-  if (!normalizeText(matter.matterIdentifier)) missing.push("ID Asunto");
-  if (!normalizeText(matter.communicationChannel)) missing.push("Canal");
-  if (!normalizeText(matter.milestone)) missing.push("Hito conclusion");
-  if (tasks.length === 0) missing.push("Sin siguientes tareas");
+  const missing = getExecutionMatterMissingFields({
+    clientNumber,
+    clientName: matter.clientName,
+    quoteNumber: matter.quoteNumber,
+    subject: matter.subject,
+    matterIdentifier: matter.matterIdentifier,
+    communicationChannel: matter.communicationChannel,
+    milestone: matter.milestone,
+    taskCount: tasks.length
+  });
 
   const today = toLocalDateInput(new Date());
+  if (!getExecutionHolidayAuthority(matter.holidayAuthorityShortName)) {
+    addMissingField(missing, "Órgano para efectos de días inhábiles");
+  }
+  if (!normalizeText(matter.internalTelegramGroupId)) {
+    addMissingField(missing, "ID del grupo interno de Telegram");
+  }
+  if (!normalizeText(matter.internalTelegramGroupName)) {
+    addMissingField(missing, "Nombre del grupo interno de Telegram");
+  }
+  if (!normalizeText(matter.executionPrompt)) {
+    addMissingField(missing, "Input de RI");
+  }
+  if (!getMatterPromotionCommand(matter.promotionCommand)) {
+    addMissingField(missing, "Comando promoción");
+  }
+
+  tasks.forEach((task) => {
+    const taskName = normalizeText(task.subject) || normalizeText(task.trackLabel);
+    const dueDate = getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority);
+
+    if (!taskName) {
+      addMissingField(missing, "Siguiente tarea");
+    }
+    if (!dueDate || !isDateKey(dueDate)) {
+      addMissingField(missing, "Fecha sig. tarea");
+    } else if (dueDate < today) {
+      addMissingField(missing, "Fecha sig. tarea vencida");
+    }
+  });
+
   const isOverdue = tasks.some((task) => {
     const dueDate = getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority);
-    return Boolean(dueDate) && dueDate <= today;
+    return Boolean(dueDate) && isDateKey(dueDate) && dueDate < today;
   });
   const nextBusinessDate = getNextBusinessDate(
     holidayDateKeysByAuthority,
@@ -905,7 +946,9 @@ export function ExecutionTeamWorkspace({
 
     const target = focusTarget === "promotionCommand"
       ? row.querySelector<HTMLSelectElement>("[data-execution-focus='promotionCommand']")
-      : null;
+      : focusTarget === "missing"
+        ? row.querySelector<HTMLElement>("[data-execution-focus='missing']")
+        : null;
 
     window.setTimeout(() => {
       target?.focus({ preventScroll: true });
@@ -1315,6 +1358,7 @@ export function ExecutionTeamWorkspace({
             <table className="lead-table execution-table">
               <thead>
                 <tr>
+                  <th>No.</th>
                   <th>No. Cliente</th>
                   <th>Cliente</th>
                   <th>No. Cotizacion</th>
@@ -1344,29 +1388,30 @@ export function ExecutionTeamWorkspace({
                   </th>
                   <th>Comando promoción</th>
                   <th>Hito conclusion</th>
-                  <th>Concluyo?</th>
+                  <th>¿Concluyo?</th>
                   <th>Comentarios</th>
+                  <th>Faltantes</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={21} className="centered-inline-message">
+                    <td colSpan={23} className="centered-inline-message">
                       Cargando ejecucion...
                     </td>
                   </tr>
                 ) : filteredMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={21} className="centered-inline-message">
+                    <td colSpan={23} className="centered-inline-message">
                       No hay asuntos del equipo en esta vista.
                     </td>
                   </tr>
                 ) : (
                   <>
-                    {filteredMatters.map((matter) => {
+                    {filteredMatters.map((matter, index) => {
                       const clientNumber = getEffectiveClientNumber(matter, clients);
                       const matterTasks = getMatterTasks(matter, activeTaskMap);
-                      const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
+                      const validation = evaluateExecutionMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                       const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
                       const isGeneratingCaducidadRi = generatingCaducidadRiMatterIds.has(matter.id);
                       const isFocusedMatter = matter.id === focusMatterId;
@@ -1381,13 +1426,14 @@ export function ExecutionTeamWorkspace({
                       ].filter(Boolean).join(" ");
                       const rowTitle = [
                         validation.missing.length > 0 ? `Falta: ${validation.missing.join(", ")}` : "",
-                        validation.isOverdue ? "Tiene tareas vencidas o con vencimiento de hoy." : ""
+                        validation.isOverdue ? "Tiene tareas vencidas." : ""
                       ]
                         .filter(Boolean)
                         .join(" ");
 
                       return (
                         <tr id={`execution-matter-row-${matter.id}`} key={matter.id} className={rowClassName} title={rowTitle}>
+                          <td className="execution-row-index">{index + 1}</td>
                           <td>
                             <input className="lead-cell-input matter-cell-derived" value={clientNumber || "-"} readOnly />
                           </td>
@@ -1597,12 +1643,22 @@ export function ExecutionTeamWorkspace({
                               placeholder="Comentarios del equipo..."
                             />
                           </td>
+                          <td>
+                            <div
+                              data-execution-focus="missing"
+                              className={`execution-missing-cell ${validation.missing.length > 0 ? "is-missing" : ""}`}
+                              title={validation.missing.join(", ")}
+                              tabIndex={validation.missing.length > 0 ? 0 : undefined}
+                            >
+                              {validation.missing.length > 0 ? validation.missing.join(", ") : "-"}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
 
                     <tr className="execution-table-note">
-                      <td colSpan={21}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
+                      <td colSpan={23}>Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas.</td>
                     </tr>
                   </>
                 )}
@@ -1626,6 +1682,7 @@ export function ExecutionTeamWorkspace({
             <table className="lead-table execution-table execution-table-recycle">
               <thead>
                 <tr>
+                  <th>No.</th>
                   <th>No. Cliente</th>
                   <th>Cliente</th>
                   <th>No. Cotizacion</th>
@@ -1648,7 +1705,7 @@ export function ExecutionTeamWorkspace({
                   </th>
                   <th>Comando promoción</th>
                   <th>Hito conclusion</th>
-                  <th>Concluyo?</th>
+                  <th>¿Concluyo?</th>
                   <th>Notas</th>
                   <th>Accion</th>
                 </tr>
@@ -1656,22 +1713,23 @@ export function ExecutionTeamWorkspace({
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={15} className="centered-inline-message">
+                    <td colSpan={16} className="centered-inline-message">
                       Cargando papelera...
                     </td>
                   </tr>
                 ) : filteredDeletedMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="centered-inline-message">
+                    <td colSpan={16} className="centered-inline-message">
                       Papelera vacia.
                     </td>
                   </tr>
                 ) : (
-                  filteredDeletedMatters.map((matter) => {
+                  filteredDeletedMatters.map((matter, index) => {
                     const matterTasks = getMatterTasks(matter, allTaskMap);
 
                     return (
                       <tr key={matter.id}>
+                        <td className="execution-row-index">{index + 1}</td>
                         <td>{getEffectiveClientNumber(matter, clients) || "-"}</td>
                         <td>{matter.clientName || "-"}</td>
                         <td>{matter.quoteNumber || "-"}</td>

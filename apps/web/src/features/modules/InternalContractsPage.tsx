@@ -61,6 +61,30 @@ const BUNDLED_CONTRACT_TEMPLATES: DisplayInternalContractTemplate[] = [
     updatedAt: "2024-09-10T00:00:00.000Z",
     downloadUrl: "/internal-contract-templates/contrato-psp-rc-2024-09-10.docx",
     isBundled: true
+  },
+  {
+    id: "bundled-commercial-commission-contract-2026-05-22",
+    title: "Contrato de comisi\u00f3n mercantil (22.05.2026)",
+    originalFileName: "Contrato de comisi\u00f3n mercantil (22.05.2026).docx",
+    fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    fileSizeBytes: 120542,
+    notes: "Machote base de empresa.",
+    createdAt: "2026-05-22T00:00:00.000Z",
+    updatedAt: "2026-05-22T00:00:00.000Z",
+    downloadUrl: "/internal-contract-templates/contrato-comision-mercantil-2026-05-22.docx",
+    isBundled: true
+  },
+  {
+    id: "bundled-joint-professional-services-contract-2026-06-19",
+    title: "Contrato de prestaci\u00f3n de servicios profesionales conjuntos (19.06.2026)",
+    originalFileName: "Contrato de prestaci\u00f3n de servicios profesionales conjuntos (19.06.2026).docx",
+    fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    fileSizeBytes: 129156,
+    notes: "Machote base de empresa.",
+    createdAt: "2026-06-19T00:00:00.000Z",
+    updatedAt: "2026-06-19T00:00:00.000Z",
+    downloadUrl: "/internal-contract-templates/contrato-prestacion-servicios-profesionales-conjuntos-2026-06-19.docx",
+    isBundled: true
   }
 ];
 
@@ -705,13 +729,11 @@ export function InternalContractsPage() {
           <div>
             <span>Alta</span>
             <strong>{formatDate(contract.createdAt)}</strong>
-            <small>{contract.fileMimeType ?? "Tipo no registrado"}</small>
           </div>
           {canDownloadPdf ? (
             <div>
               <span>Version PDF</span>
               <strong>{contract.pdfOriginalFileName ?? "PDF generado"}</strong>
-              <small>{contract.pdfFileMimeType ?? "application/pdf"}</small>
             </div>
           ) : null}
         </div>
@@ -1030,7 +1052,6 @@ export function InternalContractsPage() {
                   <div>
                     <span>Alta</span>
                     <strong>{formatDate(template.createdAt)}</strong>
-                    <small>{template.fileMimeType ?? "Tipo no registrado"}</small>
                   </div>
                 </div>
 
