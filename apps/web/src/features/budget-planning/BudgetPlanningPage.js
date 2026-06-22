@@ -60,13 +60,13 @@ function getMonthName(month) {
     return MONTH_NAMES[month - 1] ?? `Mes ${month}`;
 }
 function getIncomeTotal(record) {
-    const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || record.paymentMethod === "E_RECEIVED")
+    const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || (record.paymentMethod === "E" && record.paymentReceived))
         ? Number(record.paidThisMonthMxn || 0)
         : 0;
-    const payment2Mxn = record.paymentDate2 && (record.paymentMethod2 === "T" || record.paymentMethod2 === "E_RECEIVED")
+    const payment2Mxn = record.paymentDate2 && (record.paymentMethod2 === "T" || (record.paymentMethod2 === "E" && record.paymentReceived2))
         ? Number(record.payment2Mxn || 0)
         : 0;
-    const payment3Mxn = record.paymentDate3 && (record.paymentMethod3 === "T" || record.paymentMethod3 === "E_RECEIVED")
+    const payment3Mxn = record.paymentDate3 && (record.paymentMethod3 === "T" || (record.paymentMethod3 === "E" && record.paymentReceived3))
         ? Number(record.payment3Mxn || 0)
         : 0;
     return primaryPaymentMxn + payment2Mxn + payment3Mxn;

@@ -1,0 +1,1 @@
+ALTER TABLE "FinanceRecord" ADD COLUMN "delinquencyStatus" TEXT NOT NULL DEFAULT 'CURRENT';

@@ -36,15 +36,19 @@ const financeRecordFieldsSchema = z.object({
   previousPaymentsMxn: z.coerce.number().nonnegative().optional(),
   nextPaymentDate: z.string().nullable().optional(),
   nextPaymentNotes: z.string().nullable().optional(),
+  delinquencyStatus: z.enum(["CURRENT", "DAYS_1_TO_10", "MORE_THAN_10", "MORE_THAN_20", "MORE_THAN_30"]).optional(),
   paidThisMonthMxn: z.coerce.number().nonnegative().optional(),
   payment2Mxn: z.coerce.number().nonnegative().optional(),
   payment3Mxn: z.coerce.number().nonnegative().optional(),
   paymentDate1: z.string().nullable().optional(),
   paymentDate2: z.string().nullable().optional(),
   paymentDate3: z.string().nullable().optional(),
-  paymentMethod: z.enum(["blank", "T", "E_RECEIVED", "E_PENDING"]).optional(),
-  paymentMethod2: z.enum(["blank", "T", "E_RECEIVED", "E_PENDING"]).optional(),
-  paymentMethod3: z.enum(["blank", "T", "E_RECEIVED", "E_PENDING"]).optional(),
+  paymentMethod: z.enum(["blank", "T", "E"]).optional(),
+  paymentMethod2: z.enum(["blank", "T", "E"]).optional(),
+  paymentMethod3: z.enum(["blank", "T", "E"]).optional(),
+  paymentReceived: z.boolean().optional(),
+  paymentReceived2: z.boolean().optional(),
+  paymentReceived3: z.boolean().optional(),
   expenseNotes1: z.string().nullable().optional(),
   expenseNotes2: z.string().nullable().optional(),
   expenseNotes3: z.string().nullable().optional(),
@@ -121,14 +125,19 @@ export const financesRoutes: FastifyPluginAsync = async (app) => {
       paymentMethod?: FinanceRecord["paymentMethod"];
       paymentMethod2?: FinanceRecord["paymentMethod2"];
       paymentMethod3?: FinanceRecord["paymentMethod3"];
+      paymentReceived?: boolean;
+      paymentReceived2?: boolean;
+      paymentReceived3?: boolean;
     }
   ) {
-    const hasReceivedCash = [payload.paymentMethod, payload.paymentMethod2, payload.paymentMethod3].includes("E_RECEIVED");
-    if (hasReceivedCash && !isEmrtUser(request)) {
+    const hasReceivedCashField = Object.prototype.hasOwnProperty.call(payload, "paymentReceived") ||
+      Object.prototype.hasOwnProperty.call(payload, "paymentReceived2") ||
+      Object.prototype.hasOwnProperty.call(payload, "paymentReceived3");
+    if (hasReceivedCashField && !isEmrtUser(request)) {
       throw new app.errors.AppError(
         403,
         "FORBIDDEN_PAYMENT_METHOD",
-        "Only EMRT can mark a cash payment as received."
+        "Only EMRT can update the cash received checkbox."
       );
     }
   }

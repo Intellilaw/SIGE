@@ -30,7 +30,14 @@ type PercentagePayload = Pick<
 >;
 
 const VALID_CONTRACT_STATUS = new Set<ContractSignedStatus>(["YES", "NO", "NOT_REQUIRED"]);
-const VALID_PAYMENT_METHODS = new Set<FinanceRecord["paymentMethod"]>(["blank", "T", "E_RECEIVED", "E_PENDING"]);
+const VALID_PAYMENT_METHODS = new Set<FinanceRecord["paymentMethod"]>(["blank", "T", "E"]);
+const VALID_DELINQUENCY_STATUSES = new Set<FinanceRecord["delinquencyStatus"]>([
+  "CURRENT",
+  "DAYS_1_TO_10",
+  "MORE_THAN_10",
+  "MORE_THAN_20",
+  "MORE_THAN_30"
+]);
 const FINANCE_RECORD_BASE_SELECT = {
   id: true,
   year: true,
@@ -48,6 +55,7 @@ const FINANCE_RECORD_BASE_SELECT = {
   previousPaymentsMxn: true,
   nextPaymentDate: true,
   nextPaymentNotes: true,
+  delinquencyStatus: true,
   paidThisMonthMxn: true,
   payment2Mxn: true,
   payment3Mxn: true,
@@ -57,6 +65,9 @@ const FINANCE_RECORD_BASE_SELECT = {
   paymentMethod: true,
   paymentMethod2: true,
   paymentMethod3: true,
+  paymentReceived: true,
+  paymentReceived2: true,
+  paymentReceived3: true,
   expenseNotes1: true,
   expenseNotes2: true,
   expenseNotes3: true,
@@ -130,13 +141,27 @@ function normalizeContractSignedStatus(value?: string | null): ContractSignedSta
 }
 
 function normalizeFinancePaymentMethod(value?: string | null): FinanceRecord["paymentMethod"] {
+  if (value === "E_RECEIVED" || value === "E_PENDING") {
+    return "E";
+  }
+
   return VALID_PAYMENT_METHODS.has(value as FinanceRecord["paymentMethod"])
     ? (value as FinanceRecord["paymentMethod"])
     : "blank";
 }
 
-function isFinancePaymentMethodReceived(value?: FinanceRecord["paymentMethod"] | null) {
-  return value === "T" || value === "E_RECEIVED";
+function normalizeDelinquencyStatus(value?: string | null): FinanceRecord["delinquencyStatus"] {
+  return VALID_DELINQUENCY_STATUSES.has(value as FinanceRecord["delinquencyStatus"])
+    ? (value as FinanceRecord["delinquencyStatus"])
+    : "CURRENT";
+}
+
+function isPaymentReceived(method?: FinanceRecord["paymentMethod"] | null, received?: boolean | null) {
+  return method === "T" || (method === "E" && received === true);
+}
+
+function normalizePaymentReceived(method?: FinanceRecord["paymentMethod"] | null, received?: boolean | null) {
+  return method === "E" && received === true;
 }
 
 function hasPaymentDate(value?: string | null) {
@@ -155,18 +180,21 @@ function getReceivedPaymentsMxn(
     | "paymentMethod"
     | "paymentMethod2"
     | "paymentMethod3"
+    | "paymentReceived"
+    | "paymentReceived2"
+    | "paymentReceived3"
   >
 ) {
   const payment1Mxn =
-    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+    hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
       ? record.paidThisMonthMxn
       : 0;
   const payment2Mxn =
-    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+    hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
       ? record.payment2Mxn
       : 0;
   const payment3Mxn =
-    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+    hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
       ? record.payment3Mxn
       : 0;
 
@@ -175,6 +203,36 @@ function getReceivedPaymentsMxn(
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
+}
+
+function assertUnlockedReceivedPaymentFields(
+  currentRecord: {
+    paymentReceived: boolean;
+    paymentReceived2: boolean;
+    paymentReceived3: boolean;
+  },
+  payload: FinanceRecordWriteRecord
+) {
+  const lockedPayments: Array<{
+    locked: boolean;
+    fields: Array<keyof FinanceRecordWriteRecord>;
+  }> = [
+    { locked: currentRecord.paymentReceived, fields: ["paidThisMonthMxn", "paymentDate1", "paymentMethod"] },
+    { locked: currentRecord.paymentReceived2, fields: ["payment2Mxn", "paymentDate2", "paymentMethod2"] },
+    { locked: currentRecord.paymentReceived3, fields: ["payment3Mxn", "paymentDate3", "paymentMethod3"] }
+  ];
+
+  const hasLockedFieldUpdate = lockedPayments.some((payment) =>
+    payment.locked && payment.fields.some((field) => hasOwn(payload, field))
+  );
+
+  if (hasLockedFieldUpdate) {
+    throw new AppError(
+      409,
+      "FINANCE_RECEIVED_PAYMENT_LOCKED",
+      "This payment was marked as received and its amount, date and payment method are locked."
+    );
+  }
 }
 
 function parseDateValue(value?: string | null) {
@@ -431,6 +489,9 @@ export class PrismaFinanceRepository implements FinanceRepository {
 
   public async createRecord(year: number, month: number, payload: FinanceRecordWriteRecord = {}) {
     const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    const paymentMethod = normalizeFinancePaymentMethod(payload.paymentMethod);
+    const paymentMethod2 = normalizeFinancePaymentMethod(payload.paymentMethod2);
+    const paymentMethod3 = normalizeFinancePaymentMethod(payload.paymentMethod3);
     const data: Prisma.FinanceRecordUncheckedCreateInput = {
       year,
       month,
@@ -447,15 +508,19 @@ export class PrismaFinanceRepository implements FinanceRepository {
       previousPaymentsMxn: toDecimal(payload.previousPaymentsMxn),
       nextPaymentDate: parseDateValue(payload.nextPaymentDate),
       nextPaymentNotes: normalizeOptionalText(payload.nextPaymentNotes),
+      delinquencyStatus: normalizeDelinquencyStatus(payload.delinquencyStatus),
       paidThisMonthMxn: toDecimal(payload.paidThisMonthMxn),
       payment2Mxn: toDecimal(payload.payment2Mxn),
       payment3Mxn: toDecimal(payload.payment3Mxn),
       paymentDate1: parseDateValue(payload.paymentDate1),
       paymentDate2: parseDateValue(payload.paymentDate2),
       paymentDate3: parseDateValue(payload.paymentDate3),
-      paymentMethod: normalizeFinancePaymentMethod(payload.paymentMethod),
-      paymentMethod2: normalizeFinancePaymentMethod(payload.paymentMethod2),
-      paymentMethod3: normalizeFinancePaymentMethod(payload.paymentMethod3),
+      paymentMethod,
+      paymentMethod2,
+      paymentMethod3,
+      paymentReceived: normalizePaymentReceived(paymentMethod, payload.paymentReceived),
+      paymentReceived2: normalizePaymentReceived(paymentMethod2, payload.paymentReceived2),
+      paymentReceived3: normalizePaymentReceived(paymentMethod3, payload.paymentReceived3),
       expenseNotes1: normalizeOptionalText(payload.expenseNotes1),
       expenseNotes2: normalizeOptionalText(payload.expenseNotes2),
       expenseNotes3: normalizeOptionalText(payload.expenseNotes3),
@@ -490,6 +555,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
   public async updateRecord(recordId: string, payload: FinanceRecordWriteRecord) {
     const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
     const currentRecord = await this.findRecordOrThrow(this.prisma, recordId);
+    assertUnlockedReceivedPaymentFields(currentRecord, payload);
 
     const data: Prisma.FinanceRecordUncheckedUpdateInput = {};
 
@@ -532,6 +598,9 @@ export class PrismaFinanceRepository implements FinanceRepository {
     if (hasOwn(payload, "nextPaymentNotes")) {
       data.nextPaymentNotes = normalizeOptionalText(payload.nextPaymentNotes);
     }
+    if (hasOwn(payload, "delinquencyStatus")) {
+      data.delinquencyStatus = normalizeDelinquencyStatus(payload.delinquencyStatus);
+    }
     if (hasOwn(payload, "paidThisMonthMxn")) {
       data.paidThisMonthMxn = toDecimal(payload.paidThisMonthMxn);
     }
@@ -558,6 +627,37 @@ export class PrismaFinanceRepository implements FinanceRepository {
     }
     if (hasOwn(payload, "paymentMethod3")) {
       data.paymentMethod3 = normalizeFinancePaymentMethod(payload.paymentMethod3);
+    }
+    const nextPaymentMethod = hasOwn(payload, "paymentMethod")
+      ? normalizeFinancePaymentMethod(payload.paymentMethod)
+      : normalizeFinancePaymentMethod(currentRecord.paymentMethod);
+    const nextPaymentMethod2 = hasOwn(payload, "paymentMethod2")
+      ? normalizeFinancePaymentMethod(payload.paymentMethod2)
+      : normalizeFinancePaymentMethod(currentRecord.paymentMethod2);
+    const nextPaymentMethod3 = hasOwn(payload, "paymentMethod3")
+      ? normalizeFinancePaymentMethod(payload.paymentMethod3)
+      : normalizeFinancePaymentMethod(currentRecord.paymentMethod3);
+
+    if (hasOwn(payload, "paymentMethod") || hasOwn(payload, "paymentReceived")) {
+      data.paymentMethod = nextPaymentMethod;
+      data.paymentReceived = normalizePaymentReceived(
+        nextPaymentMethod,
+        hasOwn(payload, "paymentReceived") ? payload.paymentReceived : currentRecord.paymentReceived
+      );
+    }
+    if (hasOwn(payload, "paymentMethod2") || hasOwn(payload, "paymentReceived2")) {
+      data.paymentMethod2 = nextPaymentMethod2;
+      data.paymentReceived2 = normalizePaymentReceived(
+        nextPaymentMethod2,
+        hasOwn(payload, "paymentReceived2") ? payload.paymentReceived2 : currentRecord.paymentReceived2
+      );
+    }
+    if (hasOwn(payload, "paymentMethod3") || hasOwn(payload, "paymentReceived3")) {
+      data.paymentMethod3 = nextPaymentMethod3;
+      data.paymentReceived3 = normalizePaymentReceived(
+        nextPaymentMethod3,
+        hasOwn(payload, "paymentReceived3") ? payload.paymentReceived3 : currentRecord.paymentReceived3
+      );
     }
     if (hasOwn(payload, "expenseNotes1")) {
       data.expenseNotes1 = normalizeOptionalText(payload.expenseNotes1);
@@ -739,6 +839,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
           previousPaymentsMxn: toDecimal(record.previousPaymentsMxn + totalPaidMxn),
           nextPaymentDate: parseDateValue(record.nextPaymentDate),
           nextPaymentNotes: normalizeOptionalText(record.nextPaymentNotes),
+          delinquencyStatus: "CURRENT",
           paidThisMonthMxn: toDecimal(0),
           payment2Mxn: toDecimal(0),
           payment3Mxn: toDecimal(0),
@@ -748,6 +849,9 @@ export class PrismaFinanceRepository implements FinanceRepository {
           paymentMethod: "blank",
           paymentMethod2: "blank",
           paymentMethod3: "blank",
+          paymentReceived: false,
+          paymentReceived2: false,
+          paymentReceived3: false,
           expenseNotes1: null,
           expenseNotes2: null,
           expenseNotes3: null,
@@ -1037,7 +1141,13 @@ export class PrismaFinanceRepository implements FinanceRepository {
         id: true,
         quoteNumber: true,
         clientName: true,
-        subject: true
+        subject: true,
+        paymentMethod: true,
+        paymentMethod2: true,
+        paymentMethod3: true,
+        paymentReceived: true,
+        paymentReceived2: true,
+        paymentReceived3: true
       }
     });
 

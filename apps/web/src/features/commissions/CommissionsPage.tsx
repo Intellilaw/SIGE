@@ -343,8 +343,8 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
 
-function isFinancePaymentMethodReceived(value?: FinanceRecord["paymentMethod"] | null) {
-  return value === "T" || value === "E_RECEIVED";
+function isPaymentReceived(method?: FinanceRecord["paymentMethod"] | null, received?: boolean | null) {
+  return method === "T" || (method === "E" && received === true);
 }
 
 function hasPaymentDate(value?: string | null) {
@@ -363,18 +363,21 @@ function getReceivedPaymentsMxn(
     | "paymentMethod"
     | "paymentMethod2"
     | "paymentMethod3"
+    | "paymentReceived"
+    | "paymentReceived2"
+    | "paymentReceived3"
   >
 ) {
   const payment1Mxn =
-    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+    hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
       ? record.paidThisMonthMxn
       : 0;
   const payment2Mxn =
-    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+    hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
       ? record.payment2Mxn
       : 0;
   const payment3Mxn =
-    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+    hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
       ? record.payment3Mxn
       : 0;
 

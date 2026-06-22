@@ -5970,7 +5970,7 @@ textarea {
 }
 
 .finance-table-monthly-x-nav-spacer {
-  width: 8514px;
+  width: 9640px;
 }
 
 .finance-active-table-x-nav-spacer {
@@ -6020,7 +6020,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 8514px; font-size: 0.82rem; }
+.finance-table-monthly { min-width: 9640px; font-size: 0.82rem; table-layout: fixed; }
 .finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
@@ -6094,6 +6094,52 @@ textarea {
 .finance-input-number { text-align: right; }
 .finance-input-currency { font-variant-numeric: tabular-nums; }
 .finance-payment-method-placeholder { min-height: 38px; }
+
+.finance-received-checkbox {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 38px;
+  width: 100%;
+}
+
+.finance-received-checkbox input {
+  accent-color: #1d4ed8;
+  height: 18px;
+  width: 18px;
+}
+
+.finance-client-message-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.finance-client-message-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.finance-client-message-copy-button {
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.finance-client-message-copy-button.is-copied {
+  background: #dcfce7;
+  color: #166534;
+  transform: translateY(-1px);
+}
+
+.finance-client-message {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  min-height: 168px;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.finance-client-message-empty {
+  min-height: 38px;
+}
 
 .finance-stack,
 .finance-target-picker {

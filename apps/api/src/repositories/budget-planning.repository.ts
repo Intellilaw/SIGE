@@ -66,8 +66,8 @@ function calculateExpectedIncomeBreakdownFromFinance(records: Array<{
   );
 }
 
-function isFinancePaymentMethodReceived(value?: string | null) {
-  return value === "T" || value === "E_RECEIVED";
+function isPaymentReceived(method?: string | null, received?: boolean | null) {
+  return method === "T" || method === "E_RECEIVED" || (method === "E" && received === true);
 }
 
 function hasPaymentDate(value?: Date | null) {
@@ -84,17 +84,20 @@ function calculateReceivedIncomeMxn(record: {
   paymentMethod?: string | null;
   paymentMethod2?: string | null;
   paymentMethod3?: string | null;
+  paymentReceived?: boolean | null;
+  paymentReceived2?: boolean | null;
+  paymentReceived3?: boolean | null;
 }) {
   const primaryPaymentMxn =
-    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+    hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
       ? Number(record.paidThisMonthMxn || 0)
       : 0;
   const payment2Mxn =
-    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+    hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
       ? Number(record.payment2Mxn || 0)
       : 0;
   const payment3Mxn =
-    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+    hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
       ? Number(record.payment3Mxn || 0)
       : 0;
   return primaryPaymentMxn + payment2Mxn + payment3Mxn;

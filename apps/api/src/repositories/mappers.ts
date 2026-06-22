@@ -1594,14 +1594,34 @@ export function mapCommissionExclusion(record: {
 const FINANCE_PAYMENT_METHOD_VALUES = new Set<FinanceRecord["paymentMethod"]>([
   "blank",
   "T",
-  "E_RECEIVED",
-  "E_PENDING"
+  "E"
+]);
+const FINANCE_DELINQUENCY_STATUS_VALUES = new Set<FinanceRecord["delinquencyStatus"]>([
+  "CURRENT",
+  "DAYS_1_TO_10",
+  "MORE_THAN_10",
+  "MORE_THAN_20",
+  "MORE_THAN_30"
 ]);
 
 function normalizeFinancePaymentMethod(value?: string | null): FinanceRecord["paymentMethod"] {
+  if (value === "E_RECEIVED" || value === "E_PENDING") {
+    return "E";
+  }
+
   return FINANCE_PAYMENT_METHOD_VALUES.has(value as FinanceRecord["paymentMethod"])
     ? (value as FinanceRecord["paymentMethod"])
     : "blank";
+}
+
+function normalizeFinancePaymentReceived(method?: string | null, received?: boolean | null) {
+  return method === "E_RECEIVED" || (normalizeFinancePaymentMethod(method) === "E" && received === true);
+}
+
+function normalizeFinanceDelinquencyStatus(value?: string | null): FinanceRecord["delinquencyStatus"] {
+  return FINANCE_DELINQUENCY_STATUS_VALUES.has(value as FinanceRecord["delinquencyStatus"])
+    ? (value as FinanceRecord["delinquencyStatus"])
+    : "CURRENT";
 }
 
 export function mapFinanceRecord(record: {
@@ -1621,6 +1641,7 @@ export function mapFinanceRecord(record: {
   previousPaymentsMxn: Prisma.Decimal;
   nextPaymentDate: Date | null;
   nextPaymentNotes: string | null;
+  delinquencyStatus: string;
   paidThisMonthMxn: Prisma.Decimal;
   payment2Mxn: Prisma.Decimal;
   payment3Mxn: Prisma.Decimal;
@@ -1630,6 +1651,9 @@ export function mapFinanceRecord(record: {
   paymentMethod: string;
   paymentMethod2: string;
   paymentMethod3: string;
+  paymentReceived: boolean;
+  paymentReceived2: boolean;
+  paymentReceived3: boolean;
   expenseNotes1: string | null;
   expenseNotes2: string | null;
   expenseNotes3: string | null;
@@ -1668,6 +1692,7 @@ export function mapFinanceRecord(record: {
     previousPaymentsMxn: Number(record.previousPaymentsMxn),
     nextPaymentDate: record.nextPaymentDate?.toISOString(),
     nextPaymentNotes: record.nextPaymentNotes ?? undefined,
+    delinquencyStatus: normalizeFinanceDelinquencyStatus(record.delinquencyStatus),
     paidThisMonthMxn: Number(record.paidThisMonthMxn),
     payment2Mxn: Number(record.payment2Mxn),
     payment3Mxn: Number(record.payment3Mxn),
@@ -1677,6 +1702,9 @@ export function mapFinanceRecord(record: {
     paymentMethod: normalizeFinancePaymentMethod(record.paymentMethod),
     paymentMethod2: normalizeFinancePaymentMethod(record.paymentMethod2),
     paymentMethod3: normalizeFinancePaymentMethod(record.paymentMethod3),
+    paymentReceived: normalizeFinancePaymentReceived(record.paymentMethod, record.paymentReceived),
+    paymentReceived2: normalizeFinancePaymentReceived(record.paymentMethod2, record.paymentReceived2),
+    paymentReceived3: normalizeFinancePaymentReceived(record.paymentMethod3, record.paymentReceived3),
     expenseNotes1: record.expenseNotes1 ?? undefined,
     expenseNotes2: record.expenseNotes2 ?? undefined,
     expenseNotes3: record.expenseNotes3 ?? undefined,

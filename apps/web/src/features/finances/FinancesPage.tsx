@@ -35,6 +35,7 @@ type FinanceRecordPatchPayload = {
   previousPaymentsMxn?: number;
   nextPaymentDate?: string | null;
   nextPaymentNotes?: string | null;
+  delinquencyStatus?: FinanceRecord["delinquencyStatus"];
   paidThisMonthMxn?: number;
   payment2Mxn?: number;
   payment3Mxn?: number;
@@ -44,6 +45,9 @@ type FinanceRecordPatchPayload = {
   paymentMethod?: FinanceRecord["paymentMethod"];
   paymentMethod2?: FinanceRecord["paymentMethod2"];
   paymentMethod3?: FinanceRecord["paymentMethod3"];
+  paymentReceived?: boolean;
+  paymentReceived2?: boolean;
+  paymentReceived3?: boolean;
   expenseNotes1?: string | null;
   expenseNotes2?: string | null;
   expenseNotes3?: string | null;
@@ -71,6 +75,8 @@ type CopyResult = {
 };
 
 type FinancePaymentMethodField = "paymentMethod" | "paymentMethod2" | "paymentMethod3";
+type FinancePaymentReceivedField = "paymentReceived" | "paymentReceived2" | "paymentReceived3";
+type FinanceDelinquencyStatusWithMessage = Exclude<FinanceRecord["delinquencyStatus"], "CURRENT">;
 
 const MONTHLY_COLUMN_WIDTHS = [
   "56px",
@@ -86,9 +92,12 @@ const MONTHLY_COLUMN_WIDTHS = [
   "170px",
   "170px",
   "280px",
+  "190px",
+  "420px",
   "180px",
   "180px",
-  "170px",
+  "110px",
+  "120px",
   "160px",
   "150px",
   "150px",
@@ -127,9 +136,135 @@ const MONTHLY_COLUMN_WIDTHS = [
 const PAYMENT_METHOD_OPTIONS: Array<{ value: FinanceRecord["paymentMethod"]; label: string }> = [
   { value: "blank", label: "" },
   { value: "T", label: "T" },
-  { value: "E_RECEIVED", label: "E recibido" },
-  { value: "E_PENDING", label: "E pendiente" }
+  { value: "E", label: "E" }
 ];
+
+const DELINQUENCY_STATUS_OPTIONS: Array<{ value: FinanceRecord["delinquencyStatus"]; label: string }> = [
+  { value: "CURRENT", label: "Al corriente" },
+  { value: "DAYS_1_TO_10", label: "Mora de 1 a 10 d\u00edas" },
+  { value: "MORE_THAN_10", label: "Mora mayor a 10 d\u00edas" },
+  { value: "MORE_THAN_20", label: "Mora mayor a 20 d\u00edas" },
+  { value: "MORE_THAN_30", label: "Mora mayor a 30 d\u00edas" }
+];
+
+const CLIENT_DELINQUENCY_MESSAGES: Record<FinanceDelinquencyStatusWithMessage, { es: string; en: string }> = {
+  DAYS_1_TO_10: {
+    es: [
+      "*Mora de 1 a 10 d\u00edas*",
+      "",
+      "Estimado cliente,",
+      "",
+      "Le recordamos que se encuentra pendiente de pago el importe correspondiente, cuyo vencimiento ya transcurri\u00f3.",
+      "",
+      "Para mantener la prestaci\u00f3n ordinaria de nuestros servicios sin afectaciones, le agradeceremos ponerse al corriente a la brevedad.",
+      "",
+      "Atentamente,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n"),
+    en: [
+      "*1 to 10 days past due*",
+      "",
+      "Dear client,",
+      "",
+      "We would like to remind you that the corresponding payment remains outstanding and its due date has already passed.",
+      "",
+      "To maintain the ordinary provision of our services without disruption, we kindly ask you to bring your account up to date as soon as possible.",
+      "",
+      "Sincerely,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n")
+  },
+  MORE_THAN_10: {
+    es: [
+      "*Mora mayor a 10 d\u00edas*",
+      "",
+      "Estimado cliente,",
+      "",
+      "Le informamos que su cuenta presenta un atraso mayor a 10 d\u00edas.",
+      "",
+      "Con el fin de mantener activa la prestaci\u00f3n ordinaria de nuestros servicios, le solicitamos regularizar el pago pendiente a la brevedad.",
+      "",
+      "En caso de que el atraso contin\u00fae, podr\u00edamos vernos en la necesidad de limitar temporalmente la atenci\u00f3n de asuntos no urgentes.",
+      "",
+      "Atentamente,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n"),
+    en: [
+      "*More than 10 days past due*",
+      "",
+      "Dear client,",
+      "",
+      "We inform you that your account is more than 10 days past due.",
+      "",
+      "In order to keep the ordinary provision of our services active, we kindly ask you to regularize the outstanding payment as soon as possible.",
+      "",
+      "If the delay continues, we may need to temporarily limit our attention to non-urgent matters.",
+      "",
+      "Sincerely,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n")
+  },
+  MORE_THAN_20: {
+    es: [
+      "*Mora mayor a 20 d\u00edas*",
+      "",
+      "Estimado cliente,",
+      "",
+      "Le informamos que su cuenta presenta un atraso mayor a 20 d\u00edas.",
+      "",
+      "Por esta raz\u00f3n, y hasta que se regularice el pago pendiente, la atenci\u00f3n quedar\u00e1 limitada temporalmente a asuntos urgentes o vencimientos que no puedan diferirse.",
+      "",
+      "Una vez regularizada la cuenta, reanudaremos la prestaci\u00f3n ordinaria de nuestros servicios.",
+      "",
+      "Atentamente,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n"),
+    en: [
+      "*More than 20 days past due*",
+      "",
+      "Dear client,",
+      "",
+      "We inform you that your account is more than 20 days past due.",
+      "",
+      "For this reason, and until the outstanding payment is regularized, our attention will be temporarily limited to urgent matters or deadlines that cannot be deferred.",
+      "",
+      "Once the account is regularized, we will resume the ordinary provision of our services.",
+      "",
+      "Sincerely,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n")
+  },
+  MORE_THAN_30: {
+    es: [
+      "*Mora mayor a 30 d\u00edas*",
+      "",
+      "Estimado cliente,",
+      "",
+      "Le informamos que su cuenta presenta un atraso mayor a 30 d\u00edas.",
+      "",
+      "Por esta raz\u00f3n, la prestaci\u00f3n de nuestros servicios quedar\u00e1 suspendida temporalmente hasta que se regularice el pago pendiente.",
+      "",
+      "Una vez recibida la regularizaci\u00f3n correspondiente, con gusto reanudaremos la atenci\u00f3n de sus asuntos.",
+      "",
+      "Atentamente,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n"),
+    en: [
+      "*More than 30 days past due*",
+      "",
+      "Dear client,",
+      "",
+      "We inform you that your account is more than 30 days past due.",
+      "",
+      "For this reason, the provision of our services will be temporarily suspended until the outstanding payment is regularized.",
+      "",
+      "Once the corresponding regularization has been received, we will gladly resume attention to your matters.",
+      "",
+      "Sincerely,",
+      "*RUSCONI CONSULTING*"
+    ].join("\n")
+  }
+};
 
 const ACTIVE_COLUMN_WIDTHS = [
   "120px",
@@ -437,8 +572,8 @@ function getDefaultPercentages(team?: FinanceRecord["responsibleTeam"] | null) {
   };
 }
 
-function isFinancePaymentMethodReceived(value?: FinanceRecord["paymentMethod"] | null) {
-  return value === "T" || value === "E_RECEIVED";
+function isPaymentReceived(method?: FinanceRecord["paymentMethod"] | null, received?: boolean | null) {
+  return method === "T" || (method === "E" && received === true);
 }
 
 function hasPaymentDate(value?: string | null) {
@@ -457,22 +592,55 @@ function getReceivedPaymentsMxn(
     | "paymentMethod"
     | "paymentMethod2"
     | "paymentMethod3"
+    | "paymentReceived"
+    | "paymentReceived2"
+    | "paymentReceived3"
   >
 ) {
   const payment1Mxn =
-    hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+    hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
       ? record.paidThisMonthMxn
       : 0;
   const payment2Mxn =
-    hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+    hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
       ? record.payment2Mxn
       : 0;
   const payment3Mxn =
-    hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+    hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
       ? record.payment3Mxn
       : 0;
 
   return payment1Mxn + payment2Mxn + payment3Mxn;
+}
+
+function getClientDelinquencyMessage(status?: FinanceRecord["delinquencyStatus"] | null) {
+  if (!status || status === "CURRENT") {
+    return { es: "", en: "" };
+  }
+
+  return CLIENT_DELINQUENCY_MESSAGES[status as FinanceDelinquencyStatusWithMessage] ?? { es: "", en: "" };
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-1000px";
+  textarea.style.left = "-1000px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
 }
 
 function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
@@ -569,25 +737,33 @@ function buildMatchKeys(input: { quoteNumber?: string | null; clientName?: strin
 }
 
 function normalizeRecordPatchForState(patch: FinanceRecordPatchPayload): Partial<FinanceRecord> {
-  return {
-    ...patch,
-    clientNumber: patch.clientNumber ?? undefined,
-    quoteNumber: patch.quoteNumber ?? undefined,
-    responsibleTeam: patch.responsibleTeam ?? undefined,
-    workingConcepts: patch.workingConcepts ?? undefined,
-    nextPaymentDate: patch.nextPaymentDate ?? undefined,
-    nextPaymentNotes: patch.nextPaymentNotes ?? undefined,
-    paymentDate1: patch.paymentDate1 ?? undefined,
-    paymentDate2: patch.paymentDate2 ?? undefined,
-    paymentDate3: patch.paymentDate3 ?? undefined,
-    expenseNotes1: patch.expenseNotes1 ?? undefined,
-    expenseNotes2: patch.expenseNotes2 ?? undefined,
-    expenseNotes3: patch.expenseNotes3 ?? undefined,
-    clientCommissionRecipient: patch.clientCommissionRecipient ?? undefined,
-    closingCommissionRecipient: patch.closingCommissionRecipient ?? undefined,
-    milestone: patch.milestone ?? undefined,
-    financeComments: patch.financeComments ?? undefined
-  };
+  const normalizedPatch = { ...patch } as Partial<FinanceRecord>;
+  const nullableFields: Array<keyof FinanceRecordPatchPayload> = [
+    "clientNumber",
+    "quoteNumber",
+    "responsibleTeam",
+    "workingConcepts",
+    "nextPaymentDate",
+    "nextPaymentNotes",
+    "paymentDate1",
+    "paymentDate2",
+    "paymentDate3",
+    "expenseNotes1",
+    "expenseNotes2",
+    "expenseNotes3",
+    "clientCommissionRecipient",
+    "closingCommissionRecipient",
+    "milestone",
+    "financeComments"
+  ];
+
+  nullableFields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      (normalizedPatch as Record<string, unknown>)[field] = patch[field] ?? undefined;
+    }
+  });
+
+  return normalizedPatch;
 }
 
 function MonthSummaryCards({ records }: { records: FinanceRecord[] }) {
@@ -670,6 +846,8 @@ export function FinancesPage() {
   const [contractForm, setContractForm] = useState<ProfessionalServicesContractFieldValues>(EMPTY_PROFESSIONAL_SERVICES_FIELDS);
   const [wordSearch, setWordSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
+  const [copiedClientMessageKey, setCopiedClientMessageKey] = useState<string | null>(null);
+  const copiedClientMessageTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const page = pageRef.current;
@@ -1066,6 +1244,14 @@ export function FinancesPage() {
   }, [activeTab, isSalesMonthlyViewer]);
 
   useEffect(() => {
+    return () => {
+      if (copiedClientMessageTimeoutRef.current !== null) {
+        window.clearTimeout(copiedClientMessageTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (isSalesMonthlyViewer && activeTab !== "monthly-view") {
       return;
     }
@@ -1187,6 +1373,11 @@ export function FinancesPage() {
             nextRecord[field] = patch[field] ?? record[field];
           }
         });
+        (["paymentReceived", "paymentReceived2", "paymentReceived3"] as const).forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(patch, field) && !Object.prototype.hasOwnProperty.call(updated, field)) {
+            nextRecord[field] = patch[field] ?? record[field];
+          }
+        });
 
         return nextRecord;
       }));
@@ -1208,6 +1399,22 @@ export function FinancesPage() {
 
     updateRecordLocal(record.id, patch);
     void persistRecordPatch(record.id, patch);
+  }
+
+  async function handleCopyClientMessage(message: string, copyKey: string) {
+    try {
+      await copyTextToClipboard(message);
+      setCopiedClientMessageKey(copyKey);
+      if (copiedClientMessageTimeoutRef.current !== null) {
+        window.clearTimeout(copiedClientMessageTimeoutRef.current);
+      }
+      copiedClientMessageTimeoutRef.current = window.setTimeout(() => {
+        setCopiedClientMessageKey((current) => (current === copyKey ? null : current));
+        copiedClientMessageTimeoutRef.current = null;
+      }, 1500);
+    } catch (caughtError) {
+      setError(toErrorMessage(caughtError));
+    }
   }
 
   async function handleMatterNextPaymentDateChange(matterId: string, value: string) {
@@ -1467,13 +1674,16 @@ export function FinancesPage() {
           <th>Honorarios pagaderos este mes</th>
           <th>Fecha de proximo pago</th>
           <th>Detalle Fecha</th>
+          <th>{"\u00bfEn mora?"}</th>
+          <th>Mensaje para cliente</th>
           <th>Pagado este mes</th>
           <th>Fecha Pago Real</th>
           <th>Método de pago</th>
+          <th>Recibido</th>
           <th>Adeudado hoy</th>
           <th>Alta probabilidad de cobro</th>
           <th>Baja probabilidad de cobro</th>
-          <th>Honorarios netos</th>
+          <th>Honorarios netos cobrados este mes</th>
           <th>Comision cliente 20%</th>
           <th>Para quien</th>
           <th>Comision cierre 10%</th>
@@ -1510,6 +1720,7 @@ export function FinancesPage() {
     const renderPaymentMethodSelect = (
       record: FinanceRecord,
       field: FinancePaymentMethodField,
+      receivedField: FinancePaymentReceivedField,
       paymentDate?: string | null
     ) => {
       if (!hasPaymentDate(paymentDate)) {
@@ -1518,21 +1729,83 @@ export function FinancesPage() {
 
       return (
         <select
-          className="finance-input"
+          className={`finance-input ${record[receivedField] === true ? "finance-input-readonly" : ""}`.trim()}
+          disabled={record[receivedField] === true}
           value={record[field] ?? "blank"}
           onChange={(event) => {
             const paymentMethod = event.target.value as FinanceRecord[FinancePaymentMethodField];
             const patch = { [field]: paymentMethod } as FinanceRecordPatchPayload;
+            if (paymentMethod !== "E" && canSelectReceivedCash) {
+              (patch as Record<string, unknown>)[receivedField] = false;
+            }
             updateRecordLocal(record.id, patch);
             void persistRecordPatch(record.id, patch);
           }}
         >
           {PAYMENT_METHOD_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value} disabled={option.value === "E_RECEIVED" && !canSelectReceivedCash}>
+            <option key={option.value} value={option.value}>
               {option.label}
             </option>
           ))}
         </select>
+      );
+    };
+
+    const renderPaymentReceivedCheckbox = (
+      record: FinanceRecord,
+      methodField: FinancePaymentMethodField,
+      receivedField: FinancePaymentReceivedField,
+      paymentDate?: string | null
+    ) => {
+      if (!hasPaymentDate(paymentDate) || record[methodField] !== "E") {
+        return <div aria-hidden="true" className="finance-payment-method-placeholder" />;
+      }
+
+      return (
+        <label className="finance-received-checkbox" title={canSelectReceivedCash ? "Marcar efectivo recibido" : "Solo EMRT puede marcar efectivo recibido"}>
+          <input
+            checked={record[receivedField] === true}
+            disabled={!canSelectReceivedCash}
+            onChange={(event) => {
+              const patch = { [receivedField]: event.target.checked } as FinanceRecordPatchPayload;
+              updateRecordLocal(record.id, patch);
+              void persistRecordPatch(record.id, patch);
+            }}
+            type="checkbox"
+          />
+        </label>
+      );
+    };
+
+    const renderClientMessage = (record: FinanceRecord) => {
+      const messages = getClientDelinquencyMessage(record.delinquencyStatus);
+      const spanishCopyKey = `${record.id}:es`;
+      const englishCopyKey = `${record.id}:en`;
+
+      if (!messages.es) {
+        return <div aria-hidden="true" className="finance-client-message-empty" />;
+      }
+
+      return (
+        <div className="finance-client-message-panel">
+          <textarea className="finance-input finance-client-message" readOnly value={messages.es} />
+          <div className="finance-client-message-actions">
+            <button
+              className={`secondary-button finance-inline-button finance-client-message-copy-button ${copiedClientMessageKey === spanishCopyKey ? "is-copied" : ""}`.trim()}
+              onClick={() => void handleCopyClientMessage(messages.es, spanishCopyKey)}
+              type="button"
+            >
+              {copiedClientMessageKey === spanishCopyKey ? "Copiado" : "Copiar mensaje en espa\u00f1ol"}
+            </button>
+            <button
+              className={`secondary-button finance-inline-button finance-client-message-copy-button ${copiedClientMessageKey === englishCopyKey ? "is-copied" : ""}`.trim()}
+              onClick={() => void handleCopyClientMessage(messages.en, englishCopyKey)}
+              type="button"
+            >
+              {copiedClientMessageKey === englishCopyKey ? "Copiado" : "Copiar mensaje en ingl\u00e9s"}
+            </button>
+          </div>
+        </div>
       );
     };
 
@@ -1550,6 +1823,9 @@ export function FinancesPage() {
             {filteredRecords.map((record, index) => {
               const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
               const isSelected = selectedIds.has(record.id);
+              const payment1Locked = record.paymentReceived === true;
+              const payment2Locked = record.paymentReceived2 === true;
+              const payment3Locked = record.paymentReceived3 === true;
               const rowClassName = `${shouldHighlight ? "finance-row-danger" : ""} ${isSelected ? "finance-row-selected" : ""}`.trim();
 
               return (
@@ -1588,24 +1864,47 @@ export function FinancesPage() {
                   <td><input className="finance-input finance-input-readonly" type="date" value={toDateInput(record.nextPaymentDate)} readOnly /></td>
                   <td><input className="finance-input" value={record.nextPaymentNotes ?? ""} onChange={(event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value })} /></td>
                   <td>
+                    <select
+                      className="finance-input"
+                      value={record.delinquencyStatus ?? "CURRENT"}
+                      onChange={(event) => {
+                        const delinquencyStatus = event.target.value as FinanceRecord["delinquencyStatus"];
+                        updateRecordLocal(record.id, { delinquencyStatus });
+                        void persistRecordPatch(record.id, { delinquencyStatus });
+                      }}
+                    >
+                      {DELINQUENCY_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>{renderClientMessage(record)}</td>
+                  <td>
                     <div className="finance-stack">
-                      <CurrencyInput value={record.paidThisMonthMxn} onValueChange={(paidThisMonthMxn) => updateRecordLocal(record.id, { paidThisMonthMxn })} onValueCommit={(paidThisMonthMxn) => void persistRecordPatch(record.id, { paidThisMonthMxn })} />
-                      <CurrencyInput value={record.payment2Mxn} onValueChange={(payment2Mxn) => updateRecordLocal(record.id, { payment2Mxn })} onValueCommit={(payment2Mxn) => void persistRecordPatch(record.id, { payment2Mxn })} />
-                      <CurrencyInput value={record.payment3Mxn} onValueChange={(payment3Mxn) => updateRecordLocal(record.id, { payment3Mxn })} onValueCommit={(payment3Mxn) => void persistRecordPatch(record.id, { payment3Mxn })} />
+                      <CurrencyInput value={record.paidThisMonthMxn} readOnly={payment1Locked} onValueChange={(paidThisMonthMxn) => updateRecordLocal(record.id, { paidThisMonthMxn })} onValueCommit={(paidThisMonthMxn) => void persistRecordPatch(record.id, { paidThisMonthMxn })} />
+                      <CurrencyInput value={record.payment2Mxn} readOnly={payment2Locked} onValueChange={(payment2Mxn) => updateRecordLocal(record.id, { payment2Mxn })} onValueCommit={(payment2Mxn) => void persistRecordPatch(record.id, { payment2Mxn })} />
+                      <CurrencyInput value={record.payment3Mxn} readOnly={payment3Locked} onValueChange={(payment3Mxn) => updateRecordLocal(record.id, { payment3Mxn })} onValueCommit={(payment3Mxn) => void persistRecordPatch(record.id, { payment3Mxn })} />
                     </div>
                   </td>
                   <td>
                     <div className="finance-stack">
-                      <input className="finance-input" type="date" value={toDateInput(record.paymentDate1)} onChange={(event) => updateRecordLocal(record.id, { paymentDate1: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate1: event.target.value || null })} />
-                      <input className="finance-input" type="date" value={toDateInput(record.paymentDate2)} onChange={(event) => updateRecordLocal(record.id, { paymentDate2: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate2: event.target.value || null })} />
-                      <input className="finance-input" type="date" value={toDateInput(record.paymentDate3)} onChange={(event) => updateRecordLocal(record.id, { paymentDate3: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate3: event.target.value || null })} />
+                      <input className={`finance-input ${payment1Locked ? "finance-input-readonly" : ""}`.trim()} disabled={payment1Locked} type="date" value={toDateInput(record.paymentDate1)} onChange={(event) => updateRecordLocal(record.id, { paymentDate1: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate1: event.target.value || null })} />
+                      <input className={`finance-input ${payment2Locked ? "finance-input-readonly" : ""}`.trim()} disabled={payment2Locked} type="date" value={toDateInput(record.paymentDate2)} onChange={(event) => updateRecordLocal(record.id, { paymentDate2: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate2: event.target.value || null })} />
+                      <input className={`finance-input ${payment3Locked ? "finance-input-readonly" : ""}`.trim()} disabled={payment3Locked} type="date" value={toDateInput(record.paymentDate3)} onChange={(event) => updateRecordLocal(record.id, { paymentDate3: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { paymentDate3: event.target.value || null })} />
                     </div>
                   </td>
                   <td>
                     <div className="finance-stack">
-                      {renderPaymentMethodSelect(record, "paymentMethod", record.paymentDate1)}
-                      {renderPaymentMethodSelect(record, "paymentMethod2", record.paymentDate2)}
-                      {renderPaymentMethodSelect(record, "paymentMethod3", record.paymentDate3)}
+                      {renderPaymentMethodSelect(record, "paymentMethod", "paymentReceived", record.paymentDate1)}
+                      {renderPaymentMethodSelect(record, "paymentMethod2", "paymentReceived2", record.paymentDate2)}
+                      {renderPaymentMethodSelect(record, "paymentMethod3", "paymentReceived3", record.paymentDate3)}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="finance-stack">
+                      {renderPaymentReceivedCheckbox(record, "paymentMethod", "paymentReceived", record.paymentDate1)}
+                      {renderPaymentReceivedCheckbox(record, "paymentMethod2", "paymentReceived2", record.paymentDate2)}
+                      {renderPaymentReceivedCheckbox(record, "paymentMethod3", "paymentReceived3", record.paymentDate3)}
                     </div>
                   </td>
                   <td><CurrencyInput className={stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""} value={stats.dueTodayMxn} readOnly /></td>
@@ -1671,7 +1970,7 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={49}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={52}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
@@ -1681,7 +1980,10 @@ export function FinancesPage() {
               <td />
               <td>{formatCurrency(totals.conceptFeesMxn)}</td>
               <td colSpan={2} />
+              <td />
+              <td />
               <td>{formatCurrency(totals.totalPaidMxn)}</td>
+              <td />
               <td />
               <td />
               <td>{formatCurrency(totals.dueTodayMxn)}</td>

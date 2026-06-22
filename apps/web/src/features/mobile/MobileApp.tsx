@@ -363,13 +363,13 @@ function getFinanceMatterTypeLabel(type: FinanceRecord["matterType"]) {
 }
 
 function getReceivedFinanceIncome(record: FinanceRecord) {
-  const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || record.paymentMethod === "E_RECEIVED")
+  const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || (record.paymentMethod === "E" && record.paymentReceived))
     ? record.paidThisMonthMxn
     : 0;
-  const payment2Mxn = record.paymentDate2 && (record.paymentMethod2 === "T" || record.paymentMethod2 === "E_RECEIVED")
+  const payment2Mxn = record.paymentDate2 && (record.paymentMethod2 === "T" || (record.paymentMethod2 === "E" && record.paymentReceived2))
     ? record.payment2Mxn
     : 0;
-  const payment3Mxn = record.paymentDate3 && (record.paymentMethod3 === "T" || record.paymentMethod3 === "E_RECEIVED")
+  const payment3Mxn = record.paymentDate3 && (record.paymentMethod3 === "T" || (record.paymentMethod3 === "E" && record.paymentReceived3))
     ? record.payment3Mxn
     : 0;
   return primaryPaymentMxn + payment2Mxn + payment3Mxn;

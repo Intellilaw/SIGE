@@ -732,6 +732,7 @@ export interface FinanceRecordWriteRecord {
   previousPaymentsMxn?: number;
   nextPaymentDate?: string | null;
   nextPaymentNotes?: string | null;
+  delinquencyStatus?: FinanceRecord["delinquencyStatus"];
   paidThisMonthMxn?: number;
   payment2Mxn?: number;
   payment3Mxn?: number;
@@ -741,6 +742,9 @@ export interface FinanceRecordWriteRecord {
   paymentMethod?: FinanceRecord["paymentMethod"];
   paymentMethod2?: FinanceRecord["paymentMethod2"];
   paymentMethod3?: FinanceRecord["paymentMethod3"];
+  paymentReceived?: boolean;
+  paymentReceived2?: boolean;
+  paymentReceived3?: boolean;
   expenseNotes1?: string | null;
   expenseNotes2?: string | null;
   expenseNotes3?: string | null;

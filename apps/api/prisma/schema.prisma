@@ -816,6 +816,7 @@ model FinanceRecord {
   previousPaymentsMxn        Decimal      @default(0)
   nextPaymentDate            DateTime?
   nextPaymentNotes           String?
+  delinquencyStatus          String       @default("CURRENT")
   paidThisMonthMxn           Decimal      @default(0)
   payment2Mxn                Decimal      @default(0)
   payment3Mxn                Decimal      @default(0)
@@ -825,6 +826,9 @@ model FinanceRecord {
   paymentMethod              String       @default("blank")
   paymentMethod2             String       @default("blank")
   paymentMethod3             String       @default("blank")
+  paymentReceived            Boolean      @default(false)
+  paymentReceived2           Boolean      @default(false)
+  paymentReceived3           Boolean      @default(false)
   expenseNotes1              String?
   expenseNotes2              String?
   expenseNotes3              String?

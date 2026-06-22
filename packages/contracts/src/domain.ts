@@ -937,7 +937,13 @@ export interface FinanceRecordStats {
   netProfitMxn: number;
 }
 
-export type FinancePaymentMethod = "blank" | "T" | "E_RECEIVED" | "E_PENDING";
+export type FinancePaymentMethod = "blank" | "T" | "E";
+export type FinanceDelinquencyStatus =
+  | "CURRENT"
+  | "DAYS_1_TO_10"
+  | "MORE_THAN_10"
+  | "MORE_THAN_20"
+  | "MORE_THAN_30";
 
 export interface FinanceRecord {
   id: string;
@@ -956,6 +962,7 @@ export interface FinanceRecord {
   previousPaymentsMxn: number;
   nextPaymentDate?: string;
   nextPaymentNotes?: string;
+  delinquencyStatus: FinanceDelinquencyStatus;
   paidThisMonthMxn: number;
   payment2Mxn: number;
   payment3Mxn: number;
@@ -965,6 +972,9 @@ export interface FinanceRecord {
   paymentMethod: FinancePaymentMethod;
   paymentMethod2: FinancePaymentMethod;
   paymentMethod3: FinancePaymentMethod;
+  paymentReceived: boolean;
+  paymentReceived2: boolean;
+  paymentReceived3: boolean;
   expenseNotes1?: string;
   expenseNotes2?: string;
   expenseNotes3?: string;

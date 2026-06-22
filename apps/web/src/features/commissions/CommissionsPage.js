@@ -225,20 +225,20 @@ function toDateKey(value) {
 function getErrorMessage(error) {
     return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 }
-function isFinancePaymentMethodReceived(value) {
-    return value === "T" || value === "E_RECEIVED";
+function isPaymentReceived(method, received) {
+    return method === "T" || (method === "E" && received === true);
 }
 function hasPaymentDate(value) {
     return Boolean(value);
 }
 function getReceivedPaymentsMxn(record) {
-    const payment1Mxn = hasPaymentDate(record.paymentDate1) && isFinancePaymentMethodReceived(record.paymentMethod)
+    const payment1Mxn = hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
         ? record.paidThisMonthMxn
         : 0;
-    const payment2Mxn = hasPaymentDate(record.paymentDate2) && isFinancePaymentMethodReceived(record.paymentMethod2)
+    const payment2Mxn = hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
         ? record.payment2Mxn
         : 0;
-    const payment3Mxn = hasPaymentDate(record.paymentDate3) && isFinancePaymentMethodReceived(record.paymentMethod3)
+    const payment3Mxn = hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
         ? record.payment3Mxn
         : 0;
     return payment1Mxn + payment2Mxn + payment3Mxn;
