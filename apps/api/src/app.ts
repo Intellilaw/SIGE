@@ -15,8 +15,6 @@ import { ClientsService } from "./modules/clients/clients.service";
 import { CommissionsService } from "./modules/commissions/commissions.service";
 import { DailyDocumentsService } from "./modules/daily-documents/daily-documents.service";
 import { DashboardService } from "./modules/dashboard/dashboard.service";
-import { startExternalContractInpcScheduler } from "./modules/external-contracts/external-contract-inpc-scheduler.js";
-import { ExternalContractsService } from "./modules/external-contracts/external-contracts.service";
 import { FinancesService } from "./modules/finances/finances.service";
 import { GeneralExpensesService } from "./modules/general-expenses/general-expenses.service";
 import { GeneralSupervisionService } from "./modules/general-supervision/general-supervision.service";
@@ -39,7 +37,6 @@ import { budgetPlanningRoutes } from "./modules/budget-planning/budget-planning.
 import { commissionsRoutes } from "./modules/commissions/commissions.routes";
 import { dailyDocumentsRoutes } from "./modules/daily-documents/daily-documents.routes";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes";
-import { externalContractsRoutes } from "./modules/external-contracts/external-contracts.routes";
 import { financesRoutes } from "./modules/finances/finances.routes";
 import { generalExpensesRoutes } from "./modules/general-expenses/general-expenses.routes";
 import { generalSupervisionRoutes } from "./modules/general-supervision/general-supervision.routes";
@@ -61,7 +58,6 @@ import { PrismaClientsRepository } from "./repositories/clients.repository";
 import { PrismaCommissionsRepository } from "./repositories/commissions.repository";
 import { PrismaDailyDocumentsRepository } from "./repositories/daily-documents.repository";
 import { PrismaDashboardRepository } from "./repositories/dashboard.repository";
-import { PrismaExternalContractsRepository } from "./repositories/external-contracts.repository";
 import { PrismaFinanceRepository } from "./repositories/finances.repository";
 import { PrismaGeneralSupervisionPreferencesRepository } from "./repositories/general-supervision-preferences.repository";
 import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses.repository";
@@ -88,7 +84,6 @@ import type {
   AuthRepository,
   ClientsRepository,
   DailyDocumentsRepository,
-  ExternalContractsRepository,
   FinanceRepository,
   HolidaysRepository,
   InternalContractsRepository,
@@ -114,7 +109,6 @@ declare module "fastify" {
       commissions: PrismaCommissionsRepository;
       dailyDocuments: DailyDocumentsRepository;
       dashboard: PrismaDashboardRepository;
-      externalContracts: ExternalContractsRepository;
       finances: FinanceRepository;
       generalSupervisionPreferences: PrismaGeneralSupervisionPreferencesRepository;
       generalExpenses: PrismaGeneralExpensesRepository;
@@ -137,7 +131,6 @@ declare module "fastify" {
       CommissionsService: typeof CommissionsService;
       DailyDocumentsService: typeof DailyDocumentsService;
       DashboardService: typeof DashboardService;
-      ExternalContractsService: typeof ExternalContractsService;
       FinancesService: typeof FinancesService;
       GeneralExpensesService: typeof GeneralExpensesService;
       GeneralSupervisionService: typeof GeneralSupervisionService;
@@ -217,7 +210,6 @@ export async function buildApp() {
     commissions: new PrismaCommissionsRepository(prisma),
     dailyDocuments: new PrismaDailyDocumentsRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
-    externalContracts: new PrismaExternalContractsRepository(prisma),
     finances: new ResilientFinanceRepository(
       new PrismaFinanceRepository(prisma),
       false,
@@ -260,7 +252,6 @@ export async function buildApp() {
     CommissionsService,
     DailyDocumentsService,
     DashboardService,
-    ExternalContractsService,
     FinancesService,
     GeneralExpensesService,
     GeneralSupervisionService,
@@ -311,7 +302,6 @@ export async function buildApp() {
     await api.register(commissionsRoutes);
     await api.register(dailyDocumentsRoutes);
     await api.register(dashboardRoutes);
-    await api.register(externalContractsRoutes);
     await api.register(financesRoutes);
     await api.register(generalExpensesRoutes);
     await api.register(generalSupervisionRoutes);
@@ -331,11 +321,9 @@ export async function buildApp() {
 
   if (env.APP_ENV !== "test") {
     const stopTasksMaintenance = startTasksMaintenanceScheduler(prisma, app.log);
-    const stopExternalContractInpcSync = startExternalContractInpcScheduler(prisma, app.log);
     const stopKpiDailySnapshots = startKpiDailySnapshotScheduler(kpisRepository, app.log);
     app.addHook("onClose", async () => {
       stopTasksMaintenance();
-      stopExternalContractInpcSync();
       stopKpiDailySnapshots();
     });
   }

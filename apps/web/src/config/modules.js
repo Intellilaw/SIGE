@@ -169,29 +169,6 @@ export const appModules = [
         coverage: ["Asuntos con ID asignado", "Búsqueda por cliente, cotización, ID y asunto", "Borrado permanente por superadmin"]
     },
     {
-        id: "brief-manager",
-        path: "/app/brief-manager",
-        label: "Manager de escritos",
-        shortLabel: "Escritos",
-        icon: "\u270D\uFE0F",
-        description: "Concentrador para control, versionado y administracion de escritos del despacho.",
-        phase: "Operativo",
-        available: true,
-        coverage: ["Acceso directo con sesion SIGE", "Seguimiento de escritos", "Control documental operativo"]
-    },
-    {
-        id: "external-contracts",
-        path: "/app/external-contracts",
-        label: "Minka",
-        shortLabel: "Minka",
-        icon: "\u{1F3E2}",
-        description: "Carga, control por cliente y fechas clave de contratos externos de clientes.",
-        phase: "Operativo",
-        available: true,
-        access: "settlements-team",
-        coverage: ["Contratos de arrendamiento por cliente", "Carga Word y PDF", "Renovacion y aumento de renta", "Formatos operativos"]
-    },
-    {
         id: "internal-contracts",
         path: "/app/internal-contracts",
         label: "Administraci\u00f3n de contratos internos",
@@ -328,28 +305,6 @@ export function canAccessGeneralSupervision(user) {
         emailLocalPart
     ].some(isEmrtIdentity);
 }
-export function canAccessExternalContracts(user) {
-    if (!user) {
-        return false;
-    }
-    const normalizedTeams = [
-        normalizeIdentity(user.legacyTeam),
-        normalizeIdentity(user.secondaryLegacyTeam)
-    ];
-    const normalizedRoles = [
-        normalizeIdentity(user.specificRole),
-        normalizeIdentity(user.secondarySpecificRole)
-    ];
-    const hasAdministrativeAccess = user.role === "SUPERADMIN"
-        || user.legacyRole === "SUPERADMIN"
-        || normalizedRoles.includes("direccion general")
-        || Boolean(user.permissions?.includes("*"));
-    return hasAdministrativeAccess
-        || user.team === "SETTLEMENTS"
-        || user.secondaryTeam === "SETTLEMENTS"
-        || normalizedTeams.includes("convenios")
-        || normalizedRoles.some((role) => role.includes("convenios"));
-}
 export function isAlwaysEnabledModule(moduleId) {
     return ALWAYS_ENABLED_MODULE_IDS.has(moduleId);
 }
@@ -360,9 +315,6 @@ export function getVisibleAppModules(user, disabledModuleIds = []) {
     const disabledModules = new Set(disabledModuleIds);
     return appModules.filter((module) => {
         if (module.access === "emrt-superadmin" && !canAccessGeneralSupervision(user)) {
-            return false;
-        }
-        if (module.access === "settlements-team" && !canAccessExternalContracts(user)) {
             return false;
         }
         return isAlwaysEnabledModule(module.id) || !disabledModules.has(module.id);

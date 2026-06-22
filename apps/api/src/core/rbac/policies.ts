@@ -27,8 +27,6 @@ export const BASE_PERMISSIONS = {
   internalContractsRead: "internal-contracts:read",
   internalContractsWrite: "internal-contracts:write",
   internalContractTemplatesRead: "internal-contract-templates:read",
-  externalContractsRead: "external-contracts:read",
-  externalContractsWrite: "external-contracts:write",
   laborFileRead: "labor-file:read",
   laborFileWrite: "labor-file:write",
   dailyDocumentsRead: "daily-documents:read",

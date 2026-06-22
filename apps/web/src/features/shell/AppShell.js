@@ -1,10 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { APP_VERSION_LABEL, buildDisplayName } from "@sige/contracts";
 import { getNavigationForUser } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 import { useModuleAvailability } from "../modules/ModuleAvailabilityContext";
-import { openBriefManagerWindow, reportBriefManagerOpenError } from "../modules/openBriefManagerWindow";
 function looksLikeHandle(value) {
     return /[@._-]/.test(value);
 }
@@ -20,18 +19,7 @@ function getSidebarUserName(user) {
 export function AppShell() {
     const { user, logout } = useAuth();
     const { disabledModuleIds } = useModuleAvailability();
-    const navigate = useNavigate();
     const sidebarUserName = getSidebarUserName(user);
     const navigation = getNavigationForUser(user, disabledModuleIds);
-    const handleOpenBriefManager = () => {
-        const openingBriefManager = openBriefManagerWindow().catch(reportBriefManagerOpenError);
-        navigate("/app", { replace: true });
-        void openingBriefManager;
-    };
-    return (_jsxs("div", { className: "app-shell", children: [_jsxs("aside", { className: "sidebar", children: [_jsx("div", { className: "nav-section", children: _jsx("nav", { className: "nav-list", children: navigation.map((item) => {
-                                if (item.path === "/app/brief-manager") {
-                                    return (_jsxs("button", { type: "button", className: "nav-link nav-link-button", onClick: handleOpenBriefManager, children: [_jsx("span", { className: "nav-link-icon", "aria-hidden": "true", children: item.icon }), _jsx("span", { className: "nav-link-label", children: item.label })] }, item.path));
-                                }
-                                return (_jsxs(NavLink, { to: item.path, end: item.path === "/app", className: "nav-link", children: [_jsx("span", { className: "nav-link-icon", "aria-hidden": "true", children: item.icon }), item.path === "/app" ? (_jsxs("span", { className: "nav-link-content nav-link-content-version", children: [_jsx("span", { className: "nav-link-label", children: item.label }), _jsx("span", { className: "app-version-badge app-version-badge-sidebar", children: APP_VERSION_LABEL })] })) : (_jsx("span", { className: "nav-link-label", children: item.label }))] }, item.path));
-                            }) }) }), _jsxs("div", { className: "user-card", children: [_jsx("strong", { children: sidebarUserName }), user?.organizationName ? _jsx("span", { children: user.organizationName }) : null, _jsx("button", { type: "button", onClick: logout, children: "Cerrar sesion" })] })] }), _jsx("main", { className: "content", children: _jsx(Outlet, {}) })] }));
+    return (_jsxs("div", { className: "app-shell", children: [_jsxs("aside", { className: "sidebar", children: [_jsx("div", { className: "nav-section", children: _jsx("nav", { className: "nav-list", children: navigation.map((item) => (_jsxs(NavLink, { to: item.path, end: item.path === "/app", className: "nav-link", children: [_jsx("span", { className: "nav-link-icon", "aria-hidden": "true", children: item.icon }), item.path === "/app" ? (_jsxs("span", { className: "nav-link-content nav-link-content-version", children: [_jsx("span", { className: "nav-link-label", children: item.label }), _jsx("span", { className: "app-version-badge app-version-badge-sidebar", children: APP_VERSION_LABEL })] })) : (_jsx("span", { className: "nav-link-label", children: item.label }))] }, item.path))) }) }), _jsxs("div", { className: "user-card", children: [_jsx("strong", { children: sidebarUserName }), user?.organizationName ? _jsx("span", { children: user.organizationName }) : null, _jsx("button", { type: "button", onClick: logout, children: "Cerrar sesion" })] })] }), _jsx("main", { className: "content", children: _jsx(Outlet, {}) })] }));
 }

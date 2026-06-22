@@ -352,7 +352,6 @@ export function derivePermissions(input: {
     "catalog:read",
     "commissions:read",
     "documents-third-party:read",
-    "brief-manager:read",
     "internal-contracts:read",
     "labor-file:read",
     "holidays:read",
@@ -470,8 +469,6 @@ export function derivePermissions(input: {
       permissions.add("tasks:read");
       permissions.add("tasks:settlements");
       permissions.add("execution:settlements");
-      permissions.add("external-contracts:read");
-      permissions.add("external-contracts:write");
     }
 
     if (teamKey === "FINANCIAL_LAW" || normalizedTeam === "der financiero") {

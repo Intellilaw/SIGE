@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
 import { buildExecutionTermTaskMap, buildExecutionTrackingRecordTaskMap, collectExecutionHolidayFetchPlan, evaluateExecutionMatterRow, fetchExecutionHolidayDateKeysByAuthority, getEffectiveClientNumber, getExecutionMatterTasks, mergeExecutionTaskMaps, serializeExecutionHolidayFetchPlan, sortActiveExecutionMatters } from "../execution/execution-row-utils";
-import { externalContractMilestoneKindLabel, getAllExternalContractMilestones } from "../modules/external-contract-milestones";
 import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
 import { buildTaskDashboardMembers, findTaskModuleDescriptorBySlug } from "./task-module-descriptors";
 import { buildDistributionHistoryTaskNameMap, getEffectiveTrackingResponsible, getLitigationWritingFollowUpTaskLabel, hasValidTrackingResponsible, isLitigationWritingPostPresentationStage, isTrackingTermEnabled, resolveTrackingTaskName, usesPresentationAndTermDates } from "./task-display-utils";
@@ -14,7 +13,6 @@ const TIMEFRAMES = [
     { id: "manana", label: "Tareas mañana", colorClass: "is-tomorrow" },
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
-const SETTLEMENTS_MODULE_ID = "settlements";
 const LITIGATION_MODULE_ID = "litigation";
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
@@ -63,20 +61,6 @@ function getLocalDateInput(offset = 0) {
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + offset);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-function shiftMonthsDateInput(value, monthOffset) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        return "";
-    }
-    const [year, month, day] = value.split("-").map(Number);
-    const firstDayOfTargetMonth = new Date(year, month - 1 + monthOffset, 1, 12, 0, 0, 0);
-    const lastDayOfTargetMonth = new Date(firstDayOfTargetMonth.getFullYear(), firstDayOfTargetMonth.getMonth() + 1, 0, 12, 0, 0, 0).getDate();
-    const target = new Date(firstDayOfTargetMonth);
-    target.setDate(Math.min(day, lastDayOfTargetMonth));
-    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
-}
-function getExternalContractReminderDate(dueDate) {
-    return shiftMonthsDateInput(dueDate, -1) || dueDate;
 }
 function matchesResponsible(taskResponsible, member, sharedResponsibleAliases) {
     const normalizedResponsible = normalizeComparableText(taskResponsible);
@@ -326,7 +310,6 @@ export function TasksTeamPage() {
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const [trackingRecords, setTrackingRecords] = useState([]);
     const [terms, setTerms] = useState([]);
-    const [externalContracts, setExternalContracts] = useState([]);
     const [executionMatters, setExecutionMatters] = useState([]);
     const [executionClients, setExecutionClients] = useState([]);
     const [executionDistributionHistory, setExecutionDistributionHistory] = useState([]);
@@ -378,7 +361,6 @@ export function TasksTeamPage() {
         if (!legacyConfig) {
             setTrackingRecords([]);
             setTerms([]);
-            setExternalContracts([]);
             setExecutionMatters([]);
             setExecutionClients([]);
             setExecutionDistributionHistory([]);
@@ -391,9 +373,6 @@ export function TasksTeamPage() {
             setLoading(true);
             try {
                 const shouldLoadExecutionMissingRows = currentModule.moduleId === LITIGATION_MODULE_ID;
-                const externalContractsPromise = currentModule.moduleId === SETTLEMENTS_MODULE_ID
-                    ? apiGet("/external-contracts").catch(() => [])
-                    : Promise.resolve([]);
                 const executionMattersPromise = shouldLoadExecutionMissingRows
                     ? apiGet("/matters").catch(() => [])
                     : Promise.resolve([]);
@@ -403,17 +382,15 @@ export function TasksTeamPage() {
                 const executionDistributionHistoryPromise = shouldLoadExecutionMissingRows
                     ? apiGet(`/tasks/distributions?moduleId=${currentModule.moduleId}`).catch(() => [])
                     : Promise.resolve([]);
-                const [loadedTracking, loadedTerms, loadedExternalContracts, loadedExecutionMatters, loadedExecutionClients, loadedExecutionDistributionHistory] = await Promise.all([
+                const [loadedTracking, loadedTerms, loadedExecutionMatters, loadedExecutionClients, loadedExecutionDistributionHistory] = await Promise.all([
                     apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
                     apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`),
-                    externalContractsPromise,
                     executionMattersPromise,
                     executionClientsPromise,
                     executionDistributionHistoryPromise
                 ]);
                 setTrackingRecords(loadedTracking);
                 setTerms(loadedTerms);
-                setExternalContracts(loadedExternalContracts);
                 setExecutionClients(loadedExecutionClients);
                 setExecutionMatters(shouldLoadExecutionMissingRows
                     ? sortActiveExecutionMatters(loadedExecutionMatters.filter((matter) => matter.responsibleTeam === currentModule.team), loadedExecutionClients)
@@ -483,7 +460,6 @@ export function TasksTeamPage() {
             active = false;
         };
     }, [executionHolidayFetchPlan, executionHolidayFetchSignature, module?.moduleId]);
-    const externalContractMilestones = useMemo(() => module?.moduleId === SETTLEMENTS_MODULE_ID ? getAllExternalContractMilestones(externalContracts) : [], [externalContracts, module?.moduleId]);
     function buildTrackingRows(member, timeframe) {
         return trackingRecords
             .filter((record) => !record.deletedAt)
@@ -568,32 +544,6 @@ export function TasksTeamPage() {
             }));
         });
     }
-    function buildExternalContractMilestoneRows(timeframe) {
-        if (module?.moduleId !== SETTLEMENTS_MODULE_ID) {
-            return [];
-        }
-        const today = getLocalDateInput();
-        return externalContractMilestones
-            .map((milestone) => {
-            const reminderDate = getExternalContractReminderDate(milestone.dueDate);
-            const kindLabel = externalContractMilestoneKindLabel(milestone.kind);
-            return {
-                taskId: `external-contract-milestone-${milestone.id}-${milestone.dueDate}`,
-                clientNumber: milestone.clientNumber || "-",
-                clientName: milestone.clientName || "-",
-                subject: milestone.contractTitle || milestone.propertyAddress || `Contrato ${milestone.contractNumber}`,
-                specificProcess: [kindLabel, milestone.description].filter(Boolean).join(" - ") || "Hito o alerta de contrato externo",
-                taskLabel: `Recordatorio: ${milestone.title} (fecha del hito/alerta: ${milestone.dueDate})`,
-                typeLabel: "Recordatorio 1 mes antes",
-                displayDate: reminderDate,
-                originLabel: "Proximos hitos y alertas",
-                originPath: "/app/external-contracts",
-                actionLabel: "Ir a contratos",
-                highlighted: reminderDate <= today
-            };
-        })
-            .filter((row) => belongsToTimeframe({ state: "open", date: row.displayDate }, timeframe));
-    }
     function buildExecutionMissingRows(member, timeframe) {
         if (module?.moduleId !== LITIGATION_MODULE_ID ||
             !legacyConfig ||
@@ -641,8 +591,7 @@ export function TasksTeamPage() {
         return [
             ...buildTrackingRows(member, timeframe),
             ...buildTermVerificationRows(member, timeframe),
-            ...buildExecutionMissingRows(member, timeframe),
-            ...buildExternalContractMilestoneRows(timeframe)
+            ...buildExecutionMissingRows(member, timeframe)
         ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));
     }
     if (!modulesLoading && modulesError) {

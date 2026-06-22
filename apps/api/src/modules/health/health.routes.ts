@@ -12,7 +12,6 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       "matters",
       "tasks",
       "internal-contracts",
-      "external-contracts",
       "holidays",
       "kpis",
       "rusconi-intelligence"
