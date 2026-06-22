@@ -25,7 +25,7 @@ function resolveApiBaseUrl(configuredBaseUrl?: string) {
 }
 
 const API_BASE_URL = resolveApiBaseUrl(configuredApiBaseUrl);
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 75_000;
 
 const ACCESS_TOKEN_STORAGE_KEY = "sige.accessToken";
 const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";

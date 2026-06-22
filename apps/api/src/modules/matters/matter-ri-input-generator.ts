@@ -45,6 +45,8 @@ const CADUCIDAD_NOT_APPLICABLE_TEXT = "En este procedimiento no opera la caducid
 const MAX_TELEGRAM_CONTEXT_CHARS = 12000;
 const MAX_RI_INPUT_CHARS = 900;
 const MAX_RI_EXPIRATION_OUTPUT_CHARS = 240;
+const RI_INPUT_MAX_OUTPUT_TOKENS = 2400;
+const RI_EXPIRATION_MAX_OUTPUT_TOKENS = 1800;
 const ISO_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const RI_EXPIRATION_JSON_SCHEMA = {
@@ -300,6 +302,60 @@ function extractResponsesText(payload: unknown) {
     .trim();
 }
 
+function getResponsesStatus(payload: unknown) {
+  const response = payload as {
+    status?: unknown;
+    incomplete_details?: {
+      reason?: unknown;
+    } | null;
+    error?: {
+      message?: unknown;
+    } | null;
+  };
+
+  return {
+    status: typeof response.status === "string" ? response.status : "",
+    incompleteReason: typeof response.incomplete_details?.reason === "string"
+      ? response.incomplete_details.reason
+      : "",
+    errorMessage: typeof response.error?.message === "string" ? response.error.message : ""
+  };
+}
+
+function assertUsableRusconiResponse(payload: unknown, text: string) {
+  if (text) {
+    return;
+  }
+
+  const status = getResponsesStatus(payload);
+
+  if (status.status === "incomplete" && status.incompleteReason === "max_output_tokens") {
+    throw new AppError(
+      502,
+      "RUSCONI_INTELLIGENCE_INCOMPLETE",
+      "Rusconi Intelligence agoto su presupuesto de salida antes de generar contenido visible. Reintenta el calculo RI."
+    );
+  }
+
+  if (status.status === "incomplete") {
+    throw new AppError(
+      502,
+      "RUSCONI_INTELLIGENCE_INCOMPLETE",
+      `Rusconi Intelligence no termino la respuesta.${status.incompleteReason ? ` Motivo: ${status.incompleteReason}.` : ""}`
+    );
+  }
+
+  if (status.status === "failed") {
+    throw new AppError(
+      502,
+      "RUSCONI_INTELLIGENCE_OPENAI_FAILED",
+      `OpenAI no pudo generar la salida de Rusconi Intelligence.${status.errorMessage ? ` OpenAI respondio: ${status.errorMessage}` : ""}`
+    );
+  }
+
+  throw new AppError(502, "RUSCONI_INTELLIGENCE_EMPTY", "Rusconi Intelligence no genero contenido.");
+}
+
 async function readOpenAiError(response: Response) {
   const rawBody = await response.text();
 
@@ -443,7 +499,10 @@ async function requestRusconiIntelligenceInput(params: {
       },
       body: JSON.stringify({
         model: env.OPENAI_RUSCONI_INTELLIGENCE_MODEL,
-        max_output_tokens: 900,
+        reasoning: {
+          effort: "low"
+        },
+        max_output_tokens: RI_INPUT_MAX_OUTPUT_TOKENS,
         input: [
           {
             role: "system",
@@ -477,10 +536,9 @@ async function requestRusconiIntelligenceInput(params: {
       await throwRusconiOpenAiResponseError(response);
     }
 
-    const text = extractResponsesText(await response.json() as unknown);
-    if (!text) {
-      throw new AppError(502, "RUSCONI_INTELLIGENCE_EMPTY", "Rusconi Intelligence no genero contenido.");
-    }
+    const rawResponse = await response.json() as unknown;
+    const text = extractResponsesText(rawResponse);
+    assertUsableRusconiResponse(rawResponse, text);
 
     return truncate(text, MAX_RI_INPUT_CHARS);
   } catch (error) {
@@ -525,7 +583,10 @@ async function requestRusconiIntelligenceExpiration(params: {
       },
       body: JSON.stringify({
         model: env.OPENAI_RUSCONI_INTELLIGENCE_MODEL,
-        max_output_tokens: 320,
+        reasoning: {
+          effort: "low"
+        },
+        max_output_tokens: RI_EXPIRATION_MAX_OUTPUT_TOKENS,
         text: {
           format: {
             type: "json_schema",
@@ -570,10 +631,9 @@ async function requestRusconiIntelligenceExpiration(params: {
       await throwRusconiOpenAiResponseError(response);
     }
 
-    const text = extractResponsesText(await response.json() as unknown);
-    if (!text) {
-      throw new AppError(502, "RUSCONI_INTELLIGENCE_EMPTY", "Rusconi Intelligence no genero contenido.");
-    }
+    const rawResponse = await response.json() as unknown;
+    const text = extractResponsesText(rawResponse);
+    assertUsableRusconiResponse(rawResponse, text);
 
     return parseExpirationResult(text);
   } catch (error) {
