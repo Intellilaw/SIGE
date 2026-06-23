@@ -80,6 +80,7 @@ const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME: Record<string, string> = {
   FGJCDMX: "FGJCDMX",
   FGR: "FGR",
   TFCyA: "TFCyA",
+  JLCyA: "JLCyA",
   SAT: "SAT",
   APF: "APF",
   APCDMX: "APCDMX"

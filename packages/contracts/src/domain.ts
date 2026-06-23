@@ -498,6 +498,7 @@ export const HOLIDAY_AUTHORITIES = [
   { shortName: "FGJCDMX", name: "Fiscal\u00eda General de Justicia de la CDMX" },
   { shortName: "FGR", name: "Fiscal\u00eda General de la Rep\u00fablica" },
   { shortName: "TFCyA", name: "Tribunal Federal de Conciliaci\u00f3n y Arbitraje" },
+  { shortName: "JLCyA", name: "Junta Local de Conciliaci\u00f3n y Arbitraje" },
   { shortName: "SAT", name: "Sistema de Administraci\u00f3n Tributaria" },
   { shortName: "APF", name: "Administraci\u00f3n P\u00fablica Federal" },
   { shortName: "APCDMX", name: "Administraci\u00f3n P\u00fablica de la Ciudad de M\u00e9xico" },
@@ -516,6 +517,7 @@ export const EXECUTION_HOLIDAY_AUTHORITIES = [
   "FGJCDMX",
   "FGR",
   "TFCyA",
+  "JLCyA",
   "SAT",
   "APF",
   "APCDMX"

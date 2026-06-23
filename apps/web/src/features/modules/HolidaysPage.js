@@ -29,6 +29,7 @@ const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME = {
     FGJCDMX: "FGJCDMX",
     FGR: "FGR",
     TFCyA: "TFCyA",
+    JLCyA: "JLCyA",
     SAT: "SAT",
     APF: "APF",
     APCDMX: "APCDMX"
