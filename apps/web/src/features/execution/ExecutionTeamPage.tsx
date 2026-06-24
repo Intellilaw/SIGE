@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
   MATTER_PROMOTION_COMMANDS,
   getExecutionMatterMissingFields,
   type Client,
+  type ExecutionSubmatter,
   type ExecutionHolidayAuthorityShortName,
   type Holiday,
   type Matter,
@@ -16,12 +17,11 @@ import {
   type TaskTrackingRecord
 } from "@sige/contracts";
 
-import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import { buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
 import { findExecutionModuleDescriptorBySlug } from "./execution-config";
-import { evaluateExecutionMatterRow } from "./execution-row-utils";
 
 type MatterPatchPayload = {
   executionPrompt?: string | null;
@@ -30,6 +30,23 @@ type MatterPatchPayload = {
   promotionCommand?: Matter["promotionCommand"] | null;
   holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName | null;
   internalTelegramGroupId?: string | null;
+  concluded?: boolean;
+  notes?: string | null;
+};
+
+type ExecutionSubmatterPatchPayload = {
+  sortOrder?: number;
+  specificProcess?: string | null;
+  matterIdentifier?: string | null;
+  communicationChannel?: Matter["communicationChannel"];
+  executionPrompt?: string | null;
+  expirationDate?: string | null;
+  expirationRiOutput?: string | null;
+  promotionCommand?: Matter["promotionCommand"] | null;
+  holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName | null;
+  internalTelegramGroupId?: string | null;
+  internalTelegramGroupName?: string | null;
+  milestone?: string | null;
   concluded?: boolean;
   notes?: string | null;
 };
@@ -50,6 +67,8 @@ type MatterTaskView = {
   updatedAt?: string;
   trackLabel: string;
   sourceLabel: string;
+  executionSubmatterId?: string;
+  executionSubmatterLabel?: string;
   isMatterFallback?: boolean;
   sourceType: "tracking" | "term" | "matter";
 };
@@ -67,6 +86,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   EMAIL: "Correo-e",
   PHONE: "Telefono"
 };
+const CHANNEL_VALUES = Object.keys(CHANNEL_LABELS) as Array<Matter["communicationChannel"]>;
 const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "termino legacy", "distribucion legacy", "evento legacy"]);
 const CADUCIDAD_RI_CONNECTION_ID = "RI-004";
 const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
@@ -141,10 +161,24 @@ function matchesWordSearch(
       matter.nextActionSource,
       toDateInput(matter.nextActionDueAt),
       getChannelLabel(matter.communicationChannel),
+      ...(matter.executionSubmatters ?? []).flatMap((submatter) => [
+        submatter.specificProcess,
+        submatter.matterIdentifier,
+        submatter.executionPrompt,
+        getSubmatterCaducidadColumnValue(submatter),
+        submatter.promotionCommand,
+        submatter.notes,
+        submatter.milestone,
+        submatter.holidayAuthorityShortName,
+        submatter.internalTelegramGroupId,
+        submatter.internalTelegramGroupName,
+        getChannelLabel(submatter.communicationChannel)
+      ]),
       ...tasks.flatMap((task) => [
         task.subject,
         task.trackLabel,
         task.sourceLabel,
+        task.executionSubmatterLabel,
         task.responsible,
         toDateInput(task.dueDate),
         getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority)
@@ -169,6 +203,19 @@ function hasMeaningfulTaskLabel(value?: string | null) {
 function getLegacyDataText(data: TaskTrackingRecord["data"], key: string) {
   const value = data?.[key];
   return typeof value === "string" ? normalizeText(value) : "";
+}
+
+function getLegacyDataString(data: TaskTrackingRecord["data"] | TaskTerm["data"] | TaskDistributionHistory["data"], key: string) {
+  const value = data?.[key];
+  return typeof value === "string" ? normalizeText(value) : "";
+}
+
+function getExecutionSubmatterIdFromData(data: TaskTrackingRecord["data"] | TaskTerm["data"] | TaskDistributionHistory["data"]) {
+  return getLegacyDataString(data, "executionSubmatterId");
+}
+
+function getExecutionSubmatterLabelFromData(data: TaskTrackingRecord["data"] | TaskTerm["data"] | TaskDistributionHistory["data"]) {
+  return getLegacyDataString(data, "executionSubmatterLabel");
 }
 
 function buildDistributionHistoryTaskNameMap(histories: TaskDistributionHistory[]) {
@@ -231,6 +278,14 @@ function getCaducidadColumnValue(matter: Matter) {
   return normalizeText(matter.expirationRiOutput) || toDateInput(matter.expirationDate);
 }
 
+function getSubmatterCaducidadColumnValue(submatter: ExecutionSubmatter) {
+  return normalizeText(submatter.expirationRiOutput) || toDateInput(submatter.expirationDate);
+}
+
+function getSubmatterLabel(submatter: ExecutionSubmatter) {
+  return normalizeText(submatter.specificProcess) || normalizeText(submatter.matterIdentifier) || "Subasunto";
+}
+
 function toLocalDateInput(value: Date) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -288,13 +343,13 @@ function isNonBusinessDate(
   return isWeekendDateKey(dateKey) || Boolean(holidayDateKeysByAuthority[authority]?.has(dateKey));
 }
 
-function getEffectiveTaskDueDate(
+function getEffectiveTaskDueDateForAuthority(
   task: MatterTaskView,
-  matter: Matter,
+  authorityValue: string | null | undefined,
   holidayDateKeysByAuthority: HolidayDateKeysByAuthority
 ) {
   const dueDate = toDateInput(task.dueDate);
-  const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+  const authority = getExecutionHolidayAuthority(authorityValue);
   if (!dueDate || !authority || !isDateKey(dueDate)) {
     return dueDate;
   }
@@ -310,16 +365,27 @@ function getEffectiveTaskDueDate(
   return effectiveDate;
 }
 
+function getEffectiveTaskDueDate(
+  task: MatterTaskView,
+  matter: Matter,
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
+) {
+  return getEffectiveTaskDueDateForAuthority(task, matter.holidayAuthorityShortName, holidayDateKeysByAuthority);
+}
+
+function getEffectiveSubmatterTaskDueDate(
+  task: MatterTaskView,
+  submatter: ExecutionSubmatter,
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
+) {
+  return getEffectiveTaskDueDateForAuthority(task, submatter.holidayAuthorityShortName, holidayDateKeysByAuthority);
+}
+
 function collectHolidayFetchPlan(matters: Matter[], taskMap: Map<string, MatterTaskView[]>) {
   const monthsByAuthority = new Map<ExecutionHolidayAuthorityShortName, Set<string>>();
 
-  matters.forEach((matter) => {
-    const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
-    if (!authority) {
-      return;
-    }
-
-    getMatterTasks(matter, taskMap).forEach((task) => {
+  function addTaskMonths(authority: ExecutionHolidayAuthorityShortName, tasks: MatterTaskView[]) {
+    tasks.forEach((task) => {
       const dueDate = toDateInput(task.dueDate);
       if (!isDateKey(dueDate)) {
         return;
@@ -329,6 +395,22 @@ function collectHolidayFetchPlan(matters: Matter[], taskMap: Map<string, MatterT
       months.add(dueDate.slice(0, 7));
       months.add(getNextMonthKey(dueDate));
       monthsByAuthority.set(authority, months);
+    });
+  }
+
+  matters.forEach((matter) => {
+    const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+    if (authority) {
+      addTaskMonths(authority, getMatterTasks(matter, taskMap));
+    }
+
+    (matter.executionSubmatters ?? []).forEach((submatter) => {
+      const submatterAuthority = getExecutionHolidayAuthority(submatter.holidayAuthorityShortName);
+      if (!submatterAuthority) {
+        return;
+      }
+
+      addTaskMonths(submatterAuthority, getSubmatterTasks(matter, submatter, taskMap));
     });
   });
 
@@ -524,6 +606,8 @@ function buildTrackingRecordTaskMap(
       updatedAt: record.updatedAt,
       trackLabel,
       sourceLabel: `${sourcePrefix}: ${trackLabel}`,
+      executionSubmatterId: getExecutionSubmatterIdFromData(record.data) || undefined,
+      executionSubmatterLabel: getExecutionSubmatterLabelFromData(record.data) || undefined,
       sourceType: "tracking"
     };
 
@@ -567,6 +651,8 @@ function buildTermTaskMap(terms: TaskTerm[], sourcePrefix: string, includeComple
       updatedAt: term.updatedAt,
       trackLabel,
       sourceLabel: `${sourcePrefix}: ${trackLabel}`,
+      executionSubmatterId: getExecutionSubmatterIdFromData(term.data) || undefined,
+      executionSubmatterLabel: getExecutionSubmatterLabelFromData(term.data) || undefined,
       sourceType: "term"
     };
 
@@ -586,7 +672,18 @@ function getMatterTasks(matter: Matter, taskMap: Map<string, MatterTaskView[]>) 
     taskMap.get(normalizeText(matter.matterNumber)) ??
     taskMap.get(normalizeText(matter.matterIdentifier)) ??
     [];
-  return linkedTasks;
+  return linkedTasks.filter((task) => !task.executionSubmatterId);
+}
+
+function getAllMatterTasks(matter: Matter, taskMap: Map<string, MatterTaskView[]>) {
+  return taskMap.get(normalizeText(matter.id)) ??
+    taskMap.get(normalizeText(matter.matterNumber)) ??
+    taskMap.get(normalizeText(matter.matterIdentifier)) ??
+    [];
+}
+
+function getSubmatterTasks(matter: Matter, submatter: ExecutionSubmatter, taskMap: Map<string, MatterTaskView[]>) {
+  return getAllMatterTasks(matter, taskMap).filter((task) => task.executionSubmatterId === submatter.id);
 }
 
 function getTaskDistributorPath(teamSlug: string, matter: Matter) {
@@ -698,6 +795,75 @@ function evaluateMatterRow(
   };
 }
 
+function evaluateSubmatterRow(
+  submatter: ExecutionSubmatter,
+  tasks: MatterTaskView[],
+  holidayDateKeysByAuthority: HolidayDateKeysByAuthority
+) {
+  const missing: string[] = [];
+  const today = toLocalDateInput(new Date());
+
+  if (!normalizeText(submatter.matterIdentifier)) {
+    addMissingField(missing, "ID Asunto");
+  }
+  if (!normalizeText(submatter.communicationChannel)) {
+    addMissingField(missing, "Canal");
+  }
+  if (!normalizeText(submatter.milestone)) {
+    addMissingField(missing, "Hito conclusion");
+  }
+  if (tasks.length === 0) {
+    addMissingField(missing, "Sin siguientes tareas");
+  }
+  if (!getExecutionHolidayAuthority(submatter.holidayAuthorityShortName)) {
+    addMissingField(missing, "Órgano para efectos de días inhábiles");
+  }
+  if (!normalizeText(submatter.internalTelegramGroupId)) {
+    addMissingField(missing, "ID del grupo interno de Telegram");
+  }
+  if (!normalizeText(submatter.internalTelegramGroupName)) {
+    addMissingField(missing, "Nombre del grupo interno de Telegram");
+  }
+  if (!normalizeText(submatter.executionPrompt)) {
+    addMissingField(missing, "Input de RI");
+  }
+  if (!getMatterPromotionCommand(submatter.promotionCommand)) {
+    addMissingField(missing, "Comando promoción");
+  }
+
+  tasks.forEach((task) => {
+    const taskName = normalizeText(task.subject) || normalizeText(task.trackLabel);
+    const dueDate = getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority);
+
+    if (!taskName) {
+      addMissingField(missing, "Siguiente tarea");
+    }
+    if (!dueDate || !isDateKey(dueDate)) {
+      addMissingField(missing, "Fecha sig. tarea");
+    } else if (dueDate < today) {
+      addMissingField(missing, "Fecha sig. tarea vencida");
+    }
+  });
+
+  const isOverdue = tasks.some((task) => {
+    const dueDate = getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority);
+    return Boolean(dueDate) && isDateKey(dueDate) && dueDate < today;
+  });
+  const nextBusinessDate = getNextBusinessDate(
+    holidayDateKeysByAuthority,
+    getExecutionHolidayAuthority(submatter.holidayAuthorityShortName)
+  );
+  const isNextBusinessDay = !isOverdue && tasks.some((task) =>
+    getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority) === nextBusinessDate
+  );
+
+  return {
+    missing,
+    isOverdue,
+    isNextBusinessDay
+  };
+}
+
 interface ExecutionTeamWorkspaceProps {
   backPath?: string;
   fallbackPath?: string;
@@ -734,6 +900,7 @@ export function ExecutionTeamWorkspace({
   const [wordSearch, setWordSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [panelMatter, setPanelMatter] = useState<Matter | null>(null);
+  const [panelSubmatter, setPanelSubmatter] = useState<ExecutionSubmatter | null>(null);
   const [panelMode, setPanelMode] = useState<"create" | "history" | null>(null);
   const [generatingRiMatterIds, setGeneratingRiMatterIds] = useState<Set<string>>(() => new Set());
   const [generatingCaducidadRiMatterIds, setGeneratingCaducidadRiMatterIds] = useState<Set<string>>(() => new Set());
@@ -912,7 +1079,7 @@ export function ExecutionTeamWorkspace({
     () =>
       activeMatters.filter((matter) => {
         const clientNumber = getEffectiveClientNumber(matter, clients);
-        const matterTasks = getMatterTasks(matter, activeTaskMap);
+        const matterTasks = getAllMatterTasks(matter, activeTaskMap);
         return (
           matchesClientSearch(matter, clientSearchWords) &&
           matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority)
@@ -924,7 +1091,7 @@ export function ExecutionTeamWorkspace({
     () =>
       deletedMatters.filter((matter) => {
         const clientNumber = getEffectiveClientNumber(matter, clients);
-        const matterTasks = getMatterTasks(matter, allTaskMap);
+        const matterTasks = getAllMatterTasks(matter, allTaskMap);
         return (
           matchesClientSearch(matter, clientSearchWords) &&
           matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority)
@@ -1092,6 +1259,133 @@ export function ExecutionTeamWorkspace({
     });
   }
 
+  function updateSubmatterLocal(
+    matterId: string,
+    submatterId: string,
+    updater: (submatter: ExecutionSubmatter) => ExecutionSubmatter
+  ) {
+    return updateMatterLocal(matterId, (matter) => ({
+      ...matter,
+      executionSubmatters: (matter.executionSubmatters ?? []).map((submatter) =>
+        submatter.id === submatterId ? updater({ ...submatter }) : submatter
+      )
+    }));
+  }
+
+  async function persistSubmatter(matterId: string, submatterId: string, payload: ExecutionSubmatterPatchPayload) {
+    try {
+      const updated = await apiPatch<Matter>(`/matters/${matterId}/execution-submatters/${submatterId}`, payload);
+      setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+      setPanelSubmatter((current) =>
+        current?.id === submatterId
+          ? updated.executionSubmatters?.find((submatter) => submatter.id === submatterId) ?? current
+          : current
+      );
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
+  function handleSubmatterLocalChange(
+    matterId: string,
+    submatterId: string,
+    field: keyof ExecutionSubmatterPatchPayload,
+    value: string
+  ) {
+    void updateSubmatterLocal(matterId, submatterId, (submatter) => {
+      const draft = submatter as ExecutionSubmatter & Record<string, unknown>;
+      draft[field as string] = value;
+      return submatter;
+    });
+  }
+
+  function handleSubmatterBlur(matterId: string, submatterId: string) {
+    const matter = activeMatters.find((item) => item.id === matterId);
+    const submatter = matter?.executionSubmatters?.find((item) => item.id === submatterId);
+    if (!submatter) {
+      return;
+    }
+
+    void persistSubmatter(matterId, submatterId, {
+      specificProcess: normalizeText(submatter.specificProcess) ? submatter.specificProcess ?? null : null,
+      matterIdentifier: normalizeText(submatter.matterIdentifier) ? submatter.matterIdentifier ?? null : null,
+      communicationChannel: submatter.communicationChannel,
+      executionPrompt: normalizeText(submatter.executionPrompt) ? submatter.executionPrompt ?? null : null,
+      expirationDate: normalizeText(submatter.expirationDate) ? submatter.expirationDate ?? null : null,
+      expirationRiOutput: normalizeText(submatter.expirationRiOutput) ? submatter.expirationRiOutput ?? null : null,
+      promotionCommand: normalizeText(submatter.promotionCommand) ? submatter.promotionCommand ?? null : null,
+      holidayAuthorityShortName: normalizeText(submatter.holidayAuthorityShortName)
+        ? submatter.holidayAuthorityShortName ?? null
+        : null,
+      internalTelegramGroupId: normalizeText(submatter.internalTelegramGroupId)
+        ? submatter.internalTelegramGroupId ?? null
+        : null,
+      internalTelegramGroupName: normalizeText(submatter.internalTelegramGroupName)
+        ? submatter.internalTelegramGroupName ?? null
+        : null,
+      milestone: normalizeText(submatter.milestone) ? submatter.milestone ?? null : null,
+      concluded: submatter.concluded,
+      notes: normalizeText(submatter.notes) ? submatter.notes ?? null : null
+    });
+  }
+
+  async function handleAddSubmatter(matter: Matter) {
+    try {
+      setErrorMessage(null);
+      const updated = await apiPost<Matter>(`/matters/${matter.id}/execution-submatters`, {});
+      setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
+  async function handleDeleteSubmatter(matterId: string, submatterId: string) {
+    if (!window.confirm("Eliminar esta subfila de ejecucion?")) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await apiDelete(`/matters/${matterId}/execution-submatters/${submatterId}`);
+      updateMatterLocal(matterId, (matter) => ({
+        ...matter,
+        executionSubmatters: (matter.executionSubmatters ?? []).filter((submatter) => submatter.id !== submatterId)
+      }));
+      setPanelSubmatter((current) => (current?.id === submatterId ? null : current));
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
+  async function handleSubmatterToggleConcluded(matterId: string, submatterId: string, concluded: boolean) {
+    updateSubmatterLocal(matterId, submatterId, (submatter) => {
+      submatter.concluded = concluded;
+      return submatter;
+    });
+
+    await persistSubmatter(matterId, submatterId, { concluded });
+  }
+
+  async function handleSubmatterHolidayAuthorityChange(matterId: string, submatterId: string, value: string) {
+    const holidayAuthorityShortName = getExecutionHolidayAuthority(value) || null;
+    updateSubmatterLocal(matterId, submatterId, (submatter) => {
+      submatter.holidayAuthorityShortName = holidayAuthorityShortName ?? undefined;
+      return submatter;
+    });
+
+    await persistSubmatter(matterId, submatterId, { holidayAuthorityShortName });
+  }
+
+  async function handleSubmatterPromotionCommandChange(matterId: string, submatterId: string, value: string) {
+    const promotionCommand = getMatterPromotionCommand(value) || null;
+    updateSubmatterLocal(matterId, submatterId, (submatter) => {
+      submatter.promotionCommand = promotionCommand ?? undefined;
+      return submatter;
+    });
+
+    await persistSubmatter(matterId, submatterId, { promotionCommand });
+  }
+
   async function handleGenerateRiInput(matterId: string) {
     setGeneratingRiMatterIds((current) => new Set(current).add(matterId));
     setErrorMessage(null);
@@ -1189,7 +1483,17 @@ export function ExecutionTeamWorkspace({
 
     try {
       setErrorMessage(null);
-      const eventName = payload.eventName.trim() || panelMatter.subject || "Tarea de ejecucion";
+      const submatterLabel = panelSubmatter ? getSubmatterLabel(panelSubmatter) : "";
+      const eventName = payload.eventName.trim() || submatterLabel || panelMatter.subject || "Tarea de ejecucion";
+      const submatterTaskData = panelSubmatter
+        ? {
+            executionSubmatterId: panelSubmatter.id,
+            executionSubmatterLabel: submatterLabel,
+            executionSubmatterIdentifier: panelSubmatter.matterIdentifier ?? null,
+            parentMatterId: panelMatter.id,
+            parentMatterIdentifier: panelMatter.matterIdentifier ?? null
+          }
+        : {};
 
       await apiPost("/tasks/distributions", {
         moduleId: module.moduleId,
@@ -1198,10 +1502,15 @@ export function ExecutionTeamWorkspace({
         clientNumber: getEffectiveClientNumber(panelMatter, clients),
         clientName: panelMatter.clientName || "Sin cliente",
         subject: panelMatter.subject || "",
-        specificProcess: panelMatter.specificProcess ?? null,
+        specificProcess: panelSubmatter?.specificProcess ?? panelMatter.specificProcess ?? null,
         matterIdentifier: panelMatter.matterIdentifier ?? null,
         eventName,
         responsible: payload.responsible,
+        data: {
+          source: "execution-selector",
+          activeSource: "tasks-distributor",
+          ...submatterTaskData
+        },
         targets: payload.targets.map((target) => {
           const table = legacyConfig.tables.find((candidate) => candidate.slug === target.tableCode);
           const taskName = target.taskName.trim() || table?.title || eventName;
@@ -1223,7 +1532,8 @@ export function ExecutionTeamWorkspace({
             data: {
               source: "execution-selector",
               tableTitle: table?.title,
-              activeSource: "tasks-distributor"
+              activeSource: "tasks-distributor",
+              ...submatterTaskData
             }
           };
         })
@@ -1286,7 +1596,11 @@ export function ExecutionTeamWorkspace({
     }
   }
 
-  const panelTasks = panelMatter ? getMatterTasks(panelMatter, allTaskMap) : [];
+  const panelTasks = panelMatter
+    ? panelSubmatter
+      ? getSubmatterTasks(panelMatter, panelSubmatter, allTaskMap)
+      : getMatterTasks(panelMatter, allTaskMap)
+    : [];
 
   return (
     <section className="page-stack execution-page">
@@ -1412,7 +1726,7 @@ export function ExecutionTeamWorkspace({
                     {filteredMatters.map((matter, index) => {
                       const clientNumber = getEffectiveClientNumber(matter, clients);
                       const matterTasks = getMatterTasks(matter, activeTaskMap);
-                      const validation = evaluateExecutionMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
+                      const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                       const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
                       const isGeneratingCaducidadRi = generatingCaducidadRiMatterIds.has(matter.id);
                       const isFocusedMatter = matter.id === focusMatterId;
@@ -1433,7 +1747,8 @@ export function ExecutionTeamWorkspace({
                         .join(" ");
 
                       return (
-                        <tr id={`execution-matter-row-${matter.id}`} key={matter.id} className={rowClassName} title={rowTitle}>
+                        <Fragment key={matter.id}>
+                        <tr id={`execution-matter-row-${matter.id}`} className={rowClassName} title={rowTitle}>
                           <td className="execution-row-index">{index + 1}</td>
                           <td>
                             <input className="lead-cell-input matter-cell-derived" value={clientNumber || "-"} readOnly />
@@ -1450,11 +1765,20 @@ export function ExecutionTeamWorkspace({
                             </div>
                           </td>
                           <td className="execution-wide-text-column">
-                            <div
-                              className="lead-cell-input matter-cell-readonly execution-readable-cell"
-                              title={matter.specificProcess || ""}
-                            >
-                              {matter.specificProcess || "-"}
+                            <div className="execution-process-cell">
+                              <div
+                                className="lead-cell-input matter-cell-readonly execution-readable-cell"
+                                title={matter.specificProcess || ""}
+                              >
+                                {matter.specificProcess || "-"}
+                              </div>
+                              <button
+                                type="button"
+                                className="secondary-button execution-submatter-add-button"
+                                onClick={() => void handleAddSubmatter(matter)}
+                              >
+                                + Subfila
+                              </button>
                             </div>
                           </td>
                           <td>
@@ -1466,6 +1790,7 @@ export function ExecutionTeamWorkspace({
                               className="primary-button matter-inline-button"
                               onClick={() => {
                                 setPanelMatter(matter);
+                                setPanelSubmatter(null);
                                 setPanelMode("create");
                               }}
                             >
@@ -1655,6 +1980,321 @@ export function ExecutionTeamWorkspace({
                             </div>
                           </td>
                         </tr>
+                        {(matter.executionSubmatters ?? []).map((submatter, submatterIndex) => {
+                          const submatterTasks = getSubmatterTasks(matter, submatter, activeTaskMap);
+                          const submatterValidation = evaluateSubmatterRow(
+                            submatter,
+                            submatterTasks,
+                            holidayDateKeysByAuthority
+                          );
+                          const submatterCaducidadRiOutput = normalizeText(submatter.expirationRiOutput);
+                          const submatterRowClassName = [
+                            "execution-submatter-row",
+                            submatterValidation.missing.length > 0 || submatterValidation.isOverdue
+                              ? "execution-row-danger"
+                              : submatterValidation.isNextBusinessDay
+                                ? "execution-row-next-business"
+                                : ""
+                          ].filter(Boolean).join(" ");
+                          const submatterRowTitle = [
+                            submatterValidation.missing.length > 0
+                              ? `Falta: ${submatterValidation.missing.join(", ")}`
+                              : "",
+                            submatterValidation.isOverdue ? "Tiene tareas vencidas." : ""
+                          ].filter(Boolean).join(" ");
+
+                          return (
+                            <tr
+                              id={`execution-submatter-row-${submatter.id}`}
+                              key={submatter.id}
+                              className={submatterRowClassName}
+                              title={submatterRowTitle}
+                            >
+                              <td colSpan={5} className="execution-submatter-label-cell">
+                                <div className="execution-submatter-label">
+                                  <span>Subfila {index + 1}.{submatterIndex + 1}</span>
+                                  <strong>{getSubmatterLabel(submatter)}</strong>
+                                  <small>{matter.subject || "Asunto madre"}</small>
+                                  <button
+                                    type="button"
+                                    className="danger-button execution-submatter-delete-button"
+                                    onClick={() => void handleDeleteSubmatter(matter.id, submatter.id)}
+                                  >
+                                    Eliminar
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="execution-wide-text-column">
+                                <input
+                                  className="lead-cell-input"
+                                  value={submatter.specificProcess || ""}
+                                  onChange={(event) =>
+                                    handleSubmatterLocalChange(matter.id, submatter.id, "specificProcess", event.target.value)
+                                  }
+                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  placeholder="Proceso especifico del subasunto..."
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="lead-cell-input"
+                                  value={submatter.matterIdentifier || ""}
+                                  onChange={(event) =>
+                                    handleSubmatterLocalChange(matter.id, submatter.id, "matterIdentifier", event.target.value)
+                                  }
+                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  placeholder="ID subfila"
+                                />
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="primary-button matter-inline-button"
+                                  onClick={() => {
+                                    setPanelMatter(matter);
+                                    setPanelSubmatter(submatter);
+                                    setPanelMode("create");
+                                  }}
+                                >
+                                  Crear Tarea
+                                </button>
+                              </td>
+                              <td>
+                                <select
+                                  className="lead-cell-input execution-channel-select"
+                                  value={submatter.communicationChannel || "WHATSAPP"}
+                                  onChange={(event) => {
+                                    const communicationChannel = event.target.value as Matter["communicationChannel"];
+                                    handleSubmatterLocalChange(
+                                      matter.id,
+                                      submatter.id,
+                                      "communicationChannel",
+                                      communicationChannel
+                                    );
+                                    void persistSubmatter(matter.id, submatter.id, { communicationChannel });
+                                  }}
+                                >
+                                  {CHANNEL_VALUES.map((channel) => (
+                                    <option key={channel} value={channel}>
+                                      {getChannelLabel(channel)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <div className="execution-actions-cell">
+                                  {submatterTasks.length === 0 ? (
+                                    <span className="matter-cell-muted">Sin tareas</span>
+                                  ) : (
+                                    submatterTasks.map((task) => (
+                                      <div key={`${getTaskViewIdentity(task)}:submatter-subject`} className="execution-inline-entry">
+                                        <strong>{"\u2022"}</strong> {task.subject || task.trackLabel}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="execution-actions-cell">
+                                  {submatterTasks.length === 0 ? (
+                                    <span className="matter-cell-muted">-</span>
+                                  ) : (
+                                    submatterTasks.map((task) => (
+                                      <div key={`${getTaskViewIdentity(task)}:submatter-due-date`} className="execution-inline-entry">
+                                        {getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority) || "S/F"}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </td>
+                              <td className="matter-checkbox-cell">
+                                {submatterTasks.length === 0 ? (
+                                  <span className="matter-cell-muted">-</span>
+                                ) : (
+                                  <div className="execution-origin-stack">
+                                    {submatterTasks.map((task) => (
+                                      <span
+                                        key={`${getTaskViewIdentity(task)}:submatter-origin`}
+                                        className="execution-origin-entry"
+                                      >
+                                        <span className="matter-origin-indicator" title={task.sourceLabel}>
+                                          i
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="secondary-button execution-origin-link"
+                                          onClick={() => navigate(getTaskSourcePath(legacyConfig.slug, task))}
+                                          title={`Abrir ${task.sourceLabel}`}
+                                        >
+                                          Ir
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="secondary-button matter-inline-button"
+                                  onClick={() => navigate(getTaskDistributorPath(legacyConfig.slug, matter))}
+                                >
+                                  Ir a tareas activas
+                                </button>
+                              </td>
+                              <td>
+                                <select
+                                  className="lead-cell-input execution-authority-select"
+                                  value={getExecutionHolidayAuthority(submatter.holidayAuthorityShortName)}
+                                  onChange={(event) =>
+                                    void handleSubmatterHolidayAuthorityChange(matter.id, submatter.id, event.target.value)
+                                  }
+                                >
+                                  <option value="">Seleccionar...</option>
+                                  {EXECUTION_HOLIDAY_AUTHORITIES.map((authority) => (
+                                    <option key={authority} value={authority}>
+                                      {authority}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  className="lead-cell-input execution-telegram-id-input"
+                                  value={submatter.internalTelegramGroupId || ""}
+                                  onChange={(event) =>
+                                    handleSubmatterLocalChange(
+                                      matter.id,
+                                      submatter.id,
+                                      "internalTelegramGroupId",
+                                      event.target.value
+                                    )
+                                  }
+                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  placeholder="-100..."
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="lead-cell-input execution-telegram-name-input"
+                                  value={submatter.internalTelegramGroupName || ""}
+                                  onChange={(event) =>
+                                    handleSubmatterLocalChange(
+                                      matter.id,
+                                      submatter.id,
+                                      "internalTelegramGroupName",
+                                      event.target.value
+                                    )
+                                  }
+                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  placeholder="Pendiente de bot"
+                                />
+                              </td>
+                              <td>
+                                <div className="execution-ri-input-cell">
+                                  <textarea
+                                    className="lead-cell-input execution-textarea"
+                                    value={submatter.executionPrompt || ""}
+                                    onChange={(event) =>
+                                      handleSubmatterLocalChange(matter.id, submatter.id, "executionPrompt", event.target.value)
+                                    }
+                                    onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                    placeholder="Prompt operativo..."
+                                  />
+                                </div>
+                              </td>
+                              <td>
+                                <div className="execution-caducidad-cell">
+                                  <input
+                                    className="lead-cell-input execution-date-input"
+                                    type="date"
+                                    value={toDateInput(submatter.expirationDate)}
+                                    onChange={(event) => {
+                                      handleSubmatterLocalChange(matter.id, submatter.id, "expirationDate", event.target.value);
+                                      if (submatterCaducidadRiOutput) {
+                                        handleSubmatterLocalChange(matter.id, submatter.id, "expirationRiOutput", "");
+                                      }
+                                    }}
+                                    onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  />
+                                  {submatterCaducidadRiOutput ? (
+                                    <textarea
+                                      className="lead-cell-input execution-caducidad-note"
+                                      value={submatter.expirationRiOutput || ""}
+                                      onChange={(event) =>
+                                        handleSubmatterLocalChange(
+                                          matter.id,
+                                          submatter.id,
+                                          "expirationRiOutput",
+                                          event.target.value
+                                        )
+                                      }
+                                      onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                      aria-label="Resultado RI-004"
+                                    />
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td>
+                                <select
+                                  className="lead-cell-input execution-promotion-select"
+                                  value={getMatterPromotionCommand(submatter.promotionCommand)}
+                                  onChange={(event) =>
+                                    void handleSubmatterPromotionCommandChange(matter.id, submatter.id, event.target.value)
+                                  }
+                                >
+                                  <option value="">Seleccionar...</option>
+                                  {MATTER_PROMOTION_COMMANDS.map((command) => (
+                                    <option key={command} value={command}>
+                                      {command}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  className="lead-cell-input"
+                                  value={submatter.milestone || ""}
+                                  onChange={(event) =>
+                                    handleSubmatterLocalChange(matter.id, submatter.id, "milestone", event.target.value)
+                                  }
+                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  placeholder="Hito..."
+                                />
+                              </td>
+                              <td className="matter-checkbox-cell">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(submatter.concluded)}
+                                  onChange={(event) =>
+                                    void handleSubmatterToggleConcluded(matter.id, submatter.id, event.target.checked)
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <textarea
+                                  className="lead-cell-input execution-textarea"
+                                  value={submatter.notes || ""}
+                                  onChange={(event) =>
+                                    handleSubmatterLocalChange(matter.id, submatter.id, "notes", event.target.value)
+                                  }
+                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
+                                  placeholder="Comentarios del subasunto..."
+                                />
+                              </td>
+                              <td>
+                                <div
+                                  className={`execution-missing-cell ${submatterValidation.missing.length > 0 ? "is-missing" : ""}`}
+                                  title={submatterValidation.missing.join(", ")}
+                                  tabIndex={submatterValidation.missing.length > 0 ? 0 : undefined}
+                                >
+                                  {submatterValidation.missing.length > 0 ? submatterValidation.missing.join(", ") : "-"}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        </Fragment>
                       );
                     })}
 
@@ -1789,11 +2429,13 @@ export function ExecutionTeamWorkspace({
         legacyConfig={legacyConfig}
         distributionEvents={distributionEvents}
         matter={panelMatter}
+        submatter={panelSubmatter}
         clientNumber={panelMatter ? getEffectiveClientNumber(panelMatter, clients) : ""}
         mode={panelMode}
         tasks={panelTasks}
         onClose={() => {
           setPanelMatter(null);
+          setPanelSubmatter(null);
           setPanelMode(null);
         }}
         onModeChange={setPanelMode}

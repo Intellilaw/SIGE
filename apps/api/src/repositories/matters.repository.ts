@@ -3,7 +3,7 @@ import { EXECUTION_HOLIDAY_AUTHORITIES, findTaskModule, type Matter } from "@sig
 
 import { AppError } from "../core/errors/app-error";
 import { mapMatter } from "./mappers";
-import type { MattersRepository, MatterWriteRecord } from "./types";
+import type { ExecutionSubmatterWriteRecord, MattersRepository, MatterWriteRecord } from "./types";
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 
@@ -91,6 +91,12 @@ export class PrismaMattersRepository implements MattersRepository {
   public async list() {
     const records = await this.prisma.matter.findMany({
       where: { deletedAt: null },
+      include: {
+        executionSubmatters: {
+          where: { deletedAt: null },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+        }
+      },
       orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
     });
 
@@ -100,6 +106,12 @@ export class PrismaMattersRepository implements MattersRepository {
   public async listDeleted() {
     const records = await this.prisma.matter.findMany({
       where: { deletedAt: { not: null } },
+      include: {
+        executionSubmatters: {
+          where: { deletedAt: null },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+        }
+      },
       orderBy: [{ deletedAt: "desc" }, { updatedAt: "desc" }]
     });
 
@@ -205,6 +217,61 @@ export class PrismaMattersRepository implements MattersRepository {
     });
 
     return mapMatter(record);
+  }
+
+  public async createExecutionSubmatter(matterId: string, payload: ExecutionSubmatterWriteRecord = {}) {
+    const matter = await this.findMatterOrThrow(this.prisma, matterId);
+    const nextSortOrder = await this.getNextSubmatterSortOrder(matterId);
+    const baseIdentifier = normalizeOptionalText(matter.matterIdentifier) ?? normalizeOptionalText(matter.matterNumber);
+    const submatterIndex = nextSortOrder + 1;
+
+    await this.prisma.executionSubmatter.create({
+      data: {
+        organizationId: matter.organizationId,
+        matterId,
+        sortOrder: payload.sortOrder ?? nextSortOrder,
+        specificProcess: normalizeOptionalText(payload.specificProcess),
+        matterIdentifier: normalizeOptionalText(payload.matterIdentifier) ?? (baseIdentifier ? `${baseIdentifier}-S${submatterIndex}` : null),
+        communicationChannel: payload.communicationChannel ?? matter.communicationChannel ?? DEFAULT_CHANNEL,
+        executionPrompt: normalizeOptionalText(payload.executionPrompt) ?? normalizeOptionalText(matter.executionPrompt),
+        expirationDate: hasOwn(payload, "expirationDate") ? parseDateValue(payload.expirationDate) : matter.expirationDate,
+        expirationRiOutput: normalizeOptionalText(payload.expirationRiOutput) ?? normalizeOptionalText(matter.expirationRiOutput),
+        promotionCommand: normalizeOptionalText(payload.promotionCommand) ?? normalizeOptionalText(matter.promotionCommand),
+        holidayAuthorityShortName: hasOwn(payload, "holidayAuthorityShortName")
+          ? normalizeHolidayAuthority(payload.holidayAuthorityShortName)
+          : normalizeHolidayAuthority(matter.holidayAuthorityShortName),
+        internalTelegramGroupId: normalizeOptionalText(payload.internalTelegramGroupId) ?? normalizeOptionalText(matter.internalTelegramGroupId),
+        internalTelegramGroupName: normalizeOptionalText(payload.internalTelegramGroupName) ?? normalizeOptionalText(matter.internalTelegramGroupName),
+        milestone: normalizeOptionalText(payload.milestone) ?? normalizeOptionalText(matter.milestone),
+        concluded: payload.concluded ?? false,
+        notes: normalizeOptionalText(payload.notes),
+        deletedAt: parseDateValue(payload.deletedAt)
+      }
+    });
+
+    return this.findMatterForResponse(matterId);
+  }
+
+  public async updateExecutionSubmatter(matterId: string, submatterId: string, payload: ExecutionSubmatterWriteRecord) {
+    await this.findExecutionSubmatterOrThrow(this.prisma, matterId, submatterId);
+    const data = this.buildExecutionSubmatterUpdatePayload(payload);
+
+    await this.prisma.executionSubmatter.update({
+      where: { id: submatterId },
+      data
+    });
+
+    return this.findMatterForResponse(matterId);
+  }
+
+  public async deleteExecutionSubmatter(matterId: string, submatterId: string) {
+    await this.findExecutionSubmatterOrThrow(this.prisma, matterId, submatterId);
+    await this.prisma.executionSubmatter.update({
+      where: { id: submatterId },
+      data: { deletedAt: new Date() }
+    });
+
+    return this.findMatterForResponse(matterId);
   }
 
   public async update(matterId: string, payload: MatterWriteRecord) {
@@ -430,6 +497,49 @@ export class PrismaMattersRepository implements MattersRepository {
     return record;
   }
 
+  private async findMatterForResponse(matterId: string) {
+    const record = await this.prisma.matter.findUnique({
+      where: { id: matterId },
+      include: {
+        executionSubmatters: {
+          where: { deletedAt: null },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+        }
+      }
+    });
+
+    if (!record) {
+      throw new AppError(404, "MATTER_NOT_FOUND", "The requested matter does not exist.");
+    }
+
+    return mapMatter(record);
+  }
+
+  private async findExecutionSubmatterOrThrow(prisma: PrismaExecutor, matterId: string, submatterId: string) {
+    const record = await prisma.executionSubmatter.findFirst({
+      where: {
+        id: submatterId,
+        matterId,
+        deletedAt: null
+      }
+    });
+
+    if (!record) {
+      throw new AppError(404, "EXECUTION_SUBMATTER_NOT_FOUND", "The requested execution submatter does not exist.");
+    }
+
+    return record;
+  }
+
+  private async getNextSubmatterSortOrder(matterId: string) {
+    const aggregate = await this.prisma.executionSubmatter.aggregate({
+      where: { matterId },
+      _max: { sortOrder: true }
+    });
+
+    return (aggregate._max.sortOrder ?? -1) + 1;
+  }
+
   private async findQuoteByReference(prisma: PrismaExecutor, reference: {
     quoteId?: string | null;
     quoteNumber?: string | null;
@@ -648,6 +758,58 @@ export class PrismaMattersRepository implements MattersRepository {
     }
     if (hasOwn(payload, "origin")) {
       data.origin = payload.origin ?? "MANUAL";
+    }
+    if (hasOwn(payload, "notes")) {
+      data.notes = normalizeOptionalText(payload.notes);
+    }
+    if (hasOwn(payload, "deletedAt")) {
+      data.deletedAt = parseDateValue(payload.deletedAt);
+    }
+
+    return data;
+  }
+
+  private buildExecutionSubmatterUpdatePayload(payload: ExecutionSubmatterWriteRecord): Prisma.ExecutionSubmatterUncheckedUpdateInput {
+    const data: Prisma.ExecutionSubmatterUncheckedUpdateInput = {};
+
+    if (hasOwn(payload, "sortOrder")) {
+      data.sortOrder = payload.sortOrder ?? 0;
+    }
+    if (hasOwn(payload, "specificProcess")) {
+      data.specificProcess = normalizeOptionalText(payload.specificProcess);
+    }
+    if (hasOwn(payload, "matterIdentifier")) {
+      data.matterIdentifier = normalizeOptionalText(payload.matterIdentifier);
+    }
+    if (hasOwn(payload, "communicationChannel")) {
+      data.communicationChannel = payload.communicationChannel ?? DEFAULT_CHANNEL;
+    }
+    if (hasOwn(payload, "executionPrompt")) {
+      data.executionPrompt = normalizeOptionalText(payload.executionPrompt);
+    }
+    if (hasOwn(payload, "expirationDate")) {
+      data.expirationDate = parseDateValue(payload.expirationDate);
+    }
+    if (hasOwn(payload, "expirationRiOutput")) {
+      data.expirationRiOutput = normalizeOptionalText(payload.expirationRiOutput);
+    }
+    if (hasOwn(payload, "promotionCommand")) {
+      data.promotionCommand = normalizeOptionalText(payload.promotionCommand);
+    }
+    if (hasOwn(payload, "holidayAuthorityShortName")) {
+      data.holidayAuthorityShortName = normalizeHolidayAuthority(payload.holidayAuthorityShortName);
+    }
+    if (hasOwn(payload, "internalTelegramGroupId")) {
+      data.internalTelegramGroupId = normalizeOptionalText(payload.internalTelegramGroupId);
+    }
+    if (hasOwn(payload, "internalTelegramGroupName")) {
+      data.internalTelegramGroupName = normalizeOptionalText(payload.internalTelegramGroupName);
+    }
+    if (hasOwn(payload, "milestone")) {
+      data.milestone = normalizeOptionalText(payload.milestone);
+    }
+    if (hasOwn(payload, "concluded")) {
+      data.concluded = payload.concluded ?? false;
     }
     if (hasOwn(payload, "notes")) {
       data.notes = normalizeOptionalText(payload.notes);

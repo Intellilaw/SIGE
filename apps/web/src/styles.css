@@ -3951,6 +3951,86 @@ textarea {
   line-height: 1.35;
 }
 
+.execution-process-cell {
+  min-width: 300px;
+  display: grid;
+  gap: 8px;
+}
+
+.execution-submatter-add-button {
+  width: fit-content;
+  min-width: 104px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.execution-submatter-row td {
+  background: #f6fbff;
+  border-top: 1px solid rgba(15, 118, 110, 0.16);
+}
+
+.execution-submatter-row .lead-cell-input {
+  background: #ffffff;
+}
+
+.execution-submatter-label-cell {
+  position: relative;
+  min-width: 560px;
+  width: 560px;
+  padding-left: 34px;
+}
+
+.execution-submatter-label-cell::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  bottom: 18px;
+  width: 3px;
+  border-radius: 999px;
+  background: #0f766e;
+}
+
+.execution-submatter-label {
+  min-height: 64px;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+}
+
+.execution-submatter-label span {
+  color: #0f766e;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.execution-submatter-label strong {
+  color: #243447;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.execution-submatter-label small {
+  color: #667085;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.execution-submatter-delete-button {
+  width: fit-content;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.execution-channel-select {
+  min-width: 150px;
+}
+
 .execution-table-recycle thead th {
   background: #f7f3ea;
 }
@@ -4103,6 +4183,13 @@ textarea {
   line-height: 1.32;
 }
 
+.execution-caducidad-note {
+  min-width: 220px;
+  min-height: 48px;
+  resize: vertical;
+  font-family: inherit;
+}
+
 .execution-promotion-select {
   min-width: 220px;
 }
@@ -4161,6 +4248,11 @@ textarea {
 
 .execution-panel-copy {
   margin: 6px 0 0;
+}
+
+.execution-panel-submatter-copy {
+  color: #0f766e;
+  font-weight: 800;
 }
 
 .execution-panel-ri-anchor {

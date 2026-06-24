@@ -719,6 +719,29 @@ export interface Matter {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
+  executionSubmatters?: ExecutionSubmatter[];
+}
+
+export interface ExecutionSubmatter {
+  id: string;
+  matterId: string;
+  sortOrder: number;
+  specificProcess?: string;
+  matterIdentifier?: string;
+  communicationChannel: Lead["communicationChannel"];
+  executionPrompt?: string;
+  expirationDate?: string;
+  expirationRiOutput?: string;
+  promotionCommand?: MatterPromotionCommand;
+  holidayAuthorityShortName?: ExecutionHolidayAuthorityShortName;
+  internalTelegramGroupId?: string;
+  internalTelegramGroupName?: string;
+  milestone?: string;
+  concluded: boolean;
+  notes?: string;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CommissionReceiver {

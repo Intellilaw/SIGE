@@ -1,4 +1,4 @@
-import type { MattersRepository, MatterWriteRecord } from "../../repositories/types";
+import type { ExecutionSubmatterWriteRecord, MattersRepository, MatterWriteRecord } from "../../repositories/types";
 
 export class MattersService {
   public constructor(private readonly repository: MattersRepository) {}
@@ -49,5 +49,17 @@ export class MattersService {
 
   public sendToExecution(matterId: string) {
     return this.repository.sendToExecution(matterId);
+  }
+
+  public createExecutionSubmatter(matterId: string, payload?: ExecutionSubmatterWriteRecord) {
+    return this.repository.createExecutionSubmatter(matterId, payload);
+  }
+
+  public updateExecutionSubmatter(matterId: string, submatterId: string, payload: ExecutionSubmatterWriteRecord) {
+    return this.repository.updateExecutionSubmatter(matterId, submatterId, payload);
+  }
+
+  public deleteExecutionSubmatter(matterId: string, submatterId: string) {
+    return this.repository.deleteExecutionSubmatter(matterId, submatterId);
   }
 }

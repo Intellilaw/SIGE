@@ -13,7 +13,7 @@ import {
 import { getSessionUser, requireAnyPermissions, requireAuth, requireRoles } from "../../core/auth/guards";
 import { filterExternalVisibleMatters, isExternalScopedUser } from "../../core/auth/external-matter-access";
 import { generateMatterRiExpiration, generateMatterRiInput, type RiMatterTaskContext } from "./matter-ri-input-generator";
-import { enrichMatterTelegramGroupName } from "./telegram-group-name-resolver";
+import { enrichMatterTelegramGroupName, resolveTelegramGroupName } from "./telegram-group-name-resolver";
 import { sendPromotionCommandToTelegram } from "./telegram-promotion-command-sender";
 
 const teamSchema = z.enum([
@@ -75,8 +75,30 @@ const matterSchema = z.object({
   deletedAt: z.string().nullable().optional()
 });
 
+const executionSubmatterSchema = z.object({
+  sortOrder: z.number().int().nonnegative().optional(),
+  specificProcess: z.string().nullable().optional(),
+  matterIdentifier: z.string().nullable().optional(),
+  communicationChannel: z.enum(["WHATSAPP", "TELEGRAM", "WECHAT", "EMAIL", "PHONE"]).optional(),
+  executionPrompt: z.string().nullable().optional(),
+  expirationDate: z.string().nullable().optional(),
+  expirationRiOutput: z.string().nullable().optional(),
+  promotionCommand: z.enum(MATTER_PROMOTION_COMMANDS).nullable().optional(),
+  holidayAuthorityShortName: executionHolidayAuthoritySchema.nullable().optional(),
+  internalTelegramGroupId: z.string().nullable().optional(),
+  internalTelegramGroupName: z.string().nullable().optional(),
+  milestone: z.string().nullable().optional(),
+  concluded: z.boolean().optional(),
+  notes: z.string().nullable().optional(),
+  deletedAt: z.string().nullable().optional()
+});
+
 const matterIdParamsSchema = z.object({
   matterId: z.string().min(1)
+});
+
+const executionSubmatterParamsSchema = matterIdParamsSchema.extend({
+  submatterId: z.string().min(1)
 });
 
 const bulkTrashSchema = z.object({
@@ -129,6 +151,16 @@ function isExecutionMatterPatch(value: unknown) {
     "holidayAuthorityShortName",
     "internalTelegramGroupId"
   ]);
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => allowedKeys.has(key));
+}
+
+function isExecutionSubmatterPatch(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const allowedKeys = new Set(Object.keys(executionSubmatterSchema.shape));
   const keys = Object.keys(value);
   return keys.length > 0 && keys.every((key) => allowedKeys.has(key));
 }
@@ -262,6 +294,72 @@ async function listRiTaskContext(app: FastifyInstance, matter: Matter) {
       .filter((task) => matchesMatter(keys, task.matterId, task.matterNumber, task.matterIdentifier))
       .map(termToRiTask)
   ].slice(0, 20);
+}
+
+async function assertCanWriteExecutionMatter(app: FastifyInstance, request: FastifyRequest, matterId: string) {
+  const permissions = getEffectivePermissionsForRequest(request);
+  const records = await new app.services.MattersService(app.repositories.matters).list();
+  const currentMatter = records.find((matter) => matter.id === matterId);
+
+  if (!currentMatter) {
+    throw new app.errors.AppError(404, "MATTER_NOT_FOUND", "The requested matter does not exist.");
+  }
+
+  const canWriteMatters = permissions.includes("*") || permissions.includes("matters:write");
+  const canUpdateExecutionMatter = canAccessExecutionMatter({
+    permissions,
+    responsibleTeam: currentMatter.responsibleTeam
+  });
+
+  if (!canWriteMatters && !canUpdateExecutionMatter) {
+    throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
+  }
+
+  return currentMatter;
+}
+
+async function enrichExecutionSubmatterTelegramGroupName<T extends {
+  internalTelegramGroupId?: string | null;
+  internalTelegramGroupName?: string | null;
+}>(
+  payload: T,
+  currentInternalTelegramGroupId?: string | null,
+  logger?: { warn: (message: string) => void }
+): Promise<T> {
+  if (!Object.prototype.hasOwnProperty.call(payload, "internalTelegramGroupId")) {
+    return payload;
+  }
+
+  const nextGroupId = (payload.internalTelegramGroupId ?? "").trim();
+  if (!nextGroupId) {
+    return {
+      ...payload,
+      internalTelegramGroupId: null,
+      internalTelegramGroupName: null
+    };
+  }
+
+  const groupName = await resolveTelegramGroupName(nextGroupId, logger);
+  if (groupName) {
+    return {
+      ...payload,
+      internalTelegramGroupId: nextGroupId,
+      internalTelegramGroupName: groupName
+    };
+  }
+
+  if (nextGroupId !== (currentInternalTelegramGroupId ?? "").trim()) {
+    return {
+      ...payload,
+      internalTelegramGroupId: nextGroupId,
+      internalTelegramGroupName: null
+    };
+  }
+
+  return {
+    ...payload,
+    internalTelegramGroupId: nextGroupId
+  };
 }
 
 export const mattersRoutes: FastifyPluginAsync = async (app) => {
@@ -454,6 +552,42 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
       taskName: payload.taskName,
       logger: app.log
     });
+  });
+
+  app.post("/matters/:matterId/execution-submatters", { preHandler: [requireAuth] }, async (request) => {
+    const params = matterIdParamsSchema.parse(request.params);
+    const currentMatter = await assertCanWriteExecutionMatter(app, request, params.matterId);
+    const payload = await enrichExecutionSubmatterTelegramGroupName(
+      executionSubmatterSchema.partial().parse(request.body ?? {}),
+      currentMatter.internalTelegramGroupId,
+      app.log
+    );
+
+    return service.createExecutionSubmatter(params.matterId, payload);
+  });
+
+  app.patch("/matters/:matterId/execution-submatters/:submatterId", { preHandler: [requireAuth] }, async (request) => {
+    const params = executionSubmatterParamsSchema.parse(request.params);
+
+    if (!isExecutionSubmatterPatch(request.body)) {
+      throw new app.errors.AppError(400, "INVALID_SUBMATTER_PATCH", "Invalid execution submatter payload.");
+    }
+
+    const currentMatter = await assertCanWriteExecutionMatter(app, request, params.matterId);
+    const currentSubmatter = currentMatter.executionSubmatters?.find((submatter) => submatter.id === params.submatterId);
+    const payload = await enrichExecutionSubmatterTelegramGroupName(
+      executionSubmatterSchema.parse(request.body),
+      currentSubmatter?.internalTelegramGroupId,
+      app.log
+    );
+
+    return service.updateExecutionSubmatter(params.matterId, params.submatterId, payload);
+  });
+
+  app.delete("/matters/:matterId/execution-submatters/:submatterId", { preHandler: [requireAuth] }, async (request) => {
+    const params = executionSubmatterParamsSchema.parse(request.params);
+    await assertCanWriteExecutionMatter(app, request, params.matterId);
+    return service.deleteExecutionSubmatter(params.matterId, params.submatterId);
   });
 
   app.post("/matters/bulk-trash", { preHandler: writeGuards }, async (request, reply) => {

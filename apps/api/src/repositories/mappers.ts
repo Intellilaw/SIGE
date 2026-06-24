@@ -16,6 +16,7 @@ import type {
   CommissionReceiver,
   CommissionSnapshot,
   DailyDocumentAssignment,
+  ExecutionSubmatter,
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
@@ -1237,6 +1238,27 @@ export function mapMatter(record: {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  executionSubmatters?: Array<{
+    id: string;
+    matterId: string;
+    sortOrder: number;
+    specificProcess: string | null;
+    matterIdentifier: string | null;
+    communicationChannel: string;
+    executionPrompt: string | null;
+    expirationDate: Date | null;
+    expirationRiOutput: string | null;
+    promotionCommand: string | null;
+    holidayAuthorityShortName: string | null;
+    internalTelegramGroupId: string | null;
+    internalTelegramGroupName: string | null;
+    milestone: string | null;
+    concluded: boolean;
+    notes: string | null;
+    deletedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
 }): Matter {
   return {
     id: record.id,
@@ -1283,7 +1305,54 @@ export function mapMatter(record: {
     notes: record.notes ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
-    deletedAt: record.deletedAt?.toISOString()
+    deletedAt: record.deletedAt?.toISOString(),
+    executionSubmatters: record.executionSubmatters?.map(mapExecutionSubmatter)
+  };
+}
+
+export function mapExecutionSubmatter(record: {
+  id: string;
+  matterId: string;
+  sortOrder: number;
+  specificProcess: string | null;
+  matterIdentifier: string | null;
+  communicationChannel: string;
+  executionPrompt: string | null;
+  expirationDate: Date | null;
+  expirationRiOutput: string | null;
+  promotionCommand: string | null;
+  holidayAuthorityShortName: string | null;
+  internalTelegramGroupId: string | null;
+  internalTelegramGroupName: string | null;
+  milestone: string | null;
+  concluded: boolean;
+  notes: string | null;
+  deletedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ExecutionSubmatter {
+  return {
+    id: record.id,
+    matterId: record.matterId,
+    sortOrder: record.sortOrder,
+    specificProcess: record.specificProcess ?? undefined,
+    matterIdentifier: record.matterIdentifier ?? undefined,
+    communicationChannel: record.communicationChannel as ExecutionSubmatter["communicationChannel"],
+    executionPrompt: record.executionPrompt ?? undefined,
+    expirationDate: record.expirationDate?.toISOString(),
+    expirationRiOutput: record.expirationRiOutput ?? undefined,
+    promotionCommand: (record.promotionCommand ?? undefined) as ExecutionSubmatter["promotionCommand"],
+    holidayAuthorityShortName: (
+      (record.holidayAuthorityShortName === "PJCDMX" ? "TSJCDMX" : record.holidayAuthorityShortName) ?? undefined
+    ) as ExecutionSubmatter["holidayAuthorityShortName"],
+    internalTelegramGroupId: record.internalTelegramGroupId ?? undefined,
+    internalTelegramGroupName: record.internalTelegramGroupName ?? undefined,
+    milestone: record.milestone ?? undefined,
+    concluded: record.concluded,
+    notes: record.notes ?? undefined,
+    deletedAt: record.deletedAt?.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 

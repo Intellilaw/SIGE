@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import type {
   ClientsRepository,
+  ExecutionSubmatterWriteRecord,
   FinanceRecordWriteRecord,
   FinanceRepository,
   MattersRepository,
@@ -157,6 +158,31 @@ export class ResilientMattersRepository extends ResilientRepositoryBase implemen
 
   public sendToExecution(matterId: string) {
     return this.withFallback(() => this.primary.sendToExecution(matterId), () => this.fallback!.sendToExecution(matterId));
+  }
+
+  public createExecutionSubmatter(matterId: string, payload?: ExecutionSubmatterWriteRecord) {
+    return this.withFallback(
+      () => this.primary.createExecutionSubmatter(matterId, payload),
+      () => this.fallback!.createExecutionSubmatter(matterId, payload)
+    );
+  }
+
+  public updateExecutionSubmatter(
+    matterId: string,
+    submatterId: string,
+    payload: ExecutionSubmatterWriteRecord
+  ) {
+    return this.withFallback(
+      () => this.primary.updateExecutionSubmatter(matterId, submatterId, payload),
+      () => this.fallback!.updateExecutionSubmatter(matterId, submatterId, payload)
+    );
+  }
+
+  public deleteExecutionSubmatter(matterId: string, submatterId: string) {
+    return this.withFallback(
+      () => this.primary.deleteExecutionSubmatter(matterId, submatterId),
+      () => this.fallback!.deleteExecutionSubmatter(matterId, submatterId)
+    );
   }
 }
 

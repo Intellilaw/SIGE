@@ -9,6 +9,7 @@ import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationId } from "../core/tenant/tenant-context";
 import type {
   ClientsRepository,
+  ExecutionSubmatterWriteRecord,
   MattersRepository,
   MatterWriteRecord,
   QuotesRepository,
@@ -943,6 +944,18 @@ export class LocalMattersRepository implements MattersRepository {
   }
 
   public sendToExecution(_matterId: string) {
+    return unavailableWrite();
+  }
+
+  public createExecutionSubmatter(_matterId: string, _payload?: ExecutionSubmatterWriteRecord) {
+    return unavailableWrite();
+  }
+
+  public updateExecutionSubmatter(_matterId: string, _submatterId: string, _payload: ExecutionSubmatterWriteRecord) {
+    return unavailableWrite();
+  }
+
+  public deleteExecutionSubmatter(_matterId: string, _submatterId: string) {
     return unavailableWrite();
   }
 }

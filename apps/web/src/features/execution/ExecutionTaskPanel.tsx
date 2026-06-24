@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Matter, TaskDistributionEvent, TaskState } from "@sige/contracts";
+import type { ExecutionSubmatter, Matter, TaskDistributionEvent, TaskState } from "@sige/contracts";
 
 import {
   getCatalogTargetEntries,
@@ -34,6 +34,8 @@ type MatterTaskView = {
   updatedAt?: string;
   trackLabel: string;
   sourceLabel: string;
+  executionSubmatterId?: string;
+  executionSubmatterLabel?: string;
   isMatterFallback?: boolean;
   sourceType: "tracking" | "term" | "matter";
 };
@@ -56,6 +58,7 @@ interface ExecutionTaskPanelProps {
   legacyConfig: LegacyTaskModuleConfig;
   distributionEvents: TaskDistributionEvent[];
   matter: Matter | null;
+  submatter?: ExecutionSubmatter | null;
   clientNumber?: string;
   mode: "create" | "history" | null;
   tasks: MatterTaskView[];
@@ -117,6 +120,7 @@ export function ExecutionTaskPanel({
   legacyConfig,
   distributionEvents,
   matter,
+  submatter,
   clientNumber,
   mode,
   tasks,
@@ -178,11 +182,11 @@ export function ExecutionTaskPanel({
     setDueDate(addBusinessDays(new Date(), 3));
     setSuccessMessage(null);
     setDuplicateWarningAcknowledged(false);
-  }, [matter?.id, mode, module.defaultResponsible]);
+  }, [matter?.id, submatter?.id, mode, module.defaultResponsible]);
 
   useEffect(() => {
     setDuplicateWarningAcknowledged(false);
-  }, [selectedEventId, duplicateSelectionKey, matter?.id]);
+  }, [selectedEventId, duplicateSelectionKey, matter?.id, submatter?.id]);
 
   useEffect(() => {
     if (!taskSearchOpen) {
@@ -240,6 +244,8 @@ export function ExecutionTaskPanel({
   }
 
   const activeMatter = matter;
+  const activeSubmatter = submatter ?? null;
+  const activeSubmatterLabel = activeSubmatter?.specificProcess || activeSubmatter?.matterIdentifier || "";
   const missingTargetNames = selectorTargets.some((target) => !target.taskName.trim());
 
   async function handleCreate() {
@@ -306,6 +312,11 @@ export function ExecutionTaskPanel({
             <p className="muted execution-panel-copy">
               {matter.clientName || "Cliente sin nombre"} - {matter.subject || "Asunto sin nombre"}
             </p>
+            {activeSubmatter ? (
+              <p className="muted execution-panel-copy execution-panel-submatter-copy">
+                Subfila: {activeSubmatterLabel || "Subasunto sin nombre"}
+              </p>
+            ) : null}
             {mode === "create" ? (
               <div className="execution-panel-ri-anchor">
                 <RusconiIntelligenceBadge connectionId={CREATE_TASKS_RI_CONNECTION_ID} label="Ejecucion / Crear tareas" />
@@ -411,6 +422,12 @@ export function ExecutionTaskPanel({
                       <span>ID Asunto</span>
                       <input readOnly value={activeMatter.matterIdentifier || activeMatter.matterNumber || ""} />
                     </label>
+                    {activeSubmatter ? (
+                      <label className="form-field">
+                        <span>ID subfila</span>
+                        <input readOnly value={activeSubmatter.matterIdentifier || ""} />
+                      </label>
+                    ) : null}
                     <label className="form-field">
                       <span>No. Cliente</span>
                       <input readOnly value={clientNumber || activeMatter.clientNumber || ""} />
@@ -425,7 +442,7 @@ export function ExecutionTaskPanel({
                     </label>
                     <label className="form-field execution-selector-span">
                       <span>Proceso específico</span>
-                      <input readOnly value={activeMatter.specificProcess || ""} />
+                      <input readOnly value={activeSubmatter?.specificProcess || activeMatter.specificProcess || ""} />
                     </label>
                   </div>
                 </div>
@@ -510,6 +527,9 @@ export function ExecutionTaskPanel({
                         <p className="muted execution-task-meta">
                           {task.trackLabel} - {task.responsible || "Sin responsable"} - {toDateInput(task.dueDate) || "-"}
                         </p>
+                        {task.executionSubmatterLabel ? (
+                          <p className="muted execution-task-meta">Subfila: {task.executionSubmatterLabel}</p>
+                        ) : null}
                       </div>
                       <span className={`execution-task-state execution-task-state-${task.state.toLowerCase()}`}>
                         {getStateLabel(task.state)}

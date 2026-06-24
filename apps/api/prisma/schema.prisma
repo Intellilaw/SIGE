@@ -23,6 +23,7 @@ model Organization {
   quoteTemplates                   QuoteTemplate[]
   leads                            Lead[]
   matters                          Matter[]
+  executionSubmatters              ExecutionSubmatter[]
   generalExpenses                  GeneralExpense[]
   payrollEntries                   GeneralExpensePayrollEntry[]
   budgetPlans                      BudgetPlan[]
@@ -501,11 +502,40 @@ model Matter {
   quote                     Quote?       @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tasks                     TaskItem[]
+  executionSubmatters       ExecutionSubmatter[]
 
   @@unique([organizationId, matterNumber])
   @@index([organizationId, deletedAt, createdAt])
   @@index([organizationId, matterType, deletedAt])
   @@index([organizationId, quoteNumber])
+}
+
+model ExecutionSubmatter {
+  id                        String       @id @default(uuid())
+  organizationId            String       @default("org-rusconi")
+  matterId                  String
+  sortOrder                 Int          @default(0)
+  specificProcess           String?
+  matterIdentifier          String?
+  communicationChannel      String       @default("WHATSAPP")
+  executionPrompt           String?
+  expirationDate            DateTime?
+  expirationRiOutput        String?
+  promotionCommand          String?
+  holidayAuthorityShortName String?
+  internalTelegramGroupId   String?
+  internalTelegramGroupName String?
+  milestone                 String?
+  concluded                 Boolean      @default(false)
+  notes                     String?
+  deletedAt                 DateTime?
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  matter                    Matter       @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, matterId, deletedAt, sortOrder])
+  @@index([organizationId, deletedAt, createdAt])
 }
 
 model GeneralExpense {

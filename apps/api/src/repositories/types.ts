@@ -434,6 +434,24 @@ export interface MatterWriteRecord {
   deletedAt?: string | null;
 }
 
+export interface ExecutionSubmatterWriteRecord {
+  sortOrder?: number;
+  specificProcess?: string | null;
+  matterIdentifier?: string | null;
+  communicationChannel?: Matter["communicationChannel"];
+  executionPrompt?: string | null;
+  expirationDate?: string | null;
+  expirationRiOutput?: string | null;
+  promotionCommand?: Matter["promotionCommand"] | null;
+  holidayAuthorityShortName?: Matter["holidayAuthorityShortName"] | null;
+  internalTelegramGroupId?: string | null;
+  internalTelegramGroupName?: string | null;
+  milestone?: string | null;
+  concluded?: boolean;
+  notes?: string | null;
+  deletedAt?: string | null;
+}
+
 export interface MattersRepository {
   list(): Promise<Matter[]>;
   listDeleted(): Promise<Matter[]>;
@@ -447,6 +465,9 @@ export interface MattersRepository {
   restore(matterId: string): Promise<Matter | null>;
   generateIdentifier(matterId: string): Promise<Matter | null>;
   sendToExecution(matterId: string): Promise<Matter | null>;
+  createExecutionSubmatter(matterId: string, payload?: ExecutionSubmatterWriteRecord): Promise<Matter | null>;
+  updateExecutionSubmatter(matterId: string, submatterId: string, payload: ExecutionSubmatterWriteRecord): Promise<Matter | null>;
+  deleteExecutionSubmatter(matterId: string, submatterId: string): Promise<Matter | null>;
 }
 
 export interface GeneralExpenseCreateRecord {

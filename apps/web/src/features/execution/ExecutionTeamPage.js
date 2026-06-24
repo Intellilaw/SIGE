@@ -1,13 +1,12 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EXECUTION_HOLIDAY_AUTHORITIES, MATTER_PROMOTION_COMMANDS, getExecutionMatterMissingFields } from "@sige/contracts";
-import { apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 import { buildLegacyTaskModuleConfig } from "../tasks/task-legacy-config";
 import { ExecutionTaskPanel } from "./ExecutionTaskPanel";
 import { findExecutionModuleDescriptorBySlug } from "./execution-config";
-import { evaluateExecutionMatterRow } from "./execution-row-utils";
 const CHANNEL_LABELS = {
     WHATSAPP: "WhatsApp",
     TELEGRAM: "Telegram",
@@ -15,6 +14,7 @@ const CHANNEL_LABELS = {
     EMAIL: "Correo-e",
     PHONE: "Telefono"
 };
+const CHANNEL_VALUES = Object.keys(CHANNEL_LABELS);
 const LEGACY_TASK_PLACEHOLDERS = new Set(["tarea legacy", "termino legacy", "distribucion legacy", "evento legacy"]);
 const CADUCIDAD_RI_CONNECTION_ID = "RI-004";
 const EXECUTION_HOLIDAY_AUTHORITY_SET = new Set(EXECUTION_HOLIDAY_AUTHORITIES);
@@ -75,10 +75,24 @@ function matchesWordSearch(matter, clientNumber, tasks, searchWords, holidayDate
         matter.nextActionSource,
         toDateInput(matter.nextActionDueAt),
         getChannelLabel(matter.communicationChannel),
+        ...(matter.executionSubmatters ?? []).flatMap((submatter) => [
+            submatter.specificProcess,
+            submatter.matterIdentifier,
+            submatter.executionPrompt,
+            getSubmatterCaducidadColumnValue(submatter),
+            submatter.promotionCommand,
+            submatter.notes,
+            submatter.milestone,
+            submatter.holidayAuthorityShortName,
+            submatter.internalTelegramGroupId,
+            submatter.internalTelegramGroupName,
+            getChannelLabel(submatter.communicationChannel)
+        ]),
         ...tasks.flatMap((task) => [
             task.subject,
             task.trackLabel,
             task.sourceLabel,
+            task.executionSubmatterLabel,
             task.responsible,
             toDateInput(task.dueDate),
             getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority)
@@ -98,6 +112,16 @@ function hasMeaningfulTaskLabel(value) {
 function getLegacyDataText(data, key) {
     const value = data?.[key];
     return typeof value === "string" ? normalizeText(value) : "";
+}
+function getLegacyDataString(data, key) {
+    const value = data?.[key];
+    return typeof value === "string" ? normalizeText(value) : "";
+}
+function getExecutionSubmatterIdFromData(data) {
+    return getLegacyDataString(data, "executionSubmatterId");
+}
+function getExecutionSubmatterLabelFromData(data) {
+    return getLegacyDataString(data, "executionSubmatterLabel");
 }
 function buildDistributionHistoryTaskNameMap(histories) {
     const taskNamesByRecordId = new Map();
@@ -145,6 +169,12 @@ function toDateInput(value) {
 function getCaducidadColumnValue(matter) {
     return normalizeText(matter.expirationRiOutput) || toDateInput(matter.expirationDate);
 }
+function getSubmatterCaducidadColumnValue(submatter) {
+    return normalizeText(submatter.expirationRiOutput) || toDateInput(submatter.expirationDate);
+}
+function getSubmatterLabel(submatter) {
+    return normalizeText(submatter.specificProcess) || normalizeText(submatter.matterIdentifier) || "Subasunto";
+}
 function toLocalDateInput(value) {
     const year = value.getFullYear();
     const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -189,9 +219,9 @@ function isWeekendDateKey(dateKey) {
 function isNonBusinessDate(dateKey, authority, holidayDateKeysByAuthority) {
     return isWeekendDateKey(dateKey) || Boolean(holidayDateKeysByAuthority[authority]?.has(dateKey));
 }
-function getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) {
+function getEffectiveTaskDueDateForAuthority(task, authorityValue, holidayDateKeysByAuthority) {
     const dueDate = toDateInput(task.dueDate);
-    const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+    const authority = getExecutionHolidayAuthority(authorityValue);
     if (!dueDate || !authority || !isDateKey(dueDate)) {
         return dueDate;
     }
@@ -204,14 +234,16 @@ function getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) {
     }
     return effectiveDate;
 }
+function getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) {
+    return getEffectiveTaskDueDateForAuthority(task, matter.holidayAuthorityShortName, holidayDateKeysByAuthority);
+}
+function getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority) {
+    return getEffectiveTaskDueDateForAuthority(task, submatter.holidayAuthorityShortName, holidayDateKeysByAuthority);
+}
 function collectHolidayFetchPlan(matters, taskMap) {
     const monthsByAuthority = new Map();
-    matters.forEach((matter) => {
-        const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
-        if (!authority) {
-            return;
-        }
-        getMatterTasks(matter, taskMap).forEach((task) => {
+    function addTaskMonths(authority, tasks) {
+        tasks.forEach((task) => {
             const dueDate = toDateInput(task.dueDate);
             if (!isDateKey(dueDate)) {
                 return;
@@ -220,6 +252,19 @@ function collectHolidayFetchPlan(matters, taskMap) {
             months.add(dueDate.slice(0, 7));
             months.add(getNextMonthKey(dueDate));
             monthsByAuthority.set(authority, months);
+        });
+    }
+    matters.forEach((matter) => {
+        const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
+        if (authority) {
+            addTaskMonths(authority, getMatterTasks(matter, taskMap));
+        }
+        (matter.executionSubmatters ?? []).forEach((submatter) => {
+            const submatterAuthority = getExecutionHolidayAuthority(submatter.holidayAuthorityShortName);
+            if (!submatterAuthority) {
+                return;
+            }
+            addTaskMonths(submatterAuthority, getSubmatterTasks(matter, submatter, taskMap));
         });
     });
     return monthsByAuthority;
@@ -369,6 +414,8 @@ function buildTrackingRecordTaskMap(records, trackLabels, sourcePrefix, taskName
             updatedAt: record.updatedAt,
             trackLabel,
             sourceLabel: `${sourcePrefix}: ${trackLabel}`,
+            executionSubmatterId: getExecutionSubmatterIdFromData(record.data) || undefined,
+            executionSubmatterLabel: getExecutionSubmatterLabelFromData(record.data) || undefined,
             sourceType: "tracking"
         };
         addTaskViewToMap(taskMap, [record.matterId ?? "", record.matterNumber ?? "", record.matterIdentifier ?? ""], view);
@@ -404,6 +451,8 @@ function buildTermTaskMap(terms, sourcePrefix, includeCompleted = false) {
             updatedAt: term.updatedAt,
             trackLabel,
             sourceLabel: `${sourcePrefix}: ${trackLabel}`,
+            executionSubmatterId: getExecutionSubmatterIdFromData(term.data) || undefined,
+            executionSubmatterLabel: getExecutionSubmatterLabelFromData(term.data) || undefined,
             sourceType: "term"
         };
         addTaskViewToMap(taskMap, [term.matterId ?? "", term.matterNumber ?? "", term.matterIdentifier ?? ""], view);
@@ -415,7 +464,16 @@ function getMatterTasks(matter, taskMap) {
         taskMap.get(normalizeText(matter.matterNumber)) ??
         taskMap.get(normalizeText(matter.matterIdentifier)) ??
         [];
-    return linkedTasks;
+    return linkedTasks.filter((task) => !task.executionSubmatterId);
+}
+function getAllMatterTasks(matter, taskMap) {
+    return taskMap.get(normalizeText(matter.id)) ??
+        taskMap.get(normalizeText(matter.matterNumber)) ??
+        taskMap.get(normalizeText(matter.matterIdentifier)) ??
+        [];
+}
+function getSubmatterTasks(matter, submatter, taskMap) {
+    return getAllMatterTasks(matter, taskMap).filter((task) => task.executionSubmatterId === submatter.id);
 }
 function getTaskDistributorPath(teamSlug, matter) {
     const params = new URLSearchParams({ tab: "active" });
@@ -498,6 +556,64 @@ function evaluateMatterRow(matter, clientNumber, tasks, holidayDateKeysByAuthori
         isNextBusinessDay
     };
 }
+function evaluateSubmatterRow(submatter, tasks, holidayDateKeysByAuthority) {
+    const missing = [];
+    const today = toLocalDateInput(new Date());
+    if (!normalizeText(submatter.specificProcess)) {
+        addMissingField(missing, "Proceso especifico");
+    }
+    if (!normalizeText(submatter.matterIdentifier)) {
+        addMissingField(missing, "ID Asunto");
+    }
+    if (!normalizeText(submatter.communicationChannel)) {
+        addMissingField(missing, "Canal");
+    }
+    if (!normalizeText(submatter.milestone)) {
+        addMissingField(missing, "Hito conclusion");
+    }
+    if (tasks.length === 0) {
+        addMissingField(missing, "Sin siguientes tareas");
+    }
+    if (!getExecutionHolidayAuthority(submatter.holidayAuthorityShortName)) {
+        addMissingField(missing, "Órgano para efectos de días inhábiles");
+    }
+    if (!normalizeText(submatter.internalTelegramGroupId)) {
+        addMissingField(missing, "ID del grupo interno de Telegram");
+    }
+    if (!normalizeText(submatter.internalTelegramGroupName)) {
+        addMissingField(missing, "Nombre del grupo interno de Telegram");
+    }
+    if (!normalizeText(submatter.executionPrompt)) {
+        addMissingField(missing, "Input de RI");
+    }
+    if (!getMatterPromotionCommand(submatter.promotionCommand)) {
+        addMissingField(missing, "Comando promoción");
+    }
+    tasks.forEach((task) => {
+        const taskName = normalizeText(task.subject) || normalizeText(task.trackLabel);
+        const dueDate = getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority);
+        if (!taskName) {
+            addMissingField(missing, "Siguiente tarea");
+        }
+        if (!dueDate || !isDateKey(dueDate)) {
+            addMissingField(missing, "Fecha sig. tarea");
+        }
+        else if (dueDate < today) {
+            addMissingField(missing, "Fecha sig. tarea vencida");
+        }
+    });
+    const isOverdue = tasks.some((task) => {
+        const dueDate = getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority);
+        return Boolean(dueDate) && isDateKey(dueDate) && dueDate < today;
+    });
+    const nextBusinessDate = getNextBusinessDate(holidayDateKeysByAuthority, getExecutionHolidayAuthority(submatter.holidayAuthorityShortName));
+    const isNextBusinessDay = !isOverdue && tasks.some((task) => getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority) === nextBusinessDate);
+    return {
+        missing,
+        isOverdue,
+        isNextBusinessDay
+    };
+}
 export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPath = "/app/execution", titlePrefix = "", description = "Tablero operativo asunto por asunto, con siguientes tareas, resaltado rojo por faltantes o vencimientos y separacion completa por equipo.", showHero = true }) {
     const { slug } = useParams();
     const navigate = useNavigate();
@@ -519,6 +635,7 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const [wordSearch, setWordSearch] = useState("");
     const [clientSearch, setClientSearch] = useState("");
     const [panelMatter, setPanelMatter] = useState(null);
+    const [panelSubmatter, setPanelSubmatter] = useState(null);
     const [panelMode, setPanelMode] = useState(null);
     const [generatingRiMatterIds, setGeneratingRiMatterIds] = useState(() => new Set());
     const [generatingCaducidadRiMatterIds, setGeneratingCaducidadRiMatterIds] = useState(() => new Set());
@@ -636,13 +753,13 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
     const wordSearchWords = useMemo(() => getSearchWords(wordSearch), [wordSearch]);
     const filteredMatters = useMemo(() => activeMatters.filter((matter) => {
         const clientNumber = getEffectiveClientNumber(matter, clients);
-        const matterTasks = getMatterTasks(matter, activeTaskMap);
+        const matterTasks = getAllMatterTasks(matter, activeTaskMap);
         return (matchesClientSearch(matter, clientSearchWords) &&
             matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority));
     }), [activeMatters, activeTaskMap, clientSearchWords, clients, holidayDateKeysByAuthority, wordSearchWords]);
     const filteredDeletedMatters = useMemo(() => deletedMatters.filter((matter) => {
         const clientNumber = getEffectiveClientNumber(matter, clients);
-        const matterTasks = getMatterTasks(matter, allTaskMap);
+        const matterTasks = getAllMatterTasks(matter, allTaskMap);
         return (matchesClientSearch(matter, clientSearchWords) &&
             matchesWordSearch(matter, clientNumber, matterTasks, wordSearchWords, holidayDateKeysByAuthority));
     }), [allTaskMap, clientSearchWords, clients, deletedMatters, holidayDateKeysByAuthority, wordSearchWords]);
@@ -778,6 +895,109 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             notes: normalizeText(matter.notes) ? matter.notes ?? null : null
         });
     }
+    function updateSubmatterLocal(matterId, submatterId, updater) {
+        return updateMatterLocal(matterId, (matter) => ({
+            ...matter,
+            executionSubmatters: (matter.executionSubmatters ?? []).map((submatter) => submatter.id === submatterId ? updater({ ...submatter }) : submatter)
+        }));
+    }
+    async function persistSubmatter(matterId, submatterId, payload) {
+        try {
+            const updated = await apiPatch(`/matters/${matterId}/execution-submatters/${submatterId}`, payload);
+            setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+            setPanelSubmatter((current) => current?.id === submatterId
+                ? updated.executionSubmatters?.find((submatter) => submatter.id === submatterId) ?? current
+                : current);
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+    }
+    function handleSubmatterLocalChange(matterId, submatterId, field, value) {
+        void updateSubmatterLocal(matterId, submatterId, (submatter) => {
+            const draft = submatter;
+            draft[field] = value;
+            return submatter;
+        });
+    }
+    function handleSubmatterBlur(matterId, submatterId) {
+        const matter = activeMatters.find((item) => item.id === matterId);
+        const submatter = matter?.executionSubmatters?.find((item) => item.id === submatterId);
+        if (!submatter) {
+            return;
+        }
+        void persistSubmatter(matterId, submatterId, {
+            specificProcess: normalizeText(submatter.specificProcess) ? submatter.specificProcess ?? null : null,
+            matterIdentifier: normalizeText(submatter.matterIdentifier) ? submatter.matterIdentifier ?? null : null,
+            communicationChannel: submatter.communicationChannel,
+            executionPrompt: normalizeText(submatter.executionPrompt) ? submatter.executionPrompt ?? null : null,
+            expirationDate: normalizeText(submatter.expirationDate) ? submatter.expirationDate ?? null : null,
+            expirationRiOutput: normalizeText(submatter.expirationRiOutput) ? submatter.expirationRiOutput ?? null : null,
+            promotionCommand: normalizeText(submatter.promotionCommand) ? submatter.promotionCommand ?? null : null,
+            holidayAuthorityShortName: normalizeText(submatter.holidayAuthorityShortName)
+                ? submatter.holidayAuthorityShortName ?? null
+                : null,
+            internalTelegramGroupId: normalizeText(submatter.internalTelegramGroupId)
+                ? submatter.internalTelegramGroupId ?? null
+                : null,
+            internalTelegramGroupName: normalizeText(submatter.internalTelegramGroupName)
+                ? submatter.internalTelegramGroupName ?? null
+                : null,
+            milestone: normalizeText(submatter.milestone) ? submatter.milestone ?? null : null,
+            concluded: submatter.concluded,
+            notes: normalizeText(submatter.notes) ? submatter.notes ?? null : null
+        });
+    }
+    async function handleAddSubmatter(matter) {
+        try {
+            setErrorMessage(null);
+            const updated = await apiPost(`/matters/${matter.id}/execution-submatters`, {});
+            setActiveMatters((items) => sortActiveMatters(replaceMatter(items, updated), clients));
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+    }
+    async function handleDeleteSubmatter(matterId, submatterId) {
+        if (!window.confirm("Eliminar esta subfila de ejecucion?")) {
+            return;
+        }
+        try {
+            setErrorMessage(null);
+            await apiDelete(`/matters/${matterId}/execution-submatters/${submatterId}`);
+            updateMatterLocal(matterId, (matter) => ({
+                ...matter,
+                executionSubmatters: (matter.executionSubmatters ?? []).filter((submatter) => submatter.id !== submatterId)
+            }));
+            setPanelSubmatter((current) => (current?.id === submatterId ? null : current));
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+    }
+    async function handleSubmatterToggleConcluded(matterId, submatterId, concluded) {
+        updateSubmatterLocal(matterId, submatterId, (submatter) => {
+            submatter.concluded = concluded;
+            return submatter;
+        });
+        await persistSubmatter(matterId, submatterId, { concluded });
+    }
+    async function handleSubmatterHolidayAuthorityChange(matterId, submatterId, value) {
+        const holidayAuthorityShortName = getExecutionHolidayAuthority(value) || null;
+        updateSubmatterLocal(matterId, submatterId, (submatter) => {
+            submatter.holidayAuthorityShortName = holidayAuthorityShortName ?? undefined;
+            return submatter;
+        });
+        await persistSubmatter(matterId, submatterId, { holidayAuthorityShortName });
+    }
+    async function handleSubmatterPromotionCommandChange(matterId, submatterId, value) {
+        const promotionCommand = getMatterPromotionCommand(value) || null;
+        updateSubmatterLocal(matterId, submatterId, (submatter) => {
+            submatter.promotionCommand = promotionCommand ?? undefined;
+            return submatter;
+        });
+        await persistSubmatter(matterId, submatterId, { promotionCommand });
+    }
     async function handleGenerateRiInput(matterId) {
         setGeneratingRiMatterIds((current) => new Set(current).add(matterId));
         setErrorMessage(null);
@@ -856,7 +1076,17 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
         }
         try {
             setErrorMessage(null);
-            const eventName = payload.eventName.trim() || panelMatter.subject || "Tarea de ejecucion";
+            const submatterLabel = panelSubmatter ? getSubmatterLabel(panelSubmatter) : "";
+            const eventName = payload.eventName.trim() || submatterLabel || panelMatter.subject || "Tarea de ejecucion";
+            const submatterTaskData = panelSubmatter
+                ? {
+                    executionSubmatterId: panelSubmatter.id,
+                    executionSubmatterLabel: submatterLabel,
+                    executionSubmatterIdentifier: panelSubmatter.matterIdentifier ?? null,
+                    parentMatterId: panelMatter.id,
+                    parentMatterIdentifier: panelMatter.matterIdentifier ?? null
+                }
+                : {};
             await apiPost("/tasks/distributions", {
                 moduleId: module.moduleId,
                 matterId: panelMatter.id,
@@ -864,10 +1094,15 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                 clientNumber: getEffectiveClientNumber(panelMatter, clients),
                 clientName: panelMatter.clientName || "Sin cliente",
                 subject: panelMatter.subject || "",
-                specificProcess: panelMatter.specificProcess ?? null,
+                specificProcess: panelSubmatter?.specificProcess ?? panelMatter.specificProcess ?? null,
                 matterIdentifier: panelMatter.matterIdentifier ?? null,
                 eventName,
                 responsible: payload.responsible,
+                data: {
+                    source: "execution-selector",
+                    activeSource: "tasks-distributor",
+                    ...submatterTaskData
+                },
                 targets: payload.targets.map((target) => {
                     const table = legacyConfig.tables.find((candidate) => candidate.slug === target.tableCode);
                     const taskName = target.taskName.trim() || table?.title || eventName;
@@ -888,7 +1123,8 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                         data: {
                             source: "execution-selector",
                             tableTitle: table?.title,
-                            activeSource: "tasks-distributor"
+                            activeSource: "tasks-distributor",
+                            ...submatterTaskData
                         }
                     };
                 })
@@ -944,11 +1180,15 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
             return;
         }
     }
-    const panelTasks = panelMatter ? getMatterTasks(panelMatter, allTaskMap) : [];
+    const panelTasks = panelMatter
+        ? panelSubmatter
+            ? getSubmatterTasks(panelMatter, panelSubmatter, allTaskMap)
+            : getMatterTasks(panelMatter, allTaskMap)
+        : [];
     return (_jsxs("section", { className: "page-stack execution-page", children: [showHero ? (_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(backPath), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: `${titlePrefix}${module.label}` }) })] })] }), _jsx("p", { className: "muted", children: description })] })) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsxs("div", { className: "matters-toolbar execution-search-toolbar", children: [_jsxs("div", { className: "matters-filters leads-search-filters matters-active-search-filters execution-search-filters", children: [_jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscar por palabra" }), _jsx("input", { type: "text", value: wordSearch, onChange: (event) => setWordSearch(event.target.value), placeholder: "ID, asunto, tarea, nota..." })] }), _jsxs("label", { className: "form-field matters-search-field", children: [_jsx("span", { children: "Buscador por cliente" }), _jsx("input", { type: "text", value: clientSearch, onChange: (event) => setClientSearch(event.target.value), placeholder: "Buscar palabra del cliente..." })] })] }), _jsx("div", { className: "matters-toolbar-actions", children: _jsx("span", { className: "muted", children: "Filtra por cliente y abre cada asunto para crear o consultar tareas del equipo." }) })] })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Asuntos en ejecucion" }), _jsxs("span", { children: [filteredMatters.length, " registros"] })] }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No." }), _jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { className: "execution-wide-text-column", children: "Asunto" }), _jsx("th", { className: "execution-wide-text-column", children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Enviar" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: "Origen" }), _jsx("th", { children: "Ir a tareas activas" }), _jsx("th", { children: "\u00D3rgano para efectos de d\u00EDas inh\u00E1biles" }), _jsx("th", { children: "ID del grupo interno de Telegram" }), _jsx("th", { children: "Nombre del grupo interno de Telegram" }), _jsx("th", { children: _jsxs("span", { className: "ri-table-column-label", children: ["Input de RI", _jsx(RusconiIntelligenceBadge, { connectionId: "RI-001", label: "Ejecucion / Input de RI" })] }) }), _jsx("th", { children: _jsxs("span", { className: "ri-table-column-label", children: ["Caducidad", _jsx(RusconiIntelligenceBadge, { connectionId: CADUCIDAD_RI_CONNECTION_ID, label: "Ejecucion / Caducidad" })] }) }), _jsx("th", { children: "Comando promoci\u00F3n" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "\u00BFConcluyo?" }), _jsx("th", { children: "Comentarios" }), _jsx("th", { children: "Faltantes" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 23, className: "centered-inline-message", children: "Cargando ejecucion..." }) })) : filteredMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 23, className: "centered-inline-message", children: "No hay asuntos del equipo en esta vista." }) })) : (_jsxs(_Fragment, { children: [filteredMatters.map((matter, index) => {
                                                     const clientNumber = getEffectiveClientNumber(matter, clients);
                                                     const matterTasks = getMatterTasks(matter, activeTaskMap);
-                                                    const validation = evaluateExecutionMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
+                                                    const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                                                     const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
                                                     const isGeneratingCaducidadRi = generatingCaducidadRiMatterIds.has(matter.id);
                                                     const isFocusedMatter = matter.id === focusMatterId;
@@ -967,20 +1207,54 @@ export function ExecutionTeamWorkspace({ backPath = "/app/execution", fallbackPa
                                                     ]
                                                         .filter(Boolean)
                                                         .join(" ");
-                                                    return (_jsxs("tr", { id: `execution-matter-row-${matter.id}`, className: rowClassName, title: rowTitle, children: [_jsx("td", { className: "execution-row-index", children: index + 1 }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-derived", value: clientNumber || "-", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.clientName || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.quoteNumber || "", readOnly: true }) }), _jsx("td", { className: "execution-wide-text-column", children: _jsx("div", { className: "lead-cell-input matter-cell-readonly execution-readable-cell", title: matter.subject || "", children: matter.subject || "-" }) }), _jsx("td", { className: "execution-wide-text-column", children: _jsx("div", { className: "lead-cell-input matter-cell-readonly execution-readable-cell", title: matter.specificProcess || "", children: matter.specificProcess || "-" }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.matterIdentifier || "", readOnly: true }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "primary-button matter-inline-button", onClick: () => {
-                                                                        setPanelMatter(matter);
-                                                                        setPanelMode("create");
-                                                                    }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("div", { className: "matter-reflection-card", children: getChannelLabel(matter.communicationChannel) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:subject`)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F" }, `${getTaskViewIdentity(task)}:due-date`)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: matterTasks.map((task) => (_jsxs("span", { className: "execution-origin-entry", children: [_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }), _jsx("button", { type: "button", className: "secondary-button execution-origin-link", onClick: () => navigate(getTaskSourcePath(legacyConfig.slug, task)), title: `Abrir ${task.sourceLabel}`, children: "Ir" })] }, `${getTaskViewIdentity(task)}:origin`))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(getTaskDistributorPath(legacyConfig.slug, matter)), children: "Ir a tareas activas" }) }), _jsx("td", { children: _jsxs("select", { className: "lead-cell-input execution-authority-select", value: getExecutionHolidayAuthority(matter.holidayAuthorityShortName), onChange: (event) => void handleHolidayAuthorityChange(matter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), EXECUTION_HOLIDAY_AUTHORITIES.map((authority) => (_jsx("option", { value: authority, children: authority }, authority)))] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input execution-telegram-id-input", value: matter.internalTelegramGroupId || "", onChange: (event) => handleLocalChange(matter.id, "internalTelegramGroupId", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "-100..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly execution-telegram-name-input", value: matter.internalTelegramGroupName || "", readOnly: true, placeholder: "Pendiente de bot" }) }), _jsx("td", { children: _jsxs("div", { className: "execution-ri-input-cell", children: [_jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.executionPrompt || "", onChange: (event) => handleLocalChange(matter.id, "executionPrompt", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Prompt operativo..." }), generatingRiMatterIds.has(matter.id) ? (_jsx("span", { className: "execution-ri-generation-status", role: "status", children: "Generando RI..." })) : null] }) }), _jsx("td", { children: _jsxs("div", { className: "execution-caducidad-cell", children: [caducidadRiOutput ? (_jsx("div", { className: "lead-cell-input matter-cell-readonly execution-caducidad-output", title: caducidadRiOutput, children: caducidadRiOutput })) : (_jsx("input", { className: "lead-cell-input execution-date-input", type: "date", value: toDateInput(matter.expirationDate), onChange: (event) => {
-                                                                                handleLocalChange(matter.id, "expirationDate", event.target.value);
-                                                                                if (normalizeText(matter.expirationRiOutput)) {
-                                                                                    handleLocalChange(matter.id, "expirationRiOutput", "");
-                                                                                }
-                                                                            }, onBlur: () => handleBlur(matter.id) })), isGeneratingCaducidadRi ? (_jsx("span", { className: "execution-ri-generation-status", role: "status", children: "Calculando RI-004..." })) : null] }) }), _jsx("td", { children: _jsxs("select", { "data-execution-focus": "promotionCommand", className: `lead-cell-input execution-promotion-select${isPromotionCommandFocus ? " is-focused-from-manager" : ""}`, value: getMatterPromotionCommand(matter.promotionCommand), onChange: (event) => void handlePromotionCommandChange(matter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), MATTER_PROMOTION_COMMANDS.map((command) => (_jsx("option", { value: command, children: command }, command)))] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.milestone || "", readOnly: true }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(matter.concluded), onChange: (event) => void handleToggleConcluded(matter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.notes || "", onChange: (event) => handleLocalChange(matter.id, "notes", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Comentarios del equipo..." }) }), _jsx("td", { children: _jsx("div", { "data-execution-focus": "missing", className: `execution-missing-cell ${validation.missing.length > 0 ? "is-missing" : ""}`, title: validation.missing.join(", "), tabIndex: validation.missing.length > 0 ? 0 : undefined, children: validation.missing.length > 0 ? validation.missing.join(", ") : "-" }) })] }, matter.id));
+                                                    return (_jsxs(Fragment, { children: [_jsxs("tr", { id: `execution-matter-row-${matter.id}`, className: rowClassName, title: rowTitle, children: [_jsx("td", { className: "execution-row-index", children: index + 1 }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-derived", value: clientNumber || "-", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.clientName || "", readOnly: true }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.quoteNumber || "", readOnly: true }) }), _jsx("td", { className: "execution-wide-text-column", children: _jsx("div", { className: "lead-cell-input matter-cell-readonly execution-readable-cell", title: matter.subject || "", children: matter.subject || "-" }) }), _jsx("td", { className: "execution-wide-text-column", children: _jsxs("div", { className: "execution-process-cell", children: [_jsx("div", { className: "lead-cell-input matter-cell-readonly execution-readable-cell", title: matter.specificProcess || "", children: matter.specificProcess || "-" }), _jsx("button", { type: "button", className: "secondary-button execution-submatter-add-button", onClick: () => void handleAddSubmatter(matter), children: "+ Subfila" })] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.matterIdentifier || "", readOnly: true }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "primary-button matter-inline-button", onClick: () => {
+                                                                                setPanelMatter(matter);
+                                                                                setPanelSubmatter(null);
+                                                                                setPanelMode("create");
+                                                                            }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("div", { className: "matter-reflection-card", children: getChannelLabel(matter.communicationChannel) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:subject`)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F" }, `${getTaskViewIdentity(task)}:due-date`)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: matterTasks.map((task) => (_jsxs("span", { className: "execution-origin-entry", children: [_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }), _jsx("button", { type: "button", className: "secondary-button execution-origin-link", onClick: () => navigate(getTaskSourcePath(legacyConfig.slug, task)), title: `Abrir ${task.sourceLabel}`, children: "Ir" })] }, `${getTaskViewIdentity(task)}:origin`))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(getTaskDistributorPath(legacyConfig.slug, matter)), children: "Ir a tareas activas" }) }), _jsx("td", { children: _jsxs("select", { className: "lead-cell-input execution-authority-select", value: getExecutionHolidayAuthority(matter.holidayAuthorityShortName), onChange: (event) => void handleHolidayAuthorityChange(matter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), EXECUTION_HOLIDAY_AUTHORITIES.map((authority) => (_jsx("option", { value: authority, children: authority }, authority)))] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input execution-telegram-id-input", value: matter.internalTelegramGroupId || "", onChange: (event) => handleLocalChange(matter.id, "internalTelegramGroupId", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "-100..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly execution-telegram-name-input", value: matter.internalTelegramGroupName || "", readOnly: true, placeholder: "Pendiente de bot" }) }), _jsx("td", { children: _jsxs("div", { className: "execution-ri-input-cell", children: [_jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.executionPrompt || "", onChange: (event) => handleLocalChange(matter.id, "executionPrompt", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Prompt operativo..." }), generatingRiMatterIds.has(matter.id) ? (_jsx("span", { className: "execution-ri-generation-status", role: "status", children: "Generando RI..." })) : null] }) }), _jsx("td", { children: _jsxs("div", { className: "execution-caducidad-cell", children: [caducidadRiOutput ? (_jsx("div", { className: "lead-cell-input matter-cell-readonly execution-caducidad-output", title: caducidadRiOutput, children: caducidadRiOutput })) : (_jsx("input", { className: "lead-cell-input execution-date-input", type: "date", value: toDateInput(matter.expirationDate), onChange: (event) => {
+                                                                                        handleLocalChange(matter.id, "expirationDate", event.target.value);
+                                                                                        if (normalizeText(matter.expirationRiOutput)) {
+                                                                                            handleLocalChange(matter.id, "expirationRiOutput", "");
+                                                                                        }
+                                                                                    }, onBlur: () => handleBlur(matter.id) })), isGeneratingCaducidadRi ? (_jsx("span", { className: "execution-ri-generation-status", role: "status", children: "Calculando RI-004..." })) : null] }) }), _jsx("td", { children: _jsxs("select", { "data-execution-focus": "promotionCommand", className: `lead-cell-input execution-promotion-select${isPromotionCommandFocus ? " is-focused-from-manager" : ""}`, value: getMatterPromotionCommand(matter.promotionCommand), onChange: (event) => void handlePromotionCommandChange(matter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), MATTER_PROMOTION_COMMANDS.map((command) => (_jsx("option", { value: command, children: command }, command)))] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input matter-cell-readonly", value: matter.milestone || "", readOnly: true }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(matter.concluded), onChange: (event) => void handleToggleConcluded(matter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: matter.notes || "", onChange: (event) => handleLocalChange(matter.id, "notes", event.target.value), onBlur: () => handleBlur(matter.id), placeholder: "Comentarios del equipo..." }) }), _jsx("td", { children: _jsx("div", { "data-execution-focus": "missing", className: `execution-missing-cell ${validation.missing.length > 0 ? "is-missing" : ""}`, title: validation.missing.join(", "), tabIndex: validation.missing.length > 0 ? 0 : undefined, children: validation.missing.length > 0 ? validation.missing.join(", ") : "-" }) })] }), (matter.executionSubmatters ?? []).map((submatter, submatterIndex) => {
+                                                                const submatterTasks = getSubmatterTasks(matter, submatter, activeTaskMap);
+                                                                const submatterValidation = evaluateSubmatterRow(submatter, submatterTasks, holidayDateKeysByAuthority);
+                                                                const submatterCaducidadRiOutput = normalizeText(submatter.expirationRiOutput);
+                                                                const submatterRowClassName = [
+                                                                    "execution-submatter-row",
+                                                                    submatterValidation.missing.length > 0 || submatterValidation.isOverdue
+                                                                        ? "execution-row-danger"
+                                                                        : submatterValidation.isNextBusinessDay
+                                                                            ? "execution-row-next-business"
+                                                                            : ""
+                                                                ].filter(Boolean).join(" ");
+                                                                const submatterRowTitle = [
+                                                                    submatterValidation.missing.length > 0
+                                                                        ? `Falta: ${submatterValidation.missing.join(", ")}`
+                                                                        : "",
+                                                                    submatterValidation.isOverdue ? "Tiene tareas vencidas." : ""
+                                                                ].filter(Boolean).join(" ");
+                                                                return (_jsxs("tr", { id: `execution-submatter-row-${submatter.id}`, className: submatterRowClassName, title: submatterRowTitle, children: [_jsx("td", { colSpan: 5, className: "execution-submatter-label-cell", children: _jsxs("div", { className: "execution-submatter-label", children: [_jsxs("span", { children: ["Subfila ", index + 1, ".", submatterIndex + 1] }), _jsx("strong", { children: getSubmatterLabel(submatter) }), _jsx("small", { children: matter.subject || "Asunto madre" }), _jsx("button", { type: "button", className: "danger-button execution-submatter-delete-button", onClick: () => void handleDeleteSubmatter(matter.id, submatter.id), children: "Eliminar" })] }) }), _jsx("td", { className: "execution-wide-text-column", children: _jsx("input", { className: "lead-cell-input", value: submatter.specificProcess || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "specificProcess", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "Proceso especifico del subasunto..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input", value: submatter.matterIdentifier || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "matterIdentifier", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "ID subfila" }) }), _jsx("td", { children: _jsx("button", { type: "button", className: "primary-button matter-inline-button", onClick: () => {
+                                                                                    setPanelMatter(matter);
+                                                                                    setPanelSubmatter(submatter);
+                                                                                    setPanelMode("create");
+                                                                                }, children: "Crear Tarea" }) }), _jsx("td", { children: _jsx("select", { className: "lead-cell-input execution-channel-select", value: submatter.communicationChannel || "WHATSAPP", onChange: (event) => {
+                                                                                    const communicationChannel = event.target.value;
+                                                                                    handleSubmatterLocalChange(matter.id, submatter.id, "communicationChannel", communicationChannel);
+                                                                                    void persistSubmatter(matter.id, submatter.id, { communicationChannel });
+                                                                                }, children: CHANNEL_VALUES.map((channel) => (_jsx("option", { value: channel, children: getChannelLabel(channel) }, channel))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: submatterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (submatterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:submatter-subject`)))) }) }), _jsx("td", { children: _jsx("div", { className: "execution-actions-cell", children: submatterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (submatterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: getEffectiveSubmatterTaskDueDate(task, submatter, holidayDateKeysByAuthority) || "S/F" }, `${getTaskViewIdentity(task)}:submatter-due-date`)))) }) }), _jsx("td", { className: "matter-checkbox-cell", children: submatterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (_jsx("div", { className: "execution-origin-stack", children: submatterTasks.map((task) => (_jsxs("span", { className: "execution-origin-entry", children: [_jsx("span", { className: "matter-origin-indicator", title: task.sourceLabel, children: "i" }), _jsx("button", { type: "button", className: "secondary-button execution-origin-link", onClick: () => navigate(getTaskSourcePath(legacyConfig.slug, task)), title: `Abrir ${task.sourceLabel}`, children: "Ir" })] }, `${getTaskViewIdentity(task)}:submatter-origin`))) })) }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(getTaskDistributorPath(legacyConfig.slug, matter)), children: "Ir a tareas activas" }) }), _jsx("td", { children: _jsxs("select", { className: "lead-cell-input execution-authority-select", value: getExecutionHolidayAuthority(submatter.holidayAuthorityShortName), onChange: (event) => void handleSubmatterHolidayAuthorityChange(matter.id, submatter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), EXECUTION_HOLIDAY_AUTHORITIES.map((authority) => (_jsx("option", { value: authority, children: authority }, authority)))] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input execution-telegram-id-input", value: submatter.internalTelegramGroupId || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "internalTelegramGroupId", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "-100..." }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input execution-telegram-name-input", value: submatter.internalTelegramGroupName || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "internalTelegramGroupName", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "Pendiente de bot" }) }), _jsx("td", { children: _jsx("div", { className: "execution-ri-input-cell", children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: submatter.executionPrompt || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "executionPrompt", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "Prompt operativo..." }) }) }), _jsx("td", { children: _jsxs("div", { className: "execution-caducidad-cell", children: [_jsx("input", { className: "lead-cell-input execution-date-input", type: "date", value: toDateInput(submatter.expirationDate), onChange: (event) => {
+                                                                                            handleSubmatterLocalChange(matter.id, submatter.id, "expirationDate", event.target.value);
+                                                                                            if (submatterCaducidadRiOutput) {
+                                                                                                handleSubmatterLocalChange(matter.id, submatter.id, "expirationRiOutput", "");
+                                                                                            }
+                                                                                        }, onBlur: () => handleSubmatterBlur(matter.id, submatter.id) }), submatterCaducidadRiOutput ? (_jsx("textarea", { className: "lead-cell-input execution-caducidad-note", value: submatter.expirationRiOutput || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "expirationRiOutput", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), "aria-label": "Resultado RI-004" })) : null] }) }), _jsx("td", { children: _jsxs("select", { className: "lead-cell-input execution-promotion-select", value: getMatterPromotionCommand(submatter.promotionCommand), onChange: (event) => void handleSubmatterPromotionCommandChange(matter.id, submatter.id, event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar..." }), MATTER_PROMOTION_COMMANDS.map((command) => (_jsx("option", { value: command, children: command }, command)))] }) }), _jsx("td", { children: _jsx("input", { className: "lead-cell-input", value: submatter.milestone || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "milestone", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "Hito..." }) }), _jsx("td", { className: "matter-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: Boolean(submatter.concluded), onChange: (event) => void handleSubmatterToggleConcluded(matter.id, submatter.id, event.target.checked) }) }), _jsx("td", { children: _jsx("textarea", { className: "lead-cell-input execution-textarea", value: submatter.notes || "", onChange: (event) => handleSubmatterLocalChange(matter.id, submatter.id, "notes", event.target.value), onBlur: () => handleSubmatterBlur(matter.id, submatter.id), placeholder: "Comentarios del subasunto..." }) }), _jsx("td", { children: _jsx("div", { className: `execution-missing-cell ${submatterValidation.missing.length > 0 ? "is-missing" : ""}`, title: submatterValidation.missing.join(", "), tabIndex: submatterValidation.missing.length > 0 ? 0 : undefined, children: submatterValidation.missing.length > 0 ? submatterValidation.missing.join(", ") : "-" }) })] }, submatter.id));
+                                                            })] }, matter.id));
                                                 }), _jsx("tr", { className: "execution-table-note", children: _jsx("td", { colSpan: 23, children: "Para agregar un nuevo asunto, se debe hacer desde el Manager de tareas." }) })] })) })] }) }) })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Papelera de reciclaje" }), _jsxs("span", { children: [filteredDeletedMatters.length, " registros"] })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los asuntos eliminados desaparecen definitivamente despues de 30 dias." }), _jsx("div", { className: "lead-table-shell", children: _jsx("div", { className: "lead-table-wrapper", children: _jsxs("table", { className: "lead-table execution-table execution-table-recycle", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No." }), _jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "No. Cotizacion" }), _jsx("th", { className: "execution-wide-text-column", children: "Asunto" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { children: "Canal" }), _jsx("th", { children: "Siguiente tarea" }), _jsx("th", { children: "Fecha sig. tarea" }), _jsx("th", { children: _jsxs("span", { className: "ri-table-column-label", children: ["Input de RI", _jsx(RusconiIntelligenceBadge, { connectionId: "RI-001", label: "Ejecucion / Input de RI" })] }) }), _jsx("th", { children: _jsxs("span", { className: "ri-table-column-label", children: ["Caducidad", _jsx(RusconiIntelligenceBadge, { connectionId: CADUCIDAD_RI_CONNECTION_ID, label: "Ejecucion / Caducidad" })] }) }), _jsx("th", { children: "Comando promoci\u00F3n" }), _jsx("th", { children: "Hito conclusion" }), _jsx("th", { children: "\u00BFConcluyo?" }), _jsx("th", { children: "Notas" }), _jsx("th", { children: "Accion" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "Cargando papelera..." }) })) : filteredDeletedMatters.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 16, className: "centered-inline-message", children: "Papelera vacia." }) })) : (filteredDeletedMatters.map((matter, index) => {
                                             const matterTasks = getMatterTasks(matter, allTaskMap);
                                             return (_jsxs("tr", { children: [_jsx("td", { className: "execution-row-index", children: index + 1 }), _jsx("td", { children: getEffectiveClientNumber(matter, clients) || "-" }), _jsx("td", { children: matter.clientName || "-" }), _jsx("td", { children: matter.quoteNumber || "-" }), _jsx("td", { className: "execution-wide-text-column", children: _jsx("div", { className: "lead-cell-input matter-cell-readonly execution-readable-cell", title: matter.subject || "", children: matter.subject || "-" }) }), _jsx("td", { children: matter.matterIdentifier || "-" }), _jsx("td", { children: getChannelLabel(matter.communicationChannel) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "Sin tareas" })) : (matterTasks.map((task) => (_jsxs("div", { className: "execution-inline-entry", children: [_jsx("strong", { children: "\u2022" }), " ", task.subject || task.trackLabel] }, `${getTaskViewIdentity(task)}:recycle-subject`)))) }), _jsx("td", { children: matterTasks.length === 0 ? (_jsx("span", { className: "matter-cell-muted", children: "-" })) : (matterTasks.map((task) => (_jsx("div", { className: "execution-inline-entry", children: getEffectiveTaskDueDate(task, matter, holidayDateKeysByAuthority) || "S/F" }, `${getTaskViewIdentity(task)}:recycle-due-date`)))) }), _jsx("td", { children: matter.executionPrompt || "-" }), _jsx("td", { children: getCaducidadColumnValue(matter) || "-" }), _jsx("td", { children: matter.promotionCommand || "-" }), _jsx("td", { children: matter.milestone || "-" }), _jsx("td", { children: matter.concluded ? "Si" : "No" }), _jsx("td", { children: matter.notes || "-" }), _jsx("td", { children: _jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => void handleRestore(matter.id), children: "Regresar" }) })] }, matter.id));
-                                        })) })] }) }) })] }), _jsx(ExecutionTaskPanel, { module: module, legacyConfig: legacyConfig, distributionEvents: distributionEvents, matter: panelMatter, clientNumber: panelMatter ? getEffectiveClientNumber(panelMatter, clients) : "", mode: panelMode, tasks: panelTasks, onClose: () => {
+                                        })) })] }) }) })] }), _jsx(ExecutionTaskPanel, { module: module, legacyConfig: legacyConfig, distributionEvents: distributionEvents, matter: panelMatter, submatter: panelSubmatter, clientNumber: panelMatter ? getEffectiveClientNumber(panelMatter, clients) : "", mode: panelMode, tasks: panelTasks, onClose: () => {
                     setPanelMatter(null);
+                    setPanelSubmatter(null);
                     setPanelMode(null);
                 }, onModeChange: setPanelMode, onCreateTask: handleCreateTask, onUpdateState: handleUpdateTaskState })] }));
 }
