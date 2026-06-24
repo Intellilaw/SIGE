@@ -1725,6 +1725,8 @@ export function ExecutionTeamWorkspace({
                   <>
                     {filteredMatters.map((matter, index) => {
                       const clientNumber = getEffectiveClientNumber(matter, clients);
+                      const submatters = matter.executionSubmatters ?? [];
+                      const hasSubmatters = submatters.length > 0;
                       const matterTasks = getMatterTasks(matter, activeTaskMap);
                       const validation = evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority);
                       const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
@@ -1732,6 +1734,7 @@ export function ExecutionTeamWorkspace({
                       const isFocusedMatter = matter.id === focusMatterId;
                       const isPromotionCommandFocus = isFocusedMatter && focusTarget === "promotionCommand";
                       const rowClassName = [
+                        hasSubmatters ? "execution-row-group-parent" : "",
                         validation.missing.length > 0 || validation.isOverdue
                           ? "execution-row-danger"
                           : validation.isNextBusinessDay
@@ -1748,6 +1751,17 @@ export function ExecutionTeamWorkspace({
 
                       return (
                         <Fragment key={matter.id}>
+                        {hasSubmatters ? (
+                          <tr className="execution-row-group-cap">
+                            <td colSpan={23}>
+                              <div className="execution-row-group-cap-content">
+                                <span>Asunto madre {index + 1}</span>
+                                <strong>{matter.subject || "Asunto sin nombre"}</strong>
+                                <small>{submatters.length === 1 ? "1 subfila" : `${submatters.length} subfilas`}</small>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
                         <tr id={`execution-matter-row-${matter.id}`} className={rowClassName} title={rowTitle}>
                           <td className="execution-row-index">{index + 1}</td>
                           <td>
@@ -1980,7 +1994,7 @@ export function ExecutionTeamWorkspace({
                             </div>
                           </td>
                         </tr>
-                        {(matter.executionSubmatters ?? []).map((submatter, submatterIndex) => {
+                        {submatters.map((submatter, submatterIndex) => {
                           const submatterTasks = getSubmatterTasks(matter, submatter, activeTaskMap);
                           const submatterValidation = evaluateSubmatterRow(
                             submatter,
@@ -1990,6 +2004,8 @@ export function ExecutionTeamWorkspace({
                           const submatterCaducidadRiOutput = normalizeText(submatter.expirationRiOutput);
                           const submatterRowClassName = [
                             "execution-submatter-row",
+                            "execution-row-group-member",
+                            submatterIndex === submatters.length - 1 ? "execution-row-group-last" : "",
                             submatterValidation.missing.length > 0 || submatterValidation.isOverdue
                               ? "execution-row-danger"
                               : submatterValidation.isNextBusinessDay
@@ -2012,9 +2028,11 @@ export function ExecutionTeamWorkspace({
                             >
                               <td colSpan={5} className="execution-submatter-label-cell">
                                 <div className="execution-submatter-label">
-                                  <span>Subfila {index + 1}.{submatterIndex + 1}</span>
-                                  <strong>{getSubmatterLabel(submatter)}</strong>
-                                  <small>{matter.subject || "Asunto madre"}</small>
+                                  <div className="execution-submatter-label-main">
+                                    <span className="execution-submatter-kicker">Subfila {index + 1}.{submatterIndex + 1}</span>
+                                    <strong>{getSubmatterLabel(submatter)}</strong>
+                                    <small>{matter.subject || "Asunto madre"}</small>
+                                  </div>
                                   <button
                                     type="button"
                                     className="danger-button execution-submatter-delete-button"
