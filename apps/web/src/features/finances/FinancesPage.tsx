@@ -94,6 +94,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "280px",
   "190px",
   "420px",
+  "420px",
   "180px",
   "180px",
   "110px",
@@ -147,8 +148,12 @@ const DELINQUENCY_STATUS_OPTIONS: Array<{ value: FinanceRecord["delinquencyStatu
   { value: "MORE_THAN_30", label: "Mora mayor a 30 d\u00edas" }
 ];
 
-const CLIENT_DELINQUENCY_MESSAGES: Record<FinanceDelinquencyStatusWithMessage, { es: string; en: string }> = {
-  DAYS_1_TO_10: {
+const CLIENT_DELINQUENCY_MESSAGES: Record<
+  "ongoing" | "concluded",
+  Record<FinanceDelinquencyStatusWithMessage, { es: string; en: string }>
+> = {
+  ongoing: {
+    DAYS_1_TO_10: {
     es: [
       "*Mora de 1 a 10 d\u00edas*",
       "",
@@ -174,7 +179,7 @@ const CLIENT_DELINQUENCY_MESSAGES: Record<FinanceDelinquencyStatusWithMessage, {
       "*RUSCONI CONSULTING*"
     ].join("\n")
   },
-  MORE_THAN_10: {
+    MORE_THAN_10: {
     es: [
       "*Mora mayor a 10 d\u00edas*",
       "",
@@ -204,7 +209,7 @@ const CLIENT_DELINQUENCY_MESSAGES: Record<FinanceDelinquencyStatusWithMessage, {
       "*RUSCONI CONSULTING*"
     ].join("\n")
   },
-  MORE_THAN_20: {
+    MORE_THAN_20: {
     es: [
       "*Mora mayor a 20 d\u00edas*",
       "",
@@ -234,7 +239,7 @@ const CLIENT_DELINQUENCY_MESSAGES: Record<FinanceDelinquencyStatusWithMessage, {
       "*RUSCONI CONSULTING*"
     ].join("\n")
   },
-  MORE_THAN_30: {
+    MORE_THAN_30: {
     es: [
       "*Mora mayor a 30 d\u00edas*",
       "",
@@ -263,6 +268,129 @@ const CLIENT_DELINQUENCY_MESSAGES: Record<FinanceDelinquencyStatusWithMessage, {
       "Sincerely,",
       "*RUSCONI CONSULTING*"
     ].join("\n")
+    }
+  },
+  concluded: {
+    DAYS_1_TO_10: {
+      es: [
+        "*Mora de 1 a 10 d\u00edas*",
+        "",
+        "Estimado cliente,",
+        "",
+        "Le recordamos que el pago correspondiente contin\u00faa pendiente y su fecha de vencimiento ya transcurri\u00f3.",
+        "",
+        "Le agradeceremos confirmarnos si podemos contar con el pago el d\u00eda de hoy, o en su caso indicarnos cualquier duda que est\u00e9 impidiendo regularizarlo.",
+        "",
+        "Agradeceremos mucho que pueda atender este asunto a la brevedad.",
+        "",
+        "Atentamente,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n"),
+      en: [
+        "*1 to 10 days past due*",
+        "",
+        "Dear client,",
+        "",
+        "We would like to remind you that the corresponding payment remains outstanding and its due date has already passed.",
+        "",
+        "We would appreciate your confirmation as to whether we can count on receiving the payment today, or, if applicable, whether there is any question preventing its regularization.",
+        "",
+        "We would greatly appreciate your prompt attention to this matter.",
+        "",
+        "Sincerely,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n")
+    },
+    MORE_THAN_10: {
+      es: [
+        "*Mora mayor a 10 d\u00edas*",
+        "",
+        "Estimado cliente,",
+        "",
+        "Le informamos que el pago pendiente presenta un atraso mayor a 10 d\u00edas.",
+        "",
+        "Hemos dado seguimiento al asunto y agradeceremos que nos confirme si podemos contar con el pago el d\u00eda de hoy. En caso de existir alguna duda o situaci\u00f3n que lo est\u00e9 impidiendo, le pedimos hac\u00e9rnoslo saber de inmediato.",
+        "",
+        "Agradeceremos mucho que atienda este asunto con car\u00e1cter urgente.",
+        "",
+        "Atentamente,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n"),
+      en: [
+        "*More than 10 days past due*",
+        "",
+        "Dear client,",
+        "",
+        "We inform you that the outstanding payment is more than 10 days past due.",
+        "",
+        "We have followed up on this matter and would appreciate your confirmation as to whether we can count on receiving the payment today. If there is any question or situation preventing payment, please let us know immediately.",
+        "",
+        "We would greatly appreciate your urgent attention to this matter.",
+        "",
+        "Sincerely,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n")
+    },
+    MORE_THAN_20: {
+      es: [
+        "*Mora mayor a 20 d\u00edas*",
+        "",
+        "Estimado cliente,",
+        "",
+        "Le informamos que el pago pendiente presenta un atraso mayor a 20 d\u00edas.",
+        "",
+        "A la fecha no hemos recibido la regularizaci\u00f3n correspondiente, por lo que le solicitamos confirmar si podemos contar con el pago el d\u00eda de hoy.",
+        "",
+        "Agradeceremos atender este asunto de forma urgente, a fin de evitar gestiones adicionales de cobranza y seguimiento administrativo.",
+        "",
+        "Atentamente,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n"),
+      en: [
+        "*More than 20 days past due*",
+        "",
+        "Dear client,",
+        "",
+        "We inform you that the outstanding payment is more than 20 days past due.",
+        "",
+        "To date, we have not received the corresponding regularization, so we ask you to confirm whether we can count on receiving the payment today.",
+        "",
+        "We would appreciate your urgent attention to this matter in order to avoid additional collection and administrative follow-up actions.",
+        "",
+        "Sincerely,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n")
+    },
+    MORE_THAN_30: {
+      es: [
+        "*Mora mayor a 30 d\u00edas*",
+        "",
+        "Estimado cliente,",
+        "",
+        "Le informamos que el pago pendiente presenta un atraso mayor a 30 d\u00edas.",
+        "",
+        "A pesar del seguimiento realizado, no hemos recibido la regularizaci\u00f3n correspondiente. Por lo anterior, le solicitamos confirmar de inmediato si podemos contar con el pago el d\u00eda de hoy.",
+        "",
+        "Este asunto requiere atenci\u00f3n urgente, a fin de evitar gestiones adicionales de cobranza y el escalamiento administrativo correspondiente.",
+        "",
+        "Atentamente,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n"),
+      en: [
+        "*More than 30 days past due*",
+        "",
+        "Dear client,",
+        "",
+        "We inform you that the outstanding payment is more than 30 days past due.",
+        "",
+        "Despite our follow-up, we have not received the corresponding regularization. Therefore, we ask you to immediately confirm whether we can count on receiving the payment today.",
+        "",
+        "This matter requires urgent attention in order to avoid additional collection actions and the corresponding administrative escalation.",
+        "",
+        "Sincerely,",
+        "*RUSCONI CONSULTING*"
+      ].join("\n")
+    }
   }
 };
 
@@ -613,12 +741,15 @@ function getReceivedPaymentsMxn(
   return payment1Mxn + payment2Mxn + payment3Mxn;
 }
 
-function getClientDelinquencyMessage(status?: FinanceRecord["delinquencyStatus"] | null) {
+function getClientDelinquencyMessage(
+  status: FinanceRecord["delinquencyStatus"] | null | undefined,
+  serviceStatus: "ongoing" | "concluded"
+) {
   if (!status || status === "CURRENT") {
     return { es: "", en: "" };
   }
 
-  return CLIENT_DELINQUENCY_MESSAGES[status as FinanceDelinquencyStatusWithMessage] ?? { es: "", en: "" };
+  return CLIENT_DELINQUENCY_MESSAGES[serviceStatus][status as FinanceDelinquencyStatusWithMessage] ?? { es: "", en: "" };
 }
 
 async function copyTextToClipboard(text: string) {
@@ -1675,7 +1806,8 @@ export function FinancesPage() {
           <th>Fecha de proximo pago</th>
           <th>Detalle Fecha</th>
           <th>{"\u00bfEn mora?"}</th>
-          <th>Mensaje para cliente</th>
+          <th>Mensaje para clientes de servicios en curso</th>
+          <th>Mensaje para clientes de servicios concluidos</th>
           <th>Pagado este mes</th>
           <th>Fecha Pago Real</th>
           <th>Método de pago</th>
@@ -1777,10 +1909,10 @@ export function FinancesPage() {
       );
     };
 
-    const renderClientMessage = (record: FinanceRecord) => {
-      const messages = getClientDelinquencyMessage(record.delinquencyStatus);
-      const spanishCopyKey = `${record.id}:es`;
-      const englishCopyKey = `${record.id}:en`;
+    const renderClientMessage = (record: FinanceRecord, serviceStatus: "ongoing" | "concluded") => {
+      const messages = getClientDelinquencyMessage(record.delinquencyStatus, serviceStatus);
+      const spanishCopyKey = `${record.id}:${serviceStatus}:es`;
+      const englishCopyKey = `${record.id}:${serviceStatus}:en`;
 
       if (!messages.es) {
         return <div aria-hidden="true" className="finance-client-message-empty" />;
@@ -1878,7 +2010,8 @@ export function FinancesPage() {
                       ))}
                     </select>
                   </td>
-                  <td>{renderClientMessage(record)}</td>
+                  <td>{renderClientMessage(record, "ongoing")}</td>
+                  <td>{renderClientMessage(record, "concluded")}</td>
                   <td>
                     <div className="finance-stack">
                       <CurrencyInput value={record.paidThisMonthMxn} readOnly={payment1Locked} onValueChange={(paidThisMonthMxn) => updateRecordLocal(record.id, { paidThisMonthMxn })} onValueCommit={(paidThisMonthMxn) => void persistRecordPatch(record.id, { paidThisMonthMxn })} />
@@ -1970,7 +2103,7 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={52}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={53}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
@@ -1980,6 +2113,7 @@ export function FinancesPage() {
               <td />
               <td>{formatCurrency(totals.conceptFeesMxn)}</td>
               <td colSpan={2} />
+              <td />
               <td />
               <td />
               <td>{formatCurrency(totals.totalPaidMxn)}</td>

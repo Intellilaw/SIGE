@@ -1145,6 +1145,259 @@ export interface BudgetPlanSnapshot {
   createdAt: string;
 }
 
+export type AccountingAccountType = "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "COST" | "EXPENSE";
+export type AccountingAccountNature = "DEBIT" | "CREDIT";
+export type AccountingPeriodStatus = "OPEN" | "REVIEWED" | "SAT_EXPORTED";
+export type AccountingEntryType = "OPENING" | "MANUAL" | "FINANCE_INCOME" | "FINANCE_PAYMENT" | "GENERAL_EXPENSE" | "CFDI" | "ADJUSTMENT";
+export type AccountingEntryStatus = "DRAFT" | "POSTED" | "ERROR";
+export type AccountingCfdiStatus = "UPLOADED" | "LINKED" | "POSTED" | "DUPLICATE" | "ERROR";
+export type AccountingRuleType =
+  | "FINANCE_INCOME"
+  | "FINANCE_PAYMENT"
+  | "GENERAL_EXPENSE"
+  | "GENERAL_EXPENSE_TEAM"
+  | "BANK"
+  | "IVA"
+  | "DEFAULT";
+
+export interface AccountingAccount {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountingAccountType;
+  subtype?: string;
+  satGroupingCode?: string;
+  parentId?: string;
+  level: number;
+  nature: AccountingAccountNature;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountingPeriod {
+  id: string;
+  year: number;
+  month: number;
+  status: AccountingPeriodStatus;
+  exportedAt?: string;
+  requiresRegeneration: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountingCfdiDocument {
+  id: string;
+  uuid: string;
+  version?: string;
+  type: string;
+  issuerRfc: string;
+  issuerName?: string;
+  receiverRfc: string;
+  receiverName?: string;
+  issueDate?: string;
+  certificationDate?: string;
+  subtotalMxn: number;
+  discountMxn: number;
+  taxMxn: number;
+  totalMxn: number;
+  currency: string;
+  paymentMethod?: string;
+  paymentForm?: string;
+  usage?: string;
+  status: AccountingCfdiStatus;
+  linkedSourceType?: string;
+  linkedSourceId?: string;
+  originalFileName: string;
+  parsedData?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountingJournalLine {
+  id: string;
+  entryId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  description: string;
+  debitMxn: number;
+  creditMxn: number;
+  sourceType?: string;
+  sourceId?: string;
+  createdAt: string;
+}
+
+export interface AccountingJournalEntry {
+  id: string;
+  year: number;
+  month: number;
+  entryDate: string;
+  number: string;
+  entryType: AccountingEntryType;
+  status: AccountingEntryStatus;
+  description: string;
+  sourceType?: string;
+  sourceId?: string;
+  sourceFingerprint?: string;
+  cfdiDocumentId?: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdAt: string;
+  updatedAt: string;
+  lines: AccountingJournalLine[];
+  totalDebitMxn: number;
+  totalCreditMxn: number;
+  balanced: boolean;
+}
+
+export interface AccountingRule {
+  id: string;
+  ruleType: AccountingRuleType;
+  sourceKey: string;
+  accountId: string;
+  taxAccountId?: string;
+  cashAccountId?: string;
+  counterAccountId?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountingSettings {
+  companyRfc?: string;
+  legalName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountingSettingsInput {
+  companyRfc?: string | null;
+  legalName?: string | null;
+}
+
+export interface AccountingTrialBalanceLine {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountType: AccountingAccountType;
+  openingDebitMxn: number;
+  openingCreditMxn: number;
+  periodDebitMxn: number;
+  periodCreditMxn: number;
+  endingDebitMxn: number;
+  endingCreditMxn: number;
+}
+
+export interface AccountingFinancialStatementLine {
+  accountType: AccountingAccountType;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  amountMxn: number;
+}
+
+export interface AccountingAuxiliaryLine {
+  entryId: string;
+  entryDate: string;
+  number: string;
+  description: string;
+  debitMxn: number;
+  creditMxn: number;
+  balanceMxn: number;
+}
+
+export interface AccountingPendingItem {
+  id: string;
+  sourceType: string;
+  sourceId?: string;
+  label: string;
+  detail: string;
+  severity: "INFO" | "WARNING" | "ERROR";
+}
+
+export interface AccountingOverview {
+  period: AccountingPeriod;
+  settings: AccountingSettings;
+  accounts: AccountingAccount[];
+  entries: AccountingJournalEntry[];
+  cfdiDocuments: AccountingCfdiDocument[];
+  trialBalance: AccountingTrialBalanceLine[];
+  balanceSheet: AccountingFinancialStatementLine[];
+  incomeStatement: AccountingFinancialStatementLine[];
+  pendingItems: AccountingPendingItem[];
+  totals: {
+    assetsMxn: number;
+    liabilitiesMxn: number;
+    equityMxn: number;
+    incomeMxn: number;
+    costsMxn: number;
+    expensesMxn: number;
+    netIncomeMxn: number;
+    trialBalanceDebitMxn: number;
+    trialBalanceCreditMxn: number;
+  };
+}
+
+export interface AccountingCreateAccountInput {
+  code: string;
+  name: string;
+  type: AccountingAccountType;
+  subtype?: string | null;
+  satGroupingCode?: string | null;
+  parentId?: string | null;
+  nature?: AccountingAccountNature;
+}
+
+export interface AccountingJournalLineInput {
+  accountId: string;
+  description?: string | null;
+  debitMxn?: number | null;
+  creditMxn?: number | null;
+}
+
+export interface AccountingJournalEntryInput {
+  year: number;
+  month: number;
+  entryDate: string;
+  entryType?: AccountingEntryType;
+  description?: string | null;
+  lines: AccountingJournalLineInput[];
+}
+
+export interface AccountingInitialBalanceInput {
+  year: number;
+  accountId: string;
+  debitMxn?: number | null;
+  creditMxn?: number | null;
+  description?: string | null;
+}
+
+export interface AccountingCfdiUploadInput {
+  originalFileName: string;
+  xmlBase64: string;
+}
+
+export interface AccountingCfdiUploadResult {
+  imported: AccountingCfdiDocument[];
+  duplicates: AccountingCfdiDocument[];
+  errors: Array<{ originalFileName: string; message: string }>;
+}
+
+export interface AccountingAutomationResult {
+  created: AccountingJournalEntry[];
+  skipped: AccountingPendingItem[];
+}
+
+export interface AccountingXmlExportResult {
+  fileName: string;
+  content: string;
+  format: "CATALOGO" | "BALANZA" | "POLIZAS" | "AUXILIAR_CUENTAS" | "AUXILIAR_FOLIOS";
+  generatedAt: string;
+}
+
 export type TaskState = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "MONTHLY_VIEW";
 export type TaskMode = "STATUS" | "WORKFLOW";
 

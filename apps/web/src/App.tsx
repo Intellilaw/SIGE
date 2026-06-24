@@ -32,6 +32,7 @@ import { LeadsPage } from "./features/workbench/LeadsPage";
 import { MattersPage } from "./features/workbench/MattersPage";
 import { MatterCatalogPage } from "./features/workbench/MatterCatalogPage";
 import { BudgetPlanningPage } from "./features/budget-planning/BudgetPlanningPage";
+import { AccountingPage } from "./features/accounting/AccountingPage";
 import { CommissionsPage } from "./features/commissions/CommissionsPage";
 import { FinancesPage } from "./features/finances/FinancesPage";
 import { GeneralSupervisionPage } from "./features/general-supervision/GeneralSupervisionPage";
@@ -137,6 +138,7 @@ export default function App() {
             <Route path="finances" element={withEnabledModule("finances", <FinancesPage />)} />
             <Route path="budget-planning" element={withEnabledModule("budget-planning", <BudgetPlanningPage />)} />
             <Route path="general-expenses" element={withEnabledModule("general-expenses", <GeneralExpensesPage />)} />
+            <Route path="accounting" element={withEnabledModule("accounting", <AccountingPage />)} />
             <Route path="commissions" element={withEnabledModule("commissions", <CommissionsPage />)} />
             <Route path="general-supervision" element={withEnabledModule("general-supervision", <GeneralSupervisionPage />)} />
             <Route path="rusconi-intelligence" element={withEnabledModule("rusconi-intelligence", <RusconiIntelligencePage />)} />

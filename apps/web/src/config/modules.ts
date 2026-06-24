@@ -142,6 +142,17 @@ export const appModules: AppModuleDefinition[] = [
     coverage: ["Carga de gastos", "Validacion por metodo de pago", "Resumen diario EMRT", "Control administrativo"]
   },
   {
+    id: "accounting",
+    path: "/app/accounting",
+    label: "Contabilidad",
+    shortLabel: "Contabilidad",
+    icon: "\u{1F9FE}",
+    description: "Motor contable por empresa con catalogo de cuentas, polizas, CFDI, reportes y XML SAT.",
+    phase: "Operativo",
+    available: true,
+    coverage: ["Catalogo de cuentas", "Polizas manuales y automaticas", "CFDI masivo", "Balanza y estados financieros", "XML SAT"]
+  },
+  {
     id: "commissions",
     path: "/app/commissions",
     label: "Comisiones",

@@ -17,6 +17,7 @@ const MODULE_ACCESS = {
     },
     tasks: { read: ["tasks:read", "external-tasks:read", "external-tasks:write"] },
     finances: { read: ["finances:read", "finances:write", "finances:monthly:read", "external-finances:read"], write: ["finances:write"] },
+    accounting: { read: ["accounting:read", "accounting:write", "finances:read", "finances:write"], write: ["accounting:write", "finances:write"] },
     "budget-planning": {
         read: ["budget-planning:read", "budget-planning:write"],
         write: ["budget-planning:write"]

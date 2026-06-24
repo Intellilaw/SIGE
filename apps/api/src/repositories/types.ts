@@ -1,5 +1,18 @@
 import type {
   AuthUser,
+  AccountingAccount,
+  AccountingAutomationResult,
+  AccountingCfdiDocument,
+  AccountingCfdiUploadInput,
+  AccountingCfdiUploadResult,
+  AccountingCreateAccountInput,
+  AccountingInitialBalanceInput,
+  AccountingJournalEntry,
+  AccountingJournalEntryInput,
+  AccountingOverview,
+  AccountingSettings,
+  AccountingSettingsInput,
+  AccountingXmlExportResult,
   BudgetPlan,
   BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
@@ -563,6 +576,19 @@ export interface BudgetPlanningRepository {
     month: number;
     copied: number;
   }>;
+}
+
+export interface AccountingRepository {
+  getOverview(year: number, month: number): Promise<AccountingOverview>;
+  updateSettings(payload: AccountingSettingsInput): Promise<AccountingSettings>;
+  initializeStandardCatalog(): Promise<AccountingAccount[]>;
+  createAccount(payload: AccountingCreateAccountInput): Promise<AccountingAccount>;
+  updateAccount(accountId: string, payload: Partial<AccountingCreateAccountInput> & { isActive?: boolean }): Promise<AccountingAccount>;
+  createJournalEntry(payload: AccountingJournalEntryInput, actor?: { userId?: string; displayName?: string }): Promise<AccountingJournalEntry>;
+  createOpeningBalance(payload: AccountingInitialBalanceInput, actor?: { userId?: string; displayName?: string }): Promise<AccountingJournalEntry>;
+  uploadCfdiDocuments(files: AccountingCfdiUploadInput[]): Promise<AccountingCfdiUploadResult>;
+  generateAutomaticEntries(year: number, month: number): Promise<AccountingAutomationResult>;
+  exportSatXml(year: number, month: number, format: AccountingXmlExportResult["format"]): Promise<AccountingXmlExportResult>;
 }
 
 export interface FinanceRecordWriteRecord {

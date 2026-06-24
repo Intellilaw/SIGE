@@ -429,6 +429,8 @@ export function derivePermissions(input: {
       permissions.add("matters:read");
       permissions.add("finances:read");
       permissions.add("finances:write");
+      permissions.add("accounting:read");
+      permissions.add("accounting:write");
       permissions.add("budget-planning:read");
       permissions.add("budget-planning:write");
       permissions.add("general-expenses:read");
@@ -443,6 +445,7 @@ export function derivePermissions(input: {
     if (teamKey === "ADMIN_OPERATIONS" || normalizedTeam === "servicios administrativos") {
       permissions.add("general-expenses:read");
       permissions.add("general-expenses:write");
+      permissions.add("accounting:read");
       permissions.add("budget-planning:read");
       permissions.add("budget-planning:write");
       permissions.add("internal-contracts:read");

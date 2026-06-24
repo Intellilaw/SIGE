@@ -33,6 +33,13 @@ model Organization {
   financeRecords                   FinanceRecord[]
   financeSnapshots                 FinanceSnapshot[]
   commissionSnapshots              CommissionSnapshot[]
+  accountingAccounts               AccountingAccount[]
+  accountingPeriods                AccountingPeriod[]
+  accountingCfdiDocuments          AccountingCfdiDocument[]
+  accountingJournalEntries         AccountingJournalEntry[]
+  accountingJournalLines           AccountingJournalLine[]
+  accountingRules                  AccountingRule[]
+  accountingSettings               AccountingSettings?
   taskItems                        TaskItem[]
   taskTrackingRecords              TaskTrackingRecord[]
   taskTerms                        TaskTerm[]
@@ -737,6 +744,162 @@ model CommissionSnapshot {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, year, month, section, createdAt])
+}
+
+model AccountingAccount {
+  id              String                  @id @default(uuid())
+  organizationId  String                  @default("org-rusconi")
+  code            String
+  name            String
+  type            String
+  subtype         String?
+  satGroupingCode String?
+  parentId        String?
+  level           Int                     @default(1)
+  nature          String                  @default("DEBIT")
+  isActive        Boolean                 @default(true)
+  isDefault       Boolean                 @default(false)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parent          AccountingAccount?      @relation("AccountingAccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children        AccountingAccount[]     @relation("AccountingAccountTree")
+  lines           AccountingJournalLine[]
+  rules           AccountingRule[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, type, isActive])
+  @@index([organizationId, parentId])
+}
+
+model AccountingPeriod {
+  id                   String       @id @default(uuid())
+  organizationId       String       @default("org-rusconi")
+  year                 Int
+  month                Int
+  status               String       @default("OPEN")
+  exportedAt           DateTime?
+  requiresRegeneration Boolean      @default(false)
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, year, month])
+  @@index([organizationId, year, month, status])
+}
+
+model AccountingCfdiDocument {
+  id                String                   @id @default(uuid())
+  organizationId    String                   @default("org-rusconi")
+  uuid              String
+  version           String?
+  type              String
+  issuerRfc         String
+  issuerName        String?
+  receiverRfc       String
+  receiverName      String?
+  issueDate         DateTime?
+  certificationDate DateTime?
+  subtotalMxn       Decimal                  @default(0)
+  discountMxn       Decimal                  @default(0)
+  taxMxn            Decimal                  @default(0)
+  totalMxn          Decimal                  @default(0)
+  currency          String                   @default("MXN")
+  paymentMethod     String?
+  paymentForm       String?
+  usage             String?
+  status            String                   @default("UPLOADED")
+  linkedSourceType  String?
+  linkedSourceId    String?
+  originalFileName  String
+  xmlContent        String                   @db.Text
+  parsedData        Json?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  organization      Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  journalEntries    AccountingJournalEntry[]
+
+  @@unique([organizationId, uuid])
+  @@index([organizationId, issueDate])
+  @@index([organizationId, issuerRfc])
+  @@index([organizationId, receiverRfc])
+}
+
+model AccountingJournalEntry {
+  id                String                  @id @default(uuid())
+  organizationId    String                  @default("org-rusconi")
+  year              Int
+  month             Int
+  entryDate         DateTime                @db.Date
+  number            String
+  entryType         String                  @default("MANUAL")
+  status            String                  @default("POSTED")
+  description       String                  @default("")
+  sourceType        String?
+  sourceId          String?
+  sourceFingerprint String?
+  cfdiDocumentId    String?
+  createdByUserId   String?
+  createdByName     String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  cfdiDocument      AccountingCfdiDocument? @relation(fields: [cfdiDocumentId], references: [id], onDelete: SetNull)
+  lines             AccountingJournalLine[]
+
+  @@unique([organizationId, year, month, number])
+  @@unique([organizationId, sourceType, sourceFingerprint])
+  @@index([organizationId, year, month, entryDate])
+  @@index([organizationId, sourceType, sourceId])
+}
+
+model AccountingJournalLine {
+  id             String                 @id @default(uuid())
+  organizationId String                 @default("org-rusconi")
+  entryId        String
+  accountId      String
+  description    String                 @default("")
+  debitMxn       Decimal                @default(0)
+  creditMxn      Decimal                @default(0)
+  sourceType     String?
+  sourceId       String?
+  createdAt      DateTime               @default(now())
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  entry          AccountingJournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account        AccountingAccount      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, entryId])
+  @@index([organizationId, accountId, createdAt])
+  @@index([organizationId, sourceType, sourceId])
+}
+
+model AccountingRule {
+  id               String            @id @default(uuid())
+  organizationId   String            @default("org-rusconi")
+  ruleType         String
+  sourceKey        String
+  accountId        String
+  taxAccountId     String?
+  cashAccountId    String?
+  counterAccountId String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  account          AccountingAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, ruleType, sourceKey])
+  @@index([organizationId, ruleType, isActive])
+}
+
+model AccountingSettings {
+  organizationId String       @id @default("org-rusconi")
+  companyRfc     String?
+  legalName      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 }
 
 model TaskModule {

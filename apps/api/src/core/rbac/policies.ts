@@ -12,6 +12,8 @@ export const BASE_PERMISSIONS = {
   mattersWrite: "matters:write",
   financesRead: "finances:read",
   financesWrite: "finances:write",
+  accountingRead: "accounting:read",
+  accountingWrite: "accounting:write",
   budgetPlanningRead: "budget-planning:read",
   budgetPlanningWrite: "budget-planning:write",
   generalExpensesRead: "general-expenses:read",

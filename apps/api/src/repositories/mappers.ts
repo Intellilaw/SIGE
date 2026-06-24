@@ -1,6 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import type {
   AuthUser,
+  AccountingAccount,
+  AccountingCfdiDocument,
+  AccountingJournalEntry,
+  AccountingJournalLine,
+  AccountingPeriod,
+  AccountingRule,
+  AccountingSettings,
   BudgetPlan,
   BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
@@ -1674,6 +1681,232 @@ export function mapGeneralExpensePayrollEntry(record: {
     payrollStampedByAraceli: record.payrollStampedByAraceli,
     finalPaymentApprovedByEmrt: record.finalPaymentApprovedByEmrt,
     reviewedByJnls: record.reviewedByJnls,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapAccountingAccount(record: {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  subtype: string | null;
+  satGroupingCode: string | null;
+  parentId: string | null;
+  level: number;
+  nature: string;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}): AccountingAccount {
+  return {
+    id: record.id,
+    code: record.code,
+    name: record.name,
+    type: record.type as AccountingAccount["type"],
+    subtype: record.subtype ?? undefined,
+    satGroupingCode: record.satGroupingCode ?? undefined,
+    parentId: record.parentId ?? undefined,
+    level: record.level,
+    nature: record.nature as AccountingAccount["nature"],
+    isActive: record.isActive,
+    isDefault: record.isDefault,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapAccountingPeriod(record: {
+  id: string;
+  year: number;
+  month: number;
+  status: string;
+  exportedAt: Date | null;
+  requiresRegeneration: boolean;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): AccountingPeriod {
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    status: record.status as AccountingPeriod["status"],
+    exportedAt: record.exportedAt?.toISOString(),
+    requiresRegeneration: record.requiresRegeneration,
+    notes: record.notes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapAccountingCfdiDocument(record: {
+  id: string;
+  uuid: string;
+  version: string | null;
+  type: string;
+  issuerRfc: string;
+  issuerName: string | null;
+  receiverRfc: string;
+  receiverName: string | null;
+  issueDate: Date | null;
+  certificationDate: Date | null;
+  subtotalMxn: Prisma.Decimal;
+  discountMxn: Prisma.Decimal;
+  taxMxn: Prisma.Decimal;
+  totalMxn: Prisma.Decimal;
+  currency: string;
+  paymentMethod: string | null;
+  paymentForm: string | null;
+  usage: string | null;
+  status: string;
+  linkedSourceType: string | null;
+  linkedSourceId: string | null;
+  originalFileName: string;
+  parsedData: Prisma.JsonValue | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): AccountingCfdiDocument {
+  return {
+    id: record.id,
+    uuid: record.uuid,
+    version: record.version ?? undefined,
+    type: record.type,
+    issuerRfc: record.issuerRfc,
+    issuerName: record.issuerName ?? undefined,
+    receiverRfc: record.receiverRfc,
+    receiverName: record.receiverName ?? undefined,
+    issueDate: record.issueDate?.toISOString(),
+    certificationDate: record.certificationDate?.toISOString(),
+    subtotalMxn: Number(record.subtotalMxn),
+    discountMxn: Number(record.discountMxn),
+    taxMxn: Number(record.taxMxn),
+    totalMxn: Number(record.totalMxn),
+    currency: record.currency,
+    paymentMethod: record.paymentMethod ?? undefined,
+    paymentForm: record.paymentForm ?? undefined,
+    usage: record.usage ?? undefined,
+    status: record.status as AccountingCfdiDocument["status"],
+    linkedSourceType: record.linkedSourceType ?? undefined,
+    linkedSourceId: record.linkedSourceId ?? undefined,
+    originalFileName: record.originalFileName,
+    parsedData: asRecord(record.parsedData),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapAccountingJournalLine(record: {
+  id: string;
+  entryId: string;
+  accountId: string;
+  account: { code: string; name: string };
+  description: string;
+  debitMxn: Prisma.Decimal;
+  creditMxn: Prisma.Decimal;
+  sourceType: string | null;
+  sourceId: string | null;
+  createdAt: Date;
+}): AccountingJournalLine {
+  return {
+    id: record.id,
+    entryId: record.entryId,
+    accountId: record.accountId,
+    accountCode: record.account.code,
+    accountName: record.account.name,
+    description: record.description,
+    debitMxn: Number(record.debitMxn),
+    creditMxn: Number(record.creditMxn),
+    sourceType: record.sourceType ?? undefined,
+    sourceId: record.sourceId ?? undefined,
+    createdAt: record.createdAt.toISOString()
+  };
+}
+
+export function mapAccountingJournalEntry(record: {
+  id: string;
+  year: number;
+  month: number;
+  entryDate: Date;
+  number: string;
+  entryType: string;
+  status: string;
+  description: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  sourceFingerprint: string | null;
+  cfdiDocumentId: string | null;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lines: Array<Parameters<typeof mapAccountingJournalLine>[0]>;
+}): AccountingJournalEntry {
+  const lines = record.lines.map(mapAccountingJournalLine);
+  const totalDebitMxn = lines.reduce((sum, line) => sum + line.debitMxn, 0);
+  const totalCreditMxn = lines.reduce((sum, line) => sum + line.creditMxn, 0);
+
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    entryDate: record.entryDate.toISOString().slice(0, 10),
+    number: record.number,
+    entryType: record.entryType as AccountingJournalEntry["entryType"],
+    status: record.status as AccountingJournalEntry["status"],
+    description: record.description,
+    sourceType: record.sourceType ?? undefined,
+    sourceId: record.sourceId ?? undefined,
+    sourceFingerprint: record.sourceFingerprint ?? undefined,
+    cfdiDocumentId: record.cfdiDocumentId ?? undefined,
+    createdByUserId: record.createdByUserId ?? undefined,
+    createdByName: record.createdByName ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    lines,
+    totalDebitMxn,
+    totalCreditMxn,
+    balanced: Math.abs(totalDebitMxn - totalCreditMxn) < 0.01
+  };
+}
+
+export function mapAccountingRule(record: {
+  id: string;
+  ruleType: string;
+  sourceKey: string;
+  accountId: string;
+  taxAccountId: string | null;
+  cashAccountId: string | null;
+  counterAccountId: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}): AccountingRule {
+  return {
+    id: record.id,
+    ruleType: record.ruleType as AccountingRule["ruleType"],
+    sourceKey: record.sourceKey,
+    accountId: record.accountId,
+    taxAccountId: record.taxAccountId ?? undefined,
+    cashAccountId: record.cashAccountId ?? undefined,
+    counterAccountId: record.counterAccountId ?? undefined,
+    isActive: record.isActive,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapAccountingSettings(record: {
+  companyRfc: string | null;
+  legalName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): AccountingSettings {
+  return {
+    companyRfc: record.companyRfc ?? undefined,
+    legalName: record.legalName ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

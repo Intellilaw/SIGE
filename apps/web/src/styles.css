@@ -5952,7 +5952,7 @@ textarea {
 }
 
 .finance-table-monthly-x-nav-spacer {
-  width: 9640px;
+  width: 10060px;
 }
 
 .finance-active-table-x-nav-spacer {
@@ -6002,7 +6002,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 9640px; font-size: 0.82rem; table-layout: fixed; }
+.finance-table-monthly { min-width: 10060px; font-size: 0.82rem; table-layout: fixed; }
 .finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
@@ -11362,5 +11362,194 @@ textarea {
 
   .sales-product-logo-shell {
     min-height: 92px;
+  }
+}
+
+.accounting-page {
+  max-width: 1440px;
+}
+
+.accounting-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.accounting-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.accounting-metric {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.accounting-metric span,
+.accounting-report-line span,
+.accounting-pending-item span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.accounting-metric strong {
+  color: #0f172a;
+  font-size: 1.3rem;
+}
+
+.accounting-grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.accounting-grid-two-wide {
+  align-items: start;
+}
+
+.accounting-grid-two-wide > .panel {
+  min-width: 0;
+}
+
+.accounting-span-two {
+  grid-column: 1 / -1;
+}
+
+.accounting-compact-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.accounting-form-grid,
+.accounting-form-grid-wide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.accounting-form-grid-wide {
+  grid-template-columns: 120px minmax(220px, 1fr) 150px 170px auto;
+}
+
+.accounting-form-grid input,
+.accounting-form-grid select,
+.accounting-form-grid-wide input,
+.accounting-form-grid-wide select,
+.accounting-entry-line input,
+.accounting-entry-line select {
+  min-width: 0;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.accounting-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+}
+
+.accounting-table {
+  min-width: 860px;
+}
+
+.accounting-entry-lines {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+.accounting-entry-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.25fr) minmax(88px, 0.7fr) minmax(88px, 0.7fr);
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.accounting-entry-line > * {
+  min-width: 0;
+}
+
+.accounting-file-button {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.accounting-file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.accounting-pending-summary {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto 1fr;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.accounting-pending-list {
+  display: grid;
+  gap: 0.6rem;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.accounting-pending-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.accounting-pending-item.tone-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.accounting-pending-item.tone-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.accounting-pending-item.tone-info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.accounting-report-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.7rem 0;
+}
+
+.accounting-xml-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 1100px) {
+  .accounting-metric-grid,
+  .accounting-grid-two,
+  .accounting-form-grid-wide,
+  .accounting-entry-line,
+  .accounting-xml-grid {
+    grid-template-columns: 1fr;
   }
 }
