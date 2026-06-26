@@ -22,7 +22,7 @@ const EMPTY_GLOBAL_VACATION_FORM = {
     description: ""
 };
 const EMPTY_PREVIOUS_YEAR_PENDING_FORM = {
-    days: 0,
+    days: "0",
     description: "",
     manualOverrideConfirmed: false
 };
@@ -567,9 +567,9 @@ function buildPreviousYearPendingFormDefaults(laborFile, pendingPeriod) {
     const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile, pendingPeriod);
     return {
         ...EMPTY_PREVIOUS_YEAR_PENDING_FORM,
-        days: pendingPeriod === "YEAR_BEFORE_LAST"
+        days: String(pendingPeriod === "YEAR_BEFORE_LAST"
             ? laborFile?.vacationSummary.yearBeforeLastPendingDays ?? 0
-            : laborFile?.vacationSummary.previousYearPendingDays ?? 0,
+            : laborFile?.vacationSummary.previousYearPendingDays ?? 0),
         description: currentPendingEvent?.description ?? ""
     };
 }
@@ -1259,11 +1259,16 @@ export function LaborFilesPage() {
             setFlash({ tone: "error", text: `Marca el checkbox para confirmar el ajuste manual ${periodCopy}.` });
             return;
         }
+        const parsedDays = form.days.trim() === "" ? 0 : Number(form.days.replace(",", "."));
+        if (!Number.isFinite(parsedDays)) {
+            setFlash({ tone: "error", text: "Ingresa un numero valido de dias pendientes." });
+            return;
+        }
         setSavingPreviousYearPending(true);
         setFlash(null);
         try {
             await apiPost(`/labor-files/${selectedLaborFile.id}/previous-year-pending-vacations`, {
-                days: Number(form.days) || 0,
+                days: parsedDays,
                 description: form.description || null,
                 manualOverrideConfirmed: true,
                 pendingPeriod
@@ -1436,9 +1441,9 @@ export function LaborFilesPage() {
                                                 }) }), _jsxs("div", { className: "labor-file-vacation-accounting-grid", children: [_jsxs("div", { children: [_jsx("span", { children: "D\u00EDas ya devengados" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.earnedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "D\u00EDas no devengados" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.unearnedDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Programados sin PDF firmado" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.scheduledDays })] }), _jsxs("div", { children: [_jsx("span", { children: "Autorizados con PDF firmado" }), _jsx("strong", { children: selectedLaborFile.vacationSummary.authorizedDays })] })] }), _jsxs("form", { className: "labor-file-previous-year-pending", onSubmit: (event) => void handlePreviousYearPendingSubmit(event, "LAST_YEAR"), children: [_jsxs("div", { className: "labor-file-previous-year-pending-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pendientes del \u00FAltimo a\u00F1o" }), _jsxs("span", { children: ["Saldo del \u00FAltimo a\u00F1o: ", formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate), "."] })] }), _jsxs("strong", { children: [selectedLaborFile.vacationSummary.previousYearPendingDays, " d\u00EDas"] })] }), _jsxs("label", { className: `labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`, children: [_jsx("input", { checked: previousYearPendingForm.manualOverrideConfirmed, disabled: !canManagePreviousYearPending || savingPreviousYearPending, type: "checkbox", onChange: (event) => setPreviousYearPendingForm((current) => ({
                                                                     ...current,
                                                                     manualOverrideConfirmed: event.target.checked
-                                                                })) }), _jsxs("span", { children: ["Agregar o actualizar manualmente d\u00EDas pendientes del \u00FAltimo a\u00F1o (", formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate), ")"] })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, min: "0", step: "0.5", type: "number", value: previousYearPendingForm.days, onChange: (event) => setPreviousYearPendingForm((current) => ({
+                                                                })) }), _jsxs("span", { children: ["Agregar o actualizar manualmente d\u00EDas pendientes del \u00FAltimo a\u00F1o (", formatLongDate(selectedLaborFile.vacationSummary.previousYearStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.previousYearEndDate), ")"] })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, step: "0.5", type: "number", value: previousYearPendingForm.days, onChange: (event) => setPreviousYearPendingForm((current) => ({
                                                                             ...current,
-                                                                            days: Number(event.target.value)
+                                                                            days: event.target.value
                                                                         })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nota" }), _jsx("input", { disabled: !canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending, placeholder: "Motivo o referencia del ajuste", value: previousYearPendingForm.description, onChange: (event) => setPreviousYearPendingForm((current) => ({
                                                                             ...current,
                                                                             description: event.target.value
@@ -1449,9 +1454,9 @@ export function LaborFilesPage() {
                                                                 : ""] })] }), _jsxs("form", { className: "labor-file-previous-year-pending", onSubmit: (event) => void handlePreviousYearPendingSubmit(event, "YEAR_BEFORE_LAST"), children: [_jsxs("div", { className: "labor-file-previous-year-pending-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pendientes del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o" }), _jsxs("span", { children: ["Saldo del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o: ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate), "."] })] }), _jsxs("strong", { children: [selectedLaborFile.vacationSummary.yearBeforeLastPendingDays, " d\u00EDas"] })] }), _jsxs("label", { className: `labor-file-manual-checkbox ${!canManagePreviousYearPending ? "is-disabled" : ""}`, children: [_jsx("input", { checked: yearBeforeLastPendingForm.manualOverrideConfirmed, disabled: !canManagePreviousYearPending || savingPreviousYearPending, type: "checkbox", onChange: (event) => setYearBeforeLastPendingForm((current) => ({
                                                                     ...current,
                                                                     manualOverrideConfirmed: event.target.checked
-                                                                })) }), _jsxs("span", { children: ["Agregar o actualizar manualmente d\u00EDas pendientes del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o (", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate), ")"] })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending, min: "0", step: "0.5", type: "number", value: yearBeforeLastPendingForm.days, onChange: (event) => setYearBeforeLastPendingForm((current) => ({
+                                                                })) }), _jsxs("span", { children: ["Agregar o actualizar manualmente d\u00EDas pendientes del a\u00F1o inmediato anterior al \u00FAltimo a\u00F1o (", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastStartDate), " al ", formatLongDate(selectedLaborFile.vacationSummary.yearBeforeLastEndDate), ")"] })] }), _jsxs("div", { className: "labor-file-previous-year-pending-fields", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "D\u00EDas pendientes" }), _jsx("input", { disabled: !canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending, step: "0.5", type: "number", value: yearBeforeLastPendingForm.days, onChange: (event) => setYearBeforeLastPendingForm((current) => ({
                                                                             ...current,
-                                                                            days: Number(event.target.value)
+                                                                            days: event.target.value
                                                                         })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Nota" }), _jsx("input", { disabled: !canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending, placeholder: "Motivo o referencia del ajuste", value: yearBeforeLastPendingForm.description, onChange: (event) => setYearBeforeLastPendingForm((current) => ({
                                                                             ...current,
                                                                             description: event.target.value

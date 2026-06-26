@@ -89,7 +89,7 @@ const signedVacationFormatSchema = z.object({
 });
 
 const previousYearPendingVacationSchema = z.object({
-  days: z.number().min(0),
+  days: z.number().finite(),
   description: z.string().nullable().optional(),
   manualOverrideConfirmed: z.literal(true),
   pendingPeriod: z.enum(["LAST_YEAR", "YEAR_BEFORE_LAST"]).optional().default("LAST_YEAR")

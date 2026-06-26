@@ -37,7 +37,8 @@ type LaborFileProfileForm = {
   notes: string;
 };
 
-type PreviousYearPendingVacationForm = LaborPreviousYearPendingVacationInput & {
+type PreviousYearPendingVacationForm = Omit<LaborPreviousYearPendingVacationInput, "days"> & {
+  days: string;
   description: string;
   manualOverrideConfirmed: boolean;
 };
@@ -74,7 +75,7 @@ const EMPTY_GLOBAL_VACATION_FORM: LaborGlobalVacationDayInput = {
 };
 
 const EMPTY_PREVIOUS_YEAR_PENDING_FORM: PreviousYearPendingVacationForm = {
-  days: 0,
+  days: "0",
   description: "",
   manualOverrideConfirmed: false
 };
@@ -750,9 +751,9 @@ function buildPreviousYearPendingFormDefaults(
   const currentPendingEvent = getCountedPreviousYearPendingEvent(laborFile, pendingPeriod);
   return {
     ...EMPTY_PREVIOUS_YEAR_PENDING_FORM,
-    days: pendingPeriod === "YEAR_BEFORE_LAST"
+    days: String(pendingPeriod === "YEAR_BEFORE_LAST"
       ? laborFile?.vacationSummary.yearBeforeLastPendingDays ?? 0
-      : laborFile?.vacationSummary.previousYearPendingDays ?? 0,
+      : laborFile?.vacationSummary.previousYearPendingDays ?? 0),
     description: currentPendingEvent?.description ?? ""
   };
 }
@@ -1554,12 +1555,18 @@ export function LaborFilesPage() {
       return;
     }
 
+    const parsedDays = form.days.trim() === "" ? 0 : Number(form.days.replace(",", "."));
+    if (!Number.isFinite(parsedDays)) {
+      setFlash({ tone: "error", text: "Ingresa un numero valido de dias pendientes." });
+      return;
+    }
+
     setSavingPreviousYearPending(true);
     setFlash(null);
 
     try {
       await apiPost<LaborFile>(`/labor-files/${selectedLaborFile.id}/previous-year-pending-vacations`, {
-        days: Number(form.days) || 0,
+        days: parsedDays,
         description: form.description || null,
         manualOverrideConfirmed: true,
         pendingPeriod
@@ -2822,14 +2829,13 @@ export function LaborFilesPage() {
                       <span>Días pendientes</span>
                       <input
                         disabled={!canManagePreviousYearPending || !previousYearPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
-                        min="0"
                         step="0.5"
                         type="number"
                         value={previousYearPendingForm.days}
                         onChange={(event) =>
                           setPreviousYearPendingForm((current) => ({
                             ...current,
-                            days: Number(event.target.value)
+                            days: event.target.value
                           }))
                         }
                       />
@@ -2900,14 +2906,13 @@ export function LaborFilesPage() {
                       <span>Días pendientes</span>
                       <input
                         disabled={!canManagePreviousYearPending || !yearBeforeLastPendingForm.manualOverrideConfirmed || savingPreviousYearPending}
-                        min="0"
                         step="0.5"
                         type="number"
                         value={yearBeforeLastPendingForm.days}
                         onChange={(event) =>
                           setYearBeforeLastPendingForm((current) => ({
                             ...current,
-                            days: Number(event.target.value)
+                            days: event.target.value
                           }))
                         }
                       />

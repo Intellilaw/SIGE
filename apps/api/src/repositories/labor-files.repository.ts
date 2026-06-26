@@ -903,8 +903,8 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     await this.findOrThrow(laborFileId);
 
     const days = Number(payload.days ?? 0);
-    if (!Number.isFinite(days) || days < 0) {
-      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_DAYS", "Los días pendientes del año anterior no pueden ser negativos.");
+    if (!Number.isFinite(days)) {
+      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_DAYS", "Los días pendientes del año anterior deben ser un número válido.");
     }
 
     const startDate = toDate(payload.previousYearStartDate);
@@ -923,7 +923,7 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
         }
       });
 
-      if (days > 0) {
+      if (days !== 0) {
         await transaction.laborVacationEvent.create({
           data: {
             laborFileId,
@@ -1723,8 +1723,8 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
 
   public async setPreviousYearPendingVacationDays(laborFileId: string, payload: PreviousYearPendingVacationWrite) {
     const days = Number(payload.days ?? 0);
-    if (!Number.isFinite(days) || days < 0) {
-      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_DAYS", "Los dias pendientes del año anterior no pueden ser negativos.");
+    if (!Number.isFinite(days)) {
+      throw new AppError(400, "INVALID_LABOR_PREVIOUS_YEAR_PENDING_DAYS", "Los dias pendientes del año anterior deben ser un numero valido.");
     }
 
     const startDate = normalizeDateKey(payload.previousYearStartDate);
@@ -1742,7 +1742,7 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
         event.endDate !== endDate
       );
 
-      if (days > 0) {
+      if (days !== 0) {
         laborFile.vacationEvents.push({
           id: randomUUID(),
           laborFileId,

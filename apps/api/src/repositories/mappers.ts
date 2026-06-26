@@ -812,12 +812,15 @@ export function buildVacationSummary(
       const dateRange = formatVacationRange(event.startDate, event.endDate);
       const isLastYearPending = previousYearPendingCountedEvents.includes(event);
       const isYearBeforeLastPending = yearBeforeLastPendingCountedEvents.includes(event);
+      const adjustmentDays = Math.abs(event.days);
+      const adjustmentAction = event.days < 0 ? "descuenta" : "agrega";
+      const adjustmentUnit = adjustmentDays === 1 ? "día" : "días";
       return {
         dateKey: event.startDate ?? "0000-00-00",
         line: isLastYearPending
-          ? `Saldo pendiente del último año: agrega ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+          ? `Saldo pendiente del último año: ${adjustmentAction} ${adjustmentDays} ${adjustmentUnit}${dateRange ? ` del periodo ${dateRange}` : ""}.`
           : isYearBeforeLastPending
-            ? `Saldo pendiente del año inmediato anterior al último año: agrega ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
+            ? `Saldo pendiente del año inmediato anterior al último año: ${adjustmentAction} ${adjustmentDays} ${adjustmentUnit}${dateRange ? ` del periodo ${dateRange}` : ""}.`
             : `Saldo pendiente de un año anterior no contabilizado: ${event.days} ${event.days === 1 ? "día" : "días"}${dateRange ? ` del periodo ${dateRange}` : ""}.`
       };
     }
