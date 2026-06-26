@@ -65,15 +65,42 @@ function normalizeComparableText(value: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/(\d)[’'´`](\d{1,2})(?=\s*(?:m\.?\s*n\.?|mxn|pesos?|\())/g, "$1.$2")
+    .replace(/(\d)\s+(\d{2})\s*\.\s*(\d{2})(?=\s*(?:m\.?\s*n\.?|mxn|pesos?|\())/g, "$1$2.$3")
+    .replace(/(\d)'(\d{1,2})/g, "$1.$2")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+const LOOSE_PDF_WORDS = [
+  "salario",
+  "sueldo",
+  "mensual",
+  "bruto",
+  "diario",
+  "ordinario",
+  "vigente",
+  "trabajador",
+  "cantidad",
+  "equivale",
+  "constar",
+  "dividir"
+];
+
+function normalizeLoosePdfWords(value: string) {
+  return LOOSE_PDF_WORDS.reduce((text, word) => {
+    const loosePattern = new RegExp(word.split("").join("\\s*"), "g");
+    return text.replace(loosePattern, word);
+  }, value);
+}
+
 function normalizeDocumentText(value: string) {
-  return normalizeComparableText(value)
+  return normalizeLoosePdfWords(normalizeComparableText(value))
     .replace(/\u0000/g, "")
     .replace(/[“”]/g, "\"")
     .replace(/[‘’]/g, "'")
+    .replace(/\$\s*(\d+(?:\s*,\s*\d{3})*)\s*\.\s*(\d)\s+(\d)/g, "$$$1.$2$3")
+    .replace(/\$\s+/g, "$")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -274,7 +301,122 @@ function decodePdfHexString(value: string) {
   return decodePdfTextBytes(bytes);
 }
 
-function extractPdfStrings(streamText: string) {
+function decodePdfObjectStream(pdfText: string, objectNumber: string) {
+  const objectPattern = new RegExp(`${objectNumber}\\s+0\\s+obj\\s*<<([\\s\\S]*?)>>\\s*stream\\r?\\n?([\\s\\S]*?)\\r?\\n?endstream`);
+  const match = pdfText.match(objectPattern);
+  if (!match) {
+    return "";
+  }
+
+  const dictionary = match[1] ?? "";
+  let streamBuffer = Buffer.from(match[2] ?? "", "latin1");
+  if (dictionary.includes("/FlateDecode")) {
+    try {
+      streamBuffer = inflateSync(streamBuffer);
+    } catch {
+      return "";
+    }
+  }
+
+  return streamBuffer.toString("latin1");
+}
+
+function parseHexNumber(value: string) {
+  return Number.parseInt(value, 16);
+}
+
+function incrementHexValue(value: string, offset: number) {
+  if (!value) {
+    return "";
+  }
+
+  return (parseHexNumber(value) + offset).toString(16).toUpperCase().padStart(value.length, "0");
+}
+
+function decodePdfUnicodeHex(value: string) {
+  const normalizedHex = value.length % 2 === 0 ? value : `${value}0`;
+  return decodePdfTextBytes(Buffer.from(normalizedHex, "hex"));
+}
+
+function parsePdfToUnicodeCMap(cmapText: string) {
+  const cmap = new Map<string, string>();
+  const normalized = cmapText.replace(/\r/g, "");
+
+  for (const blockMatch of normalized.matchAll(/beginbfchar\s*([\s\S]*?)\s*endbfchar/g)) {
+    const block = blockMatch[1] ?? "";
+    for (const lineMatch of block.matchAll(/<([0-9a-f]+)>\s*<([0-9a-f]+)>/gi)) {
+      cmap.set(lineMatch[1].toUpperCase(), decodePdfUnicodeHex(lineMatch[2]));
+    }
+  }
+
+  for (const blockMatch of normalized.matchAll(/beginbfrange\s*([\s\S]*?)\s*endbfrange/g)) {
+    const block = blockMatch[1] ?? "";
+    for (const lineMatch of block.matchAll(/<([0-9a-f]+)>\s*<([0-9a-f]+)>\s*(<([0-9a-f]+)>|\[([^\]]+)\])/gi)) {
+      const start = lineMatch[1].toUpperCase();
+      const end = lineMatch[2].toUpperCase();
+      const startValue = parseHexNumber(start);
+      const endValue = parseHexNumber(end);
+      const arrayDestinations = lineMatch[5]?.match(/<([0-9a-f]+)>/gi)?.map((entry) => entry.replace(/[<>]/g, "")) ?? [];
+
+      for (let codeValue = startValue; codeValue <= endValue; codeValue += 1) {
+        const offset = codeValue - startValue;
+        const source = codeValue.toString(16).toUpperCase().padStart(start.length, "0");
+        const destination = arrayDestinations[offset] ?? incrementHexValue(lineMatch[4] ?? "", offset);
+        if (destination) {
+          cmap.set(source, decodePdfUnicodeHex(destination));
+        }
+      }
+    }
+  }
+
+  return cmap;
+}
+
+function buildPdfToUnicodeCMap(pdfText: string) {
+  const combinedMap = new Map<string, string>();
+  const references = Array.from(pdfText.matchAll(/\/ToUnicode\s+(\d+)\s+\d+\s+R/g), (match) => match[1]);
+
+  for (const objectNumber of references) {
+    const cmapText = decodePdfObjectStream(pdfText, objectNumber);
+    if (!cmapText) {
+      continue;
+    }
+
+    for (const [source, destination] of parsePdfToUnicodeCMap(cmapText)) {
+      combinedMap.set(source, destination);
+    }
+  }
+
+  return combinedMap;
+}
+
+function decodePdfHexStringWithCMap(value: string, cmap: Map<string, string>) {
+  const hex = value.replace(/\s+/g, "").toUpperCase();
+  if (!hex || cmap.size === 0) {
+    return decodePdfHexString(value);
+  }
+
+  const codeLengths = Array.from(new Set(Array.from(cmap.keys(), (key) => key.length))).sort((left, right) => right - left);
+  let decoded = "";
+  let cursor = 0;
+
+  while (cursor < hex.length) {
+    const codeLength = codeLengths.find((length) => cmap.has(hex.slice(cursor, cursor + length)));
+    if (codeLength) {
+      decoded += cmap.get(hex.slice(cursor, cursor + codeLength)) ?? "";
+      cursor += codeLength;
+      continue;
+    }
+
+    const fallbackLength = codeLengths.at(-1) ?? 2;
+    decoded += decodePdfHexString(hex.slice(cursor, cursor + fallbackLength));
+    cursor += fallbackLength;
+  }
+
+  return decoded;
+}
+
+function extractPdfStrings(streamText: string, cmap = new Map<string, string>()) {
   const parts: string[] = [];
   let index = 0;
   let extractedLength = 0;
@@ -331,7 +473,7 @@ function extractPdfStrings(streamText: string) {
     if (character === "<" && streamText[index + 1] !== "<") {
       const end = streamText.indexOf(">", index + 1);
       if (end > index) {
-        const decoded = decodePdfHexString(streamText.slice(index + 1, end)).trim();
+        const decoded = decodePdfHexStringWithCMap(streamText.slice(index + 1, end), cmap).trim();
         if (decoded) {
           parts.push(decoded);
           extractedLength += decoded.length;
@@ -350,6 +492,7 @@ function extractPdfStrings(streamText: string) {
 function extractPdfText(content: Buffer) {
   const binary = content.subarray(0, MAX_PDF_SCAN_BYTES).toString("latin1");
   const textParts: string[] = [];
+  const cmap = buildPdfToUnicodeCMap(binary);
   const streamPattern = /(<<[\s\S]{0,4000}?>>)\s*stream\r?\n?([\s\S]*?)\r?\n?endstream/g;
 
   for (const match of binary.matchAll(streamPattern)) {
@@ -370,14 +513,14 @@ function extractPdfText(content: Buffer) {
       continue;
     }
 
-    const extracted = extractPdfStrings(streamText);
+    const extracted = extractPdfStrings(streamText, cmap);
     if (extracted) {
       textParts.push(extracted);
     }
   }
 
   if (content.byteLength <= MAX_PDF_FALLBACK_BYTES) {
-    const fallback = extractPdfStrings(binary);
+    const fallback = extractPdfStrings(binary, cmap);
     if (fallback) {
       textParts.push(fallback);
     }
