@@ -668,7 +668,7 @@ export interface FinanceRepository {
   bulkDelete(recordIds: string[]): Promise<void>;
   listSnapshots(): Promise<FinanceSnapshot[]>;
   createSnapshot(year: number, month: number): Promise<FinanceSnapshot>;
-  copyToNextMonth(year: number, month: number): Promise<{ year: number; month: number; copied: number }>;
+  copyToNextMonth(year: number, month: number): Promise<{ year: number; month: number; copied: number; skipped: number }>;
   sendMatterToFinance(matterId: string, year: number, month: number): Promise<FinanceRecord>;
   listCommissionReceivers(): Promise<CommissionReceiver[]>;
 }

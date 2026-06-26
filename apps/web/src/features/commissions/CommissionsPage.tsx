@@ -388,8 +388,15 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
   const totalPaidMxn = getReceivedPaymentsMxn(record);
   const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
   const netFeesMxn = totalPaidMxn - totalExpensesMxn;
-  const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
-  const dueTodayMxn = remainingMxn - totalPaidMxn;
+  const remainingMxn = record.totalMatterMxn - record.previousPaymentsMxn;
+  const dueTodayMxn = record.conceptFeesMxn - totalPaidMxn;
+  const futurePaymentsMxn = Math.round(
+    (record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn) * 100
+  ) / 100;
+  const totalNetDueMxn = record.totalMatterMxn - record.previousPaymentsMxn - totalPaidMxn;
+  const feeBreakdownDifferenceMxn = Math.round(
+    (record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn - futurePaymentsMxn) * 100
+  ) / 100;
   const clientCommissionMxn = netFeesMxn * 0.2;
   const closingCommissionMxn = netFeesMxn * 0.1;
   const commissionableBaseMxn = netFeesMxn - clientCommissionMxn - closingCommissionMxn;
@@ -443,6 +450,9 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
     netFeesMxn,
     remainingMxn,
     dueTodayMxn,
+    futurePaymentsMxn,
+    totalNetDueMxn,
+    feeBreakdownDifferenceMxn,
     clientCommissionMxn,
     closingCommissionMxn,
     commissionableBaseMxn,

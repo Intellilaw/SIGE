@@ -779,6 +779,9 @@ export interface FinanceRecordStats {
   netFeesMxn: number;
   remainingMxn: number;
   dueTodayMxn: number;
+  futurePaymentsMxn: number;
+  totalNetDueMxn: number;
+  feeBreakdownDifferenceMxn: number;
   clientCommissionMxn: number;
   closingCommissionMxn: number;
   commissionableBaseMxn: number;

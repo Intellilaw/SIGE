@@ -72,6 +72,7 @@ type CopyResult = {
   year: number;
   month: number;
   copied: number;
+  skipped?: number;
 };
 
 type FinancePaymentMethodField = "paymentMethod" | "paymentMethod2" | "paymentMethod3";
@@ -87,9 +88,11 @@ const MONTHLY_COLUMN_WIDTHS = [
   "110px",
   "360px",
   "220px",
-  "150px",
   "300px",
+  "150px",
+  "180px",
   "170px",
+  "180px",
   "170px",
   "280px",
   "190px",
@@ -99,6 +102,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "180px",
   "110px",
   "120px",
+  "160px",
   "160px",
   "150px",
   "150px",
@@ -538,6 +542,14 @@ function formatCurrency(value: number) {
   }).format(Number(value || 0));
 }
 
+function roundCurrencyValue(value: number) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function hasCurrencyDifference(value: number) {
+  return Math.round(Math.abs(Number(value) || 0) * 100) !== 0;
+}
+
 function parseCurrencyValue(value: string) {
   const parsed = Number(value.replace(/,/g, "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -778,8 +790,13 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
   const totalPaidMxn = getReceivedPaymentsMxn(record);
   const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
   const netFeesMxn = totalPaidMxn - totalExpensesMxn;
-  const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
-  const dueTodayMxn = remainingMxn - totalPaidMxn;
+  const remainingMxn = record.totalMatterMxn - record.previousPaymentsMxn;
+  const dueTodayMxn = record.conceptFeesMxn - totalPaidMxn;
+  const futurePaymentsMxn = roundCurrencyValue(record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn);
+  const totalNetDueMxn = record.totalMatterMxn - record.previousPaymentsMxn - totalPaidMxn;
+  const feeBreakdownDifferenceMxn = roundCurrencyValue(
+    record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn - futurePaymentsMxn
+  );
   const clientCommissionMxn = netFeesMxn * 0.2;
   const closingCommissionMxn = netFeesMxn * 0.1;
   const commissionableBaseMxn = netFeesMxn - clientCommissionMxn - closingCommissionMxn;
@@ -830,6 +847,9 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
     netFeesMxn,
     remainingMxn,
     dueTodayMxn,
+    futurePaymentsMxn,
+    totalNetDueMxn,
+    feeBreakdownDifferenceMxn,
     clientCommissionMxn,
     closingCommissionMxn,
     commissionableBaseMxn,
@@ -1110,9 +1130,12 @@ export function FinancesPage() {
             record.totalMatterMxn,
             record.conceptFeesMxn,
             record.previousPaymentsMxn,
+            stats.futurePaymentsMxn,
             stats.remainingMxn,
             stats.totalPaidMxn,
             stats.dueTodayMxn,
+            stats.totalNetDueMxn,
+            stats.feeBreakdownDifferenceMxn,
             stats.netFeesMxn,
             stats.salesCommissionMxn,
             stats.netProfitMxn,
@@ -1459,6 +1482,8 @@ export function FinancesPage() {
     const todayValue = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     const isDateUrgent = Boolean(record.nextPaymentDate && toDateInput(record.nextPaymentDate) <= todayValue && stats.dueTodayMxn > 1);
     const isPctInvalid = stats.pctSum !== 100;
+    const isFeeBreakdownInvalid =
+      stats.futurePaymentsMxn < 0 || hasCurrencyDifference(stats.feeBreakdownDifferenceMxn);
     const reasons: string[] = [];
 
     if (missing.length > 0) {
@@ -1469,6 +1494,15 @@ export function FinancesPage() {
     }
     if (isPctInvalid) {
       reasons.push(`Atencion: la suma de porcentajes es ${stats.pctSum}% y debe ser 100%.`);
+    }
+    if (stats.futurePaymentsMxn < 0) {
+      reasons.push(
+        "Atencion: honorarios pagados en meses anteriores + honorarios pagaderos este mes exceden Total asunto. Corrige el desglose."
+      );
+    } else if (isFeeBreakdownInvalid) {
+      reasons.push(
+        `Atencion: Total asunto no coincide con honorarios pagados en meses anteriores + honorarios pagaderos este mes + honorarios pagaderos en meses posteriores. Diferencia: ${formatCurrency(stats.feeBreakdownDifferenceMxn)}.`
+      );
     }
 
     return {
@@ -1707,7 +1741,8 @@ export function FinancesPage() {
         year: selectedYear,
         month: selectedMonth
       });
-      window.alert(`Se copiaron ${result.copied} registros a ${getMonthName(result.month)} ${result.year}.`);
+      const skippedText = result.skipped ? ` Se conservaron ${result.skipped} registros que ya existian en ese mes.` : "";
+      window.alert(`Se copiaron ${result.copied} registros faltantes a ${getMonthName(result.month)} ${result.year}.${skippedText}`);
       setCopyModalOpen(false);
       setSelectedYear(result.year);
       setSelectedMonth(result.month);
@@ -1726,9 +1761,11 @@ export function FinancesPage() {
           totalMatterMxn: acc.totalMatterMxn + record.totalMatterMxn,
           conceptFeesMxn: acc.conceptFeesMxn + record.conceptFeesMxn,
           previousPaymentsMxn: acc.previousPaymentsMxn + record.previousPaymentsMxn,
+          futurePaymentsMxn: acc.futurePaymentsMxn + stats.futurePaymentsMxn,
           remainingMxn: acc.remainingMxn + stats.remainingMxn,
           totalPaidMxn: acc.totalPaidMxn + stats.totalPaidMxn,
           dueTodayMxn: acc.dueTodayMxn + stats.dueTodayMxn,
+          totalNetDueMxn: acc.totalNetDueMxn + stats.totalNetDueMxn,
           netFeesMxn: acc.netFeesMxn + stats.netFeesMxn,
           clientCommissionMxn: acc.clientCommissionMxn + stats.clientCommissionMxn,
           closingCommissionMxn: acc.closingCommissionMxn + stats.closingCommissionMxn,
@@ -1758,9 +1795,11 @@ export function FinancesPage() {
         totalMatterMxn: 0,
         conceptFeesMxn: 0,
         previousPaymentsMxn: 0,
+        futurePaymentsMxn: 0,
         remainingMxn: 0,
         totalPaidMxn: 0,
         dueTodayMxn: 0,
+        totalNetDueMxn: 0,
         netFeesMxn: 0,
         clientCommissionMxn: 0,
         closingCommissionMxn: 0,
@@ -1800,9 +1839,11 @@ export function FinancesPage() {
           <th>Tipo</th>
           <th>Asunto</th>
           <th>Equipo Responsable</th>
-          <th>Total Asunto</th>
           <th>Conceptos trabajando</th>
+          <th>Total Asunto</th>
+          <th>Honorarios pagados en meses anteriores</th>
           <th>Honorarios pagaderos este mes</th>
+          <th>Honorarios pagaderos en meses posteriores</th>
           <th>Fecha de proximo pago</th>
           <th>Detalle Fecha</th>
           <th>{"\u00bfEn mora?"}</th>
@@ -1813,6 +1854,7 @@ export function FinancesPage() {
           <th>Método de pago</th>
           <th>Recibido</th>
           <th>Adeudado hoy</th>
+          <th>Adeudo total neto</th>
           <th>Alta probabilidad de cobro</th>
           <th>Baja probabilidad de cobro</th>
           <th>Honorarios netos cobrados este mes</th>
@@ -1958,6 +2000,14 @@ export function FinancesPage() {
               const payment1Locked = record.paymentReceived === true;
               const payment2Locked = record.paymentReceived2 === true;
               const payment3Locked = record.paymentReceived3 === true;
+              const hasFeeBreakdownError =
+                stats.futurePaymentsMxn < 0 || hasCurrencyDifference(stats.feeBreakdownDifferenceMxn);
+              const feeBreakdownMessage = stats.futurePaymentsMxn < 0
+                ? "Error: anteriores + este mes exceden Total asunto."
+                : "Error: el desglose no suma exactamente Total asunto.";
+              const feeBreakdownTooltip = stats.futurePaymentsMxn < 0
+                ? "Honorarios pagados en meses anteriores + Honorarios pagaderos este mes exceden Total asunto."
+                : `Diferencia contra Total asunto: ${formatCurrency(stats.feeBreakdownDifferenceMxn)}`;
               const rowClassName = `${shouldHighlight ? "finance-row-danger" : ""} ${isSelected ? "finance-row-selected" : ""}`.trim();
 
               return (
@@ -1990,9 +2040,18 @@ export function FinancesPage() {
                       <input className="finance-input finance-input-readonly" value={TEAM_OPTIONS.find((option) => option.key === record.responsibleTeam)?.label ?? ""} readOnly />
                     )}
                   </td>
-                  <td><CurrencyInput value={record.totalMatterMxn} readOnly /></td>
                   <td><input className="finance-input" value={record.workingConcepts ?? ""} onChange={(event) => updateRecordLocal(record.id, { workingConcepts: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value })} /></td>
+                  <td><CurrencyInput value={record.totalMatterMxn} readOnly /></td>
+                  <td><CurrencyInput value={record.previousPaymentsMxn} onValueChange={(previousPaymentsMxn) => updateRecordLocal(record.id, { previousPaymentsMxn })} onValueCommit={(previousPaymentsMxn) => void persistRecordPatch(record.id, { previousPaymentsMxn })} /></td>
                   <td><CurrencyInput value={record.conceptFeesMxn} onValueChange={(conceptFeesMxn) => updateRecordLocal(record.id, { conceptFeesMxn })} onValueCommit={(conceptFeesMxn) => void persistRecordPatch(record.id, { conceptFeesMxn })} /></td>
+                  <td title={hasFeeBreakdownError ? feeBreakdownTooltip : undefined}>
+                    <div className="finance-validation-cell">
+                      <CurrencyInput className={hasFeeBreakdownError ? "finance-cell-negative" : ""} value={stats.futurePaymentsMxn} readOnly />
+                      {hasFeeBreakdownError ? (
+                        <div className="finance-inline-error">{feeBreakdownMessage}</div>
+                      ) : null}
+                    </div>
+                  </td>
                   <td><input className="finance-input finance-input-readonly" type="date" value={toDateInput(record.nextPaymentDate)} readOnly /></td>
                   <td><input className="finance-input" value={record.nextPaymentNotes ?? ""} onChange={(event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value })} /></td>
                   <td>
@@ -2041,6 +2100,7 @@ export function FinancesPage() {
                     </div>
                   </td>
                   <td><CurrencyInput className={stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""} value={stats.dueTodayMxn} readOnly /></td>
+                  <td><CurrencyInput className={stats.totalNetDueMxn > 0 ? "finance-cell-negative" : ""} value={stats.totalNetDueMxn} readOnly /></td>
                   <td className="finance-cell-checkbox">
                     <input
                       checked={record.highCollectionProbability}
@@ -2103,24 +2163,24 @@ export function FinancesPage() {
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={53}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={56}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
             <tr className="finance-total-row">
               <td colSpan={8}>Totales</td>
+              <td />
               <td>{formatCurrency(totals.totalMatterMxn)}</td>
-              <td />
+              <td>{formatCurrency(totals.previousPaymentsMxn)}</td>
               <td>{formatCurrency(totals.conceptFeesMxn)}</td>
-              <td colSpan={2} />
-              <td />
-              <td />
-              <td />
+              <td>{formatCurrency(totals.futurePaymentsMxn)}</td>
+              <td colSpan={5} />
               <td>{formatCurrency(totals.totalPaidMxn)}</td>
               <td />
               <td />
               <td />
               <td>{formatCurrency(totals.dueTodayMxn)}</td>
+              <td>{formatCurrency(totals.totalNetDueMxn)}</td>
               <td />
               <td />
               <td>{formatCurrency(totals.netFeesMxn)}</td>
@@ -2192,9 +2252,6 @@ export function FinancesPage() {
             <tbody>
             {items.map((matter) => {
               const highlight = shouldHighlightMatter(matter);
-              const targetDate = new Date(matter.transferYear, matter.transferMonth - 1, 1);
-              const currentDate = new Date(currentYear, currentMonth - 1, 1);
-              const disabled = targetDate > currentDate;
               const relatedContract = professionalContractsByMatterId.get(matter.id);
               const contractStatus = getContractStatus(relatedContract);
 
@@ -2227,7 +2284,7 @@ export function FinancesPage() {
                       </select>
                     </div>
                   </td>
-                  <td><button className={`finance-send-button ${variant === "retainer" ? "is-retainer" : ""}`} disabled={disabled} onClick={() => void handleSendMatterToFinance(matter)} type="button">Enviar</button></td>
+                  <td><button className={`finance-send-button ${variant === "retainer" ? "is-retainer" : ""}`} disabled={!canWriteFinances} onClick={() => void handleSendMatterToFinance(matter)} type="button">Enviar</button></td>
                 </tr>
               );
             })}
@@ -2599,10 +2656,10 @@ export function FinancesPage() {
         <div className="finance-modal-backdrop">
           <div className="finance-modal">
             <h3>Advertencia</h3>
-            <p>Esta accion borrara todos los registros existentes del siguiente mes y los reemplazara con los registros actuales.</p>
+            <p>Esta accion copiara al mes siguiente solo los registros faltantes y conservara intactos los asuntos que ya existan en ese mes.</p>
             <div className="finance-modal-actions">
               <button className="secondary-button" type="button" onClick={() => setCopyModalOpen(false)}>Cancelar</button>
-              <button className="danger-button" type="button" onClick={() => void handleCopyToNextMonth()} disabled={!canWriteFinances}>Continuar</button>
+              <button className="primary-button" type="button" onClick={() => void handleCopyToNextMonth()} disabled={!canWriteFinances}>Continuar</button>
             </div>
           </div>
         </div>

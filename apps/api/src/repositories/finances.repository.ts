@@ -268,6 +268,10 @@ function toDecimal(value?: number | null) {
   return new Prisma.Decimal(value ?? 0);
 }
 
+function roundCurrencyValue(value: number) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 function getFinanceRecordSelect(includeCollectionProbability: boolean) {
   return includeCollectionProbability
     ? FINANCE_RECORD_WITH_COLLECTION_PROBABILITY_SELECT
@@ -333,7 +337,7 @@ function getMatterMatchKey(input: Pick<FinanceMatterProjection, "quoteNumber" | 
   return `matter:${clientName}|${subject}`;
 }
 
-function getRecordMatchKey(input: Pick<FinanceRecord, "quoteNumber" | "clientName" | "subject">) {
+function getRecordMatchKey(input: { quoteNumber?: string | null; clientName?: string | null; subject?: string | null }) {
   const quoteNumber = normalizeComparableText(input.quoteNumber);
   if (quoteNumber) {
     return `quote:${quoteNumber}`;
@@ -369,8 +373,13 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
   const totalPaidMxn = getReceivedPaymentsMxn(record);
   const totalExpensesMxn = record.expenseAmount1Mxn + record.expenseAmount2Mxn + record.expenseAmount3Mxn;
   const netFeesMxn = totalPaidMxn - totalExpensesMxn;
-  const remainingMxn = record.conceptFeesMxn - record.previousPaymentsMxn;
-  const dueTodayMxn = remainingMxn - totalPaidMxn;
+  const remainingMxn = record.totalMatterMxn - record.previousPaymentsMxn;
+  const dueTodayMxn = record.conceptFeesMxn - totalPaidMxn;
+  const futurePaymentsMxn = roundCurrencyValue(record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn);
+  const totalNetDueMxn = record.totalMatterMxn - record.previousPaymentsMxn - totalPaidMxn;
+  const feeBreakdownDifferenceMxn = roundCurrencyValue(
+    record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn - futurePaymentsMxn
+  );
   const clientCommissionMxn = netFeesMxn * 0.2;
   const closingCommissionMxn = netFeesMxn * 0.1;
   const commissionableBaseMxn = netFeesMxn - clientCommissionMxn - closingCommissionMxn;
@@ -424,6 +433,9 @@ function calculateFinanceStats(record: FinanceRecord): FinanceRecordStats {
     netFeesMxn,
     remainingMxn,
     dueTodayMxn,
+    futurePaymentsMxn,
+    totalNetDueMxn,
+    feeBreakdownDifferenceMxn,
     clientCommissionMxn,
     closingCommissionMxn,
     commissionableBaseMxn,
@@ -813,16 +825,36 @@ export class PrismaFinanceRepository implements FinanceRepository {
       nextYear += 1;
     }
 
+    let copied = 0;
+    let skipped = 0;
+
     await this.prisma.$transaction(async (tx) => {
-      await tx.financeRecord.deleteMany({
-        where: {
-          year: nextYear,
-          month: nextMonth
+      const targetRecords = await tx.financeRecord.findMany({
+        where: { year: nextYear, month: nextMonth },
+        select: {
+          quoteNumber: true,
+          clientName: true,
+          subject: true
+        }
+      });
+
+      const targetMatchKeys = new Set<string>();
+      targetRecords.forEach((record) => {
+        const matchKey = getRecordMatchKey(record);
+        if (matchKey) {
+          targetMatchKeys.add(matchKey);
         }
       });
 
       for (const record of sourceRecords) {
+        const matchKey = getRecordMatchKey(record);
+        if (matchKey && targetMatchKeys.has(matchKey)) {
+          skipped += 1;
+          continue;
+        }
+
         const totalPaidMxn = getReceivedPaymentsMxn(record);
+        const nextPreviousPaymentsMxn = record.previousPaymentsMxn + totalPaidMxn;
         const data: Prisma.FinanceRecordUncheckedCreateInput = {
           year: nextYear,
           month: nextMonth,
@@ -836,7 +868,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
           totalMatterMxn: toDecimal(record.totalMatterMxn),
           workingConcepts: normalizeOptionalText(record.workingConcepts),
           conceptFeesMxn: toDecimal(record.conceptFeesMxn),
-          previousPaymentsMxn: toDecimal(record.previousPaymentsMxn + totalPaidMxn),
+          previousPaymentsMxn: toDecimal(nextPreviousPaymentsMxn),
           nextPaymentDate: parseDateValue(record.nextPaymentDate),
           nextPaymentNotes: normalizeOptionalText(record.nextPaymentNotes),
           delinquencyStatus: "CURRENT",
@@ -879,13 +911,19 @@ export class PrismaFinanceRepository implements FinanceRepository {
           data,
           select: { id: true }
         });
+
+        if (matchKey) {
+          targetMatchKeys.add(matchKey);
+        }
+        copied += 1;
       }
     });
 
     return {
       year: nextYear,
       month: nextMonth,
-      copied: sourceRecords.length
+      copied,
+      skipped
     };
   }
 
@@ -895,29 +933,27 @@ export class PrismaFinanceRepository implements FinanceRepository {
     const matterPayload = buildMatterMirrorPayload(matter);
     const isRetainer = matter.matterType === "RETAINER";
 
-    if (!isRetainer) {
-      const existing = await this.findExistingUniqueRecord(this.prisma, year, month, matter);
-      if (existing) {
-        const record = await this.prisma.financeRecord.update({
-          where: { id: existing.id },
-          data: {
-            clientNumber: normalizeOptionalText(matterPayload.clientNumber),
-            clientName: normalizeRequiredText(matterPayload.clientName),
-            quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
-            matterType: matterPayload.matterType ?? "ONE_TIME",
-            subject: normalizeRequiredText(matterPayload.subject),
-            responsibleTeam: matterPayload.responsibleTeam ?? null,
-            totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
-            nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
-            milestone: normalizeOptionalText(matterPayload.milestone),
-            concluded: matterPayload.concluded ?? false
-          },
-          select: getFinanceRecordSelect(includeCollectionProbability)
-        });
+    const existing = await this.findExistingUniqueRecord(this.prisma, year, month, matter);
+    if (existing) {
+      const record = await this.prisma.financeRecord.update({
+        where: { id: existing.id },
+        data: {
+          clientNumber: normalizeOptionalText(matterPayload.clientNumber),
+          clientName: normalizeRequiredText(matterPayload.clientName),
+          quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
+          matterType: matterPayload.matterType ?? "ONE_TIME",
+          subject: normalizeRequiredText(matterPayload.subject),
+          responsibleTeam: matterPayload.responsibleTeam ?? null,
+          totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
+          nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
+          milestone: normalizeOptionalText(matterPayload.milestone),
+          concluded: matterPayload.concluded ?? false
+        },
+        select: getFinanceRecordSelect(includeCollectionProbability)
+      });
 
-        const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
-        return enrichedRecord;
-      }
+      const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+      return enrichedRecord;
     }
 
     const percentages = isRetainer ? getDefaultPercentages(undefined) : getDefaultPercentages(matter.responsibleTeam);

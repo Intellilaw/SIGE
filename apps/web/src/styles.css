@@ -6144,7 +6144,7 @@ textarea {
 }
 
 .finance-table-monthly-x-nav-spacer {
-  width: 10060px;
+  width: 10580px;
 }
 
 .finance-active-table-x-nav-spacer {
@@ -6194,7 +6194,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 10060px; font-size: 0.82rem; table-layout: fixed; }
+.finance-table-monthly { min-width: 10580px; font-size: 0.82rem; table-layout: fixed; }
 .finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
@@ -6365,6 +6365,18 @@ textarea {
 .finance-cell-checkbox { text-align: center; }
 .finance-cell-negative { background: rgba(220, 38, 38, 0.08); color: #991b1b; }
 .finance-cell-positive { background: rgba(22, 163, 74, 0.08); color: #166534; }
+.finance-validation-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.finance-inline-error {
+  color: #991b1b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .finance-total-cell { background: rgba(2, 132, 199, 0.08); color: #075985; font-weight: 800; }
 .finance-profit-cell { background: rgba(126, 34, 206, 0.08); color: #6b21a8; font-weight: 800; }
 .finance-pct-ok { color: #166534; font-weight: 800; }
