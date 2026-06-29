@@ -173,6 +173,8 @@ model LaborFile {
   dailySalaryMxn                    Decimal                      @default(0)
   advanceVacationDaysPaidBalance    Decimal                      @default(0) @db.Decimal(6, 2)
   advanceVacationDaysPaidCutoffDate DateTime?                    @db.Date
+  advanceVacationDaysPaidPrevious   Decimal                      @default(0) @db.Decimal(6, 2)
+  advanceVacationDaysPaidCurrent    Decimal                      @default(0) @db.Decimal(6, 2)
   employmentEndedAt                 DateTime?                    @db.Date
   notes                             String?
   createdAt                         DateTime                     @default(now())

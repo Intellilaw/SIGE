@@ -1572,8 +1572,10 @@ export function GeneralExpensesPage() {
                   <th>Salario neto</th>
                   <th>Días disfrutados por adelantado</th>
                   <th>Fecha en la que se pagará la prima vacacional</th>
-                  <th>Días pagados</th>
-                  <th>Días de vacaciones cuya prima vacacional es pagada esta quincena</th>
+                  <th>Pagar esta quincena</th>
+                  <th>Días pagados correspondientes a quincenas anteriores</th>
+                  <th>Días pagados correspondientes a esta quincena</th>
+                  <th>Total de días cuya prima vacacional es pagada esta quincena</th>
                   <th>Prima vacacional</th>
                   <th>Bono de puntualidad</th>
                   <th>Bono de asistencia</th>
@@ -1595,13 +1597,13 @@ export function GeneralExpensesPage() {
               <tbody>
                 {loadingPayroll ? (
                   <tr>
-                    <td colSpan={26} className="centered-inline-message">
+                    <td colSpan={28} className="centered-inline-message">
                       Cargando nómina...
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={26} className="centered-inline-message">
+                    <td colSpan={28} className="centered-inline-message">
                       Sin registros de nómina en esta quincena.
                     </td>
                   </tr>
@@ -1716,6 +1718,22 @@ export function GeneralExpensesPage() {
                     <td>
                       <div
                         className="general-expense-readonly-cell general-expense-payroll-days-cell"
+                        title="Días adelantados cuya prima se paga ahora y que corresponden a quincenas anteriores."
+                      >
+                        {formatPayrollDays(entry.vacationDaysPaidPreviousPeriods)}
+                      </div>
+                    </td>
+                    <td>
+                      <div
+                        className="general-expense-readonly-cell general-expense-payroll-days-cell"
+                        title="Días de vacaciones cuya prima se paga ahora y que corresponden a esta quincena."
+                      >
+                        {formatPayrollDays(entry.vacationDaysPaidCurrentPeriod)}
+                      </div>
+                    </td>
+                    <td>
+                      <div
+                        className="general-expense-readonly-cell general-expense-payroll-days-cell"
                         title="Días de vacaciones aprobadas con PDF firmado en esta quincena."
                       >
                         {formatPayrollDays(entry.vacationDays)}
@@ -1724,7 +1742,7 @@ export function GeneralExpensesPage() {
                     <td>
                       <div
                         className="general-expense-readonly-cell"
-                        title="Prima calculada desde vacaciones aprobadas del expediente laboral."
+                        title="Prima calculada desde el total de días pagados esta quincena."
                       >
                         {formatCurrency(entry.vacationPremiumMxn)}
                       </div>

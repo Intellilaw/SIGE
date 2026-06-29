@@ -86,6 +86,8 @@ const PAYROLL_ENTRY_INCLUDE = {
       dailySalaryMxn: true,
       advanceVacationDaysPaidBalance: true,
       advanceVacationDaysPaidCutoffDate: true,
+      advanceVacationDaysPaidPrevious: true,
+      advanceVacationDaysPaidCurrent: true,
       employmentEndedAt: true,
       documents: {
         where: { documentType: { in: ["EMPLOYMENT_CONTRACT", "ADDENDUM"] } },
@@ -200,6 +202,14 @@ function addDateKey(value: string, days: number) {
   return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
 }
 
+function maxDateKey(left: string, right: string) {
+  return left > right ? left : right;
+}
+
+function minDateKey(left: string, right: string) {
+  return left < right ? left : right;
+}
+
 function getMonthLastDateKey(year: number, month: number) {
   const date = new Date(Date.UTC(year, month, 0));
   return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
@@ -223,6 +233,18 @@ function formatMxn(value: number) {
 function formatDateKeyDisplay(dateKey: string) {
   const [year, month, day] = dateKey.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function addYearsToDateKey(value: string, years: number) {
+  const date = dateKeyToUtcDate(value);
+  const year = date.getUTCFullYear() + years;
+  const month = date.getUTCMonth() + 1;
+  const day = Math.min(date.getUTCDate(), getDaysInMonth(year, month));
+  return `${year}-${padDatePart(month)}-${padDatePart(day)}`;
 }
 
 function getMexicoCityDateKey(value = new Date()) {
@@ -529,7 +551,9 @@ function getRecordedVacationDaysInDateRange(
   laborFile: NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>,
   globalVacationDayRecords: PayrollGlobalVacationDayRecord[],
   startDate: string,
-  endDate: string
+  endDate: string,
+  employmentStartedAt: string,
+  employmentEndedAt?: string
 ) {
   const vacationEvents = laborFile.vacationEvents.filter((event) =>
     event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION"
@@ -540,12 +564,39 @@ function getRecordedVacationDaysInDateRange(
     0
   );
   const globalVacationDays = globalVacationDayRecords
-    .filter((day) => !globalVacationEvents.some((event) =>
-      event.globalVacationDayId === day.id || toDateInput(event.startDate) === toDateInput(day.date)
-    ))
+    .filter((day) => {
+      const date = toDateInput(day.date);
+      return date >= employmentStartedAt &&
+        (!employmentEndedAt || date <= employmentEndedAt) &&
+        !globalVacationEvents.some((event) =>
+          event.globalVacationDayId === day.id || toDateInput(event.startDate) === date
+        );
+    })
     .reduce((total, day) => total + getGlobalVacationDayDaysInDateRange(day, startDate, endDate), 0);
 
   return vacationEventDays + globalVacationDays;
+}
+
+function getRecordedVacationDaysInOptionalDateRange(
+  laborFile: NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>,
+  globalVacationDayRecords: PayrollGlobalVacationDayRecord[],
+  startDate: string,
+  endDate: string,
+  employmentStartedAt: string,
+  employmentEndedAt?: string
+) {
+  if (!startDate || !endDate || startDate > endDate) {
+    return 0;
+  }
+
+  return getRecordedVacationDaysInDateRange(
+    laborFile,
+    globalVacationDayRecords,
+    startDate,
+    endDate,
+    employmentStartedAt,
+    employmentEndedAt
+  );
 }
 
 function getManualAdvanceVacationDaysForPeriod(
@@ -604,7 +655,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         advanceVacationDays: 0,
         advanceVacationPremiumPaymentDate: undefined,
         advanceVacationDaysPaid: false,
-        advanceVacationDaysPaymentEligible: false
+        advanceVacationDaysPaymentEligible: false,
+        advanceVacationDaysPreviousPeriods: 0,
+        advanceVacationDaysCurrentPeriod: 0,
+        vacationDaysPaidPreviousPeriods: 0,
+        vacationDaysPaidAdvanceCurrentPeriod: 0
       };
     }
 
@@ -617,29 +672,73 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       globalVacationDayRecords.map(mapLaborGlobalVacationDay)
     );
     const period = getPayrollPeriodDateRange(record.year, record.month, record.half === 2 ? 2 : 1);
-    const advanceVacationPremiumPaymentDate = vacationSummary.currentYearStartDate;
+    const advanceVacationPremiumPaymentDate = vacationSummary.completedYears > 0
+      ? vacationSummary.currentYearStartDate
+      : addYearsToDateKey(hireDate, 1);
+    const advanceVacationStartDate = vacationSummary.completedYears > 0
+      ? vacationSummary.previousYearStartDate
+      : hireDate;
+    const advanceVacationEndDate = vacationSummary.completedYears > 0
+      ? vacationSummary.previousYearEndDate
+      : addDateKey(advanceVacationPremiumPaymentDate, -1);
     const recordedAdvanceVacationDays = getRecordedVacationDaysInDateRange(
       laborFile,
       globalVacationDayRecords,
-      vacationSummary.previousYearStartDate,
-      vacationSummary.previousYearEndDate
+      advanceVacationStartDate,
+      advanceVacationEndDate,
+      hireDate,
+      employmentEndedAt
+    );
+    const previousPeriodsEndDate = minDateKey(advanceVacationEndDate, addDateKey(period.startDate, -1));
+    const currentPeriodStartDate = maxDateKey(advanceVacationStartDate, period.startDate);
+    const currentPeriodEndDate = minDateKey(advanceVacationEndDate, period.endDate);
+    const recordedAdvanceVacationDaysPreviousPeriods = getRecordedVacationDaysInOptionalDateRange(
+      laborFile,
+      globalVacationDayRecords,
+      advanceVacationStartDate,
+      previousPeriodsEndDate,
+      hireDate,
+      employmentEndedAt
+    );
+    const recordedAdvanceVacationDaysCurrentPeriod = getRecordedVacationDaysInOptionalDateRange(
+      laborFile,
+      globalVacationDayRecords,
+      currentPeriodStartDate,
+      currentPeriodEndDate,
+      hireDate,
+      employmentEndedAt
     );
     const manualAdvanceVacationDays = getManualAdvanceVacationDaysForPeriod(
       laborFile,
-      vacationSummary.previousYearStartDate,
-      vacationSummary.previousYearEndDate
+      advanceVacationStartDate,
+      advanceVacationEndDate
     );
-    const rawAdvanceVacationDays = advanceVacationPremiumPaymentDate <= period.endDate
-      ? roundPayrollNumber(Math.max(recordedAdvanceVacationDays, manualAdvanceVacationDays))
+    const isAdvanceVacationPaymentInPeriod = advanceVacationPremiumPaymentDate >= period.startDate &&
+      advanceVacationPremiumPaymentDate <= period.endDate;
+    const manualAdvanceVacationRemainder = Math.max(0, manualAdvanceVacationDays - recordedAdvanceVacationDays);
+    const rawAdvanceVacationDaysPreviousPeriods = isAdvanceVacationPaymentInPeriod
+      ? roundPayrollNumber(recordedAdvanceVacationDaysPreviousPeriods + manualAdvanceVacationRemainder)
       : 0;
+    const rawAdvanceVacationDaysCurrentPeriod = isAdvanceVacationPaymentInPeriod
+      ? roundPayrollNumber(recordedAdvanceVacationDaysCurrentPeriod)
+      : 0;
+    const rawAdvanceVacationDays = roundPayrollNumber(
+      rawAdvanceVacationDaysPreviousPeriods + rawAdvanceVacationDaysCurrentPeriod
+    );
     const paidCutoffDate = toDateInput(laborFile.advanceVacationDaysPaidCutoffDate);
     const paidBalance = paidCutoffDate && paidCutoffDate === advanceVacationPremiumPaymentDate
       ? roundPayrollNumber(Number(laborFile.advanceVacationDaysPaidBalance ?? 0))
       : 0;
+    const paidPreviousPeriods = paidBalance > 0
+      ? roundPayrollNumber(Number(laborFile.advanceVacationDaysPaidPrevious ?? paidBalance))
+      : 0;
+    const paidCurrentPeriod = paidBalance > 0
+      ? roundPayrollNumber(Number(laborFile.advanceVacationDaysPaidCurrent ?? 0))
+      : 0;
     const advanceVacationDays = roundPayrollNumber(Math.max(0, rawAdvanceVacationDays - paidBalance));
     const advanceVacationDaysPaymentEligible = Boolean(
       advanceVacationPremiumPaymentDate &&
-      advanceVacationPremiumPaymentDate <= period.endDate &&
+      isAdvanceVacationPaymentInPeriod &&
       getMexicoCityDateKey() >= advanceVacationPremiumPaymentDate &&
       rawAdvanceVacationDays > 0
     );
@@ -648,9 +747,15 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     return {
       rawAdvanceVacationDays,
       advanceVacationDays,
-      advanceVacationPremiumPaymentDate,
+      advanceVacationPremiumPaymentDate: rawAdvanceVacationDays > 0
+        ? advanceVacationPremiumPaymentDate
+        : undefined,
       advanceVacationDaysPaid,
-      advanceVacationDaysPaymentEligible
+      advanceVacationDaysPaymentEligible,
+      advanceVacationDaysPreviousPeriods: rawAdvanceVacationDaysPreviousPeriods,
+      advanceVacationDaysCurrentPeriod: rawAdvanceVacationDaysCurrentPeriod,
+      vacationDaysPaidPreviousPeriods: advanceVacationDaysPaid ? paidPreviousPeriods : 0,
+      vacationDaysPaidAdvanceCurrentPeriod: advanceVacationDaysPaid ? paidCurrentPeriod : 0
     };
   }
 
@@ -667,10 +772,25 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     record: StoredGeneralExpensePayrollEntry,
     globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
   ) {
+    const vacationTotals = this.getPayrollVacationTotals(record);
+    const advanceVacationData = this.getPayrollAdvanceVacationData(record, globalVacationDayRecords);
+    const regularVacationDaysCurrentPeriod = roundPayrollNumber(Math.max(
+      0,
+      vacationTotals.vacationDays - advanceVacationData.advanceVacationDaysCurrentPeriod
+    ));
+    const vacationDaysPaidCurrentPeriod = roundPayrollNumber(
+      regularVacationDaysCurrentPeriod + advanceVacationData.vacationDaysPaidAdvanceCurrentPeriod
+    );
+    const vacationDaysPaidPreviousPeriods = advanceVacationData.vacationDaysPaidPreviousPeriods;
+    const vacationDays = roundPayrollNumber(vacationDaysPaidPreviousPeriods + vacationDaysPaidCurrentPeriod);
+    const dailySalaryMxn = Number(record.laborFile?.dailySalaryMxn ?? record.dailySalaryMxn ?? 0);
     const mapped = mapGeneralExpensePayrollEntry({
       ...record,
-      ...this.getPayrollVacationTotals(record),
-      ...this.getPayrollAdvanceVacationData(record, globalVacationDayRecords)
+      ...advanceVacationData,
+      vacationDaysPaidPreviousPeriods,
+      vacationDaysPaidCurrentPeriod,
+      vacationDays,
+      vacationPremiumMxn: roundPayrollNumber(vacationDays * dailySalaryMxn * PAYROLL_VACATION_PREMIUM_RATE)
     });
     const riStatus = await getLaborDailySalaryRiStatus(record.laborFile);
 
@@ -1687,12 +1807,16 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
         laborFileUpdate = {
           advanceVacationDaysPaidBalance: normalizeHours(advanceVacationData.rawAdvanceVacationDays),
-          advanceVacationDaysPaidCutoffDate: parseDateOnly(advanceVacationData.advanceVacationPremiumPaymentDate)
+          advanceVacationDaysPaidCutoffDate: parseDateOnly(advanceVacationData.advanceVacationPremiumPaymentDate),
+          advanceVacationDaysPaidPrevious: normalizeHours(advanceVacationData.advanceVacationDaysPreviousPeriods),
+          advanceVacationDaysPaidCurrent: normalizeHours(advanceVacationData.advanceVacationDaysCurrentPeriod)
         };
       } else {
         laborFileUpdate = {
           advanceVacationDaysPaidBalance: normalizeHours(0),
-          advanceVacationDaysPaidCutoffDate: null
+          advanceVacationDaysPaidCutoffDate: null,
+          advanceVacationDaysPaidPrevious: normalizeHours(0),
+          advanceVacationDaysPaidCurrent: normalizeHours(0)
         };
       }
     }

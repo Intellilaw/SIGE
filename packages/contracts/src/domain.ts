@@ -412,6 +412,10 @@ export interface LaborFile {
   employmentStatus: LaborEmploymentStatus;
   hireDate: string;
   dailySalaryMxn?: number;
+  advanceVacationDaysPaidBalance: number;
+  advanceVacationDaysPaidCutoffDate?: string;
+  advanceVacationDaysPaidPrevious: number;
+  advanceVacationDaysPaidCurrent: number;
   employmentEndedAt?: string;
   notes?: string;
   documents: LaborFileDocument[];
@@ -1124,6 +1128,8 @@ export interface GeneralExpensePayrollEntry {
   advanceVacationPremiumPaymentDate?: string;
   advanceVacationDaysPaid: boolean;
   advanceVacationDaysPaymentEligible: boolean;
+  vacationDaysPaidPreviousPeriods: number;
+  vacationDaysPaidCurrentPeriod: number;
   vacationDays: number;
   vacationPremiumMxn: number;
   absenceDays: number;

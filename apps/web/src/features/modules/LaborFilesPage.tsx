@@ -174,6 +174,14 @@ function formatLongDate(value?: string) {
   });
 }
 
+function formatVacationDays(value?: number) {
+  const numeric = Number(value ?? 0);
+  return new Intl.NumberFormat("es-MX", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number.isInteger(numeric) ? 0 : 2
+  }).format(Number.isFinite(numeric) ? numeric : 0);
+}
+
 function formatDateTime(value?: string) {
   if (!value) {
     return "-";
@@ -2793,6 +2801,22 @@ export function LaborFilesPage() {
                   <div>
                     <span>Autorizados con PDF firmado</span>
                     <strong>{selectedLaborFile.vacationSummary.authorizedDays}</strong>
+                  </div>
+                  <div>
+                    <span>Prima de días adelantados pagada</span>
+                    <strong>{formatVacationDays(selectedLaborFile.advanceVacationDaysPaidBalance)}</strong>
+                  </div>
+                  <div>
+                    <span>Pagados de quincenas anteriores</span>
+                    <strong>{formatVacationDays(selectedLaborFile.advanceVacationDaysPaidPrevious)}</strong>
+                  </div>
+                  <div>
+                    <span>Pagados de esta quincena</span>
+                    <strong>{formatVacationDays(selectedLaborFile.advanceVacationDaysPaidCurrent)}</strong>
+                  </div>
+                  <div>
+                    <span>Fecha de corte pagada</span>
+                    <strong>{formatDate(selectedLaborFile.advanceVacationDaysPaidCutoffDate)}</strong>
                   </div>
                 </div>
 

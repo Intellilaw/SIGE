@@ -1088,6 +1088,10 @@ export function mapLaborFile(record: {
   employmentStatus: string;
   hireDate: Date;
   dailySalaryMxn: Prisma.Decimal | number | null;
+  advanceVacationDaysPaidBalance?: Prisma.Decimal | number | null;
+  advanceVacationDaysPaidCutoffDate?: Date | null;
+  advanceVacationDaysPaidPrevious?: Prisma.Decimal | number | null;
+  advanceVacationDaysPaidCurrent?: Prisma.Decimal | number | null;
   employmentEndedAt: Date | null;
   notes: string | null;
   documents: Array<Parameters<typeof mapLaborFileDocument>[0]>;
@@ -1120,6 +1124,10 @@ export function mapLaborFile(record: {
     employmentStatus: record.employmentStatus as LaborFile["employmentStatus"],
     hireDate,
     dailySalaryMxn: Number(record.dailySalaryMxn ?? 0) || undefined,
+    advanceVacationDaysPaidBalance: Number(record.advanceVacationDaysPaidBalance ?? 0),
+    advanceVacationDaysPaidCutoffDate: toDateOnlyKey(record.advanceVacationDaysPaidCutoffDate) || undefined,
+    advanceVacationDaysPaidPrevious: Number(record.advanceVacationDaysPaidPrevious ?? 0),
+    advanceVacationDaysPaidCurrent: Number(record.advanceVacationDaysPaidCurrent ?? 0),
     employmentEndedAt,
     notes: record.notes ?? undefined,
     documents,
@@ -1810,6 +1818,8 @@ export function mapGeneralExpensePayrollEntry(record: {
   advanceVacationPremiumPaymentDate?: string | null;
   advanceVacationDaysPaid?: boolean;
   advanceVacationDaysPaymentEligible?: boolean;
+  vacationDaysPaidPreviousPeriods?: number;
+  vacationDaysPaidCurrentPeriod?: number;
   vacationDays?: number;
   vacationPremiumMxn?: number;
   absenceDays: Prisma.Decimal;
@@ -1869,6 +1879,8 @@ export function mapGeneralExpensePayrollEntry(record: {
     advanceVacationPremiumPaymentDate: record.advanceVacationPremiumPaymentDate ?? undefined,
     advanceVacationDaysPaid: Boolean(record.advanceVacationDaysPaid),
     advanceVacationDaysPaymentEligible: Boolean(record.advanceVacationDaysPaymentEligible),
+    vacationDaysPaidPreviousPeriods: Number(record.vacationDaysPaidPreviousPeriods ?? 0),
+    vacationDaysPaidCurrentPeriod: Number(record.vacationDaysPaidCurrentPeriod ?? 0),
     vacationDays,
     vacationPremiumMxn,
     absenceDays,

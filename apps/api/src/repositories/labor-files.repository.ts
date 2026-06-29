@@ -2075,6 +2075,9 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       status: "INCOMPLETE",
       employmentStatus: snapshot.employmentStatus as LocalLaborFileState["employmentStatus"],
       hireDate: toDateKey(snapshot.hireDate),
+      advanceVacationDaysPaidBalance: 0,
+      advanceVacationDaysPaidPrevious: 0,
+      advanceVacationDaysPaidCurrent: 0,
       employmentEndedAt: snapshot.employmentEndedAt ? toDateKey(snapshot.employmentEndedAt) : null,
       notes: null,
       documents: [],
@@ -2182,6 +2185,12 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       employmentStatus: record.employmentStatus,
       hireDate: localDate(record.hireDate),
       dailySalaryMxn: new Prisma.Decimal(record.dailySalaryMxn ?? 0),
+      advanceVacationDaysPaidBalance: new Prisma.Decimal(record.advanceVacationDaysPaidBalance ?? 0),
+      advanceVacationDaysPaidCutoffDate: record.advanceVacationDaysPaidCutoffDate
+        ? localDate(record.advanceVacationDaysPaidCutoffDate)
+        : null,
+      advanceVacationDaysPaidPrevious: new Prisma.Decimal(record.advanceVacationDaysPaidPrevious ?? 0),
+      advanceVacationDaysPaidCurrent: new Prisma.Decimal(record.advanceVacationDaysPaidCurrent ?? 0),
       employmentEndedAt: record.employmentEndedAt ? localDate(record.employmentEndedAt) : null,
       notes: record.notes ?? null,
       documents: record.documents.map((document) => this.mapDocumentRecord(document)),
