@@ -28,6 +28,7 @@
     "intranet:verify-business": "tsx scripts/migration/verify-intranet-business-import.ts",
     "intranet:repair-task-names": "tsx scripts/migration/repair-legacy-task-names.ts",
     "aws:verify-runtime": "tsx scripts/deploy/verify-aws-runtime.ts",
+    "labor:backfill-ri003-salary": "tsx scripts/labor-files/backfill-ri003-salary-extractions.ts",
     "db:transfer": "tsx scripts/migration/transfer-postgres.ts"
   },
   "dependencies": {

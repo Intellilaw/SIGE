@@ -97,7 +97,7 @@ export const RUSCONI_INTELLIGENCE_CONNECTIONS: IntelligenceConnection[] = [
     surface: "Salario diario en Expedientes laborales y Gastos generales / 2. Nomina",
     status: "active",
     promptName: "Validacion de salario diario contra contrato laboral",
-    promptVersion: "v0.2",
+    promptVersion: "v0.3",
     prompt:
       "Compara el salario diario capturado en el expediente laboral contra el salario diario ordinario bruto vigente extraido del contrato laboral y, especialmente, del addendum vigente mas reciente. Busca y lee de forma especifica expresiones como salario diario, salario diario ordinario, salario diario ordinario bruto o salario base diario; cuando el addendum vigente contenga un salario diario legible, esa cifra es la referencia principal y no debe descartarse porque el salario mensual no sea legible. Usa el salario mensual bruto solamente como respaldo cuando no exista salario diario legible, convirtiendolo a salario diario entre 30. Cuando el mismo distintivo aparezca en Nomina, confirma adicionalmente que el salario diario de nomina coincide con el salario diario verificado de Expedientes Laborales. Si falta cualquier pieza de evidencia, marca la validacion como no coincidente.",
     context: [
