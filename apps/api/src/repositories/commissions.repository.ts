@@ -1,8 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { COMMISSION_SECTIONS } from "@sige/contracts";
-
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
+import { getRequiredCommissionReceiverNames } from "./commission-receiver-defaults";
 import { attachSalesCommissionsToFinanceRecords } from "./finance-sales-commissions";
 import {
   mapCommissionExclusion,
@@ -208,8 +207,10 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
   }
 
   private async ensureDefaultReceivers() {
+    const organizationId = getCurrentOrganizationIdOrDefault();
+
     await this.prisma.commissionReceiver.createMany({
-      data: COMMISSION_SECTIONS.map((name) => ({ name })),
+      data: getRequiredCommissionReceiverNames(organizationId).map((name) => ({ organizationId, name })),
       skipDuplicates: true
     });
   }

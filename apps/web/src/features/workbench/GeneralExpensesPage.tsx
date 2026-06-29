@@ -662,6 +662,8 @@ function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayl
 
   if (patch.paymentMethod === "Efectivo") {
     next.hasVat = false;
+    next.bank = undefined;
+    next.emrtReimbursementPending = false;
   }
 
   if (Object.prototype.hasOwnProperty.call(patch, "paidByEmrtAt") && !patch.paidByEmrtAt) {
@@ -1682,7 +1684,7 @@ export function GeneralExpensesPage() {
                     <td>
                       <div
                         className="general-expense-readonly-cell general-expense-payroll-days-cell general-expense-payroll-advance-cell"
-                        title="Días disfrutados por adelantado calculados desde el saldo negativo del expediente laboral."
+                        title="Días disfrutados antes del aniversario laboral que generan prima vacacional en esta fecha de corte."
                       >
                         {formatPayrollDays(entry.advanceVacationDays)}
                       </div>
@@ -2136,10 +2138,10 @@ export function GeneralExpensesPage() {
                                   value={expense.paymentMethod}
                                   onChange={(event) => {
                                     const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
-                                    const localPatch = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false, emrtReimbursementPending: false }
+                                    const payload = nextMethod === "Efectivo"
+                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false }
                                       : { paymentMethod: nextMethod };
-                                    void persistExpensePatch(expense.id, localPatch, localPatch);
+                                    void persistExpensePatch(expense.id, payload);
                                   }}
                                   disabled={protectedFieldDisabled}
                                 >

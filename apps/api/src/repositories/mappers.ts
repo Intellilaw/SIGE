@@ -675,6 +675,60 @@ function getGlobalVacationDateKeys(day: Pick<LaborGlobalVacationDay, "date" | "d
   return Array.from({ length: days }, (_, index) => addDateKey(day.date, index));
 }
 
+function enumerateVacationDateKeys(startDate?: string, endDate?: string) {
+  if (!startDate || !endDate || endDate < startDate) {
+    return [];
+  }
+
+  const result: string[] = [];
+  let current = startDate;
+  while (current <= endDate && result.length < 370) {
+    result.push(current);
+    current = addDateKey(current, 1);
+  }
+
+  return result;
+}
+
+function getVacationEventDateKeys(event: LaborVacationEvent) {
+  const explicitDates = event.vacationDates ?? [];
+  if (explicitDates.length > 0) {
+    return [...explicitDates].sort();
+  }
+
+  if (event.startDate && event.endDate) {
+    return enumerateVacationDateKeys(event.startDate, event.endDate);
+  }
+
+  const days = Number(event.days ?? 0);
+  if (event.startDate && Number.isInteger(days) && days > 1 && days <= 31) {
+    return Array.from({ length: days }, (_, index) => addDateKey(event.startDate!, index));
+  }
+
+  return event.startDate ? [event.startDate] : [];
+}
+
+function getRepresentedDaysInRange(recordedDays: number, dateKeys: string[], startDate: string, endDate: string) {
+  const dateKeysInRange = dateKeys.filter((dateKey) => dateKey >= startDate && dateKey <= endDate);
+  if (dateKeysInRange.length === 0) {
+    return 0;
+  }
+
+  if (recordedDays > 0 && dateKeys.length > 0 && Math.abs(recordedDays - dateKeys.length) > 0.01) {
+    return dateKeysInRange.length * (recordedDays / dateKeys.length);
+  }
+
+  return dateKeysInRange.length;
+}
+
+function getVacationEventDaysInRange(event: LaborVacationEvent, startDate: string, endDate: string) {
+  return getRepresentedDaysInRange(Number(event.days ?? 0), getVacationEventDateKeys(event), startDate, endDate);
+}
+
+function getGlobalVacationDayDaysInRange(day: LaborGlobalVacationDay, startDate: string, endDate: string) {
+  return getRepresentedDaysInRange(Number(day.days ?? 0), getGlobalVacationDateKeys(day), startDate, endDate);
+}
+
 function formatVacationDateSelection(event: LaborVacationEvent) {
   const dates = event.vacationDates ?? [];
   if (dates.length === 0) {
@@ -775,7 +829,6 @@ export function buildVacationSummary(
   const yearBeforeLastPendingCountedEvents = previousYearPendingEvents.filter((event) =>
     event.startDate === yearBeforeLastStartDate && event.endDate === yearBeforeLastEndDate
   );
-  const previousYearPendingDays = previousYearPendingCountedEvents.reduce((total, event) => total + event.days, 0);
   const yearBeforeLastPendingDays = yearBeforeLastPendingCountedEvents.reduce((total, event) => total + event.days, 0);
   const ignoredPreviousYearPendingDays = previousYearPendingEvents
     .filter((event) =>
@@ -783,6 +836,9 @@ export function buildVacationSummary(
       !yearBeforeLastPendingCountedEvents.includes(event)
     )
     .reduce((total, event) => total + event.days, 0);
+  const rawPreviousYearPendingDays = previousYearPendingCountedEvents.reduce((total, event) => total + event.days, 0);
+  const previousYearManualCarryoverDays = Math.max(0, rawPreviousYearPendingDays);
+  const previousYearManualDeductionDays = Math.max(0, -rawPreviousYearPendingDays);
   const previousYearDeductionDays = vacationEvents
     .filter((event) => event.eventType === "PREVIOUS_YEAR_DEDUCTION")
     .reduce((total, event) => total + event.days, 0);
@@ -797,8 +853,24 @@ export function buildVacationSummary(
   const scheduledDays = vacationRequests
     .filter((event) => !isAuthorizedVacationEvent(event))
     .reduce((total, event) => total + event.days, 0);
-  const availableDays = entitlementDays + previousYearPendingDays + yearBeforeLastPendingDays;
-  const usedDays = authorizedDays + scheduledDays + previousYearDeductionDays + globalVacationUsedDays;
+  const recordedPreviousYearVacationDays = vacationRequests
+    .reduce((total, event) => total + getVacationEventDaysInRange(event, previousYearStartDate, previousYearEndDate), 0) +
+    applicableGlobalVacationDays
+      .filter((day) => !globalVacationRequests.some((event) =>
+        event.globalVacationDayId === day.id || event.startDate === day.date
+      ))
+      .reduce((total, day) => total + getGlobalVacationDayDaysInRange(day, previousYearStartDate, previousYearEndDate), 0);
+  const effectivePreviousYearManualDeductionDays = Math.max(
+    0,
+    previousYearManualDeductionDays - recordedPreviousYearVacationDays
+  );
+  const previousYearPendingDays = previousYearManualCarryoverDays;
+  const availableDays = entitlementDays + previousYearManualCarryoverDays + yearBeforeLastPendingDays;
+  const usedDays = authorizedDays +
+    scheduledDays +
+    previousYearDeductionDays +
+    globalVacationUsedDays +
+    effectivePreviousYearManualDeductionDays;
   const remainingDays = availableDays - usedDays;
   const unearnedDays = Math.max(0, usedDays - availableDays);
   const eventLines = vacationEvents.map((event) => {
@@ -816,6 +888,22 @@ export function buildVacationSummary(
       const adjustmentDays = Math.abs(event.days);
       const adjustmentAction = event.days < 0 ? "descuenta" : "agrega";
       const adjustmentUnit = adjustmentDays === 1 ? "día" : "días";
+      if (isLastYearPending && event.days < 0 && effectivePreviousYearManualDeductionDays < adjustmentDays) {
+        const coveredDays = adjustmentDays - effectivePreviousYearManualDeductionDays;
+        const coveredUnit = coveredDays === 1 ? "dia" : "dias";
+        if (effectivePreviousYearManualDeductionDays <= 0) {
+          return {
+            dateKey: event.startDate ?? "0000-00-00",
+            line: `Ajuste manual del ultimo ano: ${coveredDays} ${coveredUnit} ya estan cubiertos por vacaciones registradas${dateRange ? ` del periodo ${dateRange}` : ""}.`
+          };
+        }
+
+        return {
+          dateKey: event.startDate ?? "0000-00-00",
+          line: `Saldo pendiente del ultimo ano: descuenta ${effectivePreviousYearManualDeductionDays} ${effectivePreviousYearManualDeductionDays === 1 ? "dia" : "dias"} adicionales${dateRange ? ` del periodo ${dateRange}` : ""}; ${coveredDays} ${coveredUnit} ya estan cubiertos por vacaciones registradas.`
+        };
+      }
+
       return {
         dateKey: event.startDate ?? "0000-00-00",
         line: isLastYearPending

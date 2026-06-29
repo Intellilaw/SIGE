@@ -1,5 +1,7 @@
 import { COMMISSION_SECTIONS, type CommissionReceiver } from "@sige/contracts";
 
+import { getCurrentOrganizationIdOrDefault } from "../../core/tenant/tenant-context";
+import { getRequiredCommissionReceiverNames } from "../../repositories/commission-receiver-defaults";
 import type { FinanceRecordWriteRecord, FinanceRepository } from "../../repositories/types";
 
 const COMMISSION_RECEIVER_ALIAS_PAIRS = [
@@ -32,13 +34,18 @@ function normalizeComparableText(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function getCanonicalCommissionReceiverName(value?: string | null) {
+function getCanonicalCommissionReceiverName(value?: string | null, requiredNames: readonly string[] = COMMISSION_SECTIONS) {
   const name = normalizeText(value);
   if (!name) {
     return "";
   }
 
-  return COMMISSION_RECEIVER_NAME_BY_KEY.get(normalizeComparableText(name)) ?? name;
+  const nameByKey = new Map(COMMISSION_RECEIVER_NAME_BY_KEY);
+  requiredNames.forEach((requiredName) => {
+    nameByKey.set(normalizeComparableText(requiredName), requiredName);
+  });
+
+  return nameByKey.get(normalizeComparableText(name)) ?? name;
 }
 
 function getRequiredCommissionReceiverId(name: string) {
@@ -58,6 +65,8 @@ function buildRequiredCommissionReceiver(name: string): CommissionReceiver {
 }
 
 function normalizeCommissionReceivers(receivers: CommissionReceiver[]) {
+  const organizationId = getCurrentOrganizationIdOrDefault();
+  const requiredNames = getRequiredCommissionReceiverNames(organizationId);
   const byKey = new Map<string, CommissionReceiver>();
 
   const addReceiver = (receiver: CommissionReceiver) => {
@@ -65,7 +74,7 @@ function normalizeCommissionReceivers(receivers: CommissionReceiver[]) {
       return;
     }
 
-    const name = getCanonicalCommissionReceiverName(receiver.name);
+    const name = getCanonicalCommissionReceiverName(receiver.name, requiredNames);
     if (!name) {
       return;
     }
@@ -77,7 +86,7 @@ function normalizeCommissionReceivers(receivers: CommissionReceiver[]) {
   };
 
   receivers.forEach(addReceiver);
-  COMMISSION_SECTIONS.forEach((name) => addReceiver(buildRequiredCommissionReceiver(name)));
+  requiredNames.forEach((name) => addReceiver(buildRequiredCommissionReceiver(name)));
 
   return [...byKey.values()].sort((left, right) =>
     left.name.localeCompare(right.name, "es", { sensitivity: "base" })

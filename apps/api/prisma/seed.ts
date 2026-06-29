@@ -312,7 +312,12 @@ async function seedUsers() {
 
 async function seedCommissionReceivers() {
   const organizationId = "org-rusconi";
-  for (const name of COMMISSION_SECTIONS) {
+  const rusconiCommissionReceivers = [
+    ...COMMISSION_SECTIONS,
+    "Israel Vidal"
+  ];
+
+  for (const name of rusconiCommissionReceivers) {
     await prisma.commissionReceiver.upsert({
       where: {
         organizationId_name: {

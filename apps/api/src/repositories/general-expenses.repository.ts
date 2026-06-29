@@ -225,18 +225,6 @@ function formatDateKeyDisplay(dateKey: string) {
   return `${day}/${month}/${year}`;
 }
 
-function getDaysInMonth(year: number, month: number) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function addYearsToDateKey(value: string, years: number) {
-  const date = dateKeyToUtcDate(value);
-  const year = date.getUTCFullYear() + years;
-  const month = date.getUTCMonth() + 1;
-  const day = Math.min(date.getUTCDate(), getDaysInMonth(year, month));
-  return `${year}-${padDatePart(month)}-${padDatePart(day)}`;
-}
-
 function getMexicoCityDateKey(value = new Date()) {
   const dateParts = new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
@@ -492,6 +480,88 @@ function getVacationDaysInPayrollPeriod(
   return dateKeysInPeriod.length;
 }
 
+function getVacationDaysInDateRange(event: PayrollVacationEventRecord, startDate: string, endDate: string) {
+  const dateKeys = getVacationEventDateKeys(event);
+  const dateKeysInRange = dateKeys.filter((dateKey) => dateKey >= startDate && dateKey <= endDate);
+  if (dateKeysInRange.length === 0) {
+    return 0;
+  }
+
+  const recordedDays = Number(event.days ?? 0);
+  if (recordedDays > 0 && dateKeys.length > 0 && Math.abs(recordedDays - dateKeys.length) > 0.01) {
+    return dateKeysInRange.length * (recordedDays / dateKeys.length);
+  }
+
+  return dateKeysInRange.length;
+}
+
+function getGlobalVacationDayDateKeys(day: PayrollGlobalVacationDayRecord) {
+  const explicitDates = getVacationDateKeysFromJson(day.vacationDates);
+  if (explicitDates.length > 0) {
+    return explicitDates;
+  }
+
+  const startDate = toDateInput(day.date);
+  const days = Number(day.days ?? 0);
+  if (startDate && Number.isInteger(days) && days > 1 && days <= 31) {
+    return Array.from({ length: days }, (_, index) => addDateKey(startDate, index));
+  }
+
+  return startDate ? [startDate] : [];
+}
+
+function getGlobalVacationDayDaysInDateRange(day: PayrollGlobalVacationDayRecord, startDate: string, endDate: string) {
+  const dateKeys = getGlobalVacationDayDateKeys(day);
+  const dateKeysInRange = dateKeys.filter((dateKey) => dateKey >= startDate && dateKey <= endDate);
+  if (dateKeysInRange.length === 0) {
+    return 0;
+  }
+
+  const recordedDays = Number(day.days ?? 0);
+  if (recordedDays > 0 && dateKeys.length > 0 && Math.abs(recordedDays - dateKeys.length) > 0.01) {
+    return dateKeysInRange.length * (recordedDays / dateKeys.length);
+  }
+
+  return dateKeysInRange.length;
+}
+
+function getRecordedVacationDaysInDateRange(
+  laborFile: NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>,
+  globalVacationDayRecords: PayrollGlobalVacationDayRecord[],
+  startDate: string,
+  endDate: string
+) {
+  const vacationEvents = laborFile.vacationEvents.filter((event) =>
+    event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION"
+  );
+  const globalVacationEvents = vacationEvents.filter((event) => event.eventType === "GLOBAL_VACATION");
+  const vacationEventDays = vacationEvents.reduce(
+    (total, event) => total + getVacationDaysInDateRange(event, startDate, endDate),
+    0
+  );
+  const globalVacationDays = globalVacationDayRecords
+    .filter((day) => !globalVacationEvents.some((event) =>
+      event.globalVacationDayId === day.id || toDateInput(event.startDate) === toDateInput(day.date)
+    ))
+    .reduce((total, day) => total + getGlobalVacationDayDaysInDateRange(day, startDate, endDate), 0);
+
+  return vacationEventDays + globalVacationDays;
+}
+
+function getManualAdvanceVacationDaysForPeriod(
+  laborFile: NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>,
+  startDate: string,
+  endDate: string
+) {
+  return laborFile.vacationEvents
+    .filter((event) =>
+      event.eventType === "PREVIOUS_YEAR_PENDING" &&
+      toDateInput(event.startDate) === startDate &&
+      toDateInput(event.endDate) === endDate
+    )
+    .reduce((total, event) => total + Math.max(0, -Number(event.days ?? 0)), 0);
+}
+
 function getNextMonth(year: number, month: number) {
   assertMonth(month);
   const nextMonthDate = new Date(year, month, 1);
@@ -546,10 +616,22 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       laborFile.vacationEvents.map(mapLaborVacationEvent),
       globalVacationDayRecords.map(mapLaborGlobalVacationDay)
     );
-    const rawAdvanceVacationDays = roundPayrollNumber(Math.max(0, -vacationSummary.remainingDays));
-    const advanceVacationPremiumPaymentDate = rawAdvanceVacationDays > 0
-      ? addYearsToDateKey(vacationSummary.currentYearStartDate, 1)
-      : undefined;
+    const period = getPayrollPeriodDateRange(record.year, record.month, record.half === 2 ? 2 : 1);
+    const advanceVacationPremiumPaymentDate = vacationSummary.currentYearStartDate;
+    const recordedAdvanceVacationDays = getRecordedVacationDaysInDateRange(
+      laborFile,
+      globalVacationDayRecords,
+      vacationSummary.previousYearStartDate,
+      vacationSummary.previousYearEndDate
+    );
+    const manualAdvanceVacationDays = getManualAdvanceVacationDaysForPeriod(
+      laborFile,
+      vacationSummary.previousYearStartDate,
+      vacationSummary.previousYearEndDate
+    );
+    const rawAdvanceVacationDays = advanceVacationPremiumPaymentDate <= period.endDate
+      ? roundPayrollNumber(Math.max(recordedAdvanceVacationDays, manualAdvanceVacationDays))
+      : 0;
     const paidCutoffDate = toDateInput(laborFile.advanceVacationDaysPaidCutoffDate);
     const paidBalance = paidCutoffDate && paidCutoffDate === advanceVacationPremiumPaymentDate
       ? roundPayrollNumber(Number(laborFile.advanceVacationDaysPaidBalance ?? 0))
@@ -557,6 +639,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const advanceVacationDays = roundPayrollNumber(Math.max(0, rawAdvanceVacationDays - paidBalance));
     const advanceVacationDaysPaymentEligible = Boolean(
       advanceVacationPremiumPaymentDate &&
+      advanceVacationPremiumPaymentDate <= period.endDate &&
       getMexicoCityDateKey() >= advanceVacationPremiumPaymentDate &&
       rawAdvanceVacationDays > 0
     );
