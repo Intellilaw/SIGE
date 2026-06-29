@@ -423,6 +423,8 @@ export function derivePermissions(input: {
     }
 
     if (isFinanceTeam) {
+      permissions.add("tasks:read");
+      permissions.add("tasks:finance");
       permissions.add("clients:read");
       permissions.add("quotes:read");
       permissions.add("quotes:write");

@@ -17,6 +17,21 @@ export interface TaskModuleDescriptor {
 }
 
 const FALLBACK_COLORS = ["#0f766e", "#7c3aed", "#c2410c", "#0369a1", "#4d7c0f", "#be123c"];
+const TASK_ONLY_MODULE_OVERRIDES: Partial<Record<TaskModuleDefinition["id"], {
+  slug: string;
+  shortLabel: string;
+  icon: string;
+  color: string;
+  description: string;
+}>> = {
+  finance: {
+    slug: "finanzas",
+    shortLabel: "Finanzas",
+    icon: "$",
+    color: "#0f766e",
+    description: "Cobranza, datos financieros y tareas adicionales del equipo de finanzas."
+  }
+};
 const FALLBACK_ICONS_BY_TEAM: Partial<Record<TaskModuleDefinition["team"], string>> = {
   ADMIN: "🧭",
   ADMIN_OPERATIONS: "🗂️",
@@ -61,6 +76,21 @@ export function buildTaskModuleDescriptor(module: TaskModuleDefinition): TaskMod
       description: module.summary || legacyExecutionModule.description,
       definition: module,
       legacyExecutionModule
+    };
+  }
+
+  const taskOnlyOverride = TASK_ONLY_MODULE_OVERRIDES[module.id];
+  if (taskOnlyOverride) {
+    return {
+      moduleId: module.id,
+      slug: taskOnlyOverride.slug,
+      team: module.team,
+      label: module.label,
+      shortLabel: taskOnlyOverride.shortLabel,
+      icon: taskOnlyOverride.icon,
+      color: taskOnlyOverride.color,
+      description: module.summary || taskOnlyOverride.description,
+      definition: module
     };
   }
 

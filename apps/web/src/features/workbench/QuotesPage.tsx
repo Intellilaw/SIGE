@@ -49,6 +49,7 @@ type EditableLineItem = {
 type QuoteFormState = {
   clientId: string;
   clientName: string;
+  recipientName: string;
   responsibleTeam: Team | "";
   status: QuoteStatus;
   quoteType: QuoteType;
@@ -578,6 +579,7 @@ function buildEmptyQuoteForm(defaultTeam?: string, language: QuoteLanguage = "es
   return {
     clientId: "",
     clientName: "",
+    recipientName: "",
     responsibleTeam: resolveDefaultTeam(defaultTeam),
     status: "DRAFT",
     quoteType: "ONE_TIME",
@@ -647,6 +649,7 @@ function buildQuoteFormFromTemplate(template: QuoteTemplate, defaultTeam?: strin
   return {
     clientId: "",
     clientName: "",
+    recipientName: "",
     responsibleTeam: resolveDefaultTeam(template.team ?? defaultTeam),
     status: "DRAFT",
     quoteType: template.quoteType,
@@ -659,10 +662,29 @@ function buildQuoteFormFromTemplate(template: QuoteTemplate, defaultTeam?: strin
   };
 }
 
+function buildQuoteFormFromTemplateSelection(
+  current: QuoteFormState,
+  template: QuoteTemplate,
+  defaultTeam?: string,
+  language: QuoteLanguage = "es"
+): QuoteFormState {
+  const next = buildQuoteFormFromTemplate(template, defaultTeam, language);
+
+  return {
+    ...next,
+    clientId: current.clientId,
+    clientName: current.clientName,
+    recipientName: current.recipientName || current.clientName,
+    quoteDate: current.quoteDate || next.quoteDate,
+    status: current.status || next.status
+  };
+}
+
 function buildQuoteFormFromQuote(quote: Quote): QuoteFormState {
   return {
     clientId: quote.clientId,
     clientName: quote.clientName,
+    recipientName: quote.recipientName ?? quote.clientName,
     responsibleTeam: quote.responsibleTeam ?? "",
     status: quote.status,
     quoteType: quote.quoteType,
@@ -1711,6 +1733,7 @@ export function QuotesPage() {
   const [templateForm, setTemplateForm] = useState<QuoteTemplateFormState>(() => buildEmptyTemplateForm(user?.team));
   const [quoteForm, setQuoteForm] = useState<QuoteFormState>(() => buildEmptyQuoteForm(user?.team));
   const [quoteTemplateDraft, setQuoteTemplateDraft] = useState<QuoteTemplateDraftState | null>(null);
+  const [quoteRecipientTouched, setQuoteRecipientTouched] = useState(false);
   const [templateWordSearch, setTemplateWordSearch] = useState("");
   const [templateTeamSearch, setTemplateTeamSearch] = useState("");
   const [quoteWordSearch, setQuoteWordSearch] = useState("");
@@ -1791,6 +1814,7 @@ export function QuotesPage() {
   function resetQuoteComposer(nextMode: QuoteSourceMode = sourceMode) {
     setEditingQuoteId(null);
     setPreparedQuote(null);
+    setQuoteRecipientTouched(false);
     setQuoteForm(buildEmptyQuoteForm(user?.team));
     setQuoteTemplateDraft(nextMode === "generic" ? buildEmptyQuoteTemplateDraft() : null);
   }
@@ -1805,7 +1829,7 @@ export function QuotesPage() {
   function applyTemplateToQuoteForm(template: QuoteTemplate, language: QuoteTemplateLanguage = "es") {
     setSourceMode("template");
     setSelectedTemplateId(template.id);
-    updateQuoteForm(buildQuoteFormFromTemplate(template, user?.team, language));
+    updateQuoteForm((current) => buildQuoteFormFromTemplateSelection(current, template, user?.team, language));
     updateQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
   }
 
@@ -1862,6 +1886,7 @@ export function QuotesPage() {
     setPreparedQuote(null);
     setSourceMode("generic");
     setSelectedTemplateId("");
+    setQuoteRecipientTouched(true);
     setQuoteForm(buildQuoteFormFromQuote(quote));
     setQuoteTemplateDraft(buildQuoteTemplateDraftFromQuote(quote));
     setActiveTab("new-quote-generic");
@@ -1889,6 +1914,7 @@ export function QuotesPage() {
       if (editingQuoteId === quoteId) {
         setEditingQuoteId(null);
         setPreparedQuote(null);
+        setQuoteRecipientTouched(false);
         setQuoteForm(buildEmptyQuoteForm(user?.team));
         setQuoteTemplateDraft(null);
       }
@@ -1952,6 +1978,7 @@ export function QuotesPage() {
     setFlash(null);
     setEditingQuoteId(null);
     setPreparedQuote(null);
+    setQuoteRecipientTouched(false);
 
     if (nextMode === "generic") {
       setSelectedTemplateId("");
@@ -1983,11 +2010,27 @@ export function QuotesPage() {
   }
 
   function handleTemplateSelection(templateId: string) {
+    const template = templates.find((item) => item.id === templateId);
+
     setSelectedTemplateId(templateId);
     setEditingQuoteId(null);
     setPreparedQuote(null);
-    setQuoteForm(buildEmptyQuoteForm(user?.team));
-    setQuoteTemplateDraft(null);
+    setFlash(null);
+
+    if (!template) {
+      updateQuoteForm((current) => ({
+        ...buildEmptyQuoteForm(user?.team, current.language),
+        clientId: current.clientId,
+        clientName: current.clientName,
+        recipientName: quoteRecipientTouched ? current.recipientName : current.clientName,
+        quoteDate: current.quoteDate || getTodayDateInputValue()
+      }));
+      setQuoteTemplateDraft(null);
+      return;
+    }
+
+    updateQuoteForm((current) => buildQuoteFormFromTemplateSelection(current, template, user?.team, "es"));
+    setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
   }
 
   function handleClientSelection(clientId: string) {
@@ -1995,7 +2038,8 @@ export function QuotesPage() {
     updateQuoteForm((current) => ({
       ...current,
       clientId,
-      clientName: client?.name ?? ""
+      clientName: client?.name ?? "",
+      recipientName: quoteRecipientTouched ? current.recipientName : client?.name ?? ""
     }));
   }
 
@@ -2063,28 +2107,40 @@ export function QuotesPage() {
       throw new Error("Selecciona un cliente de la lista para guardar la cotizacion.");
     }
 
-    if (sourceMode === "template" && !quoteTemplateDraft) {
-      throw new Error("Selecciona una cotizacion tipo para generar esta cotizacion.");
+    const selectedTemplate = sourceMode === "template"
+      ? templates.find((template) => template.id === selectedTemplateId)
+      : undefined;
+    const activeQuoteTemplateDraft = quoteTemplateDraft ?? (selectedTemplate
+      ? buildQuoteTemplateDraftFromTemplate(selectedTemplate)
+      : null);
+    const effectiveQuoteForm =
+      sourceMode === "template" && selectedTemplate && !quoteTemplateDraft
+        ? buildQuoteFormFromTemplateSelection(quoteForm, selectedTemplate, user?.team, quoteForm.language)
+        : quoteForm;
+
+    if (sourceMode === "template" && !activeQuoteTemplateDraft) {
+      throw new Error("Elige una cotizacion tipo base y despues usa la plantilla en español o en ingles.");
     }
 
-    const lineItems = quoteTemplateDraft
-      ? buildLineItemsFromTemplateDraft(quoteTemplateDraft)
-      : buildLineItemsPayload(quoteForm.lineItems);
+    const lineItems = activeQuoteTemplateDraft
+      ? buildLineItemsFromTemplateDraft(activeQuoteTemplateDraft)
+      : buildLineItemsPayload(effectiveQuoteForm.lineItems);
 
     const payload = {
       clientId: client.id,
       clientName: client.name,
-      responsibleTeam: quoteForm.responsibleTeam || undefined,
-      subject: normalizeText(quoteForm.subject),
-      status: quoteForm.status,
-      quoteType: quoteForm.quoteType,
-      language: quoteForm.language,
-      quoteDate: quoteForm.quoteDate || getTodayDateInputValue(),
-      amountColumns: quoteTemplateDraft?.amountColumns,
-      tableRows: quoteTemplateDraft?.tableRows,
+      recipientName: normalizeText(effectiveQuoteForm.recipientName) || client.name,
+      responsibleTeam: effectiveQuoteForm.responsibleTeam || undefined,
+      subject: normalizeText(effectiveQuoteForm.subject),
+      status: effectiveQuoteForm.status,
+      quoteType: effectiveQuoteForm.quoteType,
+      language: effectiveQuoteForm.language,
+      quoteDate: effectiveQuoteForm.quoteDate || getTodayDateInputValue(),
+      amountColumns: activeQuoteTemplateDraft?.amountColumns,
+      tableRows: activeQuoteTemplateDraft?.tableRows,
       lineItems,
-      milestone: normalizeText(quoteForm.milestone) || undefined,
-      notes: normalizeText(quoteForm.notes) || undefined
+      milestone: normalizeText(effectiveQuoteForm.milestone) || undefined,
+      notes: normalizeText(effectiveQuoteForm.notes) || undefined
     };
 
     if (payload.subject.length < 3) {
@@ -2176,6 +2232,7 @@ export function QuotesPage() {
       const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
       setEditingQuoteId(null);
       setPreparedQuote(null);
+      setQuoteRecipientTouched(false);
       setQuoteForm(
         sourceMode === "template" && selectedTemplate
           ? buildQuoteFormFromTemplate(selectedTemplate, user?.team)
@@ -2878,6 +2935,7 @@ export function QuotesPage() {
                   setPreparedQuote(null);
                   setSourceMode("template");
                   setSelectedTemplateId("");
+                  setQuoteRecipientTouched(false);
                   setQuoteForm(buildEmptyQuoteForm(user?.team));
                   setQuoteTemplateDraft(null);
                   setActiveTab("quotes");
@@ -2905,6 +2963,13 @@ export function QuotesPage() {
                   ))}
                 </select>
               </label>
+
+              {selectedTemplate ? (
+                <div className="quotes-selected-template-title" aria-live="polite">
+                  <span>Titulo de la plantilla</span>
+                  <strong>{normalizeText(selectedTemplate.subject) || "Sin titulo capturado"}</strong>
+                </div>
+              ) : null}
 
               <div className="quotes-template-picker-actions">
                 <button
@@ -2995,6 +3060,22 @@ export function QuotesPage() {
                 ) : null}
                 <input aria-hidden="true" readOnly tabIndex={-1} type="hidden" value={quoteForm.clientId} />
               </div>
+
+              <label className="form-field quote-recipient-field">
+                <span>Dirigida a</span>
+                <textarea
+                  rows={2}
+                  value={quoteForm.recipientName}
+                  onChange={(event) => {
+                    setQuoteRecipientTouched(true);
+                    updateQuoteForm((current) => ({
+                      ...current,
+                      recipientName: event.target.value
+                    }));
+                  }}
+                  placeholder="Nombre(s) del destinatario"
+                />
+              </label>
 
               <label className="form-field">
                 <span>Equipo responsable</span>

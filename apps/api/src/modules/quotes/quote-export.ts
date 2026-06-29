@@ -113,6 +113,7 @@ type QuoteExportPayload = {
   quoteTitle: string;
   quoteNumber: string;
   clientName: string;
+  recipientName: string;
   createdAt: string;
   quoteDate?: string;
   language: Quote["language"];
@@ -140,6 +141,20 @@ type QuoteExportPayload = {
 
 function normalizeText(value?: string | null) {
   return (value ?? "").trim();
+}
+
+function normalizeMultilineText(value?: string | null) {
+  return (value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
+}
+
+function formatRecipientHeading(value?: string | null) {
+  return normalizeMultilineText(value).toUpperCase();
 }
 
 function sanitizeDownloadFilenameBase(value: string) {
@@ -464,25 +479,56 @@ function writePdfTextBlock(
     lineGap?: number;
     characterSpacing?: number;
     spaceAfter?: number;
+    preserveExplicitLineBreaks?: boolean;
   } = {}
 ) {
   const fontSize = options.fontSize ?? 10;
   const align = options.align ?? "left";
   const lineGap = options.lineGap ?? 2;
+  const blockText = options.preserveExplicitLineBreaks ? normalizeMultilineText(text) : text;
 
   doc
     .font(options.bold ? "Helvetica-Bold" : "Helvetica")
     .fontSize(fontSize)
     .fillColor(options.color ?? pdfText);
 
-  const height = doc.heightOfString(text, {
+  if (options.preserveExplicitLineBreaks) {
+    const lines = blockText.split("\n");
+    let currentY = y;
+
+    lines.forEach((line, index) => {
+      const lineText = line || " ";
+      const lineHeight = doc.heightOfString(lineText, {
+        width,
+        align,
+        lineGap,
+        characterSpacing: options.characterSpacing
+      });
+
+      doc.text(lineText, x, currentY, {
+        width,
+        align,
+        lineGap,
+        characterSpacing: options.characterSpacing
+      });
+
+      currentY += lineHeight;
+      if (index < lines.length - 1) {
+        currentY += lineGap;
+      }
+    });
+
+    return currentY + (options.spaceAfter ?? 10);
+  }
+
+  const height = doc.heightOfString(blockText, {
     width,
     align,
     lineGap,
     characterSpacing: options.characterSpacing
   });
 
-  doc.text(text, x, y, {
+  doc.text(blockText, x, y, {
     width,
     align,
     lineGap,
@@ -1021,10 +1067,12 @@ async function renderPdfQuoteDocument(payload: QuoteExportPayload) {
     );
 
     y = Math.max(y, 150);
-    y = writePdfTextBlock(doc, payload.clientName.toUpperCase(), pdfMarginX, y, pdfContentWidth, {
+    y = writePdfTextBlock(doc, formatRecipientHeading(payload.recipientName), pdfMarginX, y, pdfContentWidth, {
       bold: true,
       color: pdfNavy,
       fontSize: 11.2,
+      lineGap: 0,
+      preserveExplicitLineBreaks: true,
       spaceAfter: payload.presentText ? 5 : 18
     });
 
@@ -1112,22 +1160,25 @@ function createWordParagraph(
     characterSpacing?: number;
   } = {}
 ) {
+  const lines = normalizeMultilineText(text).split("\n");
+
   return new Paragraph({
     alignment: options.align ?? AlignmentType.START,
     spacing: {
       after: options.spacingAfter ?? 160,
       before: options.spacingBefore ?? 0
     },
-    children: [
+    children: lines.map((line, index) =>
       new TextRun({
-        text,
+        text: line,
+        break: index > 0 ? 1 : undefined,
         bold: options.bold,
         color: options.color ?? wordText,
         size: options.size ?? 20,
         font: "Aptos",
         characterSpacing: options.characterSpacing
       })
-    ]
+    )
   });
 }
 
@@ -1478,7 +1529,7 @@ async function renderWordQuoteDocument(payload: QuoteExportPayload) {
       size: 23,
       spacingAfter: 460
     }),
-    createWordParagraph(payload.clientName.toUpperCase(), {
+    createWordParagraph(formatRecipientHeading(payload.recipientName), {
       bold: true,
       color: wordNavy,
       size: 23,
@@ -1688,6 +1739,7 @@ function buildPayload(quote: Quote): QuoteExportPayload {
     quoteTitle: quote.title || buildQuoteTitle(quote),
     quoteNumber: quote.quoteNumber,
     clientName: quote.clientName,
+    recipientName: normalizeMultilineText(quote.recipientName) || quote.clientName,
     createdAt: quote.createdAt,
     quoteDate: quote.quoteDate,
     language,

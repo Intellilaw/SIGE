@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type {
   Client,
+  FinanceRecord,
   Matter,
+  TaskAdditionalTask,
   TaskDistributionHistory,
   TaskModuleDefinition,
   TaskTerm,
@@ -71,6 +73,7 @@ const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: str
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const LITIGATION_MODULE_ID = "litigation";
+const FINANCE_TASK_MODULE_ID = "finance";
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
 const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
@@ -119,12 +122,35 @@ function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
 }
 
+function roundCurrencyValue(value: number) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function hasCurrencyDifference(value: number) {
+  return Math.round(Math.abs(Number(value) || 0) * 100) !== 0;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
+}
+
 function getLocalDateInput(offset = 0) {
   const date = new Date();
   date.setHours(12, 0, 0, 0);
   date.setDate(date.getDate() + offset);
 
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getCurrentFinancePeriodQuery() {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+
+  return `year=${date.getFullYear()}&month=${date.getMonth() + 1}`;
 }
 
 function matchesResponsible(taskResponsible: string, member: TaskDashboardMember, sharedResponsibleAliases: string[]) {
@@ -218,6 +244,120 @@ function isLinkedTermTableEnabled(table: LegacyTaskTableConfig | undefined) {
   }
 
   return usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
+}
+
+function isPaymentReceived(method?: FinanceRecord["paymentMethod"] | null, received?: boolean | null) {
+  return method === "T" || (method === "E" && received === true);
+}
+
+function hasPaymentDate(value?: string | null) {
+  return Boolean(toDateInput(value));
+}
+
+function getReceivedFinancePaymentsMxn(record: FinanceRecord) {
+  const payment1Mxn =
+    hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
+      ? record.paidThisMonthMxn
+      : 0;
+  const payment2Mxn =
+    hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
+      ? record.payment2Mxn
+      : 0;
+  const payment3Mxn =
+    hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
+      ? record.payment3Mxn
+      : 0;
+
+  return payment1Mxn + payment2Mxn + payment3Mxn;
+}
+
+function calculateFinanceDashboardStats(record: FinanceRecord) {
+  const totalPaidMxn = getReceivedFinancePaymentsMxn(record);
+  const dueTodayMxn = record.conceptFeesMxn - totalPaidMxn;
+  const futurePaymentsMxn = roundCurrencyValue(record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn);
+  const feeBreakdownDifferenceMxn = roundCurrencyValue(
+    record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn - futurePaymentsMxn
+  );
+  const pctSum =
+    record.pctLitigation +
+    record.pctCorporateLabor +
+    record.pctSettlements +
+    record.pctFinancialLaw +
+    record.pctTaxCompliance;
+
+  return {
+    dueTodayMxn,
+    futurePaymentsMxn,
+    feeBreakdownDifferenceMxn,
+    pctSum
+  };
+}
+
+function resolveFinanceClientNumber(record: FinanceRecord, clients: Client[]) {
+  if (normalizeText(record.clientNumber)) {
+    return normalizeText(record.clientNumber);
+  }
+
+  const normalizedName = normalizeComparableText(record.clientName);
+  return clients.find((client) => normalizeComparableText(client.name) === normalizedName)?.clientNumber ?? "";
+}
+
+function evaluateFinanceRecordForTasks(record: FinanceRecord, clients: Client[]) {
+  const stats = calculateFinanceDashboardStats(record);
+  const effectiveClientNumber = resolveFinanceClientNumber(record, clients);
+  const hasExactlyOneCollectionProbability = record.highCollectionProbability !== record.lowCollectionProbability;
+  const requiredChecks: Array<{ label: string; present: boolean }> = [
+    { label: "No. Cliente", present: Boolean(normalizeText(effectiveClientNumber)) },
+    { label: "Cliente", present: Boolean(normalizeText(record.clientName)) },
+    { label: "No. Cotizacion", present: Boolean(normalizeText(record.quoteNumber)) },
+    { label: "Tipo", present: Boolean(record.matterType) },
+    {
+      label: "Periodo",
+      present:
+        record.matterType !== "RETAINER" ||
+        (Boolean(record.periodYear ?? record.year) && Boolean(record.periodMonth ?? record.month))
+    },
+    { label: "Asunto", present: Boolean(normalizeText(record.subject)) },
+    { label: "Equipo Responsable", present: Boolean(record.responsibleTeam) },
+    { label: "Conceptos trabajando", present: Boolean(normalizeText(record.workingConcepts)) },
+    { label: "Fecha de proximo pago", present: Boolean(record.nextPaymentDate) },
+    { label: "Detalle Fecha", present: Boolean(normalizeText(record.nextPaymentNotes)) },
+    { label: "En mora", present: Boolean(record.delinquencyStatus) },
+    { label: "Fecha Pago Real", present: Boolean(record.paymentDate1) },
+    { label: "Probabilidad de cobro este mes", present: hasExactlyOneCollectionProbability },
+    { label: "Receptor comision cliente 20%", present: Boolean(normalizeText(record.clientCommissionRecipient)) },
+    { label: "Receptor comision cierre 10%", present: Boolean(normalizeText(record.closingCommissionRecipient)) },
+    { label: "Hito conclusion", present: Boolean(normalizeText(record.milestone)) }
+  ];
+  const missing = requiredChecks.filter((field) => !field.present).map((field) => field.label);
+  const today = getLocalDateInput();
+  const paymentDate = toDateInput(record.nextPaymentDate);
+  const isDateUrgent = Boolean(paymentDate && paymentDate <= today && stats.dueTodayMxn > 1);
+  const isPctInvalid = stats.pctSum !== 100;
+  const isFeeBreakdownInvalid =
+    stats.futurePaymentsMxn < 0 || hasCurrencyDifference(stats.feeBreakdownDifferenceMxn);
+  const reasons: string[] = [];
+
+  if (missing.length > 0) {
+    reasons.push(`Completar datos financieros: ${missing.join(", ")}`);
+  }
+  if (isDateUrgent) {
+    reasons.push(`Cobrar pago pactado (${formatCurrency(stats.dueTodayMxn)})`);
+  }
+  if (isPctInvalid) {
+    reasons.push(`Corregir porcentajes: suman ${stats.pctSum}%`);
+  }
+  if (stats.futurePaymentsMxn < 0) {
+    reasons.push("Corregir desglose: anteriores + este mes exceden Total asunto");
+  } else if (isFeeBreakdownInvalid) {
+    reasons.push(`Corregir desglose: diferencia ${formatCurrency(stats.feeBreakdownDifferenceMxn)}`);
+  }
+
+  return {
+    effectiveClientNumber,
+    displayDate: isDateUrgent && paymentDate ? paymentDate : today,
+    reasons
+  };
 }
 
 function isLitigationWritingTable(table: LegacyTaskTableConfig | undefined) {
@@ -465,6 +605,8 @@ export function TasksTeamPage() {
 
   const [trackingRecords, setTrackingRecords] = useState<TaskTrackingRecord[]>([]);
   const [terms, setTerms] = useState<TaskTerm[]>([]);
+  const [additionalTasks, setAdditionalTasks] = useState<TaskAdditionalTask[]>([]);
+  const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [executionMatters, setExecutionMatters] = useState<Matter[]>([]);
   const [executionClients, setExecutionClients] = useState<Client[]>([]);
   const [executionDistributionHistory, setExecutionDistributionHistory] = useState<TaskDistributionHistory[]>([]);
@@ -522,28 +664,30 @@ export function TasksTeamPage() {
       return;
     }
 
-    if (!legacyConfig) {
-      setTrackingRecords([]);
-      setTerms([]);
-      setExecutionMatters([]);
-      setExecutionClients([]);
-      setExecutionDistributionHistory([]);
-      setExecutionHolidayDateKeysByAuthority({});
-      setLoading(false);
-      return;
-    }
-
     const currentModule = module;
 
     async function loadDashboard() {
       setLoading(true);
 
       try {
-        const shouldLoadExecutionMissingRows = currentModule.moduleId === LITIGATION_MODULE_ID;
+        const shouldLoadLegacyRows = Boolean(legacyConfig);
+        const shouldLoadFinanceRows = currentModule.moduleId === FINANCE_TASK_MODULE_ID;
+        const shouldLoadExecutionMissingRows = shouldLoadLegacyRows && currentModule.moduleId === LITIGATION_MODULE_ID;
+        const shouldLoadClients = shouldLoadExecutionMissingRows || shouldLoadFinanceRows;
+        const trackingRecordsPromise = shouldLoadLegacyRows
+          ? apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`)
+          : Promise.resolve<TaskTrackingRecord[]>([]);
+        const termsPromise = shouldLoadLegacyRows
+          ? apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`)
+          : Promise.resolve<TaskTerm[]>([]);
+        const financeRecordsPromise = shouldLoadFinanceRows
+          ? apiGet<FinanceRecord[]>(`/finances/records?${getCurrentFinancePeriodQuery()}`).catch(() => [])
+          : Promise.resolve<FinanceRecord[]>([]);
+        const additionalTasksPromise = apiGet<TaskAdditionalTask[]>(`/tasks/additional?moduleId=${currentModule.moduleId}`).catch(() => []);
         const executionMattersPromise = shouldLoadExecutionMissingRows
           ? apiGet<Matter[]>("/matters").catch(() => [])
           : Promise.resolve<Matter[]>([]);
-        const executionClientsPromise = shouldLoadExecutionMissingRows
+        const executionClientsPromise = shouldLoadClients
           ? apiGet<Client[]>("/clients").catch(() => [])
           : Promise.resolve<Client[]>([]);
         const executionDistributionHistoryPromise = shouldLoadExecutionMissingRows
@@ -552,12 +696,16 @@ export function TasksTeamPage() {
         const [
           loadedTracking,
           loadedTerms,
+          loadedFinanceRecords,
+          loadedAdditionalTasks,
           loadedExecutionMatters,
           loadedExecutionClients,
           loadedExecutionDistributionHistory
         ] = await Promise.all([
-          apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
-          apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`),
+          trackingRecordsPromise,
+          termsPromise,
+          financeRecordsPromise,
+          additionalTasksPromise,
           executionMattersPromise,
           executionClientsPromise,
           executionDistributionHistoryPromise
@@ -565,6 +713,8 @@ export function TasksTeamPage() {
 
         setTrackingRecords(loadedTracking);
         setTerms(loadedTerms);
+        setFinanceRecords(loadedFinanceRecords);
+        setAdditionalTasks(loadedAdditionalTasks);
         setExecutionClients(loadedExecutionClients);
         setExecutionMatters(
           shouldLoadExecutionMissingRows
@@ -575,6 +725,9 @@ export function TasksTeamPage() {
             : []
         );
         setExecutionDistributionHistory(loadedExecutionDistributionHistory);
+        if (!shouldLoadExecutionMissingRows) {
+          setExecutionHolidayDateKeysByAuthority({});
+        }
       } finally {
         setLoading(false);
       }
@@ -833,8 +986,79 @@ export function TasksTeamPage() {
     });
   }
 
+  function buildFinanceRows(timeframe: DashboardTimeframe): DashboardRow[] {
+    if (module?.moduleId !== FINANCE_TASK_MODULE_ID) {
+      return [];
+    }
+
+    return financeRecords
+      .filter((record) => !record.concluded)
+      .flatMap((record) => {
+        const evaluation = evaluateFinanceRecordForTasks(record, executionClients);
+        if (evaluation.reasons.length === 0) {
+          return [];
+        }
+
+        if (!belongsToTimeframe({ state: "open", date: evaluation.displayDate }, timeframe)) {
+          return [];
+        }
+
+        return [{
+          taskId: `finance-record-${record.id}`,
+          clientNumber: evaluation.effectiveClientNumber || "-",
+          clientName: record.clientName || "-",
+          subject: record.subject || "-",
+          specificProcess: record.quoteNumber || record.matterType || "-",
+          taskLabel: evaluation.reasons.join(" / "),
+          typeLabel: "Finanzas",
+          displayDate: evaluation.displayDate,
+          originLabel: "Finanzas",
+          originPath: "/app/finances",
+          actionLabel: "Ir a Finanzas",
+          highlighted: true
+        }];
+      });
+  }
+
+  function buildAdditionalTaskRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
+    return additionalTasks
+      .filter((task) => !task.deletedAt)
+      .filter((task) =>
+        matchesResponsible(task.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? [])
+        || (task.responsible2 ? matchesResponsible(task.responsible2, member, dashboardConfig?.sharedResponsibleAliases ?? []) : false)
+      )
+      .filter((task) =>
+        belongsToTimeframe({
+          state: task.status === "concluida" ? "closed" : "open",
+          date: task.status === "concluida" ? toDateInput(task.updatedAt) : toDateInput(task.dueDate)
+        }, timeframe)
+      )
+      .map((task) => {
+        const completed = task.status === "concluida";
+        const displayDate = completed ? toDateInput(task.updatedAt) : toDateInput(task.dueDate);
+        const highlighted = !completed && (!displayDate || displayDate <= getLocalDateInput());
+
+        return {
+          taskId: `additional-${task.id}`,
+          clientNumber: "-",
+          clientName: "-",
+          subject: "-",
+          specificProcess: "-",
+          taskLabel: task.task,
+          typeLabel: completed ? "Completada" : highlighted ? "Vencida / incompleta" : "Tarea adicional",
+          displayDate,
+          originLabel: "Tareas adicionales",
+          originPath: `/app/tasks/${slug}/adicionales`,
+          actionLabel: "Ir a adicionales",
+          highlighted
+        };
+      });
+  }
+
   function buildRows(member: TaskDashboardMember, timeframe: DashboardTimeframe) {
     return [
+      ...buildFinanceRows(timeframe),
+      ...buildAdditionalTaskRows(member, timeframe),
       ...buildTrackingRows(member, timeframe),
       ...buildTermVerificationRows(member, timeframe),
       ...buildExecutionMissingRows(member, timeframe)
@@ -882,24 +1106,35 @@ export function TasksTeamPage() {
           </div>
         </div>
         <p className="muted">
-          {legacyConfig
-            ? "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales."
-            : "Espacio de tareas del equipo listo para configuracion posterior."}
+          {module.moduleId === FINANCE_TASK_MODULE_ID
+            ? "Dashboard de tareas del equipo de Finanzas alimentado por la tabla de Finanzas y tareas adicionales."
+            : legacyConfig
+              ? "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales."
+              : "Espacio de tareas del equipo listo para configuracion posterior."}
         </p>
-        {legacyConfig ? (
+        {legacyConfig || module.moduleId === FINANCE_TASK_MODULE_ID ? (
           <div className="tasks-legacy-toolbar">
-            <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`)}>
-              Manager de tareas
-            </button>
-            <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos`)}>
-              Terminos
-            </button>
-            {legacyConfig.hasRecurringTerms ? (
-              <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`)}>
-                Terminos recurrentes
+            {legacyConfig ? (
+              <>
+                <button type="button" className="primary-action-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`)}>
+                  Manager de tareas
+                </button>
+                <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos`)}>
+                  Terminos
+                </button>
+                {legacyConfig.hasRecurringTerms ? (
+                  <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`)}>
+                    Terminos recurrentes
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+            {module.moduleId === FINANCE_TASK_MODULE_ID ? (
+              <button type="button" className="primary-action-button" onClick={() => navigate("/app/finances")}>
+                Tabla de Finanzas
               </button>
             ) : null}
-            <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${legacyConfig.slug}/adicionales`)}>
+            <button type="button" className="secondary-button" onClick={() => navigate(`/app/tasks/${module.slug}/adicionales`)}>
               Tareas adicionales
             </button>
           </div>
@@ -1047,6 +1282,23 @@ export function TasksTeamPage() {
                 <span>{table.sourceTable}</span>
               </button>
             ))}
+          </div>
+        </section>
+      ) : module.moduleId === FINANCE_TASK_MODULE_ID ? (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Fuentes de tareas</h2>
+            <span>2 fuentes</span>
+          </div>
+          <div className="tasks-table-card-grid">
+            <button type="button" className="tasks-table-card" onClick={() => navigate("/app/finances")}>
+              <strong>Tabla de Finanzas</strong>
+              <span>Solo lectura en Tareas; se corrige desde Finanzas.</span>
+            </button>
+            <button type="button" className="tasks-table-card" onClick={() => navigate(`/app/tasks/${module.slug}/adicionales`)}>
+              <strong>Tareas adicionales</strong>
+              <span>Alta y seguimiento manual del equipo.</span>
+            </button>
           </div>
         </section>
       ) : (

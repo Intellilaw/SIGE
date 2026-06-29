@@ -1,5 +1,12 @@
+import { createHash } from "node:crypto";
+
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { GeneralExpense, GeneralExpensePayrollEmployeeOption, GeneralExpensePayrollEntry } from "@sige/contracts";
+import type {
+  GeneralExpense,
+  GeneralExpenseEmrtDailyAcknowledgement,
+  GeneralExpensePayrollEmployeeOption,
+  GeneralExpensePayrollEntry
+} from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
@@ -7,6 +14,7 @@ import { getLaborDailySalaryRiStatus } from "../modules/labor-files/labor-salary
 import {
   buildVacationSummary,
   mapGeneralExpense,
+  mapGeneralExpenseEmrtAcknowledgement,
   mapGeneralExpensePayrollEntry,
   mapLaborGlobalVacationDay,
   mapLaborVacationEvent
@@ -14,6 +22,7 @@ import {
 import type {
   GeneralExpenseActor,
   GeneralExpenseCreateRecord,
+  GeneralExpenseEmrtAcknowledgementUpdateRecord,
   GeneralExpensePayrollCreateRecord,
   GeneralExpensePayrollUpdateRecord,
   GeneralExpenseUpdateRecord,
@@ -42,6 +51,12 @@ const LOCKED_AFTER_APPROVAL_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "bank",
   "hasVat",
   "recurring"
+];
+const LOCKED_AFTER_ALE_RECEIPT_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
+  ...LOCKED_AFTER_APPROVAL_FIELDS,
+  "team",
+  "approvedByEmrt",
+  "paidByEmrtAt"
 ];
 const PCT_KEYS: Array<keyof Pick<
   GeneralExpenseUpdateRecord,
@@ -162,6 +177,14 @@ function toDateInput(value?: Date | null) {
   return value ? value.toISOString().slice(0, 10) : "";
 }
 
+function parseDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new AppError(400, "INVALID_DATE", `Invalid date value: ${value}`);
+  }
+
+  return value;
+}
+
 function padDatePart(value: number) {
   return String(value).padStart(2, "0");
 }
@@ -180,6 +203,26 @@ function addDateKey(value: string, days: number) {
 function getMonthLastDateKey(year: number, month: number) {
   const date = new Date(Date.UTC(year, month, 0));
   return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
+}
+
+function getYearMonthFromDateKey(dateKey: string) {
+  const [year, month] = dateKey.split("-").map(Number);
+  assertMonth(month);
+  return { year, month };
+}
+
+function formatMxn(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function formatDateKeyDisplay(dateKey: string) {
+  const [year, month, day] = dateKey.split("-");
+  return `${day}/${month}/${year}`;
 }
 
 function getDaysInMonth(year: number, month: number) {
@@ -261,9 +304,13 @@ function isFinance(actor: GeneralExpenseActor) {
 
 function isAraceliLozano(actor: GeneralExpenseActor) {
   const normalizedEmail = normalizeComparableText(actor.email);
+  const normalizedUsername = normalizeComparableText(actor.username);
+  const normalizedDisplayName = normalizeComparableText(actor.displayName);
   return isFinance(actor) && (
-    normalizeComparableText(actor.username) === "araceli lozano" ||
-    normalizeComparableText(actor.displayName) === "araceli lozano" ||
+    normalizedUsername === "araceli lozano" ||
+    normalizedUsername === "araceli lozano escamilla" ||
+    normalizedDisplayName === "araceli lozano" ||
+    normalizedDisplayName === "araceli lozano escamilla" ||
     normalizedEmail.startsWith("araceli lozano") ||
     normalizedEmail.startsWith("araceli.lozano")
   );
@@ -589,6 +636,53 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     return records.map(mapGeneralExpense);
   }
 
+  public async listEmrtAcknowledgements(year: number, month: number) {
+    assertMonth(month);
+    const organizationId = this.getOrganizationId();
+
+    const records = await this.prisma.generalExpenseEmrtAcknowledgement.findMany({
+      where: { organizationId, year, month },
+      orderBy: [{ paidByEmrtDate: "asc" }, { createdAt: "asc" }]
+    });
+
+    return records.map(mapGeneralExpenseEmrtAcknowledgement);
+  }
+
+  public async updateEmrtAcknowledgement(
+    date: string,
+    payload: GeneralExpenseEmrtAcknowledgementUpdateRecord,
+    actor: GeneralExpenseActor
+  ): Promise<GeneralExpenseEmrtDailyAcknowledgement> {
+    const dateKey = parseDateKey(date);
+    const payloadKeys = Object.keys(payload);
+
+    if (payloadKeys.length !== 1) {
+      throw new AppError(400, "GENERAL_EXPENSE_EMRT_ACK_INVALID_PAYLOAD", "Update exactly one acknowledgement flag at a time.");
+    }
+
+    if (hasOwn(payload, "receivedByAle")) {
+      if (!isAraceliLozano(actor)) {
+        throw new AppError(403, "GENERAL_EXPENSE_EMRT_ACK_ALE_FORBIDDEN", "Only Araceli Lozano Escamilla can update the ALE receipt flag.");
+      }
+
+      return payload.receivedByAle
+        ? this.markEmrtAcknowledgementReceivedByAle(dateKey)
+        : this.unmarkEmrtAcknowledgementReceivedByAle(dateKey);
+    }
+
+    if (hasOwn(payload, "paidByEmrt")) {
+      if (!isSuperadmin(actor) || !isEduardoRusconi(actor)) {
+        throw new AppError(403, "GENERAL_EXPENSE_EMRT_ACK_EMRT_FORBIDDEN", "Only Eduardo Rusconi can update the EMRT payment confirmation.");
+      }
+
+      return payload.paidByEmrt
+        ? this.markEmrtAcknowledgementPaidByEmrt(dateKey)
+        : this.unmarkEmrtAcknowledgementPaidByEmrt(dateKey);
+    }
+
+    throw new AppError(400, "GENERAL_EXPENSE_EMRT_ACK_EMPTY_PAYLOAD", "No acknowledgement flag was provided.");
+  }
+
   public async create(payload: GeneralExpenseCreateRecord = {}) {
     const now = new Date();
     const year = payload.year ?? now.getFullYear();
@@ -630,7 +724,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async update(expenseId: string, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor) {
     const current = await this.findOrThrow(expenseId);
-    this.assertFieldAccess(current, payload, actor);
+    await this.assertFieldAccess(current, payload, actor);
 
     const data = this.buildUpdatePayload(current, payload);
     const record = await this.prisma.generalExpense.update({
@@ -645,6 +739,12 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const current = await this.findOrThrow(expenseId);
     if (current.approvedByEmrt) {
       throw new AppError(400, "GENERAL_EXPENSE_APPROVED_LOCKED", "Approved expenses cannot be deleted.");
+    }
+
+    const currentDateKey = toDateInput(current.paidByEmrtAt);
+    const acknowledgement = currentDateKey ? await this.findEmrtAcknowledgementByDate(currentDateKey) : null;
+    if (acknowledgement?.receivedByAle) {
+      throw new AppError(400, "GENERAL_EXPENSE_EMRT_ACK_LOCKED", "This expense belongs to a day already received by ALE and cannot be deleted.");
     }
 
     await this.prisma.generalExpense.deleteMany({
@@ -969,7 +1069,219 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     return laborFile;
   }
 
-  private assertFieldAccess(current: StoredGeneralExpense, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor) {
+  private async findEmrtAcknowledgementByDate(dateKey: string) {
+    const organizationId = this.getOrganizationId();
+    const { year, month } = getYearMonthFromDateKey(dateKey);
+    const paidByEmrtDate = parseDateOnly(dateKey);
+
+    return this.prisma.generalExpenseEmrtAcknowledgement.findUnique({
+      where: {
+        organizationId_year_month_paidByEmrtDate: {
+          organizationId,
+          year,
+          month,
+          paidByEmrtDate: paidByEmrtDate as Date
+        }
+      }
+    });
+  }
+
+  private async buildEmrtAcknowledgementSnapshot(dateKey: string) {
+    const organizationId = this.getOrganizationId();
+    const { year, month } = getYearMonthFromDateKey(dateKey);
+    const paidByEmrtDate = parseDateOnly(dateKey) as Date;
+    const expenses = await this.prisma.generalExpense.findMany({
+      where: {
+        organizationId,
+        year,
+        month,
+        approvedByEmrt: true,
+        paidByEmrtAt: paidByEmrtDate
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+    });
+
+    if (expenses.length === 0) {
+      throw new AppError(400, "GENERAL_EXPENSE_EMRT_ACK_EMPTY_DAY", "No EMRT cash expenses were found for this date.");
+    }
+
+    const items = expenses.map((expense, index) => ({
+      index: index + 1,
+      id: expense.id,
+      detail: (expense.detail || "Gasto sin detalle").trim(),
+      amountMxn: roundPayrollNumber(Number(expense.amountMxn || 0)),
+      approvedByEmrt: expense.approvedByEmrt,
+      paidByEmrtAt: toDateInput(expense.paidByEmrtAt),
+      createdAt: expense.createdAt.toISOString(),
+      updatedAt: expense.updatedAt.toISOString()
+    }));
+    const totalMxn = roundPayrollNumber(items.reduce((sum, item) => sum + item.amountMxn, 0));
+    const expenseIds = items.map((item) => item.id);
+    const summaryMessage = [
+      `Entrego a Araceli la suma de ${formatMxn(totalMxn)} y el resumen:`,
+      "",
+      `Gastos pagados por EMRT el ${formatDateKeyDisplay(dateKey)}:`,
+      ...items.map((item) => `${item.index}. ${item.detail}`)
+    ].join("\n");
+    const snapshotData = {
+      version: 1,
+      paidByEmrtDate: dateKey,
+      totalMxn,
+      expenseIds,
+      items
+    };
+    const snapshotHash = createHash("sha256")
+      .update(JSON.stringify(snapshotData))
+      .digest("hex");
+
+    return {
+      year,
+      month,
+      paidByEmrtDate,
+      totalMxn,
+      summaryMessage,
+      expenseIds,
+      snapshotData,
+      snapshotHash
+    };
+  }
+
+  private async markEmrtAcknowledgementReceivedByAle(dateKey: string) {
+    const organizationId = this.getOrganizationId();
+    const snapshot = await this.buildEmrtAcknowledgementSnapshot(dateKey);
+    const existing = await this.findEmrtAcknowledgementByDate(dateKey);
+    const now = new Date();
+
+    if (existing?.paidByEmrt) {
+      return mapGeneralExpenseEmrtAcknowledgement(existing);
+    }
+
+    const record = await this.prisma.generalExpenseEmrtAcknowledgement.upsert({
+      where: {
+        organizationId_year_month_paidByEmrtDate: {
+          organizationId,
+          year: snapshot.year,
+          month: snapshot.month,
+          paidByEmrtDate: snapshot.paidByEmrtDate
+        }
+      },
+      create: {
+        organizationId,
+        year: snapshot.year,
+        month: snapshot.month,
+        paidByEmrtDate: snapshot.paidByEmrtDate,
+        totalMxn: normalizeMoney(snapshot.totalMxn),
+        summaryMessage: snapshot.summaryMessage,
+        expenseIds: snapshot.expenseIds,
+        snapshotData: snapshot.snapshotData,
+        snapshotHash: snapshot.snapshotHash,
+        receivedByAle: true,
+        receivedByAleAt: now,
+        paidByEmrt: false,
+        paidByEmrtAt: null
+      },
+      update: {
+        totalMxn: normalizeMoney(snapshot.totalMxn),
+        summaryMessage: snapshot.summaryMessage,
+        expenseIds: snapshot.expenseIds,
+        snapshotData: snapshot.snapshotData,
+        snapshotHash: snapshot.snapshotHash,
+        receivedByAle: true,
+        receivedByAleAt: existing?.receivedByAleAt ?? now
+      }
+    });
+
+    return mapGeneralExpenseEmrtAcknowledgement(record);
+  }
+
+  private async unmarkEmrtAcknowledgementReceivedByAle(dateKey: string) {
+    const existing = await this.findEmrtAcknowledgementByDate(dateKey);
+    if (!existing) {
+      throw new AppError(404, "GENERAL_EXPENSE_EMRT_ACK_NOT_FOUND", "The daily EMRT acknowledgement does not exist.");
+    }
+
+    if (existing.paidByEmrt) {
+      throw new AppError(400, "GENERAL_EXPENSE_EMRT_ACK_PAID_LOCKED", "EMRT already confirmed this payment. Uncheck EMRT before changing ALE receipt.");
+    }
+
+    const record = await this.prisma.generalExpenseEmrtAcknowledgement.update({
+      where: { id: existing.id, organizationId: this.getOrganizationId() },
+      data: {
+        receivedByAle: false,
+        receivedByAleAt: null
+      }
+    });
+
+    return mapGeneralExpenseEmrtAcknowledgement(record);
+  }
+
+  private async markEmrtAcknowledgementPaidByEmrt(dateKey: string) {
+    const existing = await this.findEmrtAcknowledgementByDate(dateKey);
+    if (!existing?.receivedByAle) {
+      throw new AppError(400, "GENERAL_EXPENSE_EMRT_ACK_ALE_REQUIRED", "ALE must mark the payment as received before EMRT can confirm it.");
+    }
+
+    const record = await this.prisma.generalExpenseEmrtAcknowledgement.update({
+      where: { id: existing.id, organizationId: this.getOrganizationId() },
+      data: {
+        paidByEmrt: true,
+        paidByEmrtAt: existing.paidByEmrtAt ?? new Date()
+      }
+    });
+
+    return mapGeneralExpenseEmrtAcknowledgement(record);
+  }
+
+  private async unmarkEmrtAcknowledgementPaidByEmrt(dateKey: string) {
+    const existing = await this.findEmrtAcknowledgementByDate(dateKey);
+    if (!existing) {
+      throw new AppError(404, "GENERAL_EXPENSE_EMRT_ACK_NOT_FOUND", "The daily EMRT acknowledgement does not exist.");
+    }
+
+    const record = await this.prisma.generalExpenseEmrtAcknowledgement.update({
+      where: { id: existing.id, organizationId: this.getOrganizationId() },
+      data: {
+        paidByEmrt: false,
+        paidByEmrtAt: null
+      }
+    });
+
+    return mapGeneralExpenseEmrtAcknowledgement(record);
+  }
+
+  private async assertEmrtAcknowledgementLocks(current: StoredGeneralExpense, payload: GeneralExpenseUpdateRecord) {
+    const currentDateKey = toDateInput(current.paidByEmrtAt);
+    const targetDateKey = hasOwn(payload, "paidByEmrtAt") && payload.paidByEmrtAt
+      ? parseDateKey(payload.paidByEmrtAt)
+      : "";
+    const currentAcknowledgement = currentDateKey ? await this.findEmrtAcknowledgementByDate(currentDateKey) : null;
+
+    if (
+      currentAcknowledgement?.receivedByAle &&
+      LOCKED_AFTER_ALE_RECEIPT_FIELDS.some((field) => hasOwn(payload, field))
+    ) {
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_EMRT_ACK_LOCKED",
+        "This expense belongs to a day already received by ALE. Columns up to the EMRT payment date are locked."
+      );
+    }
+
+    if (targetDateKey && targetDateKey !== currentDateKey) {
+      const targetAcknowledgement = await this.findEmrtAcknowledgementByDate(targetDateKey);
+      if (targetAcknowledgement?.receivedByAle) {
+        throw new AppError(
+          400,
+          "GENERAL_EXPENSE_EMRT_ACK_TARGET_DATE_LOCKED",
+          "This EMRT payment date already has an ALE receipt. Uncheck the daily receipt before assigning more expenses to it."
+        );
+      }
+    }
+  }
+
+  private async assertFieldAccess(current: StoredGeneralExpense, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor) {
+    await this.assertEmrtAcknowledgementLocks(current, payload);
+
     if (current.approvedByEmrt && LOCKED_AFTER_APPROVAL_FIELDS.some((field) => hasOwn(payload, field))) {
       throw new AppError(400, "GENERAL_EXPENSE_APPROVED_LOCKED", "This expense is locked because it was already approved by EMRT.");
     }

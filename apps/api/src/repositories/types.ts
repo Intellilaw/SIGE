@@ -27,6 +27,7 @@ import type {
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  GeneralExpenseEmrtDailyAcknowledgement,
   GeneralExpensePayrollEntry,
   GeneralExpensePayrollEmployeeOption,
   Holiday,
@@ -334,6 +335,7 @@ export interface QuotesRepository {
 export interface QuoteWriteRecord {
   clientId: string;
   clientName: string;
+  recipientName?: string;
   responsibleTeam?: Quote["responsibleTeam"] | null;
   subject: string;
   status: Quote["status"];
@@ -506,6 +508,11 @@ export interface GeneralExpenseUpdateRecord {
   paidAt?: string | null;
 }
 
+export interface GeneralExpenseEmrtAcknowledgementUpdateRecord {
+  receivedByAle?: boolean;
+  paidByEmrt?: boolean;
+}
+
 export interface GeneralExpensePayrollUpdateRecord {
   laborFileId?: string | null;
   isPartTime?: boolean;
@@ -535,6 +542,12 @@ export interface GeneralExpensesRepository {
   create(payload?: GeneralExpenseCreateRecord): Promise<GeneralExpense>;
   update(expenseId: string, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor): Promise<GeneralExpense | null>;
   delete(expenseId: string): Promise<void>;
+  listEmrtAcknowledgements(year: number, month: number): Promise<GeneralExpenseEmrtDailyAcknowledgement[]>;
+  updateEmrtAcknowledgement(
+    date: string,
+    payload: GeneralExpenseEmrtAcknowledgementUpdateRecord,
+    actor: GeneralExpenseActor
+  ): Promise<GeneralExpenseEmrtDailyAcknowledgement>;
   copyRecurringToNextMonth(year: number, month: number): Promise<{
     year: number;
     month: number;
@@ -617,6 +630,8 @@ export interface FinanceRecordWriteRecord {
   clientName?: string;
   quoteNumber?: string | null;
   matterType?: FinanceRecord["matterType"];
+  periodYear?: number | null;
+  periodMonth?: number | null;
   subject?: string;
   contractSignedStatus?: FinanceRecord["contractSignedStatus"];
   responsibleTeam?: FinanceRecord["responsibleTeam"] | null;

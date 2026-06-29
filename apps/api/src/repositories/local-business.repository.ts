@@ -753,6 +753,7 @@ export class LocalBusinessStore {
 
     const quoteNumber = text(row.quote_number) || text(row.numero_cotizacion) || text(row.id);
     const clientName = text(row.client_name) || text(row.cliente);
+    const recipientName = text(row.recipient_name) || text(row.destinatario) || clientName;
     const subject = text(row.asunto) || text(row.subject) || "Cotizacion";
 
     return {
@@ -761,6 +762,7 @@ export class LocalBusinessStore {
       quoteNumber,
       clientId: text(row.client_id) || text(row.client_name),
       clientName,
+      recipientName,
       responsibleTeam: teamFromLegacy(row.responsible_team ?? row.equipo_responsable),
       subject,
       status: normalizedText(row.status).includes("aprob") ? "APPROVED" : normalizedText(row.status).includes("rechaz") ? "REJECTED" : normalizedText(row.status).includes("envi") ? "SENT" : "DRAFT",

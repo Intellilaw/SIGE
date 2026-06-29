@@ -26,6 +26,8 @@ type FinanceRecordPatchPayload = {
   clientName?: string;
   quoteNumber?: string | null;
   matterType?: FinanceRecord["matterType"];
+  periodYear?: number | null;
+  periodMonth?: number | null;
   subject?: string;
   contractSignedStatus?: FinanceRecord["contractSignedStatus"];
   responsibleTeam?: FinanceRecord["responsibleTeam"] | null;
@@ -86,6 +88,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "240px",
   "140px",
   "110px",
+  "160px",
   "360px",
   "220px",
   "300px",
@@ -104,8 +107,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "120px",
   "160px",
   "160px",
-  "150px",
-  "150px",
+  "240px",
   "170px",
   "190px",
   "220px",
@@ -135,6 +137,7 @@ const MONTHLY_COLUMN_WIDTHS = [
   "220px",
   "110px",
   "320px",
+  "300px",
   "110px"
 ] as const;
 
@@ -666,6 +669,44 @@ function getMonthName(month: number) {
   ][month - 1] ?? String(month);
 }
 
+const FINANCE_PERIOD_YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030] as const;
+const FINANCE_PERIOD_OPTIONS = FINANCE_PERIOD_YEARS.flatMap((year) =>
+  Array.from({ length: 12 }, (_, index) => {
+    const month = index + 1;
+    return {
+      value: `${year}-${String(month).padStart(2, "0")}`,
+      label: `${getMonthName(month)} ${year}`,
+      year,
+      month
+    };
+  })
+);
+
+function getFinancePeriodParts(record: Pick<FinanceRecord, "periodYear" | "periodMonth" | "year" | "month">) {
+  return {
+    year: record.periodYear ?? record.year,
+    month: record.periodMonth ?? record.month
+  };
+}
+
+function getFinancePeriodValue(record: Pick<FinanceRecord, "periodYear" | "periodMonth" | "year" | "month">) {
+  const { year, month } = getFinancePeriodParts(record);
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function getFinancePeriodLabel(record: Pick<FinanceRecord, "periodYear" | "periodMonth" | "year" | "month">) {
+  const { year, month } = getFinancePeriodParts(record);
+  return `${getMonthName(month)} ${year}`;
+}
+
+function parseFinancePeriodValue(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return {
+    periodYear: year,
+    periodMonth: month
+  } satisfies Pick<FinanceRecordPatchPayload, "periodYear" | "periodMonth">;
+}
+
 function getMatterTypeLabel(type: FinanceRecord["matterType"] | Matter["matterType"]) {
   return type === "RETAINER" ? "Iguala" : "Unico";
 }
@@ -904,6 +945,8 @@ function normalizeRecordPatchForState(patch: FinanceRecordPatchPayload): Partial
     "expenseNotes3",
     "clientCommissionRecipient",
     "closingCommissionRecipient",
+    "periodYear",
+    "periodMonth",
     "milestone",
     "financeComments"
   ];
@@ -1117,6 +1160,7 @@ export function FinancesPage() {
             record.clientName,
             record.quoteNumber,
             getMatterTypeLabel(record.matterType),
+            record.matterType === "RETAINER" ? getFinancePeriodLabel(record) : undefined,
             record.subject,
             getTeamLabel(record.responsibleTeam),
             record.workingConcepts,
@@ -1457,25 +1501,34 @@ export function FinancesPage() {
   }
 
   function getMatterHighlightMessage() {
-    return "Falta la fecha de proximo pago o ya vence este mes o antes, y aun no esta en Finanzas > Ver mes del mes actual.";
+    return "Falta la fecha de próximo pago o ya vence este mes o antes, y aun no esta en Finanzas > Ver mes del mes actual.";
   }
 
   function evaluateMonthlyRecord(record: FinanceRecord) {
     const stats = calculateFinanceStats(record);
     const effectiveClientNumber = resolveClientNumber(record.clientName, record.clientNumber);
+    const hasExactlyOneCollectionProbability = record.highCollectionProbability !== record.lowCollectionProbability;
     const requiredChecks: Array<{ label: string; present: boolean }> = [
-      { label: "numero_cliente", present: Boolean(normalizeText(effectiveClientNumber)) },
-      { label: "cliente", present: Boolean(normalizeText(record.clientName)) },
-      { label: "numero_cotizacion", present: Boolean(normalizeText(record.quoteNumber)) },
-      { label: "asunto", present: Boolean(normalizeText(record.subject)) },
-      { label: "total_asunto", present: Boolean(record.totalMatterMxn) },
-      { label: "honorarios_conceptos", present: Boolean(record.conceptFeesMxn) },
-      { label: "conceptos_trabajando", present: Boolean(normalizeText(record.workingConcepts)) },
-      { label: "fecha_pactada_pago", present: Boolean(record.nextPaymentDate) },
-      { label: "detalle_fecha_pactada", present: Boolean(normalizeText(record.nextPaymentNotes)) },
-      { label: "equipo_responsable", present: Boolean(record.responsibleTeam) },
-      { label: "comision_cliente_quien", present: Boolean(normalizeText(record.clientCommissionRecipient)) },
-      { label: "comision_cierre_quien", present: Boolean(normalizeText(record.closingCommissionRecipient)) }
+      { label: "No. Cliente", present: Boolean(normalizeText(effectiveClientNumber)) },
+      { label: "Cliente", present: Boolean(normalizeText(record.clientName)) },
+      { label: "No. Cotizacion", present: Boolean(normalizeText(record.quoteNumber)) },
+      { label: "Tipo", present: Boolean(record.matterType) },
+      {
+        label: "Periodo",
+        present:
+          record.matterType !== "RETAINER" ||
+          (Boolean(record.periodYear ?? record.year) && Boolean(record.periodMonth ?? record.month))
+      },
+      { label: "Asunto", present: Boolean(normalizeText(record.subject)) },
+      { label: "Equipo Responsable", present: Boolean(record.responsibleTeam) },
+      { label: "Conceptos trabajando", present: Boolean(normalizeText(record.workingConcepts)) },
+      { label: "Fecha de próximo pago", present: Boolean(record.nextPaymentDate) },
+      { label: "Detalle Fecha", present: Boolean(normalizeText(record.nextPaymentNotes)) },
+      { label: "En mora", present: Boolean(record.delinquencyStatus) },
+      { label: "Probabilidad de cobro este mes", present: hasExactlyOneCollectionProbability },
+      { label: "Receptor comision cliente 20%", present: Boolean(normalizeText(record.clientCommissionRecipient)) },
+      { label: "Receptor comision cierre 10%", present: Boolean(normalizeText(record.closingCommissionRecipient)) },
+      { label: "Hito conclusion", present: Boolean(normalizeText(record.milestone)) }
     ];
     const missing = requiredChecks.filter((field) => !field.present).map((field) => field.label);
     const today = new Date();
@@ -1485,29 +1538,35 @@ export function FinancesPage() {
     const isFeeBreakdownInvalid =
       stats.futurePaymentsMxn < 0 || hasCurrencyDifference(stats.feeBreakdownDifferenceMxn);
     const reasons: string[] = [];
+    const missingItems: string[] = [...missing];
 
     if (missing.length > 0) {
       reasons.push(`Faltan datos requeridos: ${missing.join(", ")}.`);
     }
     if (isDateUrgent) {
       reasons.push("Atencion: tarea urgente (atrasada/hoy no pagada).");
+      missingItems.push("Fecha urgente vencida/hoy sin pago");
     }
     if (isPctInvalid) {
       reasons.push(`Atencion: la suma de porcentajes es ${stats.pctSum}% y debe ser 100%.`);
+      missingItems.push(`SUM % ${stats.pctSum}% (debe ser 100%)`);
     }
     if (stats.futurePaymentsMxn < 0) {
       reasons.push(
         "Atencion: honorarios pagados en meses anteriores + honorarios pagaderos este mes exceden Total asunto. Corrige el desglose."
       );
+      missingItems.push("Desglose excede Total asunto");
     } else if (isFeeBreakdownInvalid) {
       reasons.push(
         `Atencion: Total asunto no coincide con honorarios pagados en meses anteriores + honorarios pagaderos este mes + honorarios pagaderos en meses posteriores. Diferencia: ${formatCurrency(stats.feeBreakdownDifferenceMxn)}.`
       );
+      missingItems.push(`Desglose no suma Total asunto (${formatCurrency(stats.feeBreakdownDifferenceMxn)})`);
     }
 
     return {
       stats,
       effectiveClientNumber,
+      missingItems,
       shouldHighlight: reasons.length > 0,
       reason: reasons.join(" ")
     };
@@ -1551,16 +1610,22 @@ export function FinancesPage() {
     }
   }
 
-  function setCollectionProbability(record: FinanceRecord, probability: "high" | "low", checked: boolean) {
-    const patch: FinanceRecordPatchPayload = probability === "high"
-      ? {
-          highCollectionProbability: checked,
-          lowCollectionProbability: checked ? false : record.lowCollectionProbability
-        }
-      : {
-          highCollectionProbability: checked ? false : record.highCollectionProbability,
-          lowCollectionProbability: checked
-        };
+  function getCollectionProbabilityValue(record: FinanceRecord) {
+    if (record.highCollectionProbability && !record.lowCollectionProbability) {
+      return "high";
+    }
+    if (record.lowCollectionProbability && !record.highCollectionProbability) {
+      return "low";
+    }
+
+    return "";
+  }
+
+  function setCollectionProbability(record: FinanceRecord, probability: "high" | "low" | "") {
+    const patch: FinanceRecordPatchPayload = {
+      highCollectionProbability: probability === "high",
+      lowCollectionProbability: probability === "low"
+    };
 
     updateRecordLocal(record.id, patch);
     void persistRecordPatch(record.id, patch);
@@ -1837,6 +1902,7 @@ export function FinancesPage() {
           <th>Cliente</th>
           <th>No. Cotizacion</th>
           <th>Tipo</th>
+          <th>Periodo</th>
           <th>Asunto</th>
           <th>Equipo Responsable</th>
           <th>Conceptos trabajando</th>
@@ -1844,7 +1910,7 @@ export function FinancesPage() {
           <th>Honorarios pagados en meses anteriores</th>
           <th>Honorarios pagaderos este mes</th>
           <th>Honorarios pagaderos en meses posteriores</th>
-          <th>Fecha de proximo pago</th>
+          <th>Fecha de próximo pago</th>
           <th>Detalle Fecha</th>
           <th>{"\u00bfEn mora?"}</th>
           <th>Mensaje para clientes de servicios en curso</th>
@@ -1855,8 +1921,7 @@ export function FinancesPage() {
           <th>Recibido</th>
           <th>Adeudado hoy</th>
           <th>Adeudo total neto</th>
-          <th>Alta probabilidad de cobro</th>
-          <th>Baja probabilidad de cobro</th>
+          <th>Probabilidad de cobro este mes</th>
           <th>Honorarios netos cobrados este mes</th>
           <th>Comision cliente 20%</th>
           <th>Para quien</th>
@@ -1884,8 +1949,9 @@ export function FinancesPage() {
           <th>Com. Ventas (1% primer pago)</th>
           <th>Utilidad neta</th>
           <th>Hito conclusion</th>
-          <th>Concluyo?</th>
+          <th>{"\u00bfConcluy\u00f3?"}</th>
           <th>Comentarios</th>
+          <th>Faltantes</th>
           <th>Accion</th>
         </tr>
       </thead>
@@ -1995,7 +2061,7 @@ export function FinancesPage() {
               {renderMonthlyHeader()}
               <tbody>
             {filteredRecords.map((record, index) => {
-              const { stats, effectiveClientNumber, shouldHighlight, reason } = evaluateMonthlyRecord(record);
+              const { stats, effectiveClientNumber, missingItems, shouldHighlight, reason } = evaluateMonthlyRecord(record);
               const isSelected = selectedIds.has(record.id);
               const payment1Locked = record.paymentReceived === true;
               const payment2Locked = record.paymentReceived2 === true;
@@ -2018,6 +2084,25 @@ export function FinancesPage() {
                   <td><input className="finance-input finance-input-readonly" value={record.clientName} readOnly /></td>
                   <td><input className="finance-input finance-input-readonly" value={record.quoteNumber ?? ""} readOnly /></td>
                   <td><span className={`finance-type-pill ${record.matterType === "RETAINER" ? "is-retainer" : ""}`}>{getMatterTypeLabel(record.matterType)}</span></td>
+                  <td>
+                    {record.matterType === "RETAINER" ? (
+                      <select
+                        className="finance-input"
+                        value={getFinancePeriodValue(record)}
+                        onChange={(event) => {
+                          const patch = parseFinancePeriodValue(event.target.value);
+                          updateRecordLocal(record.id, patch);
+                          void persistRecordPatch(record.id, patch);
+                        }}
+                      >
+                        {FINANCE_PERIOD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="finance-input finance-input-readonly" value="-" readOnly />
+                    )}
+                  </td>
                   <td><input className="finance-input finance-input-readonly" value={record.subject} readOnly /></td>
                   <td>
                     {record.matterType === "RETAINER" ? (
@@ -2052,7 +2137,7 @@ export function FinancesPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td><input className="finance-input finance-input-readonly" type="date" value={toDateInput(record.nextPaymentDate)} readOnly /></td>
+                  <td><input className="finance-input" type="date" value={toDateInput(record.nextPaymentDate)} onChange={(event) => updateRecordLocal(record.id, { nextPaymentDate: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentDate: event.target.value || null })} /></td>
                   <td><input className="finance-input" value={record.nextPaymentNotes ?? ""} onChange={(event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value })} /></td>
                   <td>
                     <select
@@ -2101,19 +2186,16 @@ export function FinancesPage() {
                   </td>
                   <td><CurrencyInput className={stats.dueTodayMxn > 0 ? "finance-cell-negative" : ""} value={stats.dueTodayMxn} readOnly /></td>
                   <td><CurrencyInput className={stats.totalNetDueMxn > 0 ? "finance-cell-negative" : ""} value={stats.totalNetDueMxn} readOnly /></td>
-                  <td className="finance-cell-checkbox">
-                    <input
-                      checked={record.highCollectionProbability}
-                      onChange={(event) => setCollectionProbability(record, "high", event.target.checked)}
-                      type="checkbox"
-                    />
-                  </td>
-                  <td className="finance-cell-checkbox">
-                    <input
-                      checked={record.lowCollectionProbability}
-                      onChange={(event) => setCollectionProbability(record, "low", event.target.checked)}
-                      type="checkbox"
-                    />
+                  <td>
+                    <select
+                      className="finance-input"
+                      value={getCollectionProbabilityValue(record)}
+                      onChange={(event) => setCollectionProbability(record, event.target.value as "high" | "low" | "")}
+                    >
+                      <option value="">Seleccionar...</option>
+                      <option value="high">Alta</option>
+                      <option value="low">Baja</option>
+                    </select>
                   </td>
                   <td><CurrencyInput className="finance-cell-positive" value={stats.netFeesMxn} readOnly /></td>
                   <td>{formatCurrency(stats.clientCommissionMxn)}</td>
@@ -2158,17 +2240,18 @@ export function FinancesPage() {
                   <td><input className="finance-input finance-input-readonly" value={record.milestone ?? ""} readOnly /></td>
                   <td className="finance-cell-checkbox"><input type="checkbox" checked={record.concluded} onChange={(event) => { updateRecordLocal(record.id, { concluded: event.target.checked }); void persistRecordPatch(record.id, { concluded: event.target.checked }); }} /></td>
                   <td><textarea className="finance-input finance-textarea" value={record.financeComments ?? ""} onChange={(event) => updateRecordLocal(record.id, { financeComments: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { financeComments: event.target.value })} /></td>
+                  <td><div className={`finance-missing-cell ${missingItems.length > 0 ? "is-alert" : ""}`.trim()} title={missingItems.join("\n")}>{missingItems.length > 0 ? missingItems.join(", ") : "-"}</div></td>
                   <td><button className="danger-button finance-inline-button" type="button" onClick={() => void handleDeleteRecord(record.id)}>Borrar</button></td>
                 </tr>
               );
             })}
             {!loading && filteredRecords.length === 0 ? (
-              <tr><td className="centered-inline-message" colSpan={56}>Sin registros para esta fecha.</td></tr>
+              <tr><td className="centered-inline-message" colSpan={57}>Sin registros para esta fecha.</td></tr>
             ) : null}
           </tbody>
           <tfoot>
             <tr className="finance-total-row">
-              <td colSpan={8}>Totales</td>
+              <td colSpan={9}>Totales</td>
               <td />
               <td>{formatCurrency(totals.totalMatterMxn)}</td>
               <td>{formatCurrency(totals.previousPaymentsMxn)}</td>
@@ -2181,7 +2264,6 @@ export function FinancesPage() {
               <td />
               <td>{formatCurrency(totals.dueTodayMxn)}</td>
               <td>{formatCurrency(totals.totalNetDueMxn)}</td>
-              <td />
               <td />
               <td>{formatCurrency(totals.netFeesMxn)}</td>
               <td>{formatCurrency(totals.clientCommissionMxn)}</td>
@@ -2204,7 +2286,7 @@ export function FinancesPage() {
               <td>{formatCurrency(totals.financeCommissionMxn)}</td>
               <td>{formatCurrency(totals.salesCommissionMxn)}</td>
               <td>{formatCurrency(totals.netProfitMxn)}</td>
-              <td colSpan={4} />
+              <td colSpan={5} />
             </tr>
               </tfoot>
             </table>
@@ -2236,7 +2318,7 @@ export function FinancesPage() {
           <th>Equipo Responsable</th>
           <th>Generar contrato</th>
           <th>Estatus del contrato de PSP</th>
-          <th>Fecha de proximo pago</th>
+          <th>Fecha de próximo pago</th>
           <th>Destino (Finanzas)</th>
           <th>Accion</th>
         </tr>
@@ -2407,7 +2489,7 @@ export function FinancesPage() {
           </section>
           <section className="panel">
             <div className="panel-header"><h2>2. Igualas por asuntos varios</h2><span>{retainerMatters.length} registros</span></div>
-            <p className="muted matter-table-caption">Los renglones siguen mostrando rojo cuando falta la fecha de proximo pago o el asunto ya debia estar visible en el mes actual.</p>
+            <p className="muted matter-table-caption">Los renglones siguen mostrando rojo cuando falta la fecha de próximo pago o el asunto ya debia estar visible en el mes actual.</p>
             {renderActiveMattersTable(retainerMatters, "retainer")}
           </section>
         </>
@@ -2679,7 +2761,7 @@ export function FinancesPage() {
               <table className="finance-table finance-table-snapshot">
                 <thead>
                   <tr>
-                    <th>No.</th><th>Cliente</th><th>No. Cot.</th><th>Responsable</th><th>Tipo Asunto</th><th>Asunto</th><th>Tipo</th><th>Total Asunto</th><th>Conceptos</th><th>Hon. Conceptos</th><th>Pagos Previos</th><th>Remanente</th><th>Fecha de proximo pago</th><th>Semana</th><th>Pagado este mes</th><th>Fecha Pago Real</th><th>Adeudado</th><th>Netos</th><th>Comm Cliente (20%)</th><th>Comm Cierre (10%)</th><th>Comm Ventas (1%)</th><th>Ut. Neta</th>
+                    <th>No.</th><th>Cliente</th><th>No. Cot.</th><th>Responsable</th><th>Tipo Asunto</th><th>Asunto</th><th>Tipo</th><th>Total Asunto</th><th>Conceptos</th><th>Hon. Conceptos</th><th>Pagos Previos</th><th>Remanente</th><th>Fecha de próximo pago</th><th>Semana</th><th>Pagado este mes</th><th>Fecha Pago Real</th><th>Adeudado</th><th>Netos</th><th>Comm Cliente (20%)</th><th>Comm Cierre (10%)</th><th>Comm Ventas (1%)</th><th>Ut. Neta</th>
                   </tr>
                 </thead>
                 <tbody>

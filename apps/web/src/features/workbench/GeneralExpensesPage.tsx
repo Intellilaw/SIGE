@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deriveEffectivePermissions,
   type GeneralExpense,
+  type GeneralExpenseEmrtDailyAcknowledgement,
   type GeneralExpensePayrollEmployeeOption,
   type GeneralExpensePayrollEntry,
   type LegacyAccessRole
@@ -62,6 +63,11 @@ type CopyNextMonthResult = {
   year: number;
   month: number;
   copied: number;
+};
+
+type EmrtAcknowledgementPatchPayload = {
+  receivedByAle?: boolean;
+  paidByEmrt?: boolean;
 };
 
 type PayrollPatchPayload = {
@@ -167,6 +173,22 @@ function formatDateDisplay(value?: string | null) {
 
   const [year, month, day] = inputValue.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function formatDateTimeDisplay(value?: string | null) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatDateDisplay(value);
+  }
+
+  return new Intl.DateTimeFormat("es-MX", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
 }
 
 function formatCurrency(value: number) {
@@ -322,9 +344,13 @@ function isAraceliLozano(input: {
   secondarySpecificRole?: string;
 }) {
   const normalizedEmail = normalizeComparableText(input.email);
+  const normalizedUsername = normalizeComparableText(input.username);
+  const normalizedDisplayName = normalizeComparableText(input.displayName);
   return isFinanceUser(input) && (
-    normalizeComparableText(input.username) === "araceli lozano" ||
-    normalizeComparableText(input.displayName) === "araceli lozano" ||
+    normalizedUsername === "araceli lozano" ||
+    normalizedUsername === "araceli lozano escamilla" ||
+    normalizedDisplayName === "araceli lozano" ||
+    normalizedDisplayName === "araceli lozano escamilla" ||
     normalizedEmail.startsWith("araceli lozano") ||
     normalizedEmail.startsWith("araceli.lozano")
   );
@@ -503,25 +529,19 @@ function buildEmrtSummaryMessage(date: string, items: GeneralExpense[], total: n
   ].join("\n");
 }
 
-async function copyTextToClipboard(text: string) {
-  if (navigator?.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const temporaryTextArea = document.createElement("textarea");
-  temporaryTextArea.value = text;
-  temporaryTextArea.setAttribute("readonly", "");
-  temporaryTextArea.style.position = "absolute";
-  temporaryTextArea.style.left = "-9999px";
-  document.body.appendChild(temporaryTextArea);
-  temporaryTextArea.select();
-  document.execCommand("copy");
-  document.body.removeChild(temporaryTextArea);
-}
-
 function replaceExpense(items: GeneralExpense[], updated: GeneralExpense) {
   return items.map((item) => (item.id === updated.id ? updated : item));
+}
+
+function replaceEmrtAcknowledgement(
+  items: GeneralExpenseEmrtDailyAcknowledgement[],
+  updated: GeneralExpenseEmrtDailyAcknowledgement
+) {
+  const next = items.some((item) => item.id === updated.id)
+    ? items.map((item) => (item.id === updated.id ? updated : item))
+    : [...items, updated];
+
+  return next.sort((left, right) => toDateInput(left.paidByEmrtDate).localeCompare(toDateInput(right.paidByEmrtDate)));
 }
 
 function mergeRecordsPreservingOrder(current: GeneralExpense[], incoming: GeneralExpense[]) {
@@ -684,15 +704,16 @@ export function GeneralExpensesPage() {
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [records, setRecords] = useState<GeneralExpense[]>([]);
+  const [emrtAcknowledgements, setEmrtAcknowledgements] = useState<GeneralExpenseEmrtDailyAcknowledgement[]>([]);
   const [payrollEntries, setPayrollEntries] = useState<GeneralExpensePayrollEntry[]>([]);
   const [payrollEmployeeOptions, setPayrollEmployeeOptions] = useState<GeneralExpensePayrollEmployeeOption[]>([]);
   const [drafts, setDrafts] = useState<ExpenseDraftMap>({});
   const [payrollDrafts, setPayrollDrafts] = useState<PayrollDraftMap>({});
   const [loading, setLoading] = useState(true);
+  const [loadingEmrtAcknowledgements, setLoadingEmrtAcknowledgements] = useState(true);
   const [loadingPayroll, setLoadingPayroll] = useState(true);
   const [loadingPayrollEmployees, setLoadingPayrollEmployees] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copiedSummaryDate, setCopiedSummaryDate] = useState("");
   const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState<string | null>(null);
   const [pendingScrollExpenseId, setPendingScrollExpenseId] = useState<string | null>(null);
 
@@ -731,6 +752,8 @@ export function GeneralExpensesPage() {
   }));
   const canEditEmrtDate = Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
   const canEditEmrtReimbursement = canApprove && canEditEmrtDate;
+  const canReceiveEmrtCashAsAle = canStampPayroll;
+  const canConfirmEmrtCashPayment = canApprove && canEditEmrtDate;
   const canReviewJnlsFlag = Boolean(user && canReviewJnls({
     role: user.role,
     legacyRole: user.legacyRole,
@@ -742,6 +765,22 @@ export function GeneralExpensesPage() {
     secondarySpecificRole: user.secondarySpecificRole,
     permissions: effectivePermissions
   }));
+
+  const emrtAcknowledgementsByDate = useMemo(() => new Map(
+    emrtAcknowledgements.map((acknowledgement): [string, GeneralExpenseEmrtDailyAcknowledgement] => [
+      toDateInput(acknowledgement.paidByEmrtDate),
+      acknowledgement
+    ])
+  ), [emrtAcknowledgements]);
+
+  function getEmrtAcknowledgementForExpense(expense: GeneralExpense) {
+    const dateKey = toDateInput(expense.paidByEmrtAt);
+    return dateKey ? emrtAcknowledgementsByDate.get(dateKey) : undefined;
+  }
+
+  function isExpensePreEmrtLocked(expense: GeneralExpense) {
+    return Boolean(getEmrtAcknowledgementForExpense(expense)?.receivedByAle);
+  }
 
   async function loadRecords() {
     if (!canRead) {
@@ -762,6 +801,27 @@ export function GeneralExpensesPage() {
       setErrorMessage(toErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadEmrtAcknowledgements() {
+    if (!canRead) {
+      setEmrtAcknowledgements([]);
+      setLoadingEmrtAcknowledgements(false);
+      return;
+    }
+
+    setLoadingEmrtAcknowledgements(true);
+
+    try {
+      const response = await apiGet<GeneralExpenseEmrtDailyAcknowledgement[]>(
+        `/general-expenses/emrt-acknowledgements?year=${selectedYear}&month=${selectedMonth}`
+      );
+      setEmrtAcknowledgements(response);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setLoadingEmrtAcknowledgements(false);
     }
   }
 
@@ -807,6 +867,7 @@ export function GeneralExpensesPage() {
 
   useEffect(() => {
     void loadRecords();
+    void loadEmrtAcknowledgements();
   }, [canRead, selectedMonth, selectedYear]);
 
   useEffect(() => {
@@ -959,6 +1020,26 @@ export function GeneralExpensesPage() {
     }
   }
 
+  async function persistEmrtAcknowledgement(date: string, payload: EmrtAcknowledgementPatchPayload) {
+    const payloadKeys = Object.keys(payload);
+    if (payloadKeys.length !== 1) {
+      return;
+    }
+
+    try {
+      const updated = await apiPatch<GeneralExpenseEmrtDailyAcknowledgement>(
+        `/general-expenses/emrt-acknowledgements/${date}`,
+        payload
+      );
+      setEmrtAcknowledgements((items) => replaceEmrtAcknowledgement(items, updated));
+      await loadRecords();
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+      await loadEmrtAcknowledgements();
+      await loadRecords();
+    }
+  }
+
   async function flushDraftField(expenseId: string, field: ExpenseDraftField) {
     const rawValue = drafts[expenseId]?.[field];
     if (rawValue === undefined) {
@@ -1083,7 +1164,7 @@ export function GeneralExpensesPage() {
   }
 
   async function handleDelete(expense: GeneralExpense) {
-    if (!canWrite || expense.approvedByEmrt) {
+    if (!canWrite || expense.approvedByEmrt || isExpensePreEmrtLocked(expense)) {
       return;
     }
 
@@ -1215,7 +1296,7 @@ export function GeneralExpensesPage() {
     field: "generalExpense" | "expenseWithoutTeam",
     checked: boolean
   ) {
-    if (!canWrite || expense.approvedByEmrt) {
+    if (!canWrite || expense.approvedByEmrt || isExpensePreEmrtLocked(expense)) {
       return;
     }
 
@@ -1247,16 +1328,13 @@ export function GeneralExpensesPage() {
     void persistExpensePatch(expense.id, payload);
   }
 
-  async function handleCopySummary(summaryMessage: string, date: string) {
-    try {
-      await copyTextToClipboard(summaryMessage);
-      setCopiedSummaryDate(date);
-      window.setTimeout(() => {
-        setCopiedSummaryDate((current) => (current === date ? "" : current));
-      }, 2000);
-    } catch (error) {
-      setErrorMessage(toErrorMessage(error));
+  function handlePaidByEmrtDateChange(expense: GeneralExpense, nextDate: string | null) {
+    if (nextDate && emrtAcknowledgementsByDate.get(nextDate)?.receivedByAle) {
+      setErrorMessage("Ese dia ya fue marcado como recibido por ALE. Desmarca el acuse diario antes de asignar mas gastos.");
+      return;
     }
+
+    void persistExpensePatch(expense.id, { paidByEmrtAt: nextDate });
   }
 
   const totals = useMemo(
@@ -1315,14 +1393,23 @@ export function GeneralExpensesPage() {
     }, {});
 
     return Object.entries(grouped)
-      .map(([date, data]) => ({
-        date,
-        total: data.total,
-        items: data.items,
-        summaryMessage: buildEmrtSummaryMessage(date, data.items, data.total)
-      }))
+      .map(([date, data]) => {
+        const acknowledgement = emrtAcknowledgementsByDate.get(date);
+        const useSnapshot = Boolean(acknowledgement?.receivedByAle);
+        const total = useSnapshot ? Number(acknowledgement?.totalMxn || 0) : data.total;
+
+        return {
+          date,
+          total,
+          items: data.items,
+          acknowledgement,
+          summaryMessage: useSnapshot && acknowledgement
+            ? acknowledgement.summaryMessage
+            : buildEmrtSummaryMessage(date, data.items, data.total)
+        };
+      })
       .sort((left, right) => left.date.localeCompare(right.date));
-  }, [records]);
+  }, [emrtAcknowledgementsByDate, records]);
 
   const emrtGrandTotal = useMemo(
     () => emrtDailyTotals.reduce((sum, item) => sum + item.total, 0),
@@ -1929,8 +2016,10 @@ export function GeneralExpensesPage() {
                           const distribution = distributeExpense(expense);
                           const ivaAmount = getIvaAmount(expense);
                           const { sum } = getDistributionPct(expense);
-                          const pctDisabled = !canWrite || expense.approvedByEmrt || expense.generalExpense || expense.expenseWithoutTeam;
-                          const vatCheckboxDisabled = !canWrite || expense.approvedByEmrt || expense.paymentMethod !== "Transferencia";
+                          const preEmrtLocked = isExpensePreEmrtLocked(expense);
+                          const protectedFieldDisabled = !canWrite || expense.approvedByEmrt || preEmrtLocked;
+                          const pctDisabled = protectedFieldDisabled || expense.generalExpense || expense.expenseWithoutTeam;
+                          const vatCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
                           const rowIncomplete = isRowIncomplete(expense);
                           const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableMoney(Number(expense.amountMxn || 0));
 
@@ -1945,7 +2034,10 @@ export function GeneralExpensesPage() {
 
                                 expenseRowRefs.current.delete(expense.id);
                               }}
-                              className={rowIncomplete ? "general-expense-row-danger" : undefined}
+                              className={[
+                                rowIncomplete ? "general-expense-row-danger" : "",
+                                preEmrtLocked ? "general-expense-row-acknowledged" : ""
+                              ].filter(Boolean).join(" ") || undefined}
                             >
                               <td className="general-expense-row-index">{index + 1}</td>
                               <td>
@@ -1955,7 +2047,7 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => setDraft(expense.id, "detail", event.target.value)}
                                   onBlur={() => void flushDraftField(expense.id, "detail")}
                                   rows={2}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={protectedFieldDisabled}
                                 />
                               </td>
                               <td>
@@ -1968,7 +2060,7 @@ export function GeneralExpensesPage() {
                                     value={draftAmount}
                                     onChange={(event) => setDraft(expense.id, "amountMxn", formatMoneyDraftValue(event.target.value))}
                                     onBlur={() => void flushDraftField(expense.id, "amountMxn")}
-                                    disabled={!canWrite || expense.approvedByEmrt}
+                                    disabled={protectedFieldDisabled}
                                   />
                                 </div>
                               </td>
@@ -1995,7 +2087,7 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.countsTowardLimit}
                                   onChange={(event) => void persistExpensePatch(expense.id, { countsTowardLimit: event.target.checked })}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={protectedFieldDisabled}
                                 />
                               </td>
                               <td className={`general-expense-limit-cell ${expense.countsTowardLimit ? "is-active" : ""}`}>
@@ -2006,7 +2098,7 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.generalExpense}
                                   onChange={(event) => handleDistributionModeChange(expense, "generalExpense", event.target.checked)}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={protectedFieldDisabled}
                                 />
                               </td>
                               <td className="general-expense-checkbox-cell">
@@ -2014,7 +2106,7 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.expenseWithoutTeam}
                                   onChange={(event) => handleDistributionModeChange(expense, "expenseWithoutTeam", event.target.checked)}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={protectedFieldDisabled}
                                 />
                               </td>
                               {DISTRIBUTION_FIELDS.map((field) => (
@@ -2045,11 +2137,11 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => {
                                     const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
                                     const localPatch = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false }
+                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false, emrtReimbursementPending: false }
                                       : { paymentMethod: nextMethod };
                                     void persistExpensePatch(expense.id, localPatch, localPatch);
                                   }}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={protectedFieldDisabled}
                                 >
                                   {PAYMENT_METHOD_OPTIONS.map((method) => (
                                     <option key={method} value={method}>
@@ -2065,7 +2157,7 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => void persistExpensePatch(expense.id, {
                                     bank: (event.target.value || null) as GeneralExpense["bank"] | null
                                   })}
-                                  disabled={!canWrite || expense.approvedByEmrt || expense.paymentMethod !== "Transferencia"}
+                                  disabled={protectedFieldDisabled || expense.paymentMethod !== "Transferencia"}
                                 >
                                   <option value="">Seleccionar...</option>
                                   {BANK_OPTIONS.map((bank) => (
@@ -2080,7 +2172,7 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.recurring}
                                   onChange={(event) => void persistExpensePatch(expense.id, { recurring: event.target.checked })}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={protectedFieldDisabled}
                                 />
                               </td>
                               <td className="general-expense-checkbox-cell">
@@ -2091,7 +2183,7 @@ export function GeneralExpensesPage() {
                                     const patch = getApprovedByEmrtPatch(event.target.checked);
                                     void persistExpensePatch(expense.id, { approvedByEmrt: event.target.checked }, patch);
                                   }}
-                                  disabled={!canApprove}
+                                  disabled={!canApprove || preEmrtLocked}
                                 />
                               </td>
                               <td>
@@ -2101,14 +2193,14 @@ export function GeneralExpensesPage() {
                                       className="general-expense-input"
                                       type="date"
                                       value={toDateInput(expense.paidByEmrtAt)}
-                                      onChange={(event) => void persistExpensePatch(expense.id, { paidByEmrtAt: event.target.value || null })}
-                                      disabled={!canEditEmrtDate}
+                                      onChange={(event) => handlePaidByEmrtDateChange(expense, event.target.value || null)}
+                                      disabled={!canEditEmrtDate || preEmrtLocked}
                                     />
                                     <button
                                       type="button"
                                       className="general-expense-inline-button"
-                                      onClick={() => void persistExpensePatch(expense.id, { paidByEmrtAt: getTodayInput() })}
-                                      disabled={!canEditEmrtDate}
+                                      onClick={() => handlePaidByEmrtDateChange(expense, getTodayInput())}
+                                      disabled={!canEditEmrtDate || preEmrtLocked}
                                     >
                                       Hoy
                                     </button>
@@ -2160,7 +2252,7 @@ export function GeneralExpensesPage() {
                                   type="button"
                                   className="danger-button general-expense-delete-button"
                                   onClick={() => void handleDelete(expense)}
-                                  disabled={!canWrite || expense.approvedByEmrt}
+                                  disabled={!canWrite || expense.approvedByEmrt || preEmrtLocked}
                                 >
                                   Borrar
                                 </button>
@@ -2210,7 +2302,7 @@ export function GeneralExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading ? (
+                  {loading || loadingEmrtAcknowledgements ? (
                     <tr>
                       <td colSpan={2} className="centered-inline-message">
                         Cargando resumen EMRT...
@@ -2223,31 +2315,53 @@ export function GeneralExpensesPage() {
                       </td>
                     </tr>
                   ) : (
-                    emrtDailyTotals.map((item) => (
-                      <tr key={item.date} className="general-expense-emrt-row">
-                        <td>
-                          <div className="general-expense-emrt-date">{formatDateDisplay(item.date)}</div>
-                          <div className="general-expense-emrt-copy-block">
-                            <div>
-                              <strong>Mensaje copiable para Telegram</strong>
+                    emrtDailyTotals.map((item) => {
+                      const acknowledgement = item.acknowledgement;
+                      const receivedByAle = Boolean(acknowledgement?.receivedByAle);
+                      const paidByEmrt = Boolean(acknowledgement?.paidByEmrt);
+
+                      return (
+                        <tr key={item.date} className="general-expense-emrt-row">
+                          <td>
+                            <div className="general-expense-emrt-date">{formatDateDisplay(item.date)}</div>
+                            <textarea
+                              className="general-expense-emrt-textarea"
+                              readOnly
+                              value={item.summaryMessage}
+                            />
+                            <div className="general-expense-emrt-acknowledgement-controls">
+                              <label className={`general-expense-inline-checkbox ${paidByEmrt || !canReceiveEmrtCashAsAle ? "is-disabled" : ""}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={receivedByAle}
+                                  onChange={(event) => void persistEmrtAcknowledgement(item.date, { receivedByAle: event.target.checked })}
+                                  disabled={!canReceiveEmrtCashAsAle || paidByEmrt}
+                                />
+                                <span>Recibido por ALE</span>
+                              </label>
+                              <label className={`general-expense-inline-checkbox ${!receivedByAle || !canConfirmEmrtCashPayment ? "is-disabled" : ""}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={paidByEmrt}
+                                  onChange={(event) => void persistEmrtAcknowledgement(item.date, { paidByEmrt: event.target.checked })}
+                                  disabled={!canConfirmEmrtCashPayment || !receivedByAle}
+                                />
+                                <span>Pagado por EMRT</span>
+                              </label>
                             </div>
-                            <button
-                              type="button"
-                              className="secondary-button"
-                              onClick={() => void handleCopySummary(item.summaryMessage, item.date)}
-                            >
-                              {copiedSummaryDate === item.date ? "Copiado" : "Copiar mensaje"}
-                            </button>
-                          </div>
-                          <textarea
-                            className="general-expense-emrt-textarea"
-                            readOnly
-                            value={item.summaryMessage}
-                          />
-                        </td>
-                        <td className="general-expense-emrt-total">{formatCurrency(item.total)}</td>
-                      </tr>
-                    ))
+                            <div className="general-expense-emrt-acknowledgement-meta">
+                              {acknowledgement?.receivedByAleAt ? (
+                                <span>Recibido por ALE: {formatDateTimeDisplay(acknowledgement.receivedByAleAt)}</span>
+                              ) : null}
+                              {acknowledgement?.paidByEmrtAt ? (
+                                <span>Pagado por EMRT: {formatDateTimeDisplay(acknowledgement.paidByEmrtAt)}</span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="general-expense-emrt-total">{formatCurrency(item.total)}</td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

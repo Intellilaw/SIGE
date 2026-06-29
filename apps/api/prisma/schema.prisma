@@ -25,6 +25,7 @@ model Organization {
   matters                          Matter[]
   executionSubmatters              ExecutionSubmatter[]
   generalExpenses                  GeneralExpense[]
+  generalExpenseEmrtAcknowledgements GeneralExpenseEmrtAcknowledgement[]
   payrollEntries                   GeneralExpensePayrollEntry[]
   budgetPlans                      BudgetPlan[]
   budgetPlanExpenseBreakdownItems  BudgetPlanExpenseBreakdownItem[]
@@ -375,6 +376,7 @@ model Quote {
   quoteNumber     String
   clientId        String
   clientName      String
+  recipientName   String       @default("")
   responsibleTeam String?
   subject         String
   status          String
@@ -539,36 +541,59 @@ model ExecutionSubmatter {
 }
 
 model GeneralExpense {
-  id                 String       @id @default(uuid())
-  organizationId     String       @default("org-rusconi")
-  year               Int
-  month              Int
-  detail             String       @default("")
-  amountMxn          Decimal      @default(0)
-  countsTowardLimit  Boolean      @default(false)
-  team               String       @default("Sin equipo")
-  generalExpense     Boolean      @default(false)
-  expenseWithoutTeam Boolean      @default(false)
-  pctLitigation      Decimal      @default(0)
-  pctCorporateLabor  Decimal      @default(0)
-  pctSettlements     Decimal      @default(0)
-  pctFinancialLaw    Decimal      @default(0)
-  pctTaxCompliance   Decimal      @default(0)
-  paymentMethod      String       @default("Transferencia")
-  bank               String?
-  hasVat             Boolean      @default(true)
-  recurring          Boolean      @default(false)
-  approvedByEmrt     Boolean      @default(false)
-  paidByEmrtAt       DateTime?    @db.Date
+  id                       String       @id @default(uuid())
+  organizationId           String       @default("org-rusconi")
+  year                     Int
+  month                    Int
+  detail                   String       @default("")
+  amountMxn                Decimal      @default(0)
+  countsTowardLimit        Boolean      @default(false)
+  team                     String       @default("Sin equipo")
+  generalExpense           Boolean      @default(false)
+  expenseWithoutTeam       Boolean      @default(false)
+  pctLitigation            Decimal      @default(0)
+  pctCorporateLabor        Decimal      @default(0)
+  pctSettlements           Decimal      @default(0)
+  pctFinancialLaw          Decimal      @default(0)
+  pctTaxCompliance         Decimal      @default(0)
+  paymentMethod            String       @default("Transferencia")
+  bank                     String?
+  hasVat                   Boolean      @default(true)
+  recurring                Boolean      @default(false)
+  approvedByEmrt           Boolean      @default(false)
+  paidByEmrtAt             DateTime?    @db.Date
   emrtReimbursementPending Boolean      @default(false)
-  reviewedByJnls     Boolean      @default(false)
-  paid               Boolean      @default(false)
-  paidAt             DateTime?    @db.Date
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reviewedByJnls           Boolean      @default(false)
+  paid                     Boolean      @default(false)
+  paidAt                   DateTime?    @db.Date
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, year, month, createdAt])
+}
+
+model GeneralExpenseEmrtAcknowledgement {
+  id               String       @id @default(uuid())
+  organizationId   String       @default("org-rusconi")
+  year             Int
+  month            Int
+  paidByEmrtDate   DateTime     @db.Date
+  totalMxn         Decimal      @default(0)
+  summaryMessage   String       @default("")
+  expenseIds       Json         @default("[]")
+  snapshotData     Json?
+  snapshotHash     String       @default("")
+  receivedByAle    Boolean      @default(false)
+  receivedByAleAt  DateTime?
+  paidByEmrt       Boolean      @default(false)
+  paidByEmrtAt     DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, year, month, paidByEmrtDate])
+  @@index([organizationId, year, month, paidByEmrtDate])
 }
 
 model GeneralExpensePayrollEntry {
@@ -696,6 +721,8 @@ model FinanceRecord {
   clientName                 String       @default("")
   quoteNumber                String?
   matterType                 String       @default("ONE_TIME")
+  periodYear                 Int?
+  periodMonth                Int?
   subject                    String       @default("")
   contractSignedStatus       String       @default("NO")
   responsibleTeam            String?

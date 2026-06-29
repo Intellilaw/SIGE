@@ -1221,6 +1221,23 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.daily-doc-inline-checkbox {
+  align-items: center;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid #d9e2ec;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.daily-doc-inline-checkbox span {
+  color: #334e68;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 .daily-doc-additional-instructions {
   gap: 10px;
 }
@@ -2483,6 +2500,14 @@ textarea {
   gap: 16px;
 }
 
+.quote-recipient-field {
+  grid-column: span 2;
+}
+
+.quote-recipient-field textarea {
+  min-height: 68px;
+}
+
 .quote-language-field {
   align-content: start;
 }
@@ -2525,6 +2550,29 @@ textarea {
   border-radius: 18px;
   border: 1px solid rgba(31, 41, 51, 0.08);
   background: rgba(29, 78, 216, 0.04);
+}
+
+.quotes-selected-template-title {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(29, 78, 216, 0.14);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.quotes-selected-template-title span {
+  color: #627d98;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.quotes-selected-template-title strong {
+  color: #173f6b;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 .quotes-template-preview {
@@ -3823,6 +3871,10 @@ textarea {
   vertical-align: top;
 }
 
+.general-expense-row-acknowledged td {
+  background: rgba(15, 118, 110, 0.08);
+}
+
 .general-expense-emrt-date {
   font-weight: 800;
   margin-bottom: 10px;
@@ -3845,6 +3897,22 @@ textarea {
   padding: 12px;
   background: #fff;
   resize: vertical;
+}
+
+.general-expense-emrt-acknowledgement-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.general-expense-emrt-acknowledgement-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  color: #52616f;
+  font-size: 0.85rem;
 }
 
 .general-expense-emrt-total {
@@ -6144,7 +6212,7 @@ textarea {
 }
 
 .finance-table-monthly-x-nav-spacer {
-  width: 10580px;
+  width: 10980px;
 }
 
 .finance-active-table-x-nav-spacer {
@@ -6194,7 +6262,7 @@ textarea {
   border-collapse: collapse;
 }
 
-.finance-table-monthly { min-width: 10580px; font-size: 0.82rem; table-layout: fixed; }
+.finance-table-monthly { min-width: 10980px; font-size: 0.82rem; table-layout: fixed; }
 .finance-active-table { min-width: 2560px; table-layout: fixed; }
 .finance-table-snapshot { min-width: 1800px; font-size: 0.8rem; }
 
@@ -6268,6 +6336,24 @@ textarea {
 .finance-input-number { text-align: right; }
 .finance-input-currency { font-variant-numeric: tabular-nums; }
 .finance-payment-method-placeholder { min-height: 38px; }
+
+.finance-missing-cell {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #52606d;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.finance-missing-cell.is-alert {
+  border-color: rgba(185, 28, 28, 0.24);
+  background: rgba(254, 226, 226, 0.84);
+  color: #991b1b;
+  font-weight: 700;
+}
 
 .finance-received-checkbox {
   align-items: center;
@@ -9450,6 +9536,10 @@ textarea {
 
   .tasks-active-term-verification-row,
   .tasks-active-term-verification-row-date-only {
+    grid-column: auto;
+  }
+
+  .quote-recipient-field {
     grid-column: auto;
   }
 

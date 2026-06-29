@@ -47,6 +47,7 @@ const tableRowSchema = z.object({
 const quoteSchema = z.object({
   clientId: z.string(),
   clientName: z.string().min(2),
+  recipientName: z.string().optional(),
   responsibleTeam: teamSchema.optional(),
   subject: z.string().min(3),
   status: z.enum(["DRAFT", "SENT", "APPROVED", "REJECTED"]),

@@ -50,6 +50,15 @@ const paramsSchema = z.object({
   expenseId: z.string().min(1)
 });
 
+const emrtAcknowledgementParamsSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
+
+const emrtAcknowledgementUpdateSchema = z.object({
+  receivedByAle: z.boolean().optional(),
+  paidByEmrt: z.boolean().optional()
+});
+
 const copySchema = z.object({
   year: z.number().int().min(2024).max(2035),
   month: z.number().int().min(1).max(12)
@@ -106,9 +115,13 @@ function isFinanceUser(user: ReturnType<typeof getSessionUser>) {
 
 function isAraceliLozano(user: ReturnType<typeof getSessionUser>) {
   const normalizedEmail = normalizeComparableText(user.email);
+  const normalizedUsername = normalizeComparableText(user.username);
+  const normalizedDisplayName = normalizeComparableText(user.displayName);
   return isFinanceUser(user) && (
-    normalizeComparableText(user.username) === "araceli lozano" ||
-    normalizeComparableText(user.displayName) === "araceli lozano" ||
+    normalizedUsername === "araceli lozano" ||
+    normalizedUsername === "araceli lozano escamilla" ||
+    normalizedDisplayName === "araceli lozano" ||
+    normalizedDisplayName === "araceli lozano escamilla" ||
     normalizedEmail.startsWith("araceli lozano") ||
     normalizedEmail.startsWith("araceli.lozano")
   );
@@ -215,6 +228,14 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
     return service.listPayrollEntries(year, month);
   });
 
+  app.get("/general-expenses/emrt-acknowledgements", { preHandler: readGuards }, async (request) => {
+    const query = querySchema.parse(request.query ?? {});
+    const now = new Date();
+    const year = query.year ?? now.getFullYear();
+    const month = query.month ?? now.getMonth() + 1;
+    return service.listEmrtAcknowledgements(year, month);
+  });
+
   app.post("/general-expenses/payroll", { preHandler: writeGuards }, async (request) => {
     const payload = payrollCreateSchema.parse(request.body ?? {});
     return service.createPayrollEntry(payload);
@@ -237,6 +258,13 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
     await service.deletePayrollEntry(params.payrollEntryId);
     reply.code(204);
     return null;
+  });
+
+  app.patch("/general-expenses/emrt-acknowledgements/:date", { preHandler: [requireAuth] }, async (request) => {
+    const params = emrtAcknowledgementParamsSchema.parse(request.params);
+    const payload = emrtAcknowledgementUpdateSchema.parse(request.body ?? {});
+    const actor = getSessionUser(request);
+    return service.updateEmrtAcknowledgement(params.date, payload, actor);
   });
 
   app.patch("/general-expenses/:expenseId", { preHandler: patchGuards }, async (request) => {

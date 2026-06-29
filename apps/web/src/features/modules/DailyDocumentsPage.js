@@ -63,6 +63,9 @@ const receiptDocumentKindLabels = {
 const additionalInstructionsFieldName = "additionalInstructions";
 const riAdjustedParagraphsFieldName = "riAdjustedParagraphs";
 const riAdjustmentSummaryFieldName = "riAdjustmentSummary";
+const propertySettlementReleaseFieldName = "includePropertySettlementRelease";
+const propertySettlementReleaseTextFieldName = "propertySettlementReleaseText";
+const propertySettlementReleaseDefaultText = "Las partes manifiestan que, a la fecha de firma de la presente acta, no existe adeudo, prestacion, reclamacion o cantidad pendiente de pago entre ellas, derivada exclusivamente de la relacion juridica, uso, posesion, ocupacion, entrega y recepcion del inmueble materia de este documento. En consecuencia, ambas partes se otorgan de manera reciproca el finiquito mas amplio que en derecho proceda, obligandose a no reservarse accion, derecho o reclamacion alguna una frente a la otra por dichos conceptos.";
 const maxPromissoryNoteCreditors = 4;
 const emptyPromissoryNoteCreditor = {
     type: "physical",
@@ -643,25 +646,43 @@ const dailyDocumentTemplates = [
             { name: "keys", label: "Llaves y controles", placeholder: "Numero de juegos de llaves, controles, tarjetas..." },
             { name: "services", label: "Servicios y medidores", type: "textarea", placeholder: "Agua, luz, gas, internet, lecturas o adeudos conocidos" },
             { name: "condition", label: "Estado general", type: "textarea", placeholder: "Estado fisico, mobiliario, accesorios, danos o pendientes" },
-            { name: "notes", label: "Observaciones", type: "textarea", placeholder: "Anexos fotograficos, inventario, pendientes de entrega" }
+            { name: "notes", label: "Observaciones", type: "textarea", placeholder: "Anexos fotograficos, inventario, pendientes de entrega" },
+            {
+                name: propertySettlementReleaseFieldName,
+                label: "Agregar finiquito reciproco entre las partes",
+                type: "checkbox"
+            },
+            {
+                name: propertySettlementReleaseTextFieldName,
+                label: "Texto del finiquito",
+                type: "textarea",
+                defaultValue: propertySettlementReleaseDefaultText,
+                visibleWhen: { name: propertySettlementReleaseFieldName, value: "true" }
+            }
         ],
-        build: (values) => ({
-            title: "Acta de entrega recepcion de inmueble",
-            subtitle: formatPlaceDate(values),
-            paragraphs: [
+        build: (values) => {
+            const paragraphs = [
                 `Comparecen ${value(values, "deliveredBy", "persona que entrega pendiente")} como parte que entrega y ${value(values, "receivedBy", "persona que recibe pendiente")} como parte que recibe, para hacer constar la entrega recepcion del inmueble ubicado en ${value(values, "propertyAddress", "domicilio pendiente")}.`,
                 `El inmueble se identifica como ${value(values, "propertyType", "tipo de inmueble pendiente")} y se entrega con ${value(values, "keys", "llaves o controles pendientes")}.`,
                 `Servicios y medidores: ${value(values, "services", "servicios pendientes")}`,
                 `Estado general del inmueble: ${value(values, "condition", "estado pendiente")}`,
                 value(values, "notes", "Sin observaciones adicionales.")
-            ],
-            details: [
-                { label: "Domicilio", value: value(values, "propertyAddress", "domicilio pendiente") },
-                { label: "Tipo de inmueble", value: value(values, "propertyType", "tipo pendiente") },
-                { label: "Llaves y controles", value: value(values, "keys", "pendiente") }
-            ],
-            signers: [value(values, "deliveredBy", "Entrega"), value(values, "receivedBy", "Recibe")]
-        })
+            ];
+            if (values[propertySettlementReleaseFieldName] === "true") {
+                paragraphs.push(value(values, propertySettlementReleaseTextFieldName, propertySettlementReleaseDefaultText));
+            }
+            return {
+                title: "Acta de entrega recepcion de inmueble",
+                subtitle: formatPlaceDate(values),
+                paragraphs,
+                details: [
+                    { label: "Domicilio", value: value(values, "propertyAddress", "domicilio pendiente") },
+                    { label: "Tipo de inmueble", value: value(values, "propertyType", "tipo pendiente") },
+                    { label: "Llaves y controles", value: value(values, "keys", "pendiente") }
+                ],
+                signers: [value(values, "deliveredBy", "Entrega"), value(values, "receivedBy", "Recibe")]
+            };
+        }
     },
     {
         id: "promissory-note",
@@ -2251,6 +2272,9 @@ export function DailyDocumentsPage() {
                                                 }
                                                 if (field.type === "percentage") {
                                                     return (_jsxs("label", { className: "form-field daily-doc-percentage-field", children: [_jsx("span", { children: field.label }), _jsxs("div", { className: "money-input-control daily-doc-percentage-control has-suffix", children: [_jsx("input", { disabled: savingAssignment, inputMode: "decimal", onChange: (event) => updateValue(field.name, formatPercentageInputValue(event.target.value)), placeholder: field.placeholder, type: "text", value: formatPercentageInputValue(values[field.name] ?? "") }), _jsx("span", { className: "money-input-suffix", children: "Por ciento" })] })] }, field.name));
+                                                }
+                                                if (field.type === "checkbox") {
+                                                    return (_jsxs("label", { className: "daily-doc-field-wide checkbox-row daily-doc-inline-checkbox", children: [_jsx("input", { checked: values[field.name] === "true", disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.checked ? "true" : ""), type: "checkbox" }), _jsx("span", { children: field.label })] }, field.name));
                                                 }
                                                 if (field.type === "currency") {
                                                     const fieldCurrency = selectedTemplate.id === "promissory-note" ? getMoneyCurrency(values) : "MXN";

@@ -70,6 +70,7 @@ function toJsonValue(value?: Record<string, unknown> | Record<string, string> | 
 }
 
 const LITIGATION_MODULE_ID = "litigation";
+const FINANCE_TASK_MODULE_ID = "finance";
 const TERM_ENABLED_DATA_KEY = "termEnabled";
 const TERM_MARKED_AT_DATA_KEY = "termMarkedAt";
 const VERIFICATION_DATES_DATA_KEY = "verificationDates";
@@ -283,7 +284,7 @@ export class PrismaTasksRepository implements TasksRepository {
         AND ut."organizationId" = ${organizationId}
       WHERE tm."isActive" = true
         AND ut."isActive" = true
-        AND ut."executionSpaceEnabled" = true
+        AND (ut."executionSpaceEnabled" = true OR tm."id" = ${FINANCE_TASK_MODULE_ID})
       ORDER BY ut."sortOrder" ASC, ut."label" ASC, tm."id" ASC
     `);
     const [tracks, activeUsers] = await this.prisma.$transaction([

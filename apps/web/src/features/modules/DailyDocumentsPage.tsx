@@ -21,7 +21,8 @@ type DailyDocumentField = {
     | "payment-type"
     | "currency-type"
     | "interest-period"
-    | "creditor-list";
+    | "creditor-list"
+    | "checkbox";
   placeholder?: string;
   defaultValue?: string;
   visibleWhen?: { name: string; value: string };
@@ -172,6 +173,10 @@ const receiptDocumentKindLabels: Record<ReceiptDocumentKind, string> = {
 const additionalInstructionsFieldName = "additionalInstructions";
 const riAdjustedParagraphsFieldName = "riAdjustedParagraphs";
 const riAdjustmentSummaryFieldName = "riAdjustmentSummary";
+const propertySettlementReleaseFieldName = "includePropertySettlementRelease";
+const propertySettlementReleaseTextFieldName = "propertySettlementReleaseText";
+const propertySettlementReleaseDefaultText =
+  "Las partes manifiestan que, a la fecha de firma de la presente acta, no existe adeudo, prestacion, reclamacion o cantidad pendiente de pago entre ellas, derivada exclusivamente de la relacion juridica, uso, posesion, ocupacion, entrega y recepcion del inmueble materia de este documento. En consecuencia, ambas partes se otorgan de manera reciproca el finiquito mas amplio que en derecho proceda, obligandose a no reservarse accion, derecho o reclamacion alguna una frente a la otra por dichos conceptos.";
 const maxPromissoryNoteCreditors = 4;
 const emptyPromissoryNoteCreditor: PromissoryNoteCreditor = {
   type: "physical",
@@ -862,12 +867,22 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
       { name: "keys", label: "Llaves y controles", placeholder: "Numero de juegos de llaves, controles, tarjetas..." },
       { name: "services", label: "Servicios y medidores", type: "textarea", placeholder: "Agua, luz, gas, internet, lecturas o adeudos conocidos" },
       { name: "condition", label: "Estado general", type: "textarea", placeholder: "Estado fisico, mobiliario, accesorios, danos o pendientes" },
-      { name: "notes", label: "Observaciones", type: "textarea", placeholder: "Anexos fotograficos, inventario, pendientes de entrega" }
+      { name: "notes", label: "Observaciones", type: "textarea", placeholder: "Anexos fotograficos, inventario, pendientes de entrega" },
+      {
+        name: propertySettlementReleaseFieldName,
+        label: "Agregar finiquito reciproco entre las partes",
+        type: "checkbox"
+      },
+      {
+        name: propertySettlementReleaseTextFieldName,
+        label: "Texto del finiquito",
+        type: "textarea",
+        defaultValue: propertySettlementReleaseDefaultText,
+        visibleWhen: { name: propertySettlementReleaseFieldName, value: "true" }
+      }
     ],
-    build: (values) => ({
-      title: "Acta de entrega recepcion de inmueble",
-      subtitle: formatPlaceDate(values),
-      paragraphs: [
+    build: (values) => {
+      const paragraphs = [
         `Comparecen ${value(values, "deliveredBy", "persona que entrega pendiente")} como parte que entrega y ${value(
           values,
           "receivedBy",
@@ -885,14 +900,24 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
         `Servicios y medidores: ${value(values, "services", "servicios pendientes")}`,
         `Estado general del inmueble: ${value(values, "condition", "estado pendiente")}`,
         value(values, "notes", "Sin observaciones adicionales.")
-      ],
-      details: [
-        { label: "Domicilio", value: value(values, "propertyAddress", "domicilio pendiente") },
-        { label: "Tipo de inmueble", value: value(values, "propertyType", "tipo pendiente") },
-        { label: "Llaves y controles", value: value(values, "keys", "pendiente") }
-      ],
-      signers: [value(values, "deliveredBy", "Entrega"), value(values, "receivedBy", "Recibe")]
-    })
+      ];
+
+      if (values[propertySettlementReleaseFieldName] === "true") {
+        paragraphs.push(value(values, propertySettlementReleaseTextFieldName, propertySettlementReleaseDefaultText));
+      }
+
+      return {
+        title: "Acta de entrega recepcion de inmueble",
+        subtitle: formatPlaceDate(values),
+        paragraphs,
+        details: [
+          { label: "Domicilio", value: value(values, "propertyAddress", "domicilio pendiente") },
+          { label: "Tipo de inmueble", value: value(values, "propertyType", "tipo pendiente") },
+          { label: "Llaves y controles", value: value(values, "keys", "pendiente") }
+        ],
+        signers: [value(values, "deliveredBy", "Entrega"), value(values, "receivedBy", "Recibe")]
+      };
+    }
   },
   {
     id: "promissory-note",
@@ -3354,6 +3379,20 @@ export function DailyDocumentsPage() {
                           />
                           <span className="money-input-suffix">Por ciento</span>
                         </div>
+                      </label>
+                    );
+                  }
+
+                  if (field.type === "checkbox") {
+                    return (
+                      <label className="daily-doc-field-wide checkbox-row daily-doc-inline-checkbox" key={field.name}>
+                        <input
+                          checked={values[field.name] === "true"}
+                          disabled={savingAssignment}
+                          onChange={(event) => updateValue(field.name, event.target.checked ? "true" : "")}
+                          type="checkbox"
+                        />
+                        <span>{field.label}</span>
                       </label>
                     );
                   }

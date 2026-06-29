@@ -1,6 +1,7 @@
 import type {
   GeneralExpenseActor,
   GeneralExpenseCreateRecord,
+  GeneralExpenseEmrtAcknowledgementUpdateRecord,
   GeneralExpensePayrollCreateRecord,
   GeneralExpensePayrollUpdateRecord,
   GeneralExpenseUpdateRecord,
@@ -24,6 +25,18 @@ export class GeneralExpensesService {
 
   public delete(expenseId: string) {
     return this.repository.delete(expenseId);
+  }
+
+  public listEmrtAcknowledgements(year: number, month: number) {
+    return this.repository.listEmrtAcknowledgements(year, month);
+  }
+
+  public updateEmrtAcknowledgement(
+    date: string,
+    payload: GeneralExpenseEmrtAcknowledgementUpdateRecord,
+    actor: GeneralExpenseActor
+  ) {
+    return this.repository.updateEmrtAcknowledgement(date, payload, actor);
   }
 
   public copyRecurringToNextMonth(year: number, month: number) {

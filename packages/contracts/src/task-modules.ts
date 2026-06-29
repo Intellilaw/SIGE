@@ -148,6 +148,13 @@ export const TASK_MODULES: TaskModuleDefinition[] = [
       track("otros-terminos", "42. Otros terminos"),
       track("sociedades-domiciliadas-yacatas", "43. Sociedades domiciliadas en Yacatas")
     ]
+  },
+  {
+    id: "finance",
+    team: "FINANCE",
+    label: "Finanzas",
+    summary: "Dashboard operativo de cobranza, datos financieros y tareas adicionales del equipo de finanzas.",
+    tracks: []
   }
 ];
 

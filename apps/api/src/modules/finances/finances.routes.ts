@@ -27,6 +27,8 @@ const financeRecordFieldsSchema = z.object({
   clientName: z.string().optional(),
   quoteNumber: z.string().nullable().optional(),
   matterType: z.enum(["ONE_TIME", "RETAINER"]).optional(),
+  periodYear: z.coerce.number().int().min(2024).max(2030).nullable().optional(),
+  periodMonth: z.coerce.number().int().min(1).max(12).nullable().optional(),
   subject: z.string().optional(),
   contractSignedStatus: z.enum(["YES", "NO", "NOT_REQUIRED"]).optional(),
   responsibleTeam: teamSchema.nullable().optional(),

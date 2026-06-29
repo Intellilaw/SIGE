@@ -1,5 +1,6 @@
 export * from "./app-version.js";
 export * from "./domain.js";
+export type { GeneralExpenseEmrtDailyAcknowledgement } from "./domain.js";
 export * from "./execution.js";
 export * from "./rusconi-intelligence.js";
 export * from "./sales.js";

@@ -97,6 +97,7 @@ export const EXECUTION_MODULE_BY_TEAM = Object.fromEntries(
   EXECUTION_MODULES.map((module) => [module.team, module])
 ) as Partial<Record<string, ExecutionModuleDescriptor>>;
 
+const TASKS_ONLY_MODULE_IDS = new Set<TaskModuleDefinition["id"]>(["finance"]);
 const FALLBACK_COLORS = ["#0f766e", "#7c3aed", "#c2410c", "#0369a1", "#4d7c0f", "#be123c"];
 const FALLBACK_ICONS_BY_TEAM: Partial<Record<Team, string>> = {
   ADMIN: "A",
@@ -154,7 +155,9 @@ export function buildExecutionModuleDescriptor(module: TaskModuleDefinition): Ex
 }
 
 export function buildExecutionModuleDescriptors(modules: TaskModuleDefinition[]) {
-  return modules.map(buildExecutionModuleDescriptor);
+  return modules
+    .filter((module) => !TASKS_ONLY_MODULE_IDS.has(module.id))
+    .map(buildExecutionModuleDescriptor);
 }
 
 export function findExecutionModuleDescriptorBySlug(modules: TaskModuleDefinition[], slug?: string) {

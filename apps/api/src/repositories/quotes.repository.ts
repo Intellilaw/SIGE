@@ -84,6 +84,7 @@ function buildQuoteData(payload: QuoteWriteRecord, quoteNumber: string) {
     }),
     clientId: payload.clientId,
     clientName: payload.clientName,
+    recipientName: normalizeText(payload.recipientName) || payload.clientName,
     responsibleTeam: payload.responsibleTeam ?? null,
     subject: payload.subject,
     status: payload.status,

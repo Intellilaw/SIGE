@@ -1,12 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import type { TaskAdditionalTask } from "@sige/contracts";
+import type { TaskAdditionalTask, TaskModuleDefinition } from "@sige/contracts";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
-import { useAuth } from "../auth/AuthContext";
-import { EXECUTION_MODULE_BY_SLUG, getVisibleExecutionModules } from "../execution/execution-config";
-import { TASK_DASHBOARD_CONFIG_BY_MODULE_ID } from "./task-dashboard-config";
-import { LEGACY_TASK_MODULE_BY_SLUG } from "./task-legacy-config";
+import { buildTaskDashboardMembers, findTaskModuleDescriptorBySlug } from "./task-module-descriptors";
+import { buildLegacyTaskModuleConfig } from "./task-legacy-config";
 
 function toDateInput(value?: string | null) {
   return value ? value.slice(0, 10) : "";
@@ -54,11 +52,16 @@ type AdditionalTab = "pendientes" | "concluidas";
 export function TaskAdditionalTasksPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const moduleConfig = slug ? LEGACY_TASK_MODULE_BY_SLUG[slug] : undefined;
-  const executionModule = slug ? EXECUTION_MODULE_BY_SLUG[slug] : undefined;
-  const canAccessModule = Boolean(
-    executionModule && getVisibleExecutionModules(user).some((module) => module.moduleId === executionModule.moduleId)
+  const [taskModules, setTaskModules] = useState<TaskModuleDefinition[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(true);
+  const [modulesError, setModulesError] = useState<string | null>(null);
+  const module = useMemo(
+    () => findTaskModuleDescriptorBySlug(taskModules, slug),
+    [slug, taskModules]
+  );
+  const moduleConfig = useMemo(
+    () => module ? buildLegacyTaskModuleConfig(module.definition, module.slug) : undefined,
+    [module]
   );
   const [tasks, setTasks] = useState<TaskAdditionalTask[]>([]);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -66,11 +69,17 @@ export function TaskAdditionalTasksPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<AdditionalTab>("pendientes");
   const [completedMonth, setCompletedMonth] = useState(currentMonthInput());
+  const canAccessModule = Boolean(moduleConfig);
 
   const responsibleOptions = useMemo(() => {
-    const members = moduleConfig ? TASK_DASHBOARD_CONFIG_BY_MODULE_ID[moduleConfig.moduleId]?.members ?? [] : [];
-    return members.map((member) => member.id);
-  }, [moduleConfig]);
+    const members = module ? buildTaskDashboardMembers(module.definition) : [];
+    const options = Array.from(new Set(members.map((member) => member.id).filter(Boolean)));
+    if (options.length > 0) {
+      return options;
+    }
+
+    return moduleConfig?.defaultResponsible ? [moduleConfig.defaultResponsible] : [];
+  }, [module, moduleConfig]);
 
   const visibleTasks = useMemo(() => {
     return tasks
@@ -86,6 +95,7 @@ export function TaskAdditionalTasksPage() {
 
   async function loadTasks() {
     if (!moduleConfig || !canAccessModule) {
+      setLoading(false);
       return;
     }
 
@@ -97,6 +107,36 @@ export function TaskAdditionalTasksPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadModules() {
+      setModulesLoading(true);
+      setModulesError(null);
+
+      try {
+        const loadedModules = await apiGet<TaskModuleDefinition[]>("/tasks/modules");
+        if (active) {
+          setTaskModules(loadedModules);
+        }
+      } catch (error) {
+        if (active) {
+          setModulesError(error instanceof Error ? error.message : "No se pudieron cargar los equipos de tareas.");
+        }
+      } finally {
+        if (active) {
+          setModulesLoading(false);
+        }
+      }
+    }
+
+    void loadModules();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     void loadTasks();
@@ -153,7 +193,27 @@ export function TaskAdditionalTasksPage() {
     setTasks((current) => current.filter((candidate) => candidate.id !== task.id));
   }
 
-  if (!moduleConfig || !executionModule || !canAccessModule) {
+  if (modulesLoading) {
+    return (
+      <section className="page-stack tasks-legacy-page">
+        <section className="panel">
+          <div className="centered-inline-message">Cargando modulo...</div>
+        </section>
+      </section>
+    );
+  }
+
+  if (modulesError) {
+    return (
+      <section className="page-stack tasks-legacy-page">
+        <section className="panel">
+          <div className="centered-inline-message">{modulesError}</div>
+        </section>
+      </section>
+    );
+  }
+
+  if (!moduleConfig || !canAccessModule) {
     return <Navigate to="/app/tasks" replace />;
   }
 

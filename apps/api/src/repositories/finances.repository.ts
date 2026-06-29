@@ -87,18 +87,33 @@ const FINANCE_RECORD_BASE_SELECT = {
   createdAt: true,
   updatedAt: true
 } satisfies Prisma.FinanceRecordSelect;
+const FINANCE_RECORD_WITH_PERIOD_SELECT = {
+  ...FINANCE_RECORD_BASE_SELECT,
+  periodYear: true,
+  periodMonth: true
+} satisfies Prisma.FinanceRecordSelect;
 const FINANCE_RECORD_WITH_COLLECTION_PROBABILITY_SELECT = {
   ...FINANCE_RECORD_BASE_SELECT,
   highCollectionProbability: true,
   lowCollectionProbability: true
 } satisfies Prisma.FinanceRecordSelect;
+const FINANCE_RECORD_WITH_PERIOD_AND_COLLECTION_PROBABILITY_SELECT = {
+  ...FINANCE_RECORD_WITH_PERIOD_SELECT,
+  highCollectionProbability: true,
+  lowCollectionProbability: true
+} satisfies Prisma.FinanceRecordSelect;
 
 type FinanceRecordMapInput = Parameters<typeof mapFinanceRecord>[0];
-type FinanceRecordMapInputWithOptionalCollectionProbability = Omit<
+type FinanceRecordMapInputWithOptionalFields = Omit<
   FinanceRecordMapInput,
-  "highCollectionProbability" | "lowCollectionProbability"
+  "periodYear" | "periodMonth" | "highCollectionProbability" | "lowCollectionProbability"
 > &
-  Partial<Pick<FinanceRecordMapInput, "highCollectionProbability" | "lowCollectionProbability">>;
+  Partial<
+    Pick<
+      FinanceRecordMapInput,
+      "periodYear" | "periodMonth" | "highCollectionProbability" | "lowCollectionProbability"
+    >
+  >;
 
 function normalizeOptionalText(value?: string | null) {
   if (typeof value !== "string") {
@@ -272,15 +287,53 @@ function roundCurrencyValue(value: number) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
-function getFinanceRecordSelect(includeCollectionProbability: boolean) {
-  return includeCollectionProbability
-    ? FINANCE_RECORD_WITH_COLLECTION_PROBABILITY_SELECT
-    : FINANCE_RECORD_BASE_SELECT;
+function normalizeFinancePeriodYear(value?: number | null) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 2024 && value <= 2030 ? value : null;
 }
 
-function mapFinanceRecordWithCollectionDefaults(record: FinanceRecordMapInputWithOptionalCollectionProbability) {
+function normalizeFinancePeriodMonth(value?: number | null) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12 ? value : null;
+}
+
+function getFinancePeriodData(input: {
+  matterType?: FinanceRecord["matterType"] | null;
+  year: number;
+  month: number;
+  periodYear?: number | null;
+  periodMonth?: number | null;
+}) {
+  if (input.matterType !== "RETAINER") {
+    return {
+      periodYear: null,
+      periodMonth: null
+    } satisfies Pick<Prisma.FinanceRecordUncheckedCreateInput, "periodYear" | "periodMonth">;
+  }
+
+  return {
+    periodYear: normalizeFinancePeriodYear(input.periodYear) ?? normalizeFinancePeriodYear(input.year) ?? 2024,
+    periodMonth: normalizeFinancePeriodMonth(input.periodMonth) ?? normalizeFinancePeriodMonth(input.month) ?? 1
+  } satisfies Pick<Prisma.FinanceRecordUncheckedCreateInput, "periodYear" | "periodMonth">;
+}
+
+function getFinanceRecordSelect(includeCollectionProbability: boolean, includePeriod: boolean) {
+  if (includeCollectionProbability && includePeriod) {
+    return FINANCE_RECORD_WITH_PERIOD_AND_COLLECTION_PROBABILITY_SELECT;
+  }
+  if (includeCollectionProbability) {
+    return FINANCE_RECORD_WITH_COLLECTION_PROBABILITY_SELECT;
+  }
+  if (includePeriod) {
+    return FINANCE_RECORD_WITH_PERIOD_SELECT;
+  }
+
+  return FINANCE_RECORD_BASE_SELECT;
+}
+
+function mapFinanceRecordWithOptionalDefaults(record: FinanceRecordMapInputWithOptionalFields) {
   return mapFinanceRecord({
     ...record,
+    periodYear: record.periodYear ?? null,
+    periodMonth: record.periodMonth ?? null,
     highCollectionProbability: record.highCollectionProbability ?? false,
     lowCollectionProbability: record.lowCollectionProbability ?? false
   });
@@ -475,32 +528,47 @@ function buildMatterMirrorPayload(matter: FinanceMatterProjection): FinanceRecor
 
 export class PrismaFinanceRepository implements FinanceRepository {
   private collectionProbabilityColumnsAvailable?: Promise<boolean>;
+  private periodColumnsAvailable?: Promise<boolean>;
 
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async listRecords(year: number, month: number) {
-    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
-    await this.syncRecordsWithMatters(year, month, includeCollectionProbability);
-    return this.listRecordsForMonth(year, month, includeCollectionProbability);
+    const [includeCollectionProbability, includePeriod] = await Promise.all([
+      this.hasCollectionProbabilityColumns(),
+      this.hasPeriodColumns()
+    ]);
+    await this.syncRecordsWithMatters(year, month, includeCollectionProbability, includePeriod);
+    return this.listRecordsForMonth(year, month, includeCollectionProbability, includePeriod);
   }
 
   public async listRecordsReadOnly(year: number, month: number) {
-    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
-    return this.listRecordsForMonth(year, month, includeCollectionProbability);
+    const [includeCollectionProbability, includePeriod] = await Promise.all([
+      this.hasCollectionProbabilityColumns(),
+      this.hasPeriodColumns()
+    ]);
+    return this.listRecordsForMonth(year, month, includeCollectionProbability, includePeriod);
   }
 
-  private async listRecordsForMonth(year: number, month: number, includeCollectionProbability: boolean) {
+  private async listRecordsForMonth(
+    year: number,
+    month: number,
+    includeCollectionProbability: boolean,
+    includePeriod: boolean
+  ) {
     const records = await this.prisma.financeRecord.findMany({
       where: { year, month },
       orderBy: [{ createdAt: "asc" }, { clientNumber: "asc" }],
-      select: getFinanceRecordSelect(includeCollectionProbability)
+      select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
     });
 
-    return attachSalesCommissionsToFinanceRecords(this.prisma, records.map(mapFinanceRecordWithCollectionDefaults));
+    return attachSalesCommissionsToFinanceRecords(this.prisma, records.map(mapFinanceRecordWithOptionalDefaults));
   }
 
   public async createRecord(year: number, month: number, payload: FinanceRecordWriteRecord = {}) {
-    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    const [includeCollectionProbability, includePeriod] = await Promise.all([
+      this.hasCollectionProbabilityColumns(),
+      this.hasPeriodColumns()
+    ]);
     const paymentMethod = normalizeFinancePaymentMethod(payload.paymentMethod);
     const paymentMethod2 = normalizeFinancePaymentMethod(payload.paymentMethod2);
     const paymentMethod3 = normalizeFinancePaymentMethod(payload.paymentMethod3);
@@ -554,19 +622,34 @@ export class PrismaFinanceRepository implements FinanceRepository {
     if (includeCollectionProbability) {
       Object.assign(data, getCollectionProbabilityCreateData(payload));
     }
+    if (includePeriod) {
+      Object.assign(
+        data,
+        getFinancePeriodData({
+          matterType: payload.matterType ?? "ONE_TIME",
+          year,
+          month,
+          periodYear: payload.periodYear,
+          periodMonth: payload.periodMonth
+        })
+      );
+    }
 
     const record = await this.prisma.financeRecord.create({
       data,
-      select: getFinanceRecordSelect(includeCollectionProbability)
+      select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
     });
 
-    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithOptionalDefaults(record)]);
     return enrichedRecord;
   }
 
   public async updateRecord(recordId: string, payload: FinanceRecordWriteRecord) {
-    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
-    const currentRecord = await this.findRecordOrThrow(this.prisma, recordId);
+    const [includeCollectionProbability, includePeriod] = await Promise.all([
+      this.hasCollectionProbabilityColumns(),
+      this.hasPeriodColumns()
+    ]);
+    const currentRecord = await this.findRecordOrThrow(this.prisma, recordId, includePeriod);
     assertUnlockedReceivedPaymentFields(currentRecord, payload);
 
     const data: Prisma.FinanceRecordUncheckedUpdateInput = {};
@@ -726,6 +809,20 @@ export class PrismaFinanceRepository implements FinanceRepository {
         }
       }
     }
+    if (includePeriod && (hasOwn(payload, "periodYear") || hasOwn(payload, "periodMonth") || hasOwn(payload, "matterType"))) {
+      Object.assign(
+        data,
+        getFinancePeriodData({
+          matterType: hasOwn(payload, "matterType")
+            ? payload.matterType ?? "ONE_TIME"
+            : (currentRecord.matterType as FinanceRecord["matterType"]),
+          year: currentRecord.year,
+          month: currentRecord.month,
+          periodYear: hasOwn(payload, "periodYear") ? payload.periodYear : currentRecord.periodYear,
+          periodMonth: hasOwn(payload, "periodMonth") ? payload.periodMonth : currentRecord.periodMonth
+        })
+      );
+    }
     if (hasOwn(payload, "milestone")) {
       data.milestone = normalizeOptionalText(payload.milestone);
     }
@@ -740,7 +837,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
       const updated = await tx.financeRecord.update({
         where: { id: recordId },
         data,
-        select: getFinanceRecordSelect(includeCollectionProbability)
+        select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
       });
 
       if (hasOwn(payload, "closingCommissionRecipient")) {
@@ -754,7 +851,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
       return updated;
     });
 
-    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithOptionalDefaults(record)]);
     return enrichedRecord;
   }
 
@@ -815,7 +912,10 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async copyToNextMonth(year: number, month: number) {
-    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    const [includeCollectionProbability, includePeriod] = await Promise.all([
+      this.hasCollectionProbabilityColumns(),
+      this.hasPeriodColumns()
+    ]);
     const sourceRecords = await this.listRecords(year, month);
 
     let nextMonth = month + 1;
@@ -906,6 +1006,18 @@ export class PrismaFinanceRepository implements FinanceRepository {
           data.highCollectionProbability = record.highCollectionProbability;
           data.lowCollectionProbability = record.highCollectionProbability ? false : record.lowCollectionProbability;
         }
+        if (includePeriod) {
+          Object.assign(
+            data,
+            getFinancePeriodData({
+              matterType: record.matterType,
+              year: nextYear,
+              month: nextMonth,
+              periodYear: nextYear,
+              periodMonth: nextMonth
+            })
+          );
+        }
 
         await tx.financeRecord.create({
           data,
@@ -928,61 +1040,79 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async sendMatterToFinance(matterId: string, year: number, month: number) {
-    const includeCollectionProbability = await this.hasCollectionProbabilityColumns();
+    const [includeCollectionProbability, includePeriod] = await Promise.all([
+      this.hasCollectionProbabilityColumns(),
+      this.hasPeriodColumns()
+    ]);
     const matter = await this.findMatterProjectionOrThrow(this.prisma, matterId);
     const matterPayload = buildMatterMirrorPayload(matter);
     const isRetainer = matter.matterType === "RETAINER";
 
     const existing = await this.findExistingUniqueRecord(this.prisma, year, month, matter);
     if (existing) {
-      const record = await this.prisma.financeRecord.update({
-        where: { id: existing.id },
-        data: {
-          clientNumber: normalizeOptionalText(matterPayload.clientNumber),
-          clientName: normalizeRequiredText(matterPayload.clientName),
-          quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
-          matterType: matterPayload.matterType ?? "ONE_TIME",
-          subject: normalizeRequiredText(matterPayload.subject),
-          responsibleTeam: matterPayload.responsibleTeam ?? null,
-          totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
-          nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
-          milestone: normalizeOptionalText(matterPayload.milestone),
-          concluded: matterPayload.concluded ?? false
-        },
-        select: getFinanceRecordSelect(includeCollectionProbability)
-      });
-
-      const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
-      return enrichedRecord;
-    }
-
-    const percentages = isRetainer ? getDefaultPercentages(undefined) : getDefaultPercentages(matter.responsibleTeam);
-    const record = await this.prisma.financeRecord.create({
-      data: {
-        year,
-        month,
+      const data: Prisma.FinanceRecordUncheckedUpdateInput = {
         clientNumber: normalizeOptionalText(matterPayload.clientNumber),
         clientName: normalizeRequiredText(matterPayload.clientName),
         quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
         matterType: matterPayload.matterType ?? "ONE_TIME",
         subject: normalizeRequiredText(matterPayload.subject),
-        contractSignedStatus: "NO",
         responsibleTeam: matterPayload.responsibleTeam ?? null,
         totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
         nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
-        pctLitigation: percentages.pctLitigation as number,
-        pctCorporateLabor: percentages.pctCorporateLabor as number,
-        pctSettlements: percentages.pctSettlements as number,
-        pctFinancialLaw: percentages.pctFinancialLaw as number,
-        pctTaxCompliance: percentages.pctTaxCompliance as number,
-        closingCommissionRecipient: normalizeOptionalText(matterPayload.closingCommissionRecipient),
         milestone: normalizeOptionalText(matterPayload.milestone),
         concluded: matterPayload.concluded ?? false
-      },
-      select: getFinanceRecordSelect(includeCollectionProbability)
+      };
+      const record = await this.prisma.financeRecord.update({
+        where: { id: existing.id },
+        data,
+        select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
+      });
+
+      const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithOptionalDefaults(record)]);
+      return enrichedRecord;
+    }
+
+    const percentages = isRetainer ? getDefaultPercentages(undefined) : getDefaultPercentages(matter.responsibleTeam);
+    const data: Prisma.FinanceRecordUncheckedCreateInput = {
+      year,
+      month,
+      clientNumber: normalizeOptionalText(matterPayload.clientNumber),
+      clientName: normalizeRequiredText(matterPayload.clientName),
+      quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
+      matterType: matterPayload.matterType ?? "ONE_TIME",
+      subject: normalizeRequiredText(matterPayload.subject),
+      contractSignedStatus: "NO",
+      responsibleTeam: matterPayload.responsibleTeam ?? null,
+      totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
+      nextPaymentDate: parseDateValue(matterPayload.nextPaymentDate),
+      pctLitigation: percentages.pctLitigation as number,
+      pctCorporateLabor: percentages.pctCorporateLabor as number,
+      pctSettlements: percentages.pctSettlements as number,
+      pctFinancialLaw: percentages.pctFinancialLaw as number,
+      pctTaxCompliance: percentages.pctTaxCompliance as number,
+      closingCommissionRecipient: normalizeOptionalText(matterPayload.closingCommissionRecipient),
+      milestone: normalizeOptionalText(matterPayload.milestone),
+      concluded: matterPayload.concluded ?? false
+    };
+    if (includePeriod) {
+      Object.assign(
+        data,
+        getFinancePeriodData({
+          matterType: matterPayload.matterType ?? "ONE_TIME",
+          year,
+          month,
+          periodYear: year,
+          periodMonth: month
+        })
+      );
+    }
+
+    const record = await this.prisma.financeRecord.create({
+      data,
+      select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
     });
 
-    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithCollectionDefaults(record)]);
+    const [enrichedRecord] = await attachSalesCommissionsToFinanceRecords(this.prisma, [mapFinanceRecordWithOptionalDefaults(record)]);
     return enrichedRecord;
   }
 
@@ -1009,12 +1139,31 @@ export class PrismaFinanceRepository implements FinanceRepository {
     return this.collectionProbabilityColumnsAvailable;
   }
 
-  private async syncRecordsWithMatters(year: number, month: number, includeCollectionProbability: boolean) {
+  private async hasPeriodColumns() {
+    this.periodColumnsAvailable ??= this.prisma
+      .$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'FinanceRecord'
+          AND column_name IN ('periodYear', 'periodMonth')
+      `
+      .then((rows) => rows.length === 2);
+
+    return this.periodColumnsAvailable;
+  }
+
+  private async syncRecordsWithMatters(
+    year: number,
+    month: number,
+    includeCollectionProbability: boolean,
+    includePeriod: boolean
+  ) {
     const [records, matters] = await Promise.all([
       this.prisma.financeRecord.findMany({
         where: { year, month },
         orderBy: [{ createdAt: "asc" }],
-        select: getFinanceRecordSelect(includeCollectionProbability)
+        select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
       }),
       this.prisma.matter.findMany({
         where: { deletedAt: null },
@@ -1061,7 +1210,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
     const updates: Array<{ id: string; data: Prisma.FinanceRecordUncheckedUpdateInput }> = [];
 
     records.forEach((record) => {
-      const mapped = mapFinanceRecordWithCollectionDefaults(record);
+      const mapped = mapFinanceRecordWithOptionalDefaults(record);
       const matchKey = getRecordMatchKey(mapped);
       if (!matchKey) {
         return;
@@ -1072,7 +1221,13 @@ export class PrismaFinanceRepository implements FinanceRepository {
         return;
       }
 
+      const nextMatterType = (matter.matterType ?? "ONE_TIME") as FinanceRecord["matterType"];
       const isRetainer = mapped.matterType === "RETAINER";
+      const nextIsRetainer = nextMatterType === "RETAINER";
+      const needsPeriodDefault =
+        includePeriod &&
+        ((nextIsRetainer && (!mapped.periodYear || !mapped.periodMonth)) ||
+          (!nextIsRetainer && (Boolean(mapped.periodYear) || Boolean(mapped.periodMonth))));
       const nextPercentages = !isRetainer && areAllPercentagesZero(record)
         ? getDefaultPercentages(matter.responsibleTeam)
         : null;
@@ -1083,12 +1238,13 @@ export class PrismaFinanceRepository implements FinanceRepository {
         normalizeComparableText(record.subject) !== normalizeComparableText(matter.subject) ||
         normalizeComparableText(record.quoteNumber) !== normalizeComparableText(matter.quoteNumber) ||
         normalizeComparableText(record.clientNumber) !== normalizeComparableText(matter.clientNumber) ||
-        record.matterType !== matter.matterType ||
+        record.matterType !== nextMatterType ||
         teamMismatch ||
         Number(record.totalMatterMxn) !== matter.totalFeesMxn ||
         toDateKey(record.nextPaymentDate) !== toDateKey(matter.nextPaymentDate) ||
         normalizeComparableText(record.milestone) !== normalizeComparableText(matter.milestone) ||
         record.concluded !== matter.concluded ||
+        needsPeriodDefault ||
         nextPercentages !== null;
 
       if (!needsUpdate) {
@@ -1099,7 +1255,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
         clientNumber: normalizeOptionalText(matter.clientNumber),
         clientName: normalizeRequiredText(matter.clientName),
         quoteNumber: normalizeOptionalText(matter.quoteNumber),
-        matterType: matter.matterType,
+        matterType: nextMatterType,
         subject: normalizeRequiredText(matter.subject),
         totalMatterMxn: toDecimal(matter.totalFeesMxn),
         nextPaymentDate: parseDateValue(matter.nextPaymentDate),
@@ -1113,6 +1269,18 @@ export class PrismaFinanceRepository implements FinanceRepository {
 
       if (nextPercentages) {
         Object.assign(data, nextPercentages);
+      }
+      if (needsPeriodDefault) {
+        Object.assign(
+          data,
+          getFinancePeriodData({
+            matterType: nextMatterType,
+            year,
+            month,
+            periodYear: mapped.periodYear,
+            periodMonth: mapped.periodMonth
+          })
+        );
       }
 
       updates.push({
@@ -1170,21 +1338,31 @@ export class PrismaFinanceRepository implements FinanceRepository {
     });
   }
 
-  private async findRecordOrThrow(prisma: PrismaExecutor, recordId: string) {
+  private async findRecordOrThrow(prisma: PrismaExecutor, recordId: string, includePeriod = false) {
+    const select = {
+      id: true,
+      year: true,
+      month: true,
+      quoteNumber: true,
+      clientName: true,
+      matterType: true,
+      subject: true,
+      paymentMethod: true,
+      paymentMethod2: true,
+      paymentMethod3: true,
+      paymentReceived: true,
+      paymentReceived2: true,
+      paymentReceived3: true,
+      ...(includePeriod
+        ? {
+            periodYear: true,
+            periodMonth: true
+          }
+        : {})
+    } satisfies Prisma.FinanceRecordSelect;
     const record = await prisma.financeRecord.findUnique({
       where: { id: recordId },
-      select: {
-        id: true,
-        quoteNumber: true,
-        clientName: true,
-        subject: true,
-        paymentMethod: true,
-        paymentMethod2: true,
-        paymentMethod3: true,
-        paymentReceived: true,
-        paymentReceived2: true,
-        paymentReceived3: true
-      }
+      select
     });
 
     if (!record) {

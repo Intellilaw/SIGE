@@ -433,6 +433,7 @@ function buildEmptyQuoteForm(defaultTeam, language = "es") {
     return {
         clientId: "",
         clientName: "",
+        recipientName: "",
         responsibleTeam: resolveDefaultTeam(defaultTeam),
         status: "DRAFT",
         quoteType: "ONE_TIME",
@@ -495,6 +496,7 @@ function buildQuoteFormFromTemplate(template, defaultTeam, language = "es") {
     return {
         clientId: "",
         clientName: "",
+        recipientName: "",
         responsibleTeam: resolveDefaultTeam(template.team ?? defaultTeam),
         status: "DRAFT",
         quoteType: template.quoteType,
@@ -506,10 +508,22 @@ function buildQuoteFormFromTemplate(template, defaultTeam, language = "es") {
         lineItems: toEditableLineItems(template.lineItems)
     };
 }
+function buildQuoteFormFromTemplateSelection(current, template, defaultTeam, language = "es") {
+    const next = buildQuoteFormFromTemplate(template, defaultTeam, language);
+    return {
+        ...next,
+        clientId: current.clientId,
+        clientName: current.clientName,
+        recipientName: current.recipientName || current.clientName,
+        quoteDate: current.quoteDate || next.quoteDate,
+        status: current.status || next.status
+    };
+}
 function buildQuoteFormFromQuote(quote) {
     return {
         clientId: quote.clientId,
         clientName: quote.clientName,
+        recipientName: quote.recipientName ?? quote.clientName,
         responsibleTeam: quote.responsibleTeam ?? "",
         status: quote.status,
         quoteType: quote.quoteType,
@@ -971,6 +985,7 @@ export function QuotesPage() {
     const [templateForm, setTemplateForm] = useState(() => buildEmptyTemplateForm(user?.team));
     const [quoteForm, setQuoteForm] = useState(() => buildEmptyQuoteForm(user?.team));
     const [quoteTemplateDraft, setQuoteTemplateDraft] = useState(null);
+    const [quoteRecipientTouched, setQuoteRecipientTouched] = useState(false);
     const [templateWordSearch, setTemplateWordSearch] = useState("");
     const [templateTeamSearch, setTemplateTeamSearch] = useState("");
     const [quoteWordSearch, setQuoteWordSearch] = useState("");
@@ -1035,6 +1050,7 @@ export function QuotesPage() {
     function resetQuoteComposer(nextMode = sourceMode) {
         setEditingQuoteId(null);
         setPreparedQuote(null);
+        setQuoteRecipientTouched(false);
         setQuoteForm(buildEmptyQuoteForm(user?.team));
         setQuoteTemplateDraft(nextMode === "generic" ? buildEmptyQuoteTemplateDraft() : null);
     }
@@ -1047,7 +1063,7 @@ export function QuotesPage() {
     function applyTemplateToQuoteForm(template, language = "es") {
         setSourceMode("template");
         setSelectedTemplateId(template.id);
-        updateQuoteForm(buildQuoteFormFromTemplate(template, user?.team, language));
+        updateQuoteForm((current) => buildQuoteFormFromTemplateSelection(current, template, user?.team, language));
         updateQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
     }
     async function handleTemplateUse(template, language) {
@@ -1097,6 +1113,7 @@ export function QuotesPage() {
         setPreparedQuote(null);
         setSourceMode("generic");
         setSelectedTemplateId("");
+        setQuoteRecipientTouched(true);
         setQuoteForm(buildQuoteFormFromQuote(quote));
         setQuoteTemplateDraft(buildQuoteTemplateDraftFromQuote(quote));
         setActiveTab("new-quote-generic");
@@ -1119,6 +1136,7 @@ export function QuotesPage() {
             if (editingQuoteId === quoteId) {
                 setEditingQuoteId(null);
                 setPreparedQuote(null);
+                setQuoteRecipientTouched(false);
                 setQuoteForm(buildEmptyQuoteForm(user?.team));
                 setQuoteTemplateDraft(null);
             }
@@ -1178,6 +1196,7 @@ export function QuotesPage() {
         setFlash(null);
         setEditingQuoteId(null);
         setPreparedQuote(null);
+        setQuoteRecipientTouched(false);
         if (nextMode === "generic") {
             setSelectedTemplateId("");
             setQuoteForm(buildEmptyQuoteForm(user?.team));
@@ -1203,18 +1222,32 @@ export function QuotesPage() {
         }));
     }
     function handleTemplateSelection(templateId) {
+        const template = templates.find((item) => item.id === templateId);
         setSelectedTemplateId(templateId);
         setEditingQuoteId(null);
         setPreparedQuote(null);
-        setQuoteForm(buildEmptyQuoteForm(user?.team));
-        setQuoteTemplateDraft(null);
+        setFlash(null);
+        if (!template) {
+            updateQuoteForm((current) => ({
+                ...buildEmptyQuoteForm(user?.team, current.language),
+                clientId: current.clientId,
+                clientName: current.clientName,
+                recipientName: quoteRecipientTouched ? current.recipientName : current.clientName,
+                quoteDate: current.quoteDate || getTodayDateInputValue()
+            }));
+            setQuoteTemplateDraft(null);
+            return;
+        }
+        updateQuoteForm((current) => buildQuoteFormFromTemplateSelection(current, template, user?.team, "es"));
+        setQuoteTemplateDraft(buildQuoteTemplateDraftFromTemplate(template));
     }
     function handleClientSelection(clientId) {
         const client = clients.find((item) => item.id === clientId);
         updateQuoteForm((current) => ({
             ...current,
             clientId,
-            clientName: client?.name ?? ""
+            clientName: client?.name ?? "",
+            recipientName: quoteRecipientTouched ? current.recipientName : client?.name ?? ""
         }));
     }
     function selectQuoteComposerClient(client) {
@@ -1269,26 +1302,36 @@ export function QuotesPage() {
         if (!client) {
             throw new Error("Selecciona un cliente de la lista para guardar la cotizacion.");
         }
-        if (sourceMode === "template" && !quoteTemplateDraft) {
-            throw new Error("Selecciona una cotizacion tipo para generar esta cotizacion.");
+        const selectedTemplate = sourceMode === "template"
+            ? templates.find((template) => template.id === selectedTemplateId)
+            : undefined;
+        const activeQuoteTemplateDraft = quoteTemplateDraft ?? (selectedTemplate
+            ? buildQuoteTemplateDraftFromTemplate(selectedTemplate)
+            : null);
+        const effectiveQuoteForm = sourceMode === "template" && selectedTemplate && !quoteTemplateDraft
+            ? buildQuoteFormFromTemplateSelection(quoteForm, selectedTemplate, user?.team, quoteForm.language)
+            : quoteForm;
+        if (sourceMode === "template" && !activeQuoteTemplateDraft) {
+            throw new Error("Elige una cotizacion tipo base y despues usa la plantilla en español o en ingles.");
         }
-        const lineItems = quoteTemplateDraft
-            ? buildLineItemsFromTemplateDraft(quoteTemplateDraft)
-            : buildLineItemsPayload(quoteForm.lineItems);
+        const lineItems = activeQuoteTemplateDraft
+            ? buildLineItemsFromTemplateDraft(activeQuoteTemplateDraft)
+            : buildLineItemsPayload(effectiveQuoteForm.lineItems);
         const payload = {
             clientId: client.id,
             clientName: client.name,
-            responsibleTeam: quoteForm.responsibleTeam || undefined,
-            subject: normalizeText(quoteForm.subject),
-            status: quoteForm.status,
-            quoteType: quoteForm.quoteType,
-            language: quoteForm.language,
-            quoteDate: quoteForm.quoteDate || getTodayDateInputValue(),
-            amountColumns: quoteTemplateDraft?.amountColumns,
-            tableRows: quoteTemplateDraft?.tableRows,
+            recipientName: normalizeText(effectiveQuoteForm.recipientName) || client.name,
+            responsibleTeam: effectiveQuoteForm.responsibleTeam || undefined,
+            subject: normalizeText(effectiveQuoteForm.subject),
+            status: effectiveQuoteForm.status,
+            quoteType: effectiveQuoteForm.quoteType,
+            language: effectiveQuoteForm.language,
+            quoteDate: effectiveQuoteForm.quoteDate || getTodayDateInputValue(),
+            amountColumns: activeQuoteTemplateDraft?.amountColumns,
+            tableRows: activeQuoteTemplateDraft?.tableRows,
             lineItems,
-            milestone: normalizeText(quoteForm.milestone) || undefined,
-            notes: normalizeText(quoteForm.notes) || undefined
+            milestone: normalizeText(effectiveQuoteForm.milestone) || undefined,
+            notes: normalizeText(effectiveQuoteForm.notes) || undefined
         };
         if (payload.subject.length < 3) {
             throw new Error("El asunto debe tener al menos 3 caracteres.");
@@ -1363,6 +1406,7 @@ export function QuotesPage() {
             const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
             setEditingQuoteId(null);
             setPreparedQuote(null);
+            setQuoteRecipientTouched(false);
             setQuoteForm(sourceMode === "template" && selectedTemplate
                 ? buildQuoteFormFromTemplate(selectedTemplate, user?.team)
                 : buildEmptyQuoteForm(user?.team));
@@ -1538,10 +1582,11 @@ export function QuotesPage() {
                                     setPreparedQuote(null);
                                     setSourceMode("template");
                                     setSelectedTemplateId("");
+                                    setQuoteRecipientTouched(false);
                                     setQuoteForm(buildEmptyQuoteForm(user?.team));
                                     setQuoteTemplateDraft(null);
                                     setActiveTab("quotes");
-                                }, children: "Cancelar edicion" })) : (_jsx("button", { type: "button", className: "secondary-button", onClick: () => resetQuoteComposer(), children: "Reiniciar captura" }))] }), sourceMode === "template" ? (_jsxs("div", { className: "quotes-template-picker", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cotizacion tipo base" }), _jsxs("select", { value: selectedTemplateId, onChange: (event) => handleTemplateSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar plantilla..." }), templates.map((template) => (_jsxs("option", { value: template.id, children: [template.templateNumber, " - ", getTeamLabel(template.team)] }, template.id)))] })] }), _jsxs("div", { className: "quotes-template-picker-actions", children: [_jsx("button", { type: "button", className: "primary-button", disabled: !selectedTemplate || translatingTemplateId === selectedTemplate.id, onClick: () => {
+                                }, children: "Cancelar edicion" })) : (_jsx("button", { type: "button", className: "secondary-button", onClick: () => resetQuoteComposer(), children: "Reiniciar captura" }))] }), sourceMode === "template" ? (_jsxs("div", { className: "quotes-template-picker", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Cotizacion tipo base" }), _jsxs("select", { value: selectedTemplateId, onChange: (event) => handleTemplateSelection(event.target.value), children: [_jsx("option", { value: "", children: "Seleccionar plantilla..." }), templates.map((template) => (_jsxs("option", { value: template.id, children: [template.templateNumber, " - ", getTeamLabel(template.team)] }, template.id)))] })] }), selectedTemplate ? (_jsxs("div", { className: "quotes-selected-template-title", "aria-live": "polite", children: [_jsx("span", { children: "Titulo de la plantilla" }), _jsx("strong", { children: normalizeText(selectedTemplate.subject) || "Sin titulo capturado" })] })) : null, _jsxs("div", { className: "quotes-template-picker-actions", children: [_jsx("button", { type: "button", className: "primary-button", disabled: !selectedTemplate || translatingTemplateId === selectedTemplate.id, onClick: () => {
                                             if (selectedTemplate) {
                                                 void handleTemplateUse(selectedTemplate, "es");
                                             }
@@ -1563,7 +1608,13 @@ export function QuotesPage() {
                                                         event.preventDefault();
                                                         selectQuoteComposerClient(filteredQuoteComposerClientOptions[0]);
                                                     }
-                                                }, placeholder: "Buscar por nombre o numero de cliente...", role: "combobox", type: "text", value: quoteComposerClientSearch }), isQuoteComposerClientSearchOpen ? (_jsx("div", { className: "quote-client-search-results", role: "listbox", "aria-label": "Resultados de clientes", children: filteredQuoteComposerClientOptions.length ? (filteredQuoteComposerClientOptions.map((client) => (_jsxs("button", { "aria-selected": quoteForm.clientId === client.id, onClick: () => selectQuoteComposerClient(client), onMouseDown: (event) => event.preventDefault(), type: "button", children: [_jsx("strong", { children: client.clientNumber || "S/N" }), _jsx("span", { children: client.name })] }, client.id)))) : (_jsx("div", { className: "quote-client-search-empty", children: "Sin clientes que coincidan con la busqueda." })) })) : null, _jsx("input", { "aria-hidden": "true", readOnly: true, tabIndex: -1, type: "hidden", value: quoteForm.clientId })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo responsable" }), _jsxs("select", { value: quoteForm.responsibleTeam, onChange: (event) => updateQuoteForm((current) => ({ ...current, responsibleTeam: event.target.value })), children: [_jsx("option", { value: "", children: "Sin equipo" }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: quoteForm.quoteType, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), sourceMode === "generic" ? (_jsxs("div", { className: "form-field quote-language-field", children: [_jsx("span", { children: "Idioma de la cotizaci\u00F3n" }), _jsxs("label", { className: "quote-language-checkbox", children: [_jsx("input", { type: "checkbox", checked: quoteForm.language === "en", onChange: (event) => handleGenericQuoteLanguageChange(event.target.checked ? "en" : "es") }), _jsx("span", { children: quoteForm.language === "en" ? "Inglés" : "Español" })] }), _jsx("small", { children: "Desmarcado: espa\u00F1ol. Marcado: ingl\u00E9s." })] })) : null, _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: suggestedQuoteNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: quoteForm.quoteDate, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { type: "text", value: quoteForm.subject, onChange: (event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value })), placeholder: "Describe el alcance de la propuesta" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: quoteForm.milestone, onChange: (event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), sourceMode === "template" && !selectedTemplate ? (_jsx("section", { className: "quote-template-editor-shell", children: _jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: "Tabla de cotizacion tipo" }), _jsx("p", { className: "muted", children: "Selecciona una cotizacion tipo base para cargar aqui su tabla editable." })] }) }) })) : null, quoteTemplateDraft ? (_jsxs("section", { className: "quote-template-editor-shell", children: [_jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: sourceMode === "template" ? "Tabla de cotizacion tipo" : "Tabla de cotizacion" }), _jsx("p", { className: "muted", children: sourceMode === "template"
+                                                }, placeholder: "Buscar por nombre o numero de cliente...", role: "combobox", type: "text", value: quoteComposerClientSearch }), isQuoteComposerClientSearchOpen ? (_jsx("div", { className: "quote-client-search-results", role: "listbox", "aria-label": "Resultados de clientes", children: filteredQuoteComposerClientOptions.length ? (filteredQuoteComposerClientOptions.map((client) => (_jsxs("button", { "aria-selected": quoteForm.clientId === client.id, onClick: () => selectQuoteComposerClient(client), onMouseDown: (event) => event.preventDefault(), type: "button", children: [_jsx("strong", { children: client.clientNumber || "S/N" }), _jsx("span", { children: client.name })] }, client.id)))) : (_jsx("div", { className: "quote-client-search-empty", children: "Sin clientes que coincidan con la busqueda." })) })) : null, _jsx("input", { "aria-hidden": "true", readOnly: true, tabIndex: -1, type: "hidden", value: quoteForm.clientId })] }), _jsxs("label", { className: "form-field quote-recipient-field", children: [_jsx("span", { children: "Dirigida a" }), _jsx("textarea", { rows: 2, value: quoteForm.recipientName, onChange: (event) => {
+                                                    setQuoteRecipientTouched(true);
+                                                    updateQuoteForm((current) => ({
+                                                        ...current,
+                                                        recipientName: event.target.value
+                                                    }));
+                                                }, placeholder: "Nombre(s) del destinatario" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Equipo responsable" }), _jsxs("select", { value: quoteForm.responsibleTeam, onChange: (event) => updateQuoteForm((current) => ({ ...current, responsibleTeam: event.target.value })), children: [_jsx("option", { value: "", children: "Sin equipo" }), QUOTE_TEAM_OPTIONS.map((team) => (_jsx("option", { value: team.key, children: team.label }, team.key)))] })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Tipo de cotizacion" }), _jsxs("select", { value: quoteForm.quoteType, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteType: event.target.value })), children: [_jsx("option", { value: "ONE_TIME", children: "Asunto unico" }), _jsx("option", { value: "RETAINER", children: "Iguala" })] })] }), sourceMode === "generic" ? (_jsxs("div", { className: "form-field quote-language-field", children: [_jsx("span", { children: "Idioma de la cotizaci\u00F3n" }), _jsxs("label", { className: "quote-language-checkbox", children: [_jsx("input", { type: "checkbox", checked: quoteForm.language === "en", onChange: (event) => handleGenericQuoteLanguageChange(event.target.checked ? "en" : "es") }), _jsx("span", { children: quoteForm.language === "en" ? "Inglés" : "Español" })] }), _jsx("small", { children: "Desmarcado: espa\u00F1ol. Marcado: ingl\u00E9s." })] })) : null, _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Numero de cotizacion" }), _jsx("input", { type: "text", value: suggestedQuoteNumber, readOnly: true })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Fecha" }), _jsx("input", { type: "date", value: quoteForm.quoteDate, onChange: (event) => updateQuoteForm((current) => ({ ...current, quoteDate: event.target.value })) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Asunto" }), _jsx("input", { type: "text", value: quoteForm.subject, onChange: (event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value })), placeholder: "Describe el alcance de la propuesta" })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hito de conclusion" }), _jsx("input", { type: "text", value: quoteForm.milestone, onChange: (event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value })), placeholder: "Ej. Firma, entrega, cierre, aprobacion" })] })] }), sourceMode === "template" && !selectedTemplate ? (_jsx("section", { className: "quote-template-editor-shell", children: _jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: "Tabla de cotizacion tipo" }), _jsx("p", { className: "muted", children: "Selecciona una cotizacion tipo base para cargar aqui su tabla editable." })] }) }) })) : null, quoteTemplateDraft ? (_jsxs("section", { className: "quote-template-editor-shell", children: [_jsx("div", { className: "panel-header quotes-line-editor-header", children: _jsxs("div", { children: [_jsx("h3", { children: sourceMode === "template" ? "Tabla de cotizacion tipo" : "Tabla de cotizacion" }), _jsx("p", { className: "muted", children: sourceMode === "template"
                                                         ? "Puedes editar la misma tabla de la plantilla antes de guardar la cotizacion."
                                                         : "Configura desde cero la cotizacion del cliente usando la misma tabla avanzada de las cotizaciones tipo." })] }) }), _jsxs("div", { className: "quote-template-amount-config-grid", children: [_jsx(TemplateAmountColumnConfig, { column: quoteTemplateDraft.amountColumns[0], onModeChange: (mode) => updateQuoteTemplateDraft((current) => ({
                                                     ...current,

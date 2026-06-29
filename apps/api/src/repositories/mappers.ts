@@ -20,6 +20,7 @@ import type {
   FinanceRecord,
   FinanceSnapshot,
   GeneralExpense,
+  GeneralExpenseEmrtDailyAcknowledgement,
   GeneralExpensePayrollEntry,
   Holiday,
   InternalContract,
@@ -1074,6 +1075,7 @@ export function mapQuote(record: {
   quoteNumber: string;
   clientId: string;
   clientName: string;
+  recipientName?: string | null;
   responsibleTeam: string | null;
   subject: string;
   status: string;
@@ -1095,6 +1097,7 @@ export function mapQuote(record: {
     quoteNumber: record.quoteNumber,
     clientId: record.clientId,
     clientName: record.clientName,
+    recipientName: record.recipientName ?? undefined,
     responsibleTeam: record.responsibleTeam as Quote["responsibleTeam"],
     subject: record.subject,
     status: record.status as Quote["status"],
@@ -1440,6 +1443,8 @@ export function mapFinanceRecord(record: {
   clientName: string;
   quoteNumber: string | null;
   matterType: string;
+  periodYear: number | null;
+  periodMonth: number | null;
   subject: string;
   contractSignedStatus: string;
   responsibleTeam: string | null;
@@ -1491,6 +1496,8 @@ export function mapFinanceRecord(record: {
     clientName: record.clientName,
     quoteNumber: record.quoteNumber ?? undefined,
     matterType: record.matterType as FinanceRecord["matterType"],
+    periodYear: record.periodYear ?? undefined,
+    periodMonth: record.periodMonth ?? undefined,
     subject: record.subject,
     contractSignedStatus: record.contractSignedStatus as FinanceRecord["contractSignedStatus"],
     responsibleTeam: (record.responsibleTeam ?? undefined) as FinanceRecord["responsibleTeam"],
@@ -1614,6 +1621,44 @@ export function mapGeneralExpense(record: {
     reviewedByJnls: record.reviewedByJnls,
     paid: record.paid,
     paidAt: record.paidAt?.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapGeneralExpenseEmrtAcknowledgement(record: {
+  id: string;
+  year: number;
+  month: number;
+  paidByEmrtDate: Date;
+  totalMxn: Prisma.Decimal;
+  summaryMessage: string;
+  expenseIds: Prisma.JsonValue;
+  snapshotHash: string;
+  receivedByAle: boolean;
+  receivedByAleAt: Date | null;
+  paidByEmrt: boolean;
+  paidByEmrtAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): GeneralExpenseEmrtDailyAcknowledgement {
+  const expenseIds = Array.isArray(record.expenseIds)
+    ? record.expenseIds.filter((value): value is string => typeof value === "string")
+    : [];
+
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    paidByEmrtDate: record.paidByEmrtDate.toISOString(),
+    totalMxn: Number(record.totalMxn),
+    summaryMessage: record.summaryMessage,
+    expenseIds,
+    snapshotHash: record.snapshotHash,
+    receivedByAle: record.receivedByAle,
+    receivedByAleAt: record.receivedByAleAt?.toISOString(),
+    paidByEmrt: record.paidByEmrt,
+    paidByEmrtAt: record.paidByEmrtAt?.toISOString(),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

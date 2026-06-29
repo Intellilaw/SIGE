@@ -595,6 +595,7 @@ export interface Quote {
   quoteNumber: string;
   clientId: string;
   clientName: string;
+  recipientName?: string;
   responsibleTeam?: Team;
   subject: string;
   status: QuoteStatus;
@@ -818,6 +819,8 @@ export interface FinanceRecord {
   clientName: string;
   quoteNumber?: string;
   matterType: QuoteType;
+  periodYear?: number;
+  periodMonth?: number;
   subject: string;
   contractSignedStatus: ContractSignedStatus;
   responsibleTeam?: Team;
@@ -1077,6 +1080,23 @@ export interface GeneralExpense {
   reviewedByJnls: boolean;
   paid: boolean;
   paidAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeneralExpenseEmrtDailyAcknowledgement {
+  id: string;
+  year: number;
+  month: number;
+  paidByEmrtDate: string;
+  totalMxn: number;
+  summaryMessage: string;
+  expenseIds: string[];
+  snapshotHash: string;
+  receivedByAle: boolean;
+  receivedByAleAt?: string;
+  paidByEmrt: boolean;
+  paidByEmrtAt?: string;
   createdAt: string;
   updatedAt: string;
 }
