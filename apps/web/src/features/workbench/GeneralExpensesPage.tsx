@@ -415,9 +415,7 @@ function getWithholdingAmounts(expense: GeneralExpense) {
   const hasActiveWithholdings = expense.paymentMethod === "Transferencia" && expense.hasWithholdings;
   const vatWithholding = hasActiveWithholdings ? ivaAmount * (2 / 3) : null;
   const isrWithholding = hasActiveWithholdings ? amount * 0.1 : null;
-  const netPayment = hasActiveWithholdings
-    ? Math.max(0, amount + ivaAmount - (vatWithholding ?? 0) - (isrWithholding ?? 0))
-    : null;
+  const netPayment = Math.max(0, amount + ivaAmount - (vatWithholding ?? 0) - (isrWithholding ?? 0));
 
   return {
     vatWithholding,
@@ -2047,9 +2045,9 @@ export function GeneralExpensesPage() {
                       <th>Detalle de Gasto</th>
                       <th>Monto</th>
                       <th>IVA</th>
-                      <th>Ret. IVA</th>
-                      <th>Ret ISR</th>
-                      <th>Pago neto</th>
+                      <th className="general-expense-withholding-column">Ret. IVA</th>
+                      <th className="general-expense-withholding-column">Ret ISR</th>
+                      <th className="general-expense-net-payment-column">Pago neto</th>
                       <th>¿Cuenta para límite?</th>
                       <th>Suma Límite</th>
                       <th>Gasto general</th>
@@ -2177,19 +2175,19 @@ export function GeneralExpensesPage() {
                                   {ivaAmount !== null ? formatCurrency(ivaAmount) : "-"}
                                 </div>
                               </td>
-                              <td>
+                              <td className="general-expense-withholding-column">
                                 <div className={`general-expense-readonly-cell ${vatWithholding === null ? "is-disabled" : ""}`}>
                                   {vatWithholding !== null ? formatCurrency(vatWithholding) : "-"}
                                 </div>
                               </td>
-                              <td>
+                              <td className="general-expense-withholding-column">
                                 <div className={`general-expense-readonly-cell ${isrWithholding === null ? "is-disabled" : ""}`}>
                                   {isrWithholding !== null ? formatCurrency(isrWithholding) : "-"}
                                 </div>
                               </td>
-                              <td>
-                                <div className={`general-expense-readonly-cell is-net-payment ${netPayment === null ? "is-disabled" : ""}`}>
-                                  {netPayment !== null ? formatCurrency(netPayment) : "-"}
+                              <td className="general-expense-net-payment-column">
+                                <div className="general-expense-readonly-cell is-net-payment">
+                                  {formatCurrency(netPayment)}
                                 </div>
                               </td>
                               <td className="general-expense-checkbox-cell">

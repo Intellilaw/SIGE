@@ -3488,6 +3488,14 @@ textarea {
   text-align: center;
 }
 
+.general-expense-withholding-column {
+  min-width: 130px;
+}
+
+.general-expense-net-payment-column {
+  min-width: 150px;
+}
+
 .general-expense-table thead th,
 .general-expense-emrt-table thead th,
 .general-expense-payroll-table thead th {
