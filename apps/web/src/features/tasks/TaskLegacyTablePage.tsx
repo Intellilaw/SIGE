@@ -69,6 +69,36 @@ function hasCompletedStatus(record: TaskTrackingRecord) {
   return record.status === "presentado" || record.status === "concluida";
 }
 
+function isLitigationWritingsTable(table: LegacyTaskTableConfig | undefined) {
+  return table?.slug === "escritos-fondo";
+}
+
+function getCompletedWorkflowStage(table: LegacyTaskTableConfig | undefined) {
+  return table?.tabs.find((tab) => tab.isCompleted && tab.stage)?.stage;
+}
+
+function getActiveWorkflowStageLimit(table: LegacyTaskTableConfig | undefined) {
+  const completedStage = getCompletedWorkflowStage(table);
+  return completedStage ? completedStage - 1 : Math.max(1, (table?.tabs.length ?? 1) - 1);
+}
+
+function getWorkflowStage(record: TaskTrackingRecord) {
+  return Number(record.workflowStage || 1);
+}
+
+function getWorkflowStageLabel(table: LegacyTaskTableConfig | undefined, record: TaskTrackingRecord) {
+  return table?.tabs.find((tab) => Number(tab.stage) === getWorkflowStage(record))?.label ?? "-";
+}
+
+function getEarliestAttentionDate(record: TaskTrackingRecord, table: LegacyTaskTableConfig | undefined) {
+  const dates = [
+    toDateInput(record.dueDate),
+    isTrackingTermEnabled(record, table) ? toDateInput(record.termDate) : ""
+  ].filter(Boolean);
+
+  return dates.sort()[0] ?? "9999-12-31";
+}
+
 function formatDisplayDate(value?: string | null) {
   const date = toDateInput(value);
   if (!date) {
@@ -172,9 +202,19 @@ export function TaskLegacyTablePage() {
       return [];
     }
 
+    const activeWritingStageLimit = getActiveWorkflowStageLimit(tableConfig);
+    const showAllActiveWritingStages = isLitigationWritingsTable(tableConfig)
+      && activeTab.stage === 1
+      && !activeTab.isCompleted;
+
     return records.filter((record) => {
       if (!moduleConfig || findTrackingTable(moduleConfig, record)?.slug !== tableConfig.slug) {
         return false;
+      }
+
+      if (showAllActiveWritingStages) {
+        const stage = getWorkflowStage(record);
+        return !hasCompletedStatus(record) && stage >= 1 && stage <= activeWritingStageLimit;
       }
 
       if (activeTab.stage) {
@@ -191,6 +231,30 @@ export function TaskLegacyTablePage() {
       }
 
       return record.status === (activeTab.status ?? "pendiente");
+    }).sort((left, right) => {
+      if (!isLitigationWritingsTable(tableConfig) || activeTab.isCompleted) {
+        return 0;
+      }
+
+      const leftStage = getWorkflowStage(left);
+      const rightStage = getWorkflowStage(right);
+      const leftAttentionGroup = leftStage === 1 ? 0 : 1;
+      const rightAttentionGroup = rightStage === 1 ? 0 : 1;
+
+      if (leftAttentionGroup !== rightAttentionGroup) {
+        return leftAttentionGroup - rightAttentionGroup;
+      }
+
+      const dateComparison = getEarliestAttentionDate(left, tableConfig).localeCompare(getEarliestAttentionDate(right, tableConfig));
+      if (dateComparison !== 0) {
+        return dateComparison;
+      }
+
+      if (leftStage !== rightStage) {
+        return leftStage - rightStage;
+      }
+
+      return (left.clientName || "").localeCompare(right.clientName || "", "es");
     });
   }, [activeTab, completedMonth, moduleConfig, records, tableConfig]);
 
@@ -203,8 +267,13 @@ export function TaskLegacyTablePage() {
   const showDateColumn = tableConfig.showDateColumn !== false;
   const showTermColumn = usesPresentationAndTermDates(tableConfig);
   const isCompletedMonthView = activeTab.isCompleted;
+  const showStatusColumn = isLitigationWritingsTable(tableConfig) && !isCompletedMonthView;
   const tableColumnCount =
-    6 + (showDateColumn ? 1 : 0) + (tableConfig.showReportedPeriod ? 1 : 0) + (showTermColumn ? 1 : 0);
+    6
+    + (showDateColumn ? 1 : 0)
+    + (tableConfig.showReportedPeriod ? 1 : 0)
+    + (showTermColumn ? 1 : 0)
+    + (showStatusColumn ? 1 : 0);
 
   return (
     <section className="page-stack tasks-legacy-page">
@@ -282,6 +351,7 @@ export function TaskLegacyTablePage() {
                 {showDateColumn ? <th>{activeTab.isCompleted ? "Fecha completada" : tableConfig.dateLabel}</th> : null}
                 {tableConfig.showReportedPeriod ? <th>{tableConfig.reportedPeriodLabel ?? "Mes reportado"}</th> : null}
                 {showTermColumn ? <th>{tableConfig.termDateLabel ?? "Término"}</th> : null}
+                {showStatusColumn ? <th>Estado</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -336,6 +406,13 @@ export function TaskLegacyTablePage() {
                         <td>
                           <div className="tasks-legacy-readonly-value tasks-legacy-date-readonly">
                             {isTrackingTermEnabled(record, tableConfig) ? formatDisplayDate(record.termDate) : "-"}
+                          </div>
+                        </td>
+                      ) : null}
+                      {showStatusColumn ? (
+                        <td>
+                          <div className="tasks-legacy-readonly-value">
+                            {getWorkflowStageLabel(tableConfig, record)}
                           </div>
                         </td>
                       ) : null}

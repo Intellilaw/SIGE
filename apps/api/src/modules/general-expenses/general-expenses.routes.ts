@@ -37,6 +37,7 @@ const updateSchema = z.object({
   paymentMethod: z.enum(["Transferencia", "Efectivo"]).optional(),
   bank: z.enum(["Banamex", "HSBC"]).nullable().optional(),
   hasVat: z.boolean().optional(),
+  hasWithholdings: z.boolean().optional(),
   recurring: z.boolean().optional(),
   approvedByEmrt: z.boolean().optional(),
   paidByEmrtAt: z.string().nullable().optional(),

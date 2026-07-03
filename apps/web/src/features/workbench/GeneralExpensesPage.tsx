@@ -50,6 +50,7 @@ type GeneralExpensePatchPayload = {
   paymentMethod?: GeneralExpense["paymentMethod"];
   bank?: GeneralExpense["bank"] | null;
   hasVat?: boolean;
+  hasWithholdings?: boolean;
   recurring?: boolean;
   approvedByEmrt?: boolean;
   paidByEmrtAt?: string | null;
@@ -407,6 +408,24 @@ function getIvaAmount(expense: GeneralExpense) {
   return amount * 0.16;
 }
 
+function getWithholdingAmounts(expense: GeneralExpense) {
+  const rawAmount = Number(expense.amountMxn || 0);
+  const amount = Number.isFinite(rawAmount) ? Math.max(0, rawAmount) : 0;
+  const ivaAmount = getIvaAmount(expense) ?? 0;
+  const hasActiveWithholdings = expense.paymentMethod === "Transferencia" && expense.hasWithholdings;
+  const vatWithholding = hasActiveWithholdings ? ivaAmount * (2 / 3) : null;
+  const isrWithholding = hasActiveWithholdings ? amount * 0.1 : null;
+  const netPayment = hasActiveWithholdings
+    ? Math.max(0, amount + ivaAmount - (vatWithholding ?? 0) - (isrWithholding ?? 0))
+    : null;
+
+  return {
+    vatWithholding,
+    isrWithholding,
+    netPayment
+  };
+}
+
 function getDistributionPct(expense: GeneralExpense) {
   const pctLitigation = Number(expense.pctLitigation || 0);
   const pctCorporateLabor = Number(expense.pctCorporateLabor || 0);
@@ -544,6 +563,34 @@ function replaceEmrtAcknowledgement(
   return next.sort((left, right) => toDateInput(left.paidByEmrtDate).localeCompare(toDateInput(right.paidByEmrtDate)));
 }
 
+function applyOptimisticEmrtAcknowledgementPatch(
+  acknowledgement: GeneralExpenseEmrtDailyAcknowledgement,
+  patch: EmrtAcknowledgementPatchPayload
+): GeneralExpenseEmrtDailyAcknowledgement {
+  const nowIso = new Date().toISOString();
+  const next: GeneralExpenseEmrtDailyAcknowledgement = {
+    ...acknowledgement,
+    updatedAt: nowIso
+  };
+
+  if (Object.prototype.hasOwnProperty.call(patch, "receivedByAle")) {
+    next.receivedByAle = Boolean(patch.receivedByAle);
+    next.receivedByAleAt = patch.receivedByAle ? next.receivedByAleAt ?? nowIso : undefined;
+
+    if (!patch.receivedByAle) {
+      next.paidByEmrt = false;
+      next.paidByEmrtAt = undefined;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "paidByEmrt")) {
+    next.paidByEmrt = Boolean(patch.paidByEmrt);
+    next.paidByEmrtAt = patch.paidByEmrt ? next.paidByEmrtAt ?? nowIso : undefined;
+  }
+
+  return next;
+}
+
 function mergeRecordsPreservingOrder(current: GeneralExpense[], incoming: GeneralExpense[]) {
   if (current.length === 0) {
     return incoming;
@@ -663,6 +710,7 @@ function applyLocalPatch(expense: GeneralExpense, patch: GeneralExpensePatchPayl
   if (patch.paymentMethod === "Efectivo") {
     next.hasVat = false;
     next.bank = undefined;
+    next.hasWithholdings = false;
     next.emrtReimbursementPending = false;
   }
 
@@ -701,6 +749,7 @@ export function GeneralExpensesPage() {
   const now = new Date();
   const expensePatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchSequenceRef = useRef<Record<string, number>>({});
+  const emrtAcknowledgementPatchSequenceRef = useRef<Record<string, number>>({});
   const expenseRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const [activeTab, setActiveTab] = useState<ActiveTab>("registro");
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -1028,14 +1077,28 @@ export function GeneralExpensesPage() {
       return;
     }
 
+    const requestSequence = (emrtAcknowledgementPatchSequenceRef.current[date] ?? 0) + 1;
+    emrtAcknowledgementPatchSequenceRef.current[date] = requestSequence;
+    setEmrtAcknowledgements((items) => {
+      const current = items.find((item) => toDateInput(item.paidByEmrtDate) === date);
+      return current ? replaceEmrtAcknowledgement(items, applyOptimisticEmrtAcknowledgementPatch(current, payload)) : items;
+    });
+
     try {
       const updated = await apiPatch<GeneralExpenseEmrtDailyAcknowledgement>(
         `/general-expenses/emrt-acknowledgements/${date}`,
         payload
       );
+      if (emrtAcknowledgementPatchSequenceRef.current[date] !== requestSequence) {
+        return;
+      }
+
       setEmrtAcknowledgements((items) => replaceEmrtAcknowledgement(items, updated));
-      await loadRecords();
     } catch (error) {
+      if (emrtAcknowledgementPatchSequenceRef.current[date] !== requestSequence) {
+        return;
+      }
+
       setErrorMessage(toErrorMessage(error));
       await loadEmrtAcknowledgements();
       await loadRecords();
@@ -1984,6 +2047,9 @@ export function GeneralExpensesPage() {
                       <th>Detalle de Gasto</th>
                       <th>Monto</th>
                       <th>IVA</th>
+                      <th>Ret. IVA</th>
+                      <th>Ret ISR</th>
+                      <th>Pago neto</th>
                       <th>¿Cuenta para límite?</th>
                       <th>Suma Límite</th>
                       <th>Gasto general</th>
@@ -2014,13 +2080,13 @@ export function GeneralExpensesPage() {
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={31} className="centered-inline-message">
+                        <td colSpan={34} className="centered-inline-message">
                           Cargando gastos...
                         </td>
                       </tr>
                     ) : records.length === 0 ? (
                       <tr>
-                        <td colSpan={31} className="centered-inline-message">
+                        <td colSpan={34} className="centered-inline-message">
                           No hay gastos registrados en este mes.
                         </td>
                       </tr>
@@ -2035,11 +2101,13 @@ export function GeneralExpensesPage() {
 
                           const distribution = distributeExpense(expense);
                           const ivaAmount = getIvaAmount(expense);
+                          const { vatWithholding, isrWithholding, netPayment } = getWithholdingAmounts(expense);
                           const { sum } = getDistributionPct(expense);
                           const preEmrtLocked = isExpensePreEmrtLocked(expense);
                           const protectedFieldDisabled = !canWrite || expense.approvedByEmrt || preEmrtLocked;
                           const pctDisabled = protectedFieldDisabled || expense.generalExpense || expense.expenseWithoutTeam;
                           const vatCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
+                          const withholdingsCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
                           const rowIncomplete = isRowIncomplete(expense);
                           const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableMoney(Number(expense.amountMxn || 0));
 
@@ -2083,23 +2151,45 @@ export function GeneralExpensesPage() {
                                     disabled={protectedFieldDisabled}
                                   />
                                 </div>
+                                <div className="general-expense-amount-options">
+                                  <label className={`general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`}>
+                                    <input
+                                      type="checkbox"
+                                      checked={expense.paymentMethod === "Transferencia" && expense.hasVat}
+                                      onChange={(event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked })}
+                                      disabled={vatCheckboxDisabled}
+                                    />
+                                    <span>Con IVA</span>
+                                  </label>
+                                  <label className={`general-expense-inline-checkbox ${withholdingsCheckboxDisabled ? "is-disabled" : ""}`}>
+                                    <input
+                                      type="checkbox"
+                                      checked={expense.paymentMethod === "Transferencia" && expense.hasWithholdings}
+                                      onChange={(event) => void persistExpensePatch(expense.id, { hasWithholdings: event.target.checked })}
+                                      disabled={withholdingsCheckboxDisabled}
+                                    />
+                                    <span>Retenciones</span>
+                                  </label>
+                                </div>
                               </td>
                               <td>
-                                <div className="general-expense-vat-stack">
-                                  <div className={`general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`}>
-                                    {ivaAmount !== null ? formatCurrency(ivaAmount) : "-"}
-                                  </div>
-                                  {expense.paymentMethod === "Transferencia" ? (
-                                    <label className={`general-expense-inline-checkbox ${vatCheckboxDisabled ? "is-disabled" : ""}`}>
-                                      <input
-                                        type="checkbox"
-                                        checked={expense.hasVat}
-                                        onChange={(event) => void persistExpensePatch(expense.id, { hasVat: event.target.checked })}
-                                        disabled={vatCheckboxDisabled}
-                                      />
-                                      <span>Con IVA</span>
-                                    </label>
-                                  ) : null}
+                                <div className={`general-expense-readonly-cell ${expense.paymentMethod === "Efectivo" ? "is-disabled" : ""}`}>
+                                  {ivaAmount !== null ? formatCurrency(ivaAmount) : "-"}
+                                </div>
+                              </td>
+                              <td>
+                                <div className={`general-expense-readonly-cell ${vatWithholding === null ? "is-disabled" : ""}`}>
+                                  {vatWithholding !== null ? formatCurrency(vatWithholding) : "-"}
+                                </div>
+                              </td>
+                              <td>
+                                <div className={`general-expense-readonly-cell ${isrWithholding === null ? "is-disabled" : ""}`}>
+                                  {isrWithholding !== null ? formatCurrency(isrWithholding) : "-"}
+                                </div>
+                              </td>
+                              <td>
+                                <div className={`general-expense-readonly-cell is-net-payment ${netPayment === null ? "is-disabled" : ""}`}>
+                                  {netPayment !== null ? formatCurrency(netPayment) : "-"}
                                 </div>
                               </td>
                               <td className="general-expense-checkbox-cell">
@@ -2157,7 +2247,7 @@ export function GeneralExpensesPage() {
                                   onChange={(event) => {
                                     const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
                                     const payload = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false }
+                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false, hasWithholdings: false }
                                       : { paymentMethod: nextMethod };
                                     void persistExpensePatch(expense.id, payload);
                                   }}
@@ -2284,7 +2374,7 @@ export function GeneralExpensesPage() {
                     )}
                     {!loading && records.length > 0 ? (
                       <tr className="general-expense-totals-row">
-                        <td colSpan={23}>Totales distribuidos:</td>
+                        <td colSpan={26}>Totales distribuidos:</td>
                         <td>{formatCurrency(totals.withoutTeam)}</td>
                         <td>{formatCurrency(totals.litigation)}</td>
                         <td>{formatCurrency(totals.corporateLabor)}</td>

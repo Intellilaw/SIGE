@@ -71,6 +71,7 @@ export const EXECUTION_MODULES = [
 export const EXECUTION_MODULE_BY_SLUG = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.slug, module]));
 export const EXECUTION_MODULE_BY_ID = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.moduleId, module]));
 export const EXECUTION_MODULE_BY_TEAM = Object.fromEntries(EXECUTION_MODULES.map((module) => [module.team, module]));
+const TASKS_ONLY_MODULE_IDS = new Set(["finance"]);
 const FALLBACK_COLORS = ["#0f766e", "#7c3aed", "#c2410c", "#0369a1", "#4d7c0f", "#be123c"];
 const FALLBACK_ICONS_BY_TEAM = {
     ADMIN: "A",
@@ -121,7 +122,9 @@ export function buildExecutionModuleDescriptor(module) {
     };
 }
 export function buildExecutionModuleDescriptors(modules) {
-    return modules.map(buildExecutionModuleDescriptor);
+    return modules
+        .filter((module) => !TASKS_ONLY_MODULE_IDS.has(module.id))
+        .map(buildExecutionModuleDescriptor);
 }
 export function findExecutionModuleDescriptorBySlug(modules, slug) {
     if (!slug) {

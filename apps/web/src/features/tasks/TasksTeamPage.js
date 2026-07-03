@@ -1,4 +1,4 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiGet } from "../../api/http-client";
@@ -14,6 +14,7 @@ const TIMEFRAMES = [
     { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const LITIGATION_MODULE_ID = "litigation";
+const FINANCE_TASK_MODULE_ID = "finance";
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
 const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
@@ -56,11 +57,29 @@ function splitResponsibleAliases(value) {
 function toDateInput(value) {
     return value ? value.slice(0, 10) : "";
 }
+function roundCurrencyValue(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+}
+function hasCurrencyDifference(value) {
+    return Math.round(Math.abs(Number(value) || 0) * 100) !== 0;
+}
+function formatCurrency(value) {
+    return new Intl.NumberFormat("es-MX", {
+        style: "currency",
+        currency: "MXN",
+        maximumFractionDigits: 0
+    }).format(Number(value) || 0);
+}
 function getLocalDateInput(offset = 0) {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + offset);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function getCurrentFinancePeriodQuery() {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    return `year=${date.getFullYear()}&month=${date.getMonth() + 1}`;
 }
 function matchesResponsible(taskResponsible, member, sharedResponsibleAliases) {
     const normalizedResponsible = normalizeComparableText(taskResponsible);
@@ -133,6 +152,102 @@ function isLinkedTermTableEnabled(table) {
         return false;
     }
     return usesPresentationAndTermDates(table) || Boolean(table.autoTerm || table.termManagedDate);
+}
+function isPaymentReceived(method, received) {
+    return method === "T" || (method === "E" && received === true);
+}
+function hasPaymentDate(value) {
+    return Boolean(toDateInput(value));
+}
+function getReceivedFinancePaymentsMxn(record) {
+    const payment1Mxn = hasPaymentDate(record.paymentDate1) && isPaymentReceived(record.paymentMethod, record.paymentReceived)
+        ? record.paidThisMonthMxn
+        : 0;
+    const payment2Mxn = hasPaymentDate(record.paymentDate2) && isPaymentReceived(record.paymentMethod2, record.paymentReceived2)
+        ? record.payment2Mxn
+        : 0;
+    const payment3Mxn = hasPaymentDate(record.paymentDate3) && isPaymentReceived(record.paymentMethod3, record.paymentReceived3)
+        ? record.payment3Mxn
+        : 0;
+    return payment1Mxn + payment2Mxn + payment3Mxn;
+}
+function calculateFinanceDashboardStats(record) {
+    const totalPaidMxn = getReceivedFinancePaymentsMxn(record);
+    const dueTodayMxn = record.conceptFeesMxn - totalPaidMxn;
+    const futurePaymentsMxn = roundCurrencyValue(record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn);
+    const feeBreakdownDifferenceMxn = roundCurrencyValue(record.totalMatterMxn - record.previousPaymentsMxn - record.conceptFeesMxn - futurePaymentsMxn);
+    const pctSum = record.pctLitigation +
+        record.pctCorporateLabor +
+        record.pctSettlements +
+        record.pctFinancialLaw +
+        record.pctTaxCompliance;
+    return {
+        dueTodayMxn,
+        futurePaymentsMxn,
+        feeBreakdownDifferenceMxn,
+        pctSum
+    };
+}
+function resolveFinanceClientNumber(record, clients) {
+    if (normalizeText(record.clientNumber)) {
+        return normalizeText(record.clientNumber);
+    }
+    const normalizedName = normalizeComparableText(record.clientName);
+    return clients.find((client) => normalizeComparableText(client.name) === normalizedName)?.clientNumber ?? "";
+}
+function evaluateFinanceRecordForTasks(record, clients) {
+    const stats = calculateFinanceDashboardStats(record);
+    const effectiveClientNumber = resolveFinanceClientNumber(record, clients);
+    const hasExactlyOneCollectionProbability = record.highCollectionProbability !== record.lowCollectionProbability;
+    const requiredChecks = [
+        { label: "No. Cliente", present: Boolean(normalizeText(effectiveClientNumber)) },
+        { label: "Cliente", present: Boolean(normalizeText(record.clientName)) },
+        { label: "No. Cotizacion", present: Boolean(normalizeText(record.quoteNumber)) },
+        { label: "Tipo", present: Boolean(record.matterType) },
+        {
+            label: "Periodo",
+            present: record.matterType !== "RETAINER" ||
+                (Boolean(record.periodYear ?? record.year) && Boolean(record.periodMonth ?? record.month))
+        },
+        { label: "Asunto", present: Boolean(normalizeText(record.subject)) },
+        { label: "Equipo Responsable", present: Boolean(record.responsibleTeam) },
+        { label: "Conceptos trabajando", present: Boolean(normalizeText(record.workingConcepts)) },
+        { label: "Fecha de proximo pago", present: Boolean(record.nextPaymentDate) },
+        { label: "Detalle Fecha", present: Boolean(normalizeText(record.nextPaymentNotes)) },
+        { label: "En mora", present: Boolean(record.delinquencyStatus) },
+        { label: "Fecha Pago Real", present: Boolean(record.paymentDate1) },
+        { label: "Probabilidad de cobro este mes", present: hasExactlyOneCollectionProbability },
+        { label: "Receptor comision cliente 20%", present: Boolean(normalizeText(record.clientCommissionRecipient)) },
+        { label: "Receptor comision cierre 10%", present: Boolean(normalizeText(record.closingCommissionRecipient)) },
+        { label: "Hito conclusion", present: Boolean(normalizeText(record.milestone)) }
+    ];
+    const missing = requiredChecks.filter((field) => !field.present).map((field) => field.label);
+    const today = getLocalDateInput();
+    const paymentDate = toDateInput(record.nextPaymentDate);
+    const isDateUrgent = Boolean(paymentDate && paymentDate <= today && stats.dueTodayMxn > 1);
+    const isPctInvalid = stats.pctSum !== 100;
+    const isFeeBreakdownInvalid = stats.futurePaymentsMxn < 0 || hasCurrencyDifference(stats.feeBreakdownDifferenceMxn);
+    const reasons = [];
+    if (missing.length > 0) {
+        reasons.push(`Completar datos financieros: ${missing.join(", ")}`);
+    }
+    if (isDateUrgent) {
+        reasons.push(`Cobrar pago pactado (${formatCurrency(stats.dueTodayMxn)})`);
+    }
+    if (isPctInvalid) {
+        reasons.push(`Corregir porcentajes: suman ${stats.pctSum}%`);
+    }
+    if (stats.futurePaymentsMxn < 0) {
+        reasons.push("Corregir desglose: anteriores + este mes exceden Total asunto");
+    }
+    else if (isFeeBreakdownInvalid) {
+        reasons.push(`Corregir desglose: diferencia ${formatCurrency(stats.feeBreakdownDifferenceMxn)}`);
+    }
+    return {
+        effectiveClientNumber,
+        displayDate: isDateUrgent && paymentDate ? paymentDate : today,
+        reasons
+    };
 }
 function isLitigationWritingTable(table) {
     return table?.slug === LITIGATION_WRITINGS_TABLE_SLUG;
@@ -310,6 +425,8 @@ export function TasksTeamPage() {
     const legacyConfig = module ? LEGACY_TASK_MODULE_BY_ID[module.moduleId] : undefined;
     const [trackingRecords, setTrackingRecords] = useState([]);
     const [terms, setTerms] = useState([]);
+    const [additionalTasks, setAdditionalTasks] = useState([]);
+    const [financeRecords, setFinanceRecords] = useState([]);
     const [executionMatters, setExecutionMatters] = useState([]);
     const [executionClients, setExecutionClients] = useState([]);
     const [executionDistributionHistory, setExecutionDistributionHistory] = useState([]);
@@ -358,44 +475,54 @@ export function TasksTeamPage() {
         if (!module || !canAccess) {
             return;
         }
-        if (!legacyConfig) {
-            setTrackingRecords([]);
-            setTerms([]);
-            setExecutionMatters([]);
-            setExecutionClients([]);
-            setExecutionDistributionHistory([]);
-            setExecutionHolidayDateKeysByAuthority({});
-            setLoading(false);
-            return;
-        }
         const currentModule = module;
         async function loadDashboard() {
             setLoading(true);
             try {
-                const shouldLoadExecutionMissingRows = currentModule.moduleId === LITIGATION_MODULE_ID;
+                const shouldLoadLegacyRows = Boolean(legacyConfig);
+                const shouldLoadFinanceRows = currentModule.moduleId === FINANCE_TASK_MODULE_ID;
+                const shouldLoadExecutionMissingRows = shouldLoadLegacyRows && currentModule.moduleId === LITIGATION_MODULE_ID;
+                const shouldLoadClients = shouldLoadExecutionMissingRows || shouldLoadFinanceRows;
+                const trackingRecordsPromise = shouldLoadLegacyRows
+                    ? apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`)
+                    : Promise.resolve([]);
+                const termsPromise = shouldLoadLegacyRows
+                    ? apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`)
+                    : Promise.resolve([]);
+                const financeRecordsPromise = shouldLoadFinanceRows
+                    ? apiGet(`/finances/records?${getCurrentFinancePeriodQuery()}`).catch(() => [])
+                    : Promise.resolve([]);
+                const additionalTasksPromise = apiGet(`/tasks/additional?moduleId=${currentModule.moduleId}`).catch(() => []);
                 const executionMattersPromise = shouldLoadExecutionMissingRows
                     ? apiGet("/matters").catch(() => [])
                     : Promise.resolve([]);
-                const executionClientsPromise = shouldLoadExecutionMissingRows
+                const executionClientsPromise = shouldLoadClients
                     ? apiGet("/clients").catch(() => [])
                     : Promise.resolve([]);
                 const executionDistributionHistoryPromise = shouldLoadExecutionMissingRows
                     ? apiGet(`/tasks/distributions?moduleId=${currentModule.moduleId}`).catch(() => [])
                     : Promise.resolve([]);
-                const [loadedTracking, loadedTerms, loadedExecutionMatters, loadedExecutionClients, loadedExecutionDistributionHistory] = await Promise.all([
-                    apiGet(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`),
-                    apiGet(`/tasks/terms?moduleId=${currentModule.moduleId}`),
+                const [loadedTracking, loadedTerms, loadedFinanceRecords, loadedAdditionalTasks, loadedExecutionMatters, loadedExecutionClients, loadedExecutionDistributionHistory] = await Promise.all([
+                    trackingRecordsPromise,
+                    termsPromise,
+                    financeRecordsPromise,
+                    additionalTasksPromise,
                     executionMattersPromise,
                     executionClientsPromise,
                     executionDistributionHistoryPromise
                 ]);
                 setTrackingRecords(loadedTracking);
                 setTerms(loadedTerms);
+                setFinanceRecords(loadedFinanceRecords);
+                setAdditionalTasks(loadedAdditionalTasks);
                 setExecutionClients(loadedExecutionClients);
                 setExecutionMatters(shouldLoadExecutionMissingRows
                     ? sortActiveExecutionMatters(loadedExecutionMatters.filter((matter) => matter.responsibleTeam === currentModule.team), loadedExecutionClients)
                     : []);
                 setExecutionDistributionHistory(loadedExecutionDistributionHistory);
+                if (!shouldLoadExecutionMissingRows) {
+                    setExecutionHolidayDateKeysByAuthority({});
+                }
             }
             finally {
                 setLoading(false);
@@ -587,8 +714,69 @@ export function TasksTeamPage() {
                 }];
         });
     }
+    function buildFinanceRows(timeframe) {
+        if (module?.moduleId !== FINANCE_TASK_MODULE_ID) {
+            return [];
+        }
+        return financeRecords
+            .filter((record) => !record.concluded)
+            .flatMap((record) => {
+            const evaluation = evaluateFinanceRecordForTasks(record, executionClients);
+            if (evaluation.reasons.length === 0) {
+                return [];
+            }
+            if (!belongsToTimeframe({ state: "open", date: evaluation.displayDate }, timeframe)) {
+                return [];
+            }
+            return [{
+                    taskId: `finance-record-${record.id}`,
+                    clientNumber: evaluation.effectiveClientNumber || "-",
+                    clientName: record.clientName || "-",
+                    subject: record.subject || "-",
+                    specificProcess: record.quoteNumber || record.matterType || "-",
+                    taskLabel: evaluation.reasons.join(" / "),
+                    typeLabel: "Finanzas",
+                    displayDate: evaluation.displayDate,
+                    originLabel: "Finanzas",
+                    originPath: "/app/finances",
+                    actionLabel: "Ir a Finanzas",
+                    highlighted: true
+                }];
+        });
+    }
+    function buildAdditionalTaskRows(member, timeframe) {
+        return additionalTasks
+            .filter((task) => !task.deletedAt)
+            .filter((task) => matchesResponsible(task.responsible, member, dashboardConfig?.sharedResponsibleAliases ?? [])
+            || (task.responsible2 ? matchesResponsible(task.responsible2, member, dashboardConfig?.sharedResponsibleAliases ?? []) : false))
+            .filter((task) => belongsToTimeframe({
+            state: task.status === "concluida" ? "closed" : "open",
+            date: task.status === "concluida" ? toDateInput(task.updatedAt) : toDateInput(task.dueDate)
+        }, timeframe))
+            .map((task) => {
+            const completed = task.status === "concluida";
+            const displayDate = completed ? toDateInput(task.updatedAt) : toDateInput(task.dueDate);
+            const highlighted = !completed && (!displayDate || displayDate <= getLocalDateInput());
+            return {
+                taskId: `additional-${task.id}`,
+                clientNumber: "-",
+                clientName: "-",
+                subject: "-",
+                specificProcess: "-",
+                taskLabel: task.task,
+                typeLabel: completed ? "Completada" : highlighted ? "Vencida / incompleta" : "Tarea adicional",
+                displayDate,
+                originLabel: "Tareas adicionales",
+                originPath: `/app/tasks/${slug}/adicionales`,
+                actionLabel: "Ir a adicionales",
+                highlighted
+            };
+        });
+    }
     function buildRows(member, timeframe) {
         return [
+            ...buildFinanceRows(timeframe),
+            ...buildAdditionalTaskRows(member, timeframe),
             ...buildTrackingRows(member, timeframe),
             ...buildTermVerificationRows(member, timeframe),
             ...buildExecutionMissingRows(member, timeframe)
@@ -603,9 +791,11 @@ export function TasksTeamPage() {
     if (modulesLoading || !module) {
         return (_jsx("section", { className: "page-stack tasks-team-page", children: _jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando equipo..." }) }) }));
     }
-    return (_jsxs("section", { className: "page-stack tasks-team-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate("/app/tasks"), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: module.label }) })] })] }), _jsx("p", { className: "muted", children: legacyConfig
-                            ? "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales."
-                            : "Espacio de tareas del equipo listo para configuracion posterior." }), legacyConfig ? (_jsxs("div", { className: "tasks-legacy-toolbar", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`), children: "Manager de tareas" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos`), children: "Terminos" }), legacyConfig.hasRecurringTerms ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`), children: "Terminos recurrentes" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/adicionales`), children: "Tareas adicionales" })] })) : null] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Vista diaria del equipo" }), _jsxs("span", { children: [dashboardMembers.length, " integrantes"] })] }), _jsx("p", { className: "muted tasks-team-board-copy", children: "Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, ma\u00F1ana y posteriores. El rojo indica faltantes, terminos sin verificacion o fechas vencidas." }), _jsxs("div", { className: "tasks-team-member-list", children: [dashboardMembers.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay integrantes activos asignados a este equipo." })) : null, dashboardMembers.map((member) => {
+    return (_jsxs("section", { className: "page-stack tasks-team-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate("/app/tasks"), children: "Volver" }), _jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", style: { color: module.color }, children: module.icon }), _jsx("div", { children: _jsx("h2", { children: module.label }) })] })] }), _jsx("p", { className: "muted", children: module.moduleId === FINANCE_TASK_MODULE_ID
+                            ? "Dashboard de tareas del equipo de Finanzas alimentado por la tabla de Finanzas y tareas adicionales."
+                            : legacyConfig
+                                ? "Operacion de tareas por equipo con Manager de tareas, tablas de seguimiento, terminos y tareas adicionales."
+                                : "Espacio de tareas del equipo listo para configuracion posterior." }), legacyConfig || module.moduleId === FINANCE_TASK_MODULE_ID ? (_jsxs("div", { className: "tasks-legacy-toolbar", children: [legacyConfig ? (_jsxs(_Fragment, { children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/distribuidor`), children: "Manager de tareas" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos`), children: "Terminos" }), legacyConfig.hasRecurringTerms ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/terminos-recurrentes`), children: "Terminos recurrentes" })) : null] })) : null, module.moduleId === FINANCE_TASK_MODULE_ID ? (_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate("/app/finances"), children: "Tabla de Finanzas" })) : null, _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${module.slug}/adicionales`), children: "Tareas adicionales" })] })) : null] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Vista diaria del equipo" }), _jsxs("span", { children: [dashboardMembers.length, " integrantes"] })] }), _jsx("p", { className: "muted tasks-team-board-copy", children: "Cada integrante conserva sus ventanas de trabajo: realizadas, hoy, ma\u00F1ana y posteriores. El rojo indica faltantes, terminos sin verificacion o fechas vencidas." }), _jsxs("div", { className: "tasks-team-member-list", children: [dashboardMembers.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay integrantes activos asignados a este equipo." })) : null, dashboardMembers.map((member) => {
                                 const isExpanded = expandedView?.memberId === member.id;
                                 const rows = isExpanded && expandedView ? buildRows(member, expandedView.timeframe) : [];
                                 return (_jsxs("article", { className: "tasks-team-member-card", children: [_jsxs("div", { className: "tasks-team-member-head", children: [_jsx("h3", { children: member.name }), _jsx("span", { children: member.id })] }), _jsx("div", { className: "tasks-team-timeframes", children: TIMEFRAMES.map((timeframe) => {
@@ -614,5 +804,5 @@ export function TasksTeamPage() {
                                                         ? null
                                                         : { memberId: member.id, timeframe: timeframe.id }), children: timeframe.label }, timeframe.id));
                                             }) }), isExpanded && expandedView ? (_jsxs("div", { className: "tasks-team-timeframe-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h3", { children: TIMEFRAMES.find((timeframe) => timeframe.id === expandedView.timeframe)?.label ?? "Detalle" }), _jsxs("span", { children: [rows.length, " tareas"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table tasks-dashboard-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "No. Cliente" }), _jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "Tarea" }), _jsx("th", { children: "Tipo" }), _jsx("th", { children: "Fecha" }), _jsx("th", { children: "Tabla de Origen" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: 9, className: "centered-inline-message", children: "Cargando tareas..." }) })) : rows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: 9, className: "centered-inline-message", children: "No hay tareas en esta categoria." }) })) : (rows.map((row) => (_jsxs("tr", { className: row.highlighted ? "tasks-dashboard-row-overdue" : undefined, children: [_jsx("td", { children: row.clientNumber || "-" }), _jsx("td", { children: row.clientName }), _jsx("td", { children: row.subject }), _jsx("td", { children: row.specificProcess }), _jsx("td", { className: row.highlighted ? "tasks-dashboard-title-overdue" : undefined, children: row.taskLabel }), _jsx("td", { children: _jsx("span", { className: `tasks-dashboard-type-pill ${row.typeLabel === "Completada" ? "is-completed" : row.highlighted ? "is-overdue" : "is-pending"}`, children: row.typeLabel }) }), _jsx("td", { children: row.displayDate || "-" }), _jsx("td", { children: row.originLabel }), _jsx("td", { children: _jsxs("div", { className: "tasks-dashboard-actions", children: [_jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(row.originPath), children: row.actionLabel }), row.secondaryActionPath ? (_jsx("button", { type: "button", className: "secondary-button matter-inline-button", onClick: () => navigate(row.secondaryActionPath ?? row.originPath), children: row.secondaryActionLabel ?? "Ir" })) : null] }) })] }, row.taskId)))) })] }) })] })) : null] }, member.id));
-                            })] })] }), legacyConfig ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Tablas de seguimiento" }), _jsxs("span", { children: [legacyConfig.tables.length, " tablas"] })] }), _jsx("div", { className: "tasks-table-card-grid", children: legacyConfig.tables.map((table) => (_jsxs("button", { type: "button", className: "tasks-table-card", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/${table.slug}`), children: [_jsx("strong", { children: table.title }), _jsx("span", { children: table.sourceTable })] }, table.slug))) })] })) : (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Submodulos" }), _jsx("span", { children: "0 configurados" })] }), _jsx("div", { className: "centered-inline-message", children: "Sin submodulos configurados." })] }))] }));
+                            })] })] }), legacyConfig ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Tablas de seguimiento" }), _jsxs("span", { children: [legacyConfig.tables.length, " tablas"] })] }), _jsx("div", { className: "tasks-table-card-grid", children: legacyConfig.tables.map((table) => (_jsxs("button", { type: "button", className: "tasks-table-card", onClick: () => navigate(`/app/tasks/${legacyConfig.slug}/${table.slug}`), children: [_jsx("strong", { children: table.title }), _jsx("span", { children: table.sourceTable })] }, table.slug))) })] })) : module.moduleId === FINANCE_TASK_MODULE_ID ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Fuentes de tareas" }), _jsx("span", { children: "2 fuentes" })] }), _jsxs("div", { className: "tasks-table-card-grid", children: [_jsxs("button", { type: "button", className: "tasks-table-card", onClick: () => navigate("/app/finances"), children: [_jsx("strong", { children: "Tabla de Finanzas" }), _jsx("span", { children: "Solo lectura en Tareas; se corrige desde Finanzas." })] }), _jsxs("button", { type: "button", className: "tasks-table-card", onClick: () => navigate(`/app/tasks/${module.slug}/adicionales`), children: [_jsx("strong", { children: "Tareas adicionales" }), _jsx("span", { children: "Alta y seguimiento manual del equipo." })] })] })] })) : (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Submodulos" }), _jsx("span", { children: "0 configurados" })] }), _jsx("div", { className: "centered-inline-message", children: "Sin submodulos configurados." })] }))] }));
 }

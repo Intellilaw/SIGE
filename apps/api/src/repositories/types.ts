@@ -5,6 +5,10 @@ import type {
   AccountingCfdiDocument,
   AccountingCfdiUploadInput,
   AccountingCfdiUploadResult,
+  AccountingCatalogXmlImportInput,
+  AccountingCatalogXmlImportResult,
+  AccountingCatalogXmlPreviewResult,
+  AccountingCatalogXmlUploadInput,
   AccountingCreateAccountInput,
   AccountingInitialBalanceInput,
   AccountingJournalEntry,
@@ -56,6 +60,8 @@ import type {
   QuoteTemplate,
   SalesDailyReport,
   SalesOverview,
+  SalesProduct,
+  SalesProductCreateInput,
   SalesProductId,
   SalesStrategy,
   SystemModuleSetting,
@@ -499,6 +505,7 @@ export interface GeneralExpenseUpdateRecord {
   paymentMethod?: GeneralExpense["paymentMethod"];
   bank?: GeneralExpense["bank"] | null;
   hasVat?: boolean;
+  hasWithholdings?: boolean;
   recurring?: boolean;
   approvedByEmrt?: boolean;
   paidByEmrtAt?: string | null;
@@ -616,6 +623,8 @@ export interface AccountingRepository {
   getOverview(year: number, month: number): Promise<AccountingOverview>;
   updateSettings(payload: AccountingSettingsInput): Promise<AccountingSettings>;
   initializeStandardCatalog(): Promise<AccountingAccount[]>;
+  previewCatalogXml(payload: AccountingCatalogXmlUploadInput): Promise<AccountingCatalogXmlPreviewResult>;
+  importCatalogXml(payload: AccountingCatalogXmlImportInput): Promise<AccountingCatalogXmlImportResult>;
   createAccount(payload: AccountingCreateAccountInput): Promise<AccountingAccount>;
   updateAccount(accountId: string, payload: Partial<AccountingCreateAccountInput> & { isActive?: boolean }): Promise<AccountingAccount>;
   createJournalEntry(payload: AccountingJournalEntryInput, actor?: { userId?: string; displayName?: string }): Promise<AccountingJournalEntry>;
@@ -744,6 +753,10 @@ export interface SalesWriteActor {
 export interface SalesRepository {
   getOverview(): Promise<SalesOverview>;
   listDailyReports(startDate: string, endDate: string): Promise<SalesDailyReport[]>;
+  createProduct(payload: SalesProductCreateInput, actor: SalesWriteActor): Promise<SalesProduct>;
+  archiveProduct(productId: SalesProductId): Promise<SalesProduct>;
+  reactivateProduct(productId: SalesProductId): Promise<SalesProduct>;
+  deleteProduct(productId: SalesProductId): Promise<void>;
   upsertStrategy(productId: SalesProductId, content: string, actor: SalesWriteActor): Promise<SalesStrategy>;
   upsertDailyReport(
     productId: SalesProductId,

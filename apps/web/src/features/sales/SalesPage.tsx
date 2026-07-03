@@ -5,6 +5,7 @@ import {
   type SalesDailyReportStore,
   type SalesOverview,
   type SalesProduct,
+  type SalesProductCreateInput,
   type SalesProductId,
   type SalesStrategy,
   type SalesTask,
@@ -17,38 +18,89 @@ import intellilawPldLogo from "../../assets/legalflow-intellilaw-pld-logo.png";
 import minkaLogo from "../../assets/legalflow-minka-logo.png";
 import rematesLogo from "../../assets/legalflow-subastas-logo.png";
 import startLogo from "../../assets/start-logo.jpg";
-import { apiGet, apiPatch } from "../../api/http-client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 
 type SalesProductView = SalesProduct & {
   logoSrc?: string;
 };
 
-const SALES_PRODUCT_LOGOS: Partial<Record<SalesProductId, string>> = {
+type SalesProductFormState = {
+  name: string;
+  tagline: string;
+  accentColor: string;
+  defaultStrategy: string;
+  defaultDailyReport: string;
+  logoFile: File | null;
+};
+
+const STATIC_SALES_PRODUCT_LOGOS: Partial<Record<SalesProductId, string>> = {
   start: startLogo,
   pld: intellilawPldLogo,
   remates: rematesLogo,
   minka: minkaLogo
 };
 
-const SALES_PRODUCTS: SalesProductView[] = LEGALFLOW_SALES_PRODUCTS.map((product) => ({
-  ...product,
-  logoSrc: SALES_PRODUCT_LOGOS[product.id]
-}));
-
-const SALES_PRODUCT_BY_ID = SALES_PRODUCTS.reduce((lookup, product) => {
-  lookup[product.id] = product;
-  return lookup;
-}, {} as Record<SalesProductId, SalesProductView>);
+const DEFAULT_SALES_PRODUCTS: SalesProductView[] = LEGALFLOW_SALES_PRODUCTS.map(attachProductLogo);
 
 const SALES_TIMEFRAMES: Array<{ id: SalesTimeframe; label: string; colorClass: string }> = [
   { id: "anteriores", label: "Tareas realizadas", colorClass: "is-past" },
   { id: "hoy", label: "Tareas hoy", colorClass: "is-today" },
-  { id: "manana", label: "Tareas mañana", colorClass: "is-tomorrow" },
+  { id: "manana", label: "Tareas manana", colorClass: "is-tomorrow" },
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 
+const DEFAULT_PRODUCT_FORM: SalesProductFormState = {
+  name: "",
+  tagline: "",
+  accentColor: "#2563eb",
+  defaultStrategy: "",
+  defaultDailyReport: "",
+  logoFile: null
+};
+
 const SAVE_DEBOUNCE_MS = 650;
+
+function attachProductLogo(product: SalesProduct): SalesProductView {
+  return {
+    ...product,
+    logoSrc: product.logoDataUrl ?? STATIC_SALES_PRODUCT_LOGOS[product.id]
+  };
+}
+
+function buildProductLookup(products: SalesProductView[]) {
+  return products.reduce((lookup, product) => {
+    lookup[product.id] = product;
+    return lookup;
+  }, {} as Record<SalesProductId, SalesProductView>);
+}
+
+function buildEmptyDailyReportStore(products: SalesProduct[] = DEFAULT_SALES_PRODUCTS) {
+  return products.reduce((store, product) => {
+    store[product.id] = {};
+    return store;
+  }, {} as SalesDailyReportStore);
+}
+
+function normalizeOverview(overview: SalesOverview): SalesOverview {
+  return {
+    ...overview,
+    archivedProducts: overview.archivedProducts ?? [],
+    dailyReports: {
+      ...buildEmptyDailyReportStore(overview.products),
+      ...overview.dailyReports
+    }
+  };
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("No se pudo leer el logo."));
+    reader.readAsDataURL(file);
+  });
+}
 
 function getLocalDateInput(offset = 0) {
   const date = new Date();
@@ -135,11 +187,12 @@ function canViewSalesSuperadminSummary(user?: {
   return Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN" || user?.permissions?.includes("*"));
 }
 
-function buildEmptyDailyReportStore() {
-  return SALES_PRODUCTS.reduce((store, product) => {
-    store[product.id] = {};
-    return store;
-  }, {} as SalesDailyReportStore);
+function canManageSalesProducts(user?: {
+  role?: string;
+  legacyRole?: string;
+  permissions?: string[];
+} | null) {
+  return canViewSalesSuperadminSummary(user) || Boolean(user?.permissions?.includes("sales:write"));
 }
 
 function buildPendingStrategy(productId: SalesProductId, content: string): SalesStrategy {
@@ -186,43 +239,30 @@ export function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [savingMessage, setSavingMessage] = useState<string | null>(null);
+  const [showCreateProductForm, setShowCreateProductForm] = useState(false);
+  const [productForm, setProductForm] = useState<SalesProductFormState>(DEFAULT_PRODUCT_FORM);
   const strategyTimers = useRef<Partial<Record<SalesProductId, number>>>({});
   const reportTimers = useRef<Record<string, number>>({});
 
-  useEffect(() => {
-    let mounted = true;
+  async function refreshOverview(nextSelectedProductId?: SalesProductId) {
+    setLoading(true);
+    setErrorMessage(null);
 
-    async function loadOverview() {
-      setLoading(true);
-      setErrorMessage(null);
-
-      try {
-        const loaded = await apiGet<SalesOverview>("/sales/overview");
-        if (mounted) {
-          setOverview({
-            ...loaded,
-            dailyReports: {
-              ...buildEmptyDailyReportStore(),
-              ...loaded.dailyReports
-            }
-          });
-        }
-      } catch (error) {
-        if (mounted) {
-          setErrorMessage(error instanceof Error ? error.message : "No se pudo cargar ventas.");
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+    try {
+      const loaded = normalizeOverview(await apiGet<SalesOverview>("/sales/overview"));
+      setOverview(loaded);
+      if (nextSelectedProductId) {
+        setSelectedProductId(nextSelectedProductId);
       }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo cargar ventas.");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    void loadOverview();
-
-    return () => {
-      mounted = false;
-    };
+  useEffect(() => {
+    void refreshOverview();
   }, []);
 
   useEffect(() => () => {
@@ -234,28 +274,58 @@ export function SalesPage() {
     Object.values(reportTimers.current).forEach((timer) => window.clearTimeout(timer));
   }, []);
 
-  const selectedProduct = SALES_PRODUCT_BY_ID[selectedProductId];
+  const salesProducts = useMemo(
+    () => (overview?.products ?? DEFAULT_SALES_PRODUCTS).map(attachProductLogo),
+    [overview]
+  );
+  const archivedProducts = useMemo(
+    () => (overview?.archivedProducts ?? []).map(attachProductLogo),
+    [overview]
+  );
+  const allProducts = useMemo(() => [...salesProducts, ...archivedProducts], [salesProducts, archivedProducts]);
+  const productById = useMemo(() => buildProductLookup(allProducts), [allProducts]);
+  const selectedProduct = productById[selectedProductId] ?? salesProducts[0] ?? null;
+
+  useEffect(() => {
+    if (!overview || selectedProduct?.status === "active") {
+      return;
+    }
+
+    const nextProductId = salesProducts[0]?.id;
+    if (nextProductId && nextProductId !== selectedProductId) {
+      setSelectedProductId(nextProductId);
+    }
+  }, [overview, salesProducts, selectedProduct, selectedProductId]);
+
   const today = getLocalDateInput();
   const salesTasks = overview?.tasks ?? [];
   const salesResponsibles = overview?.responsibles ?? [];
   const taskSeeds = overview?.taskSeeds ?? [];
-  const strategies = overview?.strategies ?? SALES_PRODUCTS.reduce((result, product) => {
+  const strategies = overview?.strategies ?? salesProducts.reduce((result, product) => {
     result[product.id] = buildPendingStrategy(product.id, product.defaultStrategy);
     return result;
   }, {} as SalesOverview["strategies"]);
-  const dailyReports = overview?.dailyReports ?? buildEmptyDailyReportStore();
+  const dailyReports = overview?.dailyReports ?? buildEmptyDailyReportStore(salesProducts);
   const openTaskCount = salesTasks.filter((task) => task.status !== "concluida").length;
   const salesPeriodicities = [...new Set(taskSeeds.map((task) => task.periodicity))];
   const dashboardProductCount = new Set(taskSeeds.map((task) => task.productId)).size;
   const canViewSuperadminSummary = canViewSalesSuperadminSummary(user);
-  const selectedProductTasks = salesTasks.filter((task) => task.productId === selectedProductId);
+  const canManageProducts = canManageSalesProducts(user);
+  const selectedProductTasks = selectedProduct ? salesTasks.filter((task) => task.productId === selectedProduct.id) : [];
   const selectedCompletedTasks = selectedProductTasks.filter(
     (task) => task.status === "concluida" && task.dueDate === selectedReportDate
   );
-  const selectedDailyReport = dailyReports[selectedProduct.id]?.[selectedReportDate] ?? "";
-  const selectedStrategy = strategies[selectedProduct.id]?.content ?? selectedProduct.defaultStrategy;
+  const selectedDailyReport = selectedProduct ? dailyReports[selectedProduct.id]?.[selectedReportDate] ?? "" : "";
+  const selectedStrategy = selectedProduct ? strategies[selectedProduct.id]?.content ?? selectedProduct.defaultStrategy : "";
 
   const responsibleById = useMemo(() => new Map(salesResponsibles.map((responsible) => [responsible.id, responsible])), [salesResponsibles]);
+
+  function updateProductForm(field: keyof SalesProductFormState, value: string | File | null) {
+    setProductForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
 
   function updateOverviewWithStrategy(productId: SalesProductId, content: string) {
     setOverview((current) => current ? applyStrategy(current, {
@@ -280,7 +350,7 @@ export function SalesPage() {
   async function persistStrategy(productId: SalesProductId, content: string) {
     setSavingMessage("Guardando estrategia...");
     try {
-      const saved = await apiPatch<SalesStrategy>(`/sales/strategies/${productId}`, { content });
+      const saved = await apiPatch<SalesStrategy>(`/sales/strategies/${encodeURIComponent(productId)}`, { content });
       setOverview((current) => current ? applyStrategy(current, saved) : current);
       setSavingMessage(null);
     } catch (error) {
@@ -292,7 +362,7 @@ export function SalesPage() {
   async function persistDailyReport(productId: SalesProductId, date: string, content: string) {
     setSavingMessage("Guardando reporte diario...");
     try {
-      const saved = await apiPatch<SalesDailyReport>(`/sales/daily-reports/${productId}/${date}`, { content });
+      const saved = await apiPatch<SalesDailyReport>(`/sales/daily-reports/${encodeURIComponent(productId)}/${date}`, { content });
       setOverview((current) => current ? applyDailyReport(current, saved) : current);
       setSavingMessage(null);
     } catch (error) {
@@ -320,6 +390,86 @@ export function SalesPage() {
     reportTimers.current[key] = window.setTimeout(() => {
       void persistDailyReport(productId, date, value);
     }, SAVE_DEBOUNCE_MS);
+  }
+
+  async function handleCreateProduct(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingMessage("Creando producto...");
+    setErrorMessage(null);
+
+    try {
+      const logoBase64 = productForm.logoFile ? await readFileAsDataUrl(productForm.logoFile) : undefined;
+      const payload: SalesProductCreateInput = {
+        name: productForm.name,
+        tagline: productForm.tagline,
+        accentColor: productForm.accentColor,
+        logoAlt: productForm.name,
+        logoOriginalFileName: productForm.logoFile?.name,
+        logoMimeType: productForm.logoFile?.type,
+        logoBase64,
+        defaultStrategy: productForm.defaultStrategy,
+        defaultDailyReport: productForm.defaultDailyReport
+      };
+      const created = await apiPost<SalesProduct>("/sales/products", payload);
+      setProductForm(DEFAULT_PRODUCT_FORM);
+      setShowCreateProductForm(false);
+      setSavingMessage(null);
+      await refreshOverview(created.id);
+    } catch (error) {
+      setSavingMessage(null);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo dar de alta el producto.");
+    }
+  }
+
+  async function handleArchiveProduct(product: SalesProductView) {
+    if (!window.confirm(`Archivar ${product.name}? Sus funciones y tareas quedaran suspendidas.`)) {
+      return;
+    }
+
+    setSavingMessage("Archivando producto...");
+    setErrorMessage(null);
+
+    try {
+      await apiPatch<SalesProduct>(`/sales/products/${encodeURIComponent(product.id)}/archive`, {});
+      const fallbackProductId = salesProducts.find((candidate) => candidate.id !== product.id)?.id;
+      setSavingMessage(null);
+      await refreshOverview(fallbackProductId);
+    } catch (error) {
+      setSavingMessage(null);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo archivar el producto.");
+    }
+  }
+
+  async function handleReactivateProduct(product: SalesProductView) {
+    setSavingMessage("Reactivando producto...");
+    setErrorMessage(null);
+
+    try {
+      const reactivated = await apiPatch<SalesProduct>(`/sales/products/${encodeURIComponent(product.id)}/reactivate`, {});
+      setSavingMessage(null);
+      await refreshOverview(reactivated.id);
+    } catch (error) {
+      setSavingMessage(null);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo reactivar el producto.");
+    }
+  }
+
+  async function handleDeleteProduct(product: SalesProductView) {
+    if (!window.confirm(`Eliminar definitivamente ${product.name}? Se borraran su estrategia y reportes diarios de este tenant.`)) {
+      return;
+    }
+
+    setSavingMessage("Eliminando producto...");
+    setErrorMessage(null);
+
+    try {
+      await apiDelete(`/sales/products/${encodeURIComponent(product.id)}`);
+      setSavingMessage(null);
+      await refreshOverview();
+    } catch (error) {
+      setSavingMessage(null);
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo eliminar el producto.");
+    }
   }
 
   function buildRows(responsibleId: string, timeframe: SalesTimeframe) {
@@ -418,7 +568,11 @@ export function SalesPage() {
                             </tr>
                           ) : (
                             rows.map((task) => {
-                              const product = SALES_PRODUCT_BY_ID[task.productId];
+                              const product = productById[task.productId];
+                              if (!product) {
+                                return null;
+                              }
+
                               const highlighted = task.status !== "concluida" && task.dueDate <= today;
 
                               return (
@@ -501,7 +655,7 @@ export function SalesPage() {
               </thead>
               <tbody>
                 {taskSeeds.map((task) => {
-                  const product = SALES_PRODUCT_BY_ID[task.productId];
+                  const product = productById[task.productId];
                   const responsible = responsibleById.get(task.responsibleId);
 
                   return (
@@ -509,8 +663,8 @@ export function SalesPage() {
                       <td>{task.company}</td>
                       <td>
                         <span className="sales-product-cell">
-                          <span className="sales-product-dot" style={{ background: product.accentColor }} />
-                          {product.name}
+                          <span className="sales-product-dot" style={{ background: product?.accentColor ?? "#2563eb" }} />
+                          {product?.name ?? task.productId}
                         </span>
                       </td>
                       <td>{task.task}</td>
@@ -530,111 +684,243 @@ export function SalesPage() {
         </section>
       ) : null}
 
-      <section className="panel">
+      <section className="panel sales-products-panel">
         <div className="panel-header">
-          <h2>Productos</h2>
-          <span>{SALES_PRODUCTS.length} productos</span>
+          <div>
+            <h2>Productos</h2>
+            <span>{salesProducts.length} productos activos</span>
+          </div>
+          {canManageProducts ? (
+            <button type="button" className="primary-button" onClick={() => setShowCreateProductForm((current) => !current)}>
+              Dar de alta producto
+            </button>
+          ) : null}
         </div>
 
-        <div className="sales-product-grid">
-          {SALES_PRODUCTS.map((product) => {
-            const productOpenTasks = salesTasks.filter((task) => task.productId === product.id && task.status !== "concluida").length;
-            const isSelected = selectedProductId === product.id;
-
-            return (
-              <button
-                key={product.id}
-                type="button"
-                className={`sales-product-card ${isSelected ? "is-selected" : ""}`}
-                aria-pressed={isSelected}
-                onClick={() => setSelectedProductId(product.id)}
-              >
-                <span className="sales-product-logo-shell">
-                  {product.logoSrc ? (
-                    <img src={product.logoSrc} alt={product.logoAlt} />
-                  ) : (
-                    <span className="sales-product-monogram" style={{ color: product.accentColor }}>
-                      {product.initials}
-                    </span>
-                  )}
-                </span>
-                <span className="sales-product-card-copy">
-                  <strong>{product.name}</strong>
-                  <span>{product.tagline}</span>
-                  <span className="sales-product-task-summary">{productOpenTasks} tareas abiertas</span>
-                </span>
+        {showCreateProductForm && canManageProducts ? (
+          <form className="sales-product-form" onSubmit={handleCreateProduct}>
+            <div className="sales-product-form-grid">
+              <label className="form-field">
+                <span>Nombre</span>
+                <input
+                  value={productForm.name}
+                  onChange={(event) => updateProductForm("name", event.target.value)}
+                  required
+                />
+              </label>
+              <label className="form-field">
+                <span>Color</span>
+                <input
+                  type="color"
+                  value={productForm.accentColor}
+                  onChange={(event) => updateProductForm("accentColor", event.target.value)}
+                />
+              </label>
+              <label className="form-field sales-product-form-wide">
+                <span>Descripcion breve</span>
+                <input
+                  value={productForm.tagline}
+                  onChange={(event) => updateProductForm("tagline", event.target.value)}
+                />
+              </label>
+              <label className="form-field sales-product-form-wide">
+                <span>Logo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => updateProductForm("logoFile", event.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label className="form-field sales-copy-field">
+                <span>Estrategia inicial</span>
+                <textarea
+                  value={productForm.defaultStrategy}
+                  onChange={(event) => updateProductForm("defaultStrategy", event.target.value)}
+                />
+              </label>
+              <label className="form-field sales-copy-field">
+                <span>Guia de reporte diario</span>
+                <textarea
+                  value={productForm.defaultDailyReport}
+                  onChange={(event) => updateProductForm("defaultDailyReport", event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="form-actions">
+              <button type="button" className="secondary-button" onClick={() => {
+                setProductForm(DEFAULT_PRODUCT_FORM);
+                setShowCreateProductForm(false);
+              }}>
+                Cancelar
               </button>
-            );
-          })}
+              <button type="submit" className="primary-button">
+                Crear producto
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        <div className="sales-product-grid">
+          {salesProducts.length === 0 ? (
+            <p className="centered-inline-message sales-empty-report">No hay productos activos.</p>
+          ) : (
+            salesProducts.map((product) => {
+              const productOpenTasks = salesTasks.filter((task) => task.productId === product.id && task.status !== "concluida").length;
+              const isSelected = selectedProduct?.id === product.id;
+
+              return (
+                <article key={product.id} className={`sales-product-card ${isSelected ? "is-selected" : ""}`}>
+                  <button
+                    type="button"
+                    className="sales-product-card-main"
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedProductId(product.id)}
+                  >
+                    <span className="sales-product-logo-shell">
+                      {product.logoSrc ? (
+                        <img src={product.logoSrc} alt={product.logoAlt} />
+                      ) : (
+                        <span className="sales-product-monogram" style={{ color: product.accentColor }}>
+                          {product.initials}
+                        </span>
+                      )}
+                    </span>
+                    <span className="sales-product-card-copy">
+                      <strong>{product.name}</strong>
+                      <span>{product.tagline}</span>
+                      <span className="sales-product-task-summary">{productOpenTasks} tareas abiertas</span>
+                    </span>
+                  </button>
+                  {canManageProducts ? (
+                    <div className="sales-product-card-actions">
+                      <button type="button" className="secondary-button matter-inline-button" onClick={() => void handleArchiveProduct(product)}>
+                        Archivar
+                      </button>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })
+          )}
         </div>
       </section>
 
-      <section className="sales-product-detail-grid" aria-label={`Detalle de ${selectedProduct.name}`}>
-        <article className="panel sales-product-panel">
-          <div className="sales-selected-product-head">
-            <span className="sales-selected-product-logo" style={{ borderColor: selectedProduct.accentColor }}>
-              {selectedProduct.logoSrc ? (
-                <img src={selectedProduct.logoSrc} alt={selectedProduct.logoAlt} />
-              ) : (
-                <span style={{ color: selectedProduct.accentColor }}>{selectedProduct.initials}</span>
-              )}
-            </span>
+      {archivedProducts.length > 0 ? (
+        <section className="panel sales-products-panel">
+          <div className="panel-header">
             <div>
-              <p className="eyebrow">Producto</p>
-              <h2>{selectedProduct.name}</h2>
-              <p className="muted">{selectedProduct.tagline}</p>
+              <h2>Archivo</h2>
+              <span>{archivedProducts.length} productos archivados</span>
             </div>
           </div>
 
-          <label className="form-field sales-copy-field">
-            <span>Estrategia general de marketing</span>
-            <textarea
-              value={selectedStrategy}
-              onChange={(event) => updateStrategy(selectedProduct.id, event.target.value)}
-            />
-          </label>
-        </article>
-
-        <article className="panel sales-product-panel">
-          <div className="panel-header">
-            <h2>Reporte diario de tareas realizadas</h2>
-            <span>{formatDateInput(selectedReportDate)}</span>
-          </div>
-
-          <label className="form-field sales-date-field">
-            <span>Fecha del reporte</span>
-            <input
-              type="date"
-              value={selectedReportDate}
-              max={today}
-              onChange={(event) => setSelectedReportDate(event.target.value)}
-            />
-          </label>
-
-          <label className="form-field sales-copy-field">
-            <span>Bitacora diaria</span>
-            <textarea
-              value={selectedDailyReport}
-              placeholder={selectedProduct.defaultDailyReport}
-              onChange={(event) => updateDailyReport(selectedProduct.id, selectedReportDate, event.target.value)}
-            />
-          </label>
-
-          <div className="sales-report-list">
-            {selectedCompletedTasks.length === 0 ? (
-              <p className="centered-inline-message sales-empty-report">No hay tareas realizadas registradas para este producto.</p>
-            ) : (
-              selectedCompletedTasks.map((task) => (
-                <div key={task.id} className="sales-report-entry">
-                  <strong>{task.task}</strong>
-                  <span>{task.channel}</span>
-                  <small>{formatDateInput(task.dueDate)}</small>
+          <div className="sales-product-grid">
+            {archivedProducts.map((product) => (
+              <article key={product.id} className="sales-product-card is-archived">
+                <div className="sales-product-card-main">
+                  <span className="sales-product-logo-shell">
+                    {product.logoSrc ? (
+                      <img src={product.logoSrc} alt={product.logoAlt} />
+                    ) : (
+                      <span className="sales-product-monogram" style={{ color: product.accentColor }}>
+                        {product.initials}
+                      </span>
+                    )}
+                  </span>
+                  <span className="sales-product-card-copy">
+                    <strong>{product.name}</strong>
+                    <span>{product.tagline}</span>
+                    <span className="sales-product-task-summary is-archived">Archivado</span>
+                  </span>
                 </div>
-              ))
-            )}
+                {canManageProducts || canViewSuperadminSummary ? (
+                  <div className="sales-product-card-actions">
+                    {canManageProducts ? (
+                      <button type="button" className="secondary-button matter-inline-button" onClick={() => void handleReactivateProduct(product)}>
+                        Reactivar
+                      </button>
+                    ) : null}
+                    {canViewSuperadminSummary ? (
+                    <button type="button" className="danger-button matter-inline-button" onClick={() => void handleDeleteProduct(product)}>
+                      Eliminar
+                    </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </article>
+            ))}
           </div>
-        </article>
-      </section>
+        </section>
+      ) : null}
+
+      {selectedProduct ? (
+        <section className="sales-product-detail-grid" aria-label={`Detalle de ${selectedProduct.name}`}>
+          <article className="panel sales-product-panel">
+            <div className="sales-selected-product-head">
+              <span className="sales-selected-product-logo" style={{ borderColor: selectedProduct.accentColor }}>
+                {selectedProduct.logoSrc ? (
+                  <img src={selectedProduct.logoSrc} alt={selectedProduct.logoAlt} />
+                ) : (
+                  <span style={{ color: selectedProduct.accentColor }}>{selectedProduct.initials}</span>
+                )}
+              </span>
+              <div>
+                <p className="eyebrow">Producto</p>
+                <h2>{selectedProduct.name}</h2>
+                <p className="muted">{selectedProduct.tagline}</p>
+              </div>
+            </div>
+
+            <label className="form-field sales-copy-field">
+              <span>Estrategia general de marketing</span>
+              <textarea
+                value={selectedStrategy}
+                onChange={(event) => updateStrategy(selectedProduct.id, event.target.value)}
+              />
+            </label>
+          </article>
+
+          <article className="panel sales-product-panel">
+            <div className="panel-header">
+              <h2>Reporte diario de tareas realizadas</h2>
+              <span>{formatDateInput(selectedReportDate)}</span>
+            </div>
+
+            <label className="form-field sales-date-field">
+              <span>Fecha del reporte</span>
+              <input
+                type="date"
+                value={selectedReportDate}
+                max={today}
+                onChange={(event) => setSelectedReportDate(event.target.value)}
+              />
+            </label>
+
+            <label className="form-field sales-copy-field">
+              <span>Bitacora diaria</span>
+              <textarea
+                value={selectedDailyReport}
+                placeholder={selectedProduct.defaultDailyReport}
+                onChange={(event) => updateDailyReport(selectedProduct.id, selectedReportDate, event.target.value)}
+              />
+            </label>
+
+            <div className="sales-report-list">
+              {selectedCompletedTasks.length === 0 ? (
+                <p className="centered-inline-message sales-empty-report">No hay tareas realizadas registradas para este producto.</p>
+              ) : (
+                selectedCompletedTasks.map((task) => (
+                  <div key={task.id} className="sales-report-entry">
+                    <strong>{task.task}</strong>
+                    <span>{task.channel}</span>
+                    <small>{formatDateInput(task.dueDate)}</small>
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+        </section>
+      ) : null}
     </section>
   );
 }

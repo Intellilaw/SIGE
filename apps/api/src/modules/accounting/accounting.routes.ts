@@ -58,6 +58,16 @@ const cfdiUploadSchema = z.object({
   })).min(1).max(200)
 });
 
+const catalogXmlUploadSchema = z.object({
+  originalFileName: z.string().min(1),
+  xmlBase64: z.string().min(1),
+  replaceActiveCatalog: z.boolean().optional()
+});
+
+const catalogXmlImportSchema = catalogXmlUploadSchema.extend({
+  confirm: z.literal(true)
+});
+
 const settingsSchema = z.object({
   companyRfc: z.string().nullable().optional(),
   legalName: z.string().nullable().optional()
@@ -91,6 +101,16 @@ export const accountingRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/accounting/catalog/standard", { preHandler: writeGuards }, async () => service.initializeStandardCatalog());
+
+  app.post("/accounting/catalog/xml/preview", { preHandler: writeGuards }, async (request) => {
+    const payload = catalogXmlUploadSchema.parse(request.body ?? {});
+    return service.previewCatalogXml(payload);
+  });
+
+  app.post("/accounting/catalog/xml/import", { preHandler: writeGuards }, async (request) => {
+    const payload = catalogXmlImportSchema.parse(request.body ?? {});
+    return service.importCatalogXml(payload);
+  });
 
   app.post("/accounting/accounts", { preHandler: writeGuards }, async (request) => {
     const payload = accountPayloadSchema.parse(request.body ?? {});

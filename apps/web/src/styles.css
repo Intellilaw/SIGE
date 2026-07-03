@@ -3574,6 +3574,12 @@ textarea {
   padding-left: 30px;
 }
 
+.general-expense-amount-options {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .general-expense-readonly-cell {
   min-height: 44px;
   display: flex;
@@ -3592,6 +3598,11 @@ textarea {
 }
 
 .general-expense-readonly-cell.is-payroll-total {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.general-expense-readonly-cell.is-net-payment {
   color: #0f766e;
   font-weight: 800;
 }
@@ -5092,9 +5103,8 @@ textarea {
 
 .sales-product-card {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 14px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   min-height: 142px;
   padding: 14px;
   border: 1px solid rgba(31, 41, 51, 0.1);
@@ -5102,7 +5112,7 @@ textarea {
   background: rgba(255, 255, 255, 0.88);
   color: #1f2933;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
@@ -5111,6 +5121,36 @@ textarea {
   transform: translateY(-2px);
   border-color: rgba(29, 78, 216, 0.3);
   box-shadow: 0 16px 34px rgba(31, 41, 51, 0.09);
+}
+
+.sales-product-card.is-archived {
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.sales-product-card-main {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+div.sales-product-card-main {
+  cursor: default;
+}
+
+.sales-product-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .sales-product-logo-shell {
@@ -5165,6 +5205,35 @@ textarea {
   color: #1d4ed8 !important;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.sales-product-task-summary.is-archived {
+  background: rgba(82, 96, 109, 0.12);
+  color: #52606d !important;
+}
+
+.sales-products-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.sales-product-form {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.sales-product-form-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 120px;
+  gap: 14px;
+}
+
+.sales-product-form-wide {
+  grid-column: 1 / -1;
 }
 
 .sales-product-detail-grid {
@@ -11639,7 +11708,8 @@ textarea {
 }
 
 @media (max-width: 960px) {
-  .sales-product-detail-grid {
+  .sales-product-detail-grid,
+  .sales-product-form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -11650,7 +11720,8 @@ textarea {
 }
 
 @media (max-width: 640px) {
-  .sales-product-card {
+  .sales-product-card,
+  .sales-product-card-main {
     grid-template-columns: 1fr;
   }
 
@@ -11713,6 +11784,85 @@ textarea {
 
 .accounting-span-two {
   grid-column: 1 / -1;
+}
+
+.accounting-catalog-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.accounting-inline-checkbox {
+  align-items: center;
+  color: #334155;
+  display: inline-flex;
+  font-size: 0.88rem;
+  font-weight: 800;
+  gap: 0.45rem;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.accounting-inline-checkbox input {
+  margin: 0;
+}
+
+.accounting-catalog-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  justify-content: space-between;
+  margin: 0.75rem 0 1rem;
+}
+
+.accounting-catalog-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.accounting-catalog-stats span,
+.accounting-preview-summary span {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  display: inline-flex;
+  gap: 0.4rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.accounting-catalog-stats strong,
+.accounting-preview-summary strong {
+  color: #0f172a;
+}
+
+.accounting-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.accounting-filter-tab {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #334155;
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 38px;
+  padding: 0.45rem 0.75rem;
+}
+
+.accounting-filter-tab.is-active {
+  background: #dbeafe;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
 }
 
 .accounting-compact-panel {
@@ -11787,6 +11937,64 @@ textarea {
   cursor: pointer;
 }
 
+.accounting-preview-block {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 0.85rem;
+  margin: 1rem 0;
+  padding-top: 1rem;
+}
+
+.accounting-preview-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  justify-content: space-between;
+}
+
+.accounting-preview-head h3 {
+  color: #0f172a;
+  font-size: 1rem;
+  margin: 0 0 0.2rem;
+}
+
+.accounting-preview-head span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.accounting-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+
+.accounting-preview-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.accounting-preview-summary span {
+  justify-content: space-between;
+}
+
+.accounting-preview-summary .is-danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b42318;
+}
+
+.accounting-preview-table {
+  min-width: 960px;
+}
+
+.accounting-preview-error-row td {
+  background: #fef2f2;
+}
+
 .accounting-pending-summary {
   display: grid;
   grid-template-columns: auto 1fr auto 1fr auto 1fr;
@@ -11843,7 +12051,14 @@ textarea {
   .accounting-grid-two,
   .accounting-form-grid-wide,
   .accounting-entry-line,
+  .accounting-preview-summary,
   .accounting-xml-grid {
     grid-template-columns: 1fr;
+  }
+
+  .accounting-catalog-actions,
+  .accounting-filter-tabs,
+  .accounting-preview-actions {
+    justify-content: flex-start;
   }
 }

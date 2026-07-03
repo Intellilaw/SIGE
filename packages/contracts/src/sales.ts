@@ -1,8 +1,9 @@
-export type SalesProductId = "start" | "pld" | "remates" | "minka";
+export type SalesProductId = string;
 export type SalesTimeframe = "anteriores" | "hoy" | "manana" | "posteriores";
 export type SalesTaskStatus = "pendiente" | "en_proceso" | "concluida";
 export type SalesTaskPriority = "alta" | "media" | "normal";
 export type SalesCompany = "LegalFlow";
+export type SalesProductStatus = "active" | "archived";
 
 export interface SalesProduct {
   id: SalesProductId;
@@ -11,6 +12,25 @@ export interface SalesProduct {
   initials: string;
   accentColor: string;
   logoAlt: string;
+  logoDataUrl?: string;
+  logoMimeType?: string;
+  status: SalesProductStatus;
+  archivedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  createdByName?: string;
+  defaultStrategy: string;
+  defaultDailyReport: string;
+}
+
+export interface SalesProductCreateInput {
+  name: string;
+  tagline: string;
+  accentColor?: string;
+  logoAlt?: string;
+  logoOriginalFileName?: string;
+  logoMimeType?: string;
+  logoBase64?: string;
   defaultStrategy: string;
   defaultDailyReport: string;
 }
@@ -59,6 +79,7 @@ export type SalesDailyReportStore = Record<SalesProductId, Record<string, string
 
 export interface SalesOverview {
   products: SalesProduct[];
+  archivedProducts: SalesProduct[];
   responsibles: SalesResponsible[];
   taskSeeds: SalesTaskSeed[];
   tasks: SalesTask[];
@@ -77,6 +98,7 @@ export const LEGALFLOW_SALES_PRODUCTS: SalesProduct[] = [
     initials: "ST",
     accentColor: "#2563eb",
     logoAlt: "Start by LegalFlow",
+    status: "active",
     defaultStrategy:
       "Delimitar el mensaje de entrada de Start: explicar el beneficio concreto, el tipo de cliente ideal, los canales prioritarios y la oferta inicial que debe convertirse en llamada comercial.",
     defaultDailyReport:
@@ -89,6 +111,7 @@ export const LEGALFLOW_SALES_PRODUCTS: SalesProduct[] = [
     initials: "PLD",
     accentColor: "#2563eb",
     logoAlt: "Intellilaw PLD by LegalFlow",
+    status: "active",
     defaultStrategy:
       "Delimitar segmentos regulados, dolores por auditoria y cumplimiento, argumentos de confianza, objeciones frecuentes y ruta de demostracion de Intellilaw PLD.",
     defaultDailyReport:
@@ -101,6 +124,7 @@ export const LEGALFLOW_SALES_PRODUCTS: SalesProduct[] = [
     initials: "RM",
     accentColor: "#1d4ed8",
     logoAlt: "Remates Inmobiliarios Mexico by LegalFlow",
+    status: "active",
     defaultStrategy:
       "Delimitar inventario objetivo, perfil de inversionista, mensajes de oportunidad, reglas de calificacion de leads y cadencia de seguimiento.",
     defaultDailyReport:
@@ -113,6 +137,7 @@ export const LEGALFLOW_SALES_PRODUCTS: SalesProduct[] = [
     initials: "MK",
     accentColor: "#6d28d9",
     logoAlt: "Minka by LegalFlow",
+    status: "active",
     defaultStrategy:
       "Delimitar casos de uso contractuales, promesas de eficiencia, perfil de usuarios juridicos, mensajes de confianza y secuencia de demostracion para Minka.",
     defaultDailyReport:

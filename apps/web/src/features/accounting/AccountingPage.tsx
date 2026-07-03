@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   AccountingAccount,
   AccountingAutomationResult,
+  AccountingCatalogXmlImportResult,
+  AccountingCatalogXmlPreviewResult,
   AccountingCfdiUploadResult,
   AccountingCreateAccountInput,
   AccountingJournalEntryInput,
@@ -37,6 +39,7 @@ const XML_FORMATS: Array<{ value: AccountingXmlExportResult["format"]; label: st
 ];
 
 type AccountingTab = "summary" | "catalog" | "entries" | "cfdi" | "reports" | "sat";
+type CatalogVisibility = "ACTIVE" | "ALL" | "INACTIVE" | "MISSING_SAT";
 
 interface JournalLineDraft {
   id: string;
@@ -103,6 +106,19 @@ function getActiveAccounts(accounts: AccountingAccount[]) {
   return accounts.filter((account) => account.isActive);
 }
 
+function getCatalogActionLabel(action: AccountingCatalogXmlPreviewResult["accounts"][number]["action"]) {
+  if (action === "CREATE") {
+    return "Crear";
+  }
+  if (action === "UPDATE") {
+    return "Actualizar";
+  }
+  if (action === "UNCHANGED") {
+    return "Sin cambios";
+  }
+  return "Error";
+}
+
 export function AccountingPage() {
   const { user } = useAuth();
   const now = new Date();
@@ -122,6 +138,10 @@ export function AccountingPage() {
     nature: "DEBIT",
     satGroupingCode: ""
   });
+  const [catalogVisibility, setCatalogVisibility] = useState<CatalogVisibility>("ACTIVE");
+  const [replaceActiveCatalog, setReplaceActiveCatalog] = useState(false);
+  const [catalogXmlPayload, setCatalogXmlPayload] = useState<{ originalFileName: string; xmlBase64: string } | null>(null);
+  const [catalogXmlPreview, setCatalogXmlPreview] = useState<AccountingCatalogXmlPreviewResult | null>(null);
   const [openingDraft, setOpeningDraft] = useState({
     accountId: "",
     debitMxn: "",
@@ -196,6 +216,59 @@ export function AccountingPage() {
     await runAction(async () => {
       await apiPost("/accounting/catalog/standard", {});
     }, "Catalogo estandar inicializado.");
+  }
+
+  async function previewCatalogXml(files: FileList | null) {
+    if (!canWrite || !files || files.length === 0) {
+      return;
+    }
+
+    const file = files[0];
+    setBusy(true);
+    setErrorMessage(null);
+    setMessage(null);
+
+    try {
+      const xmlBase64 = await readFileAsBase64(file);
+      const result = await apiPost<AccountingCatalogXmlPreviewResult>("/accounting/catalog/xml/preview", {
+        originalFileName: file.name,
+        xmlBase64,
+        replaceActiveCatalog
+      });
+      setCatalogXmlPayload({ originalFileName: file.name, xmlBase64 });
+      setCatalogXmlPreview(result);
+      setMessage(`Vista previa lista: ${result.summary.create} nuevas, ${result.summary.update} por actualizar, ${result.summary.errors} con error.`);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importCatalogXml() {
+    if (!canWrite || !catalogXmlPayload || !catalogXmlPreview) {
+      return;
+    }
+
+    setBusy(true);
+    setErrorMessage(null);
+    setMessage(null);
+
+    try {
+      const result = await apiPost<AccountingCatalogXmlImportResult>("/accounting/catalog/xml/import", {
+        ...catalogXmlPayload,
+        replaceActiveCatalog,
+        confirm: true
+      });
+      setCatalogXmlPayload(null);
+      setCatalogXmlPreview(null);
+      setMessage(`Catalogo importado: ${result.preview.summary.create} creadas, ${result.preview.summary.update} actualizadas, ${result.deactivated} desactivadas.`);
+      await loadOverview();
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createAccount() {
@@ -293,6 +366,28 @@ export function AccountingPage() {
   }
 
   const accounts = useMemo(() => getActiveAccounts(overview?.accounts ?? []), [overview]);
+  const catalogAccounts = useMemo(() => {
+    const allAccounts = overview?.accounts ?? [];
+    if (catalogVisibility === "ACTIVE") {
+      return allAccounts.filter((account) => account.isActive);
+    }
+    if (catalogVisibility === "INACTIVE") {
+      return allAccounts.filter((account) => !account.isActive);
+    }
+    if (catalogVisibility === "MISSING_SAT") {
+      return allAccounts.filter((account) => account.isActive && !account.satGroupingCode);
+    }
+    return allAccounts;
+  }, [catalogVisibility, overview]);
+  const catalogStats = useMemo(() => {
+    const allAccounts = overview?.accounts ?? [];
+    return {
+      total: allAccounts.length,
+      active: allAccounts.filter((account) => account.isActive).length,
+      inactive: allAccounts.filter((account) => !account.isActive).length,
+      missingSat: allAccounts.filter((account) => account.isActive && !account.satGroupingCode).length
+    };
+  }, [overview]);
   const pendingBySeverity = useMemo(() => {
     const pending = overview?.pendingItems ?? [];
     return {
@@ -444,9 +539,61 @@ export function AccountingPage() {
         <section className="panel">
           <div className="panel-header">
             <h2>Catalogo de cuentas</h2>
-            <button className="secondary-button" type="button" onClick={() => void initializeCatalog()} disabled={!canWrite || busy}>
-              Inicializar estandar
-            </button>
+            <div className="accounting-catalog-actions">
+              <label className="accounting-inline-checkbox">
+                <input
+                  type="checkbox"
+                  checked={replaceActiveCatalog}
+                  onChange={(event) => {
+                    setReplaceActiveCatalog(event.target.checked);
+                    setCatalogXmlPreview(null);
+                    setCatalogXmlPayload(null);
+                  }}
+                  disabled={!canWrite || busy || Boolean(catalogXmlPreview)}
+                />
+                <span>Reemplazar activos</span>
+              </label>
+              <label className="secondary-button accounting-file-button">
+                Cargar XML
+                <input
+                  type="file"
+                  accept=".xml,text/xml,application/xml"
+                  onChange={(event) => {
+                    void previewCatalogXml(event.target.files);
+                    event.target.value = "";
+                  }}
+                  disabled={!canWrite || busy}
+                />
+              </label>
+              <button className="secondary-button" type="button" onClick={() => void initializeCatalog()} disabled={!canWrite || busy}>
+                Inicializar estandar
+              </button>
+            </div>
+          </div>
+          <div className="accounting-catalog-toolbar">
+            <div className="accounting-catalog-stats">
+              <span><strong>{catalogStats.active}</strong> Activas</span>
+              <span><strong>{catalogStats.inactive}</strong> Inactivas</span>
+              <span><strong>{catalogStats.missingSat}</strong> Sin SAT</span>
+              <span><strong>{catalogStats.total}</strong> Total</span>
+            </div>
+            <div className="accounting-filter-tabs">
+              {[
+                ["ACTIVE", "Activas"],
+                ["ALL", "Todas"],
+                ["INACTIVE", "Inactivas"],
+                ["MISSING_SAT", "Sin SAT"]
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`accounting-filter-tab ${catalogVisibility === value ? "is-active" : ""}`}
+                  type="button"
+                  onClick={() => setCatalogVisibility(value as CatalogVisibility)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="accounting-form-grid accounting-form-grid-wide">
             <input placeholder="Codigo" value={accountDraft.code} onChange={(event) => setAccountDraft((current) => ({ ...current, code: event.target.value }))} disabled={!canWrite || busy} />
@@ -464,6 +611,69 @@ export function AccountingPage() {
               Crear cuenta
             </button>
           </div>
+          {catalogXmlPreview ? (
+            <div className="accounting-preview-block">
+              <div className="accounting-preview-head">
+                <div>
+                  <h3>Vista previa XML</h3>
+                  <span>{catalogXmlPreview.originalFileName}</span>
+                </div>
+                <div className="accounting-preview-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      setCatalogXmlPreview(null);
+                      setCatalogXmlPayload(null);
+                    }}
+                    disabled={busy}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => void importCatalogXml()}
+                    disabled={!canWrite || busy || catalogXmlPreview.summary.errors > 0}
+                  >
+                    Confirmar importacion
+                  </button>
+                </div>
+              </div>
+              <div className="accounting-preview-summary">
+                <span><strong>{catalogXmlPreview.summary.create}</strong> Crear</span>
+                <span><strong>{catalogXmlPreview.summary.update}</strong> Actualizar</span>
+                <span><strong>{catalogXmlPreview.summary.unchanged}</strong> Sin cambios</span>
+                <span className={catalogXmlPreview.summary.errors > 0 ? "is-danger" : ""}><strong>{catalogXmlPreview.summary.errors}</strong> Errores</span>
+              </div>
+              <div className="accounting-table-wrap">
+                <table className="data-table accounting-table accounting-preview-table">
+                  <thead>
+                    <tr>
+                      <th>Accion</th>
+                      <th>Cuenta</th>
+                      <th>Nombre</th>
+                      <th>SAT</th>
+                      <th>Padre</th>
+                      <th>Detalle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catalogXmlPreview.accounts.map((account, index) => (
+                      <tr key={`${account.code || "sin-codigo"}-${index}`} className={account.action === "ERROR" ? "accounting-preview-error-row" : undefined}>
+                        <td>{getCatalogActionLabel(account.action)}</td>
+                        <td>{account.code || "-"}</td>
+                        <td>{account.name || "-"}</td>
+                        <td>{account.satGroupingCode ?? "-"}</td>
+                        <td>{account.parentCode ?? "-"}</td>
+                        <td>{account.error ?? `${account.level} / ${account.nature === "DEBIT" ? "Deudora" : "Acreedora"}`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
           <div className="accounting-table-wrap">
             <table className="data-table accounting-table">
               <thead>
@@ -473,18 +683,25 @@ export function AccountingPage() {
                   <th>Tipo</th>
                   <th>SAT</th>
                   <th>Naturaleza</th>
+                  <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
-                {overview.accounts.map((account) => (
+                {catalogAccounts.map((account) => (
                   <tr key={account.id}>
                     <td>{account.code}</td>
                     <td>{account.name}</td>
                     <td>{account.type}</td>
                     <td>{account.satGroupingCode ?? "-"}</td>
                     <td>{account.nature === "DEBIT" ? "Deudora" : "Acreedora"}</td>
+                    <td>{account.isActive ? "Activa" : "Inactiva"}</td>
                   </tr>
                 ))}
+                {catalogAccounts.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="muted">Sin cuentas para este filtro.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

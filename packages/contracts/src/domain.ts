@@ -1077,6 +1077,7 @@ export interface GeneralExpense {
   paymentMethod: GeneralExpensePaymentMethod;
   bank?: GeneralExpenseBank;
   hasVat: boolean;
+  hasWithholdings: boolean;
   recurring: boolean;
   approvedByEmrt: boolean;
   paidByEmrtAt?: string;
@@ -1226,6 +1227,49 @@ export interface AccountingAccount {
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AccountingCatalogXmlPreviewAction = "CREATE" | "UPDATE" | "UNCHANGED" | "ERROR";
+
+export interface AccountingCatalogXmlUploadInput {
+  originalFileName: string;
+  xmlBase64: string;
+  replaceActiveCatalog?: boolean;
+}
+
+export interface AccountingCatalogXmlPreviewAccount {
+  code: string;
+  name: string;
+  type: AccountingAccountType;
+  satGroupingCode?: string;
+  parentCode?: string;
+  level: number;
+  nature: AccountingAccountNature;
+  action: AccountingCatalogXmlPreviewAction;
+  error?: string;
+}
+
+export interface AccountingCatalogXmlPreviewResult {
+  originalFileName: string;
+  accounts: AccountingCatalogXmlPreviewAccount[];
+  summary: {
+    total: number;
+    create: number;
+    update: number;
+    unchanged: number;
+    errors: number;
+  };
+  errors: Array<{ code?: string; message: string }>;
+}
+
+export interface AccountingCatalogXmlImportInput extends AccountingCatalogXmlUploadInput {
+  confirm: true;
+}
+
+export interface AccountingCatalogXmlImportResult {
+  preview: AccountingCatalogXmlPreviewResult;
+  accounts: AccountingAccount[];
+  deactivated: number;
 }
 
 export interface AccountingPeriod {

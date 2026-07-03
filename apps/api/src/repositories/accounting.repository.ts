@@ -4,6 +4,11 @@ import type {
   AccountingAccountNature,
   AccountingAccountType,
   AccountingAutomationResult,
+  AccountingCatalogXmlImportInput,
+  AccountingCatalogXmlImportResult,
+  AccountingCatalogXmlPreviewAccount,
+  AccountingCatalogXmlPreviewResult,
+  AccountingCatalogXmlUploadInput,
   AccountingCfdiDocument,
   AccountingCfdiUploadInput,
   AccountingCreateAccountInput,
@@ -213,6 +218,177 @@ function getFirstTagAttributes(xml: string, localName: string) {
   return getAttributeMap(match?.[1]);
 }
 
+function getTagAttributes(xml: string, localName: string) {
+  const escaped = localName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const attributes: Array<Record<string, string>> = [];
+
+  for (const match of xml.matchAll(new RegExp(`<(?:[\\w.-]+:)?${escaped}\\b([^>]*)\\/?>`, "gi"))) {
+    attributes.push(getAttributeMap(match[1]));
+  }
+
+  return attributes;
+}
+
+function decodeXmlAttribute(value?: string | null) {
+  return String(value ?? "")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function getXmlAttribute(attributes: Record<string, string>, key: string) {
+  const target = key.toLowerCase();
+  const entry = Object.entries(attributes).find(([candidate]) => candidate.toLowerCase() === target);
+  return decodeXmlAttribute(entry?.[1]);
+}
+
+function normalizeCatalogNature(value?: string | null, type?: AccountingAccountType): AccountingAccountNature {
+  const normalized = normalizeOptionalText(value)?.toUpperCase();
+  if (normalized === "D" || normalized === "DEBIT") {
+    return "DEBIT";
+  }
+  if (normalized === "A" || normalized === "CREDIT") {
+    return "CREDIT";
+  }
+
+  return normalizeAccountNature(undefined, type);
+}
+
+function isValidCatalogNature(value?: string | null) {
+  const normalized = normalizeOptionalText(value)?.toUpperCase();
+  return normalized === "D" || normalized === "A" || normalized === "DEBIT" || normalized === "CREDIT";
+}
+
+function inferCatalogAccountType(satGroupingCode?: string | null, code?: string | null, name?: string | null): AccountingAccountType {
+  const groupingPrefix = normalizeOptionalText(satGroupingCode)?.match(/^\d+/)?.[0];
+  const groupingNumber = Number(groupingPrefix ?? NaN);
+  if (groupingNumber >= 100 && groupingNumber < 200) {
+    return "ASSET";
+  }
+  if (groupingNumber >= 200 && groupingNumber < 300) {
+    return "LIABILITY";
+  }
+  if (groupingNumber >= 300 && groupingNumber < 400) {
+    return "EQUITY";
+  }
+  if (groupingNumber >= 400 && groupingNumber < 500) {
+    return "INCOME";
+  }
+  if (groupingNumber >= 500 && groupingNumber < 600) {
+    return "COST";
+  }
+  if (groupingNumber >= 600 && groupingNumber < 800) {
+    return "EXPENSE";
+  }
+
+  const accountPrefix = normalizeOptionalText(code)?.match(/\d/)?.[0];
+  if (accountPrefix === "1") {
+    return "ASSET";
+  }
+  if (accountPrefix === "2") {
+    return "LIABILITY";
+  }
+  if (accountPrefix === "3") {
+    return "EQUITY";
+  }
+  if (accountPrefix === "4") {
+    return "INCOME";
+  }
+  if (accountPrefix === "5") {
+    return "COST";
+  }
+  if (accountPrefix === "6" || accountPrefix === "7") {
+    return "EXPENSE";
+  }
+
+  const normalizedName = normalizeOptionalText(name)?.toLowerCase() ?? "";
+  if (normalizedName.includes("pasivo")) {
+    return "LIABILITY";
+  }
+  if (normalizedName.includes("capital")) {
+    return "EQUITY";
+  }
+  if (normalizedName.includes("ingreso")) {
+    return "INCOME";
+  }
+  if (normalizedName.includes("costo")) {
+    return "COST";
+  }
+  if (normalizedName.includes("gasto")) {
+    return "EXPENSE";
+  }
+
+  return "ASSET";
+}
+
+function parseCatalogXmlAccounts(xml: string): Array<Omit<AccountingCatalogXmlPreviewAccount, "action">> {
+  const rows = getTagAttributes(xml, "Ctas");
+  const seenCodes = new Set<string>();
+
+  return rows.map((attributes, index) => {
+    const code = normalizeRequiredText(getXmlAttribute(attributes, "NumCta"));
+    const name = normalizeRequiredText(getXmlAttribute(attributes, "Desc"));
+    const satGroupingCode = normalizeOptionalText(getXmlAttribute(attributes, "CodAgrup")) ?? undefined;
+    const parentCode = normalizeOptionalText(getXmlAttribute(attributes, "SubCtaDe")) ?? undefined;
+    const rawLevel = Number.parseInt(getXmlAttribute(attributes, "Nivel"), 10);
+    const level = Number.isFinite(rawLevel) && rawLevel > 0 ? rawLevel : parentCode ? 2 : 1;
+    const rawNature = getXmlAttribute(attributes, "Natur");
+    const type = inferCatalogAccountType(satGroupingCode, code, name);
+    const errors: string[] = [];
+
+    if (!code) {
+      errors.push(`La fila ${index + 1} no tiene NumCta.`);
+    } else if (seenCodes.has(code)) {
+      errors.push(`La cuenta ${code} esta duplicada en el XML.`);
+    }
+    if (!name) {
+      errors.push(`La cuenta ${code || index + 1} no tiene Desc.`);
+    }
+    if (!satGroupingCode) {
+      errors.push(`La cuenta ${code || index + 1} no tiene CodAgrup.`);
+    }
+    if (!Number.isFinite(rawLevel) || rawLevel <= 0) {
+      errors.push(`La cuenta ${code || index + 1} no tiene un Nivel valido.`);
+    }
+    if (!isValidCatalogNature(rawNature)) {
+      errors.push(`La cuenta ${code || index + 1} no tiene Natur valida.`);
+    }
+    if (parentCode && parentCode === code) {
+      errors.push(`La cuenta ${code} no puede ser su propia cuenta padre.`);
+    }
+
+    if (code) {
+      seenCodes.add(code);
+    }
+
+    return {
+      code,
+      name,
+      type,
+      satGroupingCode,
+      parentCode,
+      level,
+      nature: normalizeCatalogNature(rawNature, type),
+      error: errors.length > 0 ? errors.join(" ") : undefined
+    };
+  });
+}
+
+function decodeCatalogXml(payload: AccountingCatalogXmlUploadInput) {
+  try {
+    const base64 = payload.xmlBase64.includes(",") ? payload.xmlBase64.slice(payload.xmlBase64.indexOf(",") + 1) : payload.xmlBase64;
+    const xml = Buffer.from(base64, "base64").toString("utf8").replace(/^\uFEFF/, "");
+    if (!xml.includes("<")) {
+      throw new Error("Invalid XML payload.");
+    }
+    return xml;
+  } catch {
+    throw new AppError(400, "ACCOUNTING_CATALOG_XML_INVALID", `No se pudo leer el XML ${payload.originalFileName}.`);
+  }
+}
+
 function parseXmlNumber(value?: string | null) {
   const numeric = Number(String(value ?? "0").replace(/,/g, ""));
   return Number.isFinite(numeric) ? numeric : 0;
@@ -419,6 +595,198 @@ export class PrismaAccountingRepository implements AccountingRepository {
     });
 
     return accounts.map(mapAccountingAccount);
+  }
+
+  public async previewCatalogXml(payload: AccountingCatalogXmlUploadInput): Promise<AccountingCatalogXmlPreviewResult> {
+    const organizationId = this.getOrganizationId();
+    const xml = decodeCatalogXml(payload);
+    const parsedAccounts = parseCatalogXmlAccounts(xml);
+
+    if (parsedAccounts.length === 0) {
+      throw new AppError(400, "ACCOUNTING_CATALOG_XML_EMPTY", `No se encontraron cuentas Ctas en ${payload.originalFileName}.`);
+    }
+
+    const existingAccounts = await this.prisma.accountingAccount.findMany({
+      where: { organizationId },
+      select: {
+        code: true,
+        name: true,
+        type: true,
+        satGroupingCode: true,
+        parent: { select: { code: true } },
+        level: true,
+        nature: true,
+        isActive: true
+      }
+    });
+    const existingByCode = new Map(existingAccounts.map((account) => [account.code, account]));
+    const xmlCodes = new Set(parsedAccounts.map((account) => account.code).filter(Boolean));
+
+    const accounts = parsedAccounts.map((account): AccountingCatalogXmlPreviewAccount => {
+      const errors = account.error ? [account.error] : [];
+      if (account.parentCode) {
+        const parentExistsInXml = xmlCodes.has(account.parentCode);
+        const parentExistsAlready = existingByCode.has(account.parentCode);
+        if (payload.replaceActiveCatalog && !parentExistsInXml) {
+          errors.push(`La cuenta padre ${account.parentCode} debe venir en el XML para reemplazar el catalogo activo.`);
+        } else if (!parentExistsInXml && !parentExistsAlready) {
+          errors.push(`La cuenta padre ${account.parentCode} no existe en el XML ni en el catalogo actual.`);
+        }
+      }
+
+      if (errors.length > 0) {
+        return {
+          ...account,
+          action: "ERROR",
+          error: errors.join(" ")
+        };
+      }
+
+      const existing = existingByCode.get(account.code);
+      const isUnchanged = Boolean(
+        existing &&
+        existing.name === account.name &&
+        existing.type === account.type &&
+        (existing.satGroupingCode ?? undefined) === (account.satGroupingCode ?? undefined) &&
+        (existing.parent?.code ?? undefined) === (account.parentCode ?? undefined) &&
+        existing.level === account.level &&
+        existing.nature === account.nature &&
+        existing.isActive
+      );
+
+      return {
+        ...account,
+        action: existing ? isUnchanged ? "UNCHANGED" : "UPDATE" : "CREATE"
+      };
+    });
+
+    const summary = accounts.reduce(
+      (totals, account) => {
+        totals.total += 1;
+        if (account.action === "CREATE") {
+          totals.create += 1;
+        } else if (account.action === "UPDATE") {
+          totals.update += 1;
+        } else if (account.action === "UNCHANGED") {
+          totals.unchanged += 1;
+        } else {
+          totals.errors += 1;
+        }
+        return totals;
+      },
+      { total: 0, create: 0, update: 0, unchanged: 0, errors: 0 }
+    );
+
+    return {
+      originalFileName: normalizeRequiredText(payload.originalFileName),
+      accounts,
+      summary,
+      errors: accounts
+        .filter((account) => account.action === "ERROR")
+        .map((account) => ({ code: account.code || undefined, message: account.error ?? "Cuenta invalida." }))
+    };
+  }
+
+  public async importCatalogXml(payload: AccountingCatalogXmlImportInput): Promise<AccountingCatalogXmlImportResult> {
+    const organizationId = this.getOrganizationId();
+    const preview = await this.previewCatalogXml(payload);
+    if (preview.summary.errors > 0) {
+      throw new AppError(
+        400,
+        "ACCOUNTING_CATALOG_XML_HAS_ERRORS",
+        `El XML tiene ${preview.summary.errors} cuenta(s) con errores. Revisa la vista previa antes de importar.`
+      );
+    }
+
+    const importAccounts = preview.accounts.filter((account) => account.action !== "ERROR");
+    const importedCodes = new Set(importAccounts.map((account) => account.code));
+    let deactivated = 0;
+    const accounts = await this.prisma.$transaction(async (tx) => {
+      const existingAccounts = await tx.accountingAccount.findMany({
+        where: { organizationId },
+        select: { code: true, id: true, level: true }
+      });
+      const accountByCode = new Map(existingAccounts.map((account) => [account.code, account]));
+
+      if (payload.replaceActiveCatalog) {
+        const result = await tx.accountingAccount.updateMany({
+          where: {
+            organizationId,
+            isActive: true,
+            code: { notIn: Array.from(importedCodes) }
+          },
+          data: { isActive: false }
+        });
+        deactivated = result.count;
+      }
+
+      let pending = [...importAccounts].sort((first, second) => first.level - second.level || first.code.localeCompare(second.code, "es-MX"));
+      while (pending.length > 0) {
+        const nextPending: typeof pending = [];
+        let progressed = false;
+
+        for (const account of pending) {
+          const parent = account.parentCode ? accountByCode.get(account.parentCode) : null;
+          if (account.parentCode && !parent && importedCodes.has(account.parentCode)) {
+            nextPending.push(account);
+            continue;
+          }
+          if (account.parentCode && !parent) {
+            throw new AppError(400, "ACCOUNTING_CATALOG_PARENT_NOT_FOUND", `No se encontro la cuenta padre ${account.parentCode}.`);
+          }
+
+          const record = await tx.accountingAccount.upsert({
+            where: {
+              organizationId_code: {
+                organizationId,
+                code: account.code
+              }
+            },
+            create: {
+              organizationId,
+              code: account.code,
+              name: account.name,
+              type: account.type,
+              satGroupingCode: account.satGroupingCode ?? null,
+              parentId: parent?.id ?? null,
+              level: account.level,
+              nature: account.nature,
+              isActive: true,
+              isDefault: false
+            },
+            update: {
+              name: account.name,
+              type: account.type,
+              satGroupingCode: account.satGroupingCode ?? null,
+              parentId: parent?.id ?? null,
+              level: account.level,
+              nature: account.nature,
+              isActive: true
+            },
+            select: { id: true, level: true }
+          });
+          accountByCode.set(account.code, { code: account.code, ...record });
+          progressed = true;
+        }
+
+        if (!progressed) {
+          throw new AppError(400, "ACCOUNTING_CATALOG_PARENT_CYCLE", "No se pudo resolver la jerarquia del catalogo. Revisa cuentas padre circulares o faltantes.");
+        }
+
+        pending = nextPending;
+      }
+
+      return tx.accountingAccount.findMany({
+        where: { organizationId },
+        orderBy: [{ code: "asc" }]
+      });
+    });
+
+    return {
+      preview,
+      accounts: accounts.map(mapAccountingAccount),
+      deactivated
+    };
   }
 
   public async createAccount(payload: AccountingCreateAccountInput) {

@@ -1682,6 +1682,7 @@ export function mapGeneralExpense(record: {
   paymentMethod: string;
   bank: string | null;
   hasVat: boolean;
+  hasWithholdings: boolean;
   recurring: boolean;
   approvedByEmrt: boolean;
   paidByEmrtAt: Date | null;
@@ -1710,6 +1711,7 @@ export function mapGeneralExpense(record: {
     paymentMethod: record.paymentMethod as GeneralExpense["paymentMethod"],
     bank: (record.bank ?? undefined) as GeneralExpense["bank"],
     hasVat: record.hasVat,
+    hasWithholdings: record.hasWithholdings,
     recurring: record.recurring,
     approvedByEmrt: record.approvedByEmrt,
     paidByEmrtAt: record.paidByEmrtAt?.toISOString(),

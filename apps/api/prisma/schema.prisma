@@ -48,6 +48,7 @@ model Organization {
   taskDistributionEvents           TaskDistributionEvent[]
   taskDistributionHistories        TaskDistributionHistory[]
   taskAdditionalTasks              TaskAdditionalTask[]
+  salesProducts                    SalesProduct[]
   salesStrategies                  SalesStrategy[]
   salesDailyReports                SalesDailyReport[]
   holidays                         Holiday[]
@@ -561,6 +562,7 @@ model GeneralExpense {
   paymentMethod            String       @default("Transferencia")
   bank                     String?
   hasVat                   Boolean      @default(true)
+  hasWithholdings          Boolean      @default(false)
   recurring                Boolean      @default(false)
   approvedByEmrt           Boolean      @default(false)
   paidByEmrtAt             DateTime?    @db.Date
@@ -1148,6 +1150,34 @@ model SalesStrategy {
 
   @@unique([organizationId, productId])
   @@index([organizationId, productId])
+}
+
+model SalesProduct {
+  id                   String       @id @default(uuid())
+  organizationId       String       @default("org-rusconi")
+  productKey           String
+  name                 String
+  tagline              String       @db.Text
+  initials             String
+  accentColor          String       @default("#2563eb")
+  logoAlt              String
+  logoOriginalFileName String?
+  logoMimeType         String?
+  logoSizeBytes        Int?
+  logoContent          Bytes?
+  defaultStrategy      String       @db.Text
+  defaultDailyReport   String       @db.Text
+  archivedAt           DateTime?
+  deletedAt            DateTime?
+  createdByUserId      String?
+  createdByName        String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, productKey])
+  @@index([organizationId, deletedAt, archivedAt])
+  @@index([organizationId, name])
 }
 
 model SalesDailyReport {

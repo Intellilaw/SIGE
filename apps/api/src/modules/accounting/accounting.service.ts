@@ -1,4 +1,6 @@
 import type {
+  AccountingCatalogXmlImportInput,
+  AccountingCatalogXmlUploadInput,
   AccountingCfdiUploadInput,
   AccountingCreateAccountInput,
   AccountingInitialBalanceInput,
@@ -22,6 +24,14 @@ export class AccountingService {
 
   public initializeStandardCatalog() {
     return this.repository.initializeStandardCatalog();
+  }
+
+  public previewCatalogXml(payload: AccountingCatalogXmlUploadInput) {
+    return this.repository.previewCatalogXml(payload);
+  }
+
+  public importCatalogXml(payload: AccountingCatalogXmlImportInput) {
+    return this.repository.importCatalogXml(payload);
   }
 
   public createAccount(payload: AccountingCreateAccountInput) {

@@ -41,6 +41,29 @@ function findTrackingTable(moduleConfig, record) {
 function hasCompletedStatus(record) {
     return record.status === "presentado" || record.status === "concluida";
 }
+function isLitigationWritingsTable(table) {
+    return table?.slug === "escritos-fondo";
+}
+function getCompletedWorkflowStage(table) {
+    return table?.tabs.find((tab) => tab.isCompleted && tab.stage)?.stage;
+}
+function getActiveWorkflowStageLimit(table) {
+    const completedStage = getCompletedWorkflowStage(table);
+    return completedStage ? completedStage - 1 : Math.max(1, (table?.tabs.length ?? 1) - 1);
+}
+function getWorkflowStage(record) {
+    return Number(record.workflowStage || 1);
+}
+function getWorkflowStageLabel(table, record) {
+    return table?.tabs.find((tab) => Number(tab.stage) === getWorkflowStage(record))?.label ?? "-";
+}
+function getEarliestAttentionDate(record, table) {
+    const dates = [
+        toDateInput(record.dueDate),
+        isTrackingTermEnabled(record, table) ? toDateInput(record.termDate) : ""
+    ].filter(Boolean);
+    return dates.sort()[0] ?? "9999-12-31";
+}
 function formatDisplayDate(value) {
     const date = toDateInput(value);
     if (!date) {
@@ -118,9 +141,17 @@ export function TaskLegacyTablePage() {
         if (!activeTab || !tableConfig) {
             return [];
         }
+        const activeWritingStageLimit = getActiveWorkflowStageLimit(tableConfig);
+        const showAllActiveWritingStages = isLitigationWritingsTable(tableConfig)
+            && activeTab.stage === 1
+            && !activeTab.isCompleted;
         return records.filter((record) => {
             if (!moduleConfig || findTrackingTable(moduleConfig, record)?.slug !== tableConfig.slug) {
                 return false;
+            }
+            if (showAllActiveWritingStages) {
+                const stage = getWorkflowStage(record);
+                return !hasCompletedStatus(record) && stage >= 1 && stage <= activeWritingStageLimit;
             }
             if (activeTab.stage) {
                 if (activeTab.isCompleted) {
@@ -133,6 +164,25 @@ export function TaskLegacyTablePage() {
                 return hasCompletedStatus(record) && getCompletionMonth(record) === completedMonth;
             }
             return record.status === (activeTab.status ?? "pendiente");
+        }).sort((left, right) => {
+            if (!isLitigationWritingsTable(tableConfig) || activeTab.isCompleted) {
+                return 0;
+            }
+            const leftStage = getWorkflowStage(left);
+            const rightStage = getWorkflowStage(right);
+            const leftAttentionGroup = leftStage === 1 ? 0 : 1;
+            const rightAttentionGroup = rightStage === 1 ? 0 : 1;
+            if (leftAttentionGroup !== rightAttentionGroup) {
+                return leftAttentionGroup - rightAttentionGroup;
+            }
+            const dateComparison = getEarliestAttentionDate(left, tableConfig).localeCompare(getEarliestAttentionDate(right, tableConfig));
+            if (dateComparison !== 0) {
+                return dateComparison;
+            }
+            if (leftStage !== rightStage) {
+                return leftStage - rightStage;
+            }
+            return (left.clientName || "").localeCompare(right.clientName || "", "es");
         });
     }, [activeTab, completedMonth, moduleConfig, records, tableConfig]);
     if (!moduleConfig || !executionModule || !canAccessModule || !tableConfig || !activeTab) {
@@ -143,12 +193,17 @@ export function TaskLegacyTablePage() {
     const showDateColumn = tableConfig.showDateColumn !== false;
     const showTermColumn = usesPresentationAndTermDates(tableConfig);
     const isCompletedMonthView = activeTab.isCompleted;
-    const tableColumnCount = 6 + (showDateColumn ? 1 : 0) + (tableConfig.showReportedPeriod ? 1 : 0) + (showTermColumn ? 1 : 0);
-    return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/${previous.slug}`), children: "Ir a tabla anterior" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/${next.slug}`), children: "Ir a siguiente tabla" })] }), _jsx("h2", { children: tableConfig.title }), _jsx("p", { className: "muted", children: "Tabla de seguimiento operativa. Las filas pendientes se marcan en rojo si falta tarea, responsable, fecha requerida o si la fecha esta vencida." })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "tasks-legacy-toolbar", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/distribuidor`), children: "Abrir Manager de tareas" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/terminos`), children: "Ver terminos" })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los registros nuevos se crean desde el Selector de Tareas en Ejecucion; la informacion, etapas y bajas se controlan desde Tareas activas del Manager de tareas." }), _jsx("div", { className: "tasks-legacy-tabs", children: tableConfig.tabs.map((tab) => (_jsx("button", { type: "button", className: tab.key === activeTab.key ? "is-active" : "", onClick: () => setActiveTabKey(tab.key), children: tab.label }, tab.key))) }), isCompletedMonthView ? (_jsxs("div", { className: "tasks-legacy-month-filter", children: [_jsxs("label", { className: "form-field tasks-legacy-month-field", children: [_jsx("span", { children: "Mes calendario" }), _jsx("input", { type: "month", value: completedMonth, onChange: (event) => setCompletedMonth(event.target.value || currentMonthInput()) })] }), _jsx("p", { className: "muted", children: "Vista historica mensual: muestra los registros concluidos durante el mes seleccionado." })] })) : null, _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: `data-table tasks-legacy-table${showTermColumn ? " tasks-legacy-table-with-term" : ""}`, children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { className: "tasks-legacy-task-column", children: "Tarea" }), _jsx("th", { children: "Responsable" }), showDateColumn ? _jsx("th", { children: activeTab.isCompleted ? "Fecha completada" : tableConfig.dateLabel }) : null, tableConfig.showReportedPeriod ? _jsx("th", { children: tableConfig.reportedPeriodLabel ?? "Mes reportado" }) : null, showTermColumn ? _jsx("th", { children: tableConfig.termDateLabel ?? "Término" }) : null] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: tableColumnCount, className: "centered-inline-message", children: "Cargando registros..." }) })) : visibleRecords.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: tableColumnCount, className: "centered-inline-message", children: isCompletedMonthView ? "No hay registros concluidos en el mes seleccionado." : "No hay registros en esta seccion." }) })) : (visibleRecords.map((record) => {
+    const showStatusColumn = isLitigationWritingsTable(tableConfig) && !isCompletedMonthView;
+    const tableColumnCount = 6
+        + (showDateColumn ? 1 : 0)
+        + (tableConfig.showReportedPeriod ? 1 : 0)
+        + (showTermColumn ? 1 : 0)
+        + (showStatusColumn ? 1 : 0);
+    return (_jsxs("section", { className: "page-stack tasks-legacy-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "execution-page-topline", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}`), children: "Volver al dashboard" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/${previous.slug}`), children: "Ir a tabla anterior" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/${next.slug}`), children: "Ir a siguiente tabla" })] }), _jsx("h2", { children: tableConfig.title }), _jsx("p", { className: "muted", children: "Tabla de seguimiento operativa. Las filas pendientes se marcan en rojo si falta tarea, responsable, fecha requerida o si la fecha esta vencida." })] }), _jsxs("section", { className: "panel", children: [_jsxs("div", { className: "tasks-legacy-toolbar", children: [_jsx("button", { type: "button", className: "primary-action-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/distribuidor`), children: "Abrir Manager de tareas" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => navigate(`/app/tasks/${moduleConfig.slug}/terminos`), children: "Ver terminos" })] }), _jsx("p", { className: "muted matter-table-caption", children: "Los registros nuevos se crean desde el Selector de Tareas en Ejecucion; la informacion, etapas y bajas se controlan desde Tareas activas del Manager de tareas." }), _jsx("div", { className: "tasks-legacy-tabs", children: tableConfig.tabs.map((tab) => (_jsx("button", { type: "button", className: tab.key === activeTab.key ? "is-active" : "", onClick: () => setActiveTabKey(tab.key), children: tab.label }, tab.key))) }), isCompletedMonthView ? (_jsxs("div", { className: "tasks-legacy-month-filter", children: [_jsxs("label", { className: "form-field tasks-legacy-month-field", children: [_jsx("span", { children: "Mes calendario" }), _jsx("input", { type: "month", value: completedMonth, onChange: (event) => setCompletedMonth(event.target.value || currentMonthInput()) })] }), _jsx("p", { className: "muted", children: "Vista historica mensual: muestra los registros concluidos durante el mes seleccionado." })] })) : null, _jsx("div", { className: "table-scroll tasks-legacy-table-wrap", children: _jsxs("table", { className: `data-table tasks-legacy-table${showTermColumn ? " tasks-legacy-table-with-term" : ""}`, children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), _jsx("th", { children: "Proceso especifico" }), _jsx("th", { children: "ID Asunto" }), _jsx("th", { className: "tasks-legacy-task-column", children: "Tarea" }), _jsx("th", { children: "Responsable" }), showDateColumn ? _jsx("th", { children: activeTab.isCompleted ? "Fecha completada" : tableConfig.dateLabel }) : null, tableConfig.showReportedPeriod ? _jsx("th", { children: tableConfig.reportedPeriodLabel ?? "Mes reportado" }) : null, showTermColumn ? _jsx("th", { children: tableConfig.termDateLabel ?? "Término" }) : null, showStatusColumn ? _jsx("th", { children: "Estado" }) : null] }) }), _jsx("tbody", { children: loading ? (_jsx("tr", { children: _jsx("td", { colSpan: tableColumnCount, className: "centered-inline-message", children: "Cargando registros..." }) })) : visibleRecords.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: tableColumnCount, className: "centered-inline-message", children: isCompletedMonthView ? "No hay registros concluidos en el mes seleccionado." : "No hay registros en esta seccion." }) })) : (visibleRecords.map((record) => {
                                         const historyTaskName = resolveHistoryTaskName(record, history, tableConfig);
                                         const red = isRowRed(record, activeTab, showDateColumn, tableConfig, taskNamesByRecordId, historyTaskName);
                                         const green = !red && !activeTab.isCompleted;
                                         const taskName = resolveTrackingTaskName(record, tableConfig, taskNamesByRecordId, historyTaskName);
-                                        return (_jsxs("tr", { className: red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined, children: [_jsx("td", { children: record.clientName || "-" }), _jsx("td", { children: record.subject || "-" }), _jsx("td", { children: _jsx("span", { className: "tasks-legacy-process-pill", children: record.specificProcess || "N/A" }) }), _jsx("td", { children: record.matterIdentifier || record.matterNumber || "-" }), _jsx("td", { className: "tasks-legacy-task-cell", children: _jsx("div", { className: "tasks-legacy-task-readonly", children: taskName || "-" }) }), _jsx("td", { className: "tasks-legacy-responsible-cell", children: _jsx("div", { className: "tasks-legacy-readonly-value", children: getEffectiveTrackingResponsible(record, tableConfig) || "-" }) }), showDateColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : usesPresentationAndTermDates(tableConfig) ? getPresentationDate(record) : getRowDate(record, tableConfig)) }) })) : null, tableConfig.showReportedPeriod ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: record.reportedMonth || "-" }) })) : null, showTermColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: isTrackingTermEnabled(record, tableConfig) ? formatDisplayDate(record.termDate) : "-" }) })) : null] }, record.id));
+                                        return (_jsxs("tr", { className: red ? "tasks-legacy-row-red" : green ? "tasks-legacy-row-green" : undefined, children: [_jsx("td", { children: record.clientName || "-" }), _jsx("td", { children: record.subject || "-" }), _jsx("td", { children: _jsx("span", { className: "tasks-legacy-process-pill", children: record.specificProcess || "N/A" }) }), _jsx("td", { children: record.matterIdentifier || record.matterNumber || "-" }), _jsx("td", { className: "tasks-legacy-task-cell", children: _jsx("div", { className: "tasks-legacy-task-readonly", children: taskName || "-" }) }), _jsx("td", { className: "tasks-legacy-responsible-cell", children: _jsx("div", { className: "tasks-legacy-readonly-value", children: getEffectiveTrackingResponsible(record, tableConfig) || "-" }) }), showDateColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: formatDisplayDate(activeTab.isCompleted ? getCompletionDate(record) : usesPresentationAndTermDates(tableConfig) ? getPresentationDate(record) : getRowDate(record, tableConfig)) }) })) : null, tableConfig.showReportedPeriod ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: record.reportedMonth || "-" }) })) : null, showTermColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value tasks-legacy-date-readonly", children: isTrackingTermEnabled(record, tableConfig) ? formatDisplayDate(record.termDate) : "-" }) })) : null, showStatusColumn ? (_jsx("td", { children: _jsx("div", { className: "tasks-legacy-readonly-value", children: getWorkflowStageLabel(tableConfig, record) }) })) : null] }, record.id));
                                     })) })] }) })] })] }));
 }
