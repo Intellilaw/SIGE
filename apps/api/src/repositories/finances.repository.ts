@@ -315,6 +315,10 @@ function getFinancePeriodData(input: {
   } satisfies Pick<Prisma.FinanceRecordUncheckedCreateInput, "periodYear" | "periodMonth">;
 }
 
+function normalizeFinanceWorkingConcepts(matterType?: FinanceRecord["matterType"] | null, value?: string | null) {
+  return matterType === "RETAINER" ? null : normalizeOptionalText(value);
+}
+
 function getFinanceRecordSelect(includeCollectionProbability: boolean, includePeriod: boolean) {
   if (includeCollectionProbability && includePeriod) {
     return FINANCE_RECORD_WITH_PERIOD_AND_COLLECTION_PROBABILITY_SELECT;
@@ -572,18 +576,19 @@ export class PrismaFinanceRepository implements FinanceRepository {
     const paymentMethod = normalizeFinancePaymentMethod(payload.paymentMethod);
     const paymentMethod2 = normalizeFinancePaymentMethod(payload.paymentMethod2);
     const paymentMethod3 = normalizeFinancePaymentMethod(payload.paymentMethod3);
+    const matterType = payload.matterType ?? "ONE_TIME";
     const data: Prisma.FinanceRecordUncheckedCreateInput = {
       year,
       month,
       clientNumber: normalizeOptionalText(payload.clientNumber),
       clientName: normalizeRequiredText(payload.clientName),
       quoteNumber: normalizeOptionalText(payload.quoteNumber),
-      matterType: payload.matterType ?? "ONE_TIME",
+      matterType,
       subject: normalizeRequiredText(payload.subject),
       contractSignedStatus: normalizeContractSignedStatus(payload.contractSignedStatus),
       responsibleTeam: payload.responsibleTeam ?? null,
       totalMatterMxn: toDecimal(payload.totalMatterMxn),
-      workingConcepts: normalizeOptionalText(payload.workingConcepts),
+      workingConcepts: normalizeFinanceWorkingConcepts(matterType, payload.workingConcepts),
       conceptFeesMxn: toDecimal(payload.conceptFeesMxn),
       previousPaymentsMxn: toDecimal(payload.previousPaymentsMxn),
       nextPaymentDate: parseDateValue(payload.nextPaymentDate),
@@ -678,8 +683,15 @@ export class PrismaFinanceRepository implements FinanceRepository {
     if (hasOwn(payload, "totalMatterMxn")) {
       data.totalMatterMxn = toDecimal(payload.totalMatterMxn);
     }
-    if (hasOwn(payload, "workingConcepts")) {
-      data.workingConcepts = normalizeOptionalText(payload.workingConcepts);
+    const nextMatterType = hasOwn(payload, "matterType")
+      ? payload.matterType ?? "ONE_TIME"
+      : (currentRecord.matterType as FinanceRecord["matterType"]);
+
+    if (hasOwn(payload, "workingConcepts") || hasOwn(payload, "matterType")) {
+      data.workingConcepts = normalizeFinanceWorkingConcepts(
+        nextMatterType,
+        hasOwn(payload, "workingConcepts") ? payload.workingConcepts : currentRecord.workingConcepts
+      );
     }
     if (hasOwn(payload, "conceptFeesMxn")) {
       data.conceptFeesMxn = toDecimal(payload.conceptFeesMxn);
@@ -814,7 +826,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
         data,
         getFinancePeriodData({
           matterType: hasOwn(payload, "matterType")
-            ? payload.matterType ?? "ONE_TIME"
+            ? nextMatterType
             : (currentRecord.matterType as FinanceRecord["matterType"]),
           year: currentRecord.year,
           month: currentRecord.month,
@@ -963,7 +975,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
           contractSignedStatus: record.contractSignedStatus,
           responsibleTeam: record.responsibleTeam ?? null,
           totalMatterMxn: toDecimal(record.totalMatterMxn),
-          workingConcepts: normalizeOptionalText(record.workingConcepts),
+          workingConcepts: normalizeFinanceWorkingConcepts(record.matterType, record.workingConcepts),
           conceptFeesMxn: toDecimal(record.conceptFeesMxn),
           previousPaymentsMxn: toDecimal(nextPreviousPaymentsMxn),
           nextPaymentDate: parseDateValue(record.nextPaymentDate),
@@ -1052,6 +1064,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
         clientName: normalizeRequiredText(matterPayload.clientName),
         quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
         matterType: matterPayload.matterType ?? "ONE_TIME",
+        ...(matterPayload.matterType === "RETAINER" ? { workingConcepts: null } : {}),
         subject: normalizeRequiredText(matterPayload.subject),
         responsibleTeam: matterPayload.responsibleTeam ?? null,
         totalMatterMxn: toDecimal(matterPayload.totalMatterMxn),
@@ -1077,6 +1090,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
       clientName: normalizeRequiredText(matterPayload.clientName),
       quoteNumber: normalizeOptionalText(matterPayload.quoteNumber),
       matterType: matterPayload.matterType ?? "ONE_TIME",
+      workingConcepts: normalizeFinanceWorkingConcepts(matterPayload.matterType ?? "ONE_TIME", null),
       subject: normalizeRequiredText(matterPayload.subject),
       contractSignedStatus: "NO",
       responsibleTeam: matterPayload.responsibleTeam ?? null,
@@ -1208,19 +1222,35 @@ export class PrismaFinanceRepository implements FinanceRepository {
 
     records.forEach((record) => {
       const mapped = mapFinanceRecordWithOptionalDefaults(record);
+      const staleRetainerWorkingConcepts =
+        mapped.matterType === "RETAINER" && normalizeOptionalText(record.workingConcepts) !== null;
       const matchKey = getRecordMatchKey(mapped);
       if (!matchKey) {
+        if (staleRetainerWorkingConcepts) {
+          updates.push({
+            id: record.id,
+            data: { workingConcepts: null }
+          });
+        }
         return;
       }
 
       const matter = matterLookup.get(matchKey);
       if (!matter) {
+        if (staleRetainerWorkingConcepts) {
+          updates.push({
+            id: record.id,
+            data: { workingConcepts: null }
+          });
+        }
         return;
       }
 
       const nextMatterType = (matter.matterType ?? "ONE_TIME") as FinanceRecord["matterType"];
       const isRetainer = mapped.matterType === "RETAINER";
       const nextIsRetainer = nextMatterType === "RETAINER";
+      const nextWorkingConcepts = normalizeFinanceWorkingConcepts(nextMatterType, record.workingConcepts);
+      const needsWorkingConceptsUpdate = normalizeOptionalText(record.workingConcepts) !== nextWorkingConcepts;
       const needsPeriodDefault =
         includePeriod &&
         ((nextIsRetainer && (!mapped.periodYear || !mapped.periodMonth)) ||
@@ -1239,6 +1269,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
         teamMismatch ||
         Number(record.totalMatterMxn) !== matter.totalFeesMxn ||
         toDateKey(record.nextPaymentDate) !== toDateKey(matter.nextPaymentDate) ||
+        needsWorkingConceptsUpdate ||
         normalizeComparableText(record.milestone) !== normalizeComparableText(matter.milestone) ||
         record.concluded !== matter.concluded ||
         needsPeriodDefault ||
@@ -1253,6 +1284,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
         clientName: normalizeRequiredText(matter.clientName),
         quoteNumber: normalizeOptionalText(matter.quoteNumber),
         matterType: nextMatterType,
+        workingConcepts: nextWorkingConcepts,
         subject: normalizeRequiredText(matter.subject),
         totalMatterMxn: toDecimal(matter.totalFeesMxn),
         nextPaymentDate: parseDateValue(matter.nextPaymentDate),
@@ -1343,6 +1375,7 @@ export class PrismaFinanceRepository implements FinanceRepository {
       quoteNumber: true,
       clientName: true,
       matterType: true,
+      workingConcepts: true,
       subject: true,
       paymentMethod: true,
       paymentMethod2: true,

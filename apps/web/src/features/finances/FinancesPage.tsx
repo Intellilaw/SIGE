@@ -1163,7 +1163,7 @@ export function FinancesPage() {
             record.matterType === "RETAINER" ? getFinancePeriodLabel(record) : undefined,
             record.subject,
             getTeamLabel(record.responsibleTeam),
-            record.workingConcepts,
+            record.matterType === "ONE_TIME" ? record.workingConcepts : undefined,
             record.nextPaymentNotes,
             record.clientCommissionRecipient,
             record.closingCommissionRecipient,
@@ -1521,7 +1521,10 @@ export function FinancesPage() {
       },
       { label: "Asunto", present: Boolean(normalizeText(record.subject)) },
       { label: "Equipo Responsable", present: Boolean(record.responsibleTeam) },
-      { label: "Conceptos trabajando", present: Boolean(normalizeText(record.workingConcepts)) },
+      {
+        label: "Conceptos trabajando",
+        present: record.matterType !== "ONE_TIME" || Boolean(normalizeText(record.workingConcepts))
+      },
       { label: "Fecha de próximo pago", present: Boolean(record.nextPaymentDate) },
       { label: "Detalle Fecha", present: Boolean(normalizeText(record.nextPaymentNotes)) },
       { label: "En mora", present: Boolean(record.delinquencyStatus) },
@@ -2125,7 +2128,13 @@ export function FinancesPage() {
                       <input className="finance-input finance-input-readonly" value={TEAM_OPTIONS.find((option) => option.key === record.responsibleTeam)?.label ?? ""} readOnly />
                     )}
                   </td>
-                  <td><input className="finance-input" value={record.workingConcepts ?? ""} onChange={(event) => updateRecordLocal(record.id, { workingConcepts: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value })} /></td>
+                  <td>
+                    {record.matterType === "RETAINER" ? (
+                      <input className="finance-input finance-input-readonly" disabled readOnly value="" />
+                    ) : (
+                      <input className="finance-input" value={record.workingConcepts ?? ""} onChange={(event) => updateRecordLocal(record.id, { workingConcepts: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { workingConcepts: event.target.value })} />
+                    )}
+                  </td>
                   <td><CurrencyInput value={record.totalMatterMxn} readOnly /></td>
                   <td><CurrencyInput value={record.previousPaymentsMxn} onValueChange={(previousPaymentsMxn) => updateRecordLocal(record.id, { previousPaymentsMxn })} onValueCommit={(previousPaymentsMxn) => void persistRecordPatch(record.id, { previousPaymentsMxn })} /></td>
                   <td><CurrencyInput value={record.conceptFeesMxn} onValueChange={(conceptFeesMxn) => updateRecordLocal(record.id, { conceptFeesMxn })} onValueCommit={(conceptFeesMxn) => void persistRecordPatch(record.id, { conceptFeesMxn })} /></td>
