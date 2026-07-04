@@ -363,8 +363,8 @@ function buildPaymentMilestones(matter: Matter, quote: Quote, serviceLines: Prof
     .map((line) => normalizeText(line.paymentMoment))
     .filter(Boolean);
 
-  if (rawMilestones.length === 0 && normalizeText(quote.milestone)) {
-    rawMilestones.push(normalizeText(quote.milestone));
+  if (rawMilestones.length === 0 && normalizeText(matter.milestone)) {
+    rawMilestones.push(normalizeText(matter.milestone));
   }
 
   if (rawMilestones.length === 0 && normalizeText(matter.nextPaymentDate)) {

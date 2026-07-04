@@ -57,7 +57,6 @@ const quoteSchema = z.object({
   amountColumns: z.array(amountColumnSchema).length(2).optional(),
   tableRows: z.array(tableRowSchema).min(1).optional(),
   lineItems: z.array(lineItemSchema).min(1),
-  milestone: z.string().optional(),
   notes: z.string().optional()
 });
 
@@ -67,7 +66,6 @@ const quoteTemplateSchema = z.object({
   quoteType: z.enum(["ONE_TIME", "RETAINER"]),
   amountColumns: z.array(amountColumnSchema).length(2),
   tableRows: z.array(tableRowSchema).min(1),
-  milestone: z.string().optional(),
   notes: z.string().optional()
 });
 
@@ -89,7 +87,6 @@ const quoteTemplateTranslationSchema = z.object({
     tableRows: z.array(tableRowSchema).min(1),
     lineItems: z.array(quoteTemplateLineItemSchema),
     totalMxn: z.number().nonnegative(),
-    milestone: z.string().optional(),
     notes: z.string().optional(),
     createdAt: z.string(),
     updatedAt: z.string()

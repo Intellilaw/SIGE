@@ -168,7 +168,7 @@ function matchesWordSearch(
         getSubmatterCaducidadColumnValue(submatter),
         submatter.promotionCommand,
         submatter.notes,
-        submatter.milestone,
+        matter.milestone,
         submatter.holidayAuthorityShortName,
         submatter.internalTelegramGroupId,
         submatter.internalTelegramGroupName,
@@ -797,6 +797,7 @@ function evaluateMatterRow(
 
 function evaluateSubmatterRow(
   submatter: ExecutionSubmatter,
+  matterMilestone: string | null | undefined,
   tasks: MatterTaskView[],
   holidayDateKeysByAuthority: HolidayDateKeysByAuthority
 ) {
@@ -809,7 +810,7 @@ function evaluateSubmatterRow(
   if (!normalizeText(submatter.communicationChannel)) {
     addMissingField(missing, "Canal");
   }
-  if (!normalizeText(submatter.milestone)) {
+  if (!normalizeText(matterMilestone)) {
     addMissingField(missing, "Hito conclusion");
   }
   if (tasks.length === 0) {
@@ -1323,7 +1324,6 @@ export function ExecutionTeamWorkspace({
       internalTelegramGroupName: normalizeText(submatter.internalTelegramGroupName)
         ? submatter.internalTelegramGroupName ?? null
         : null,
-      milestone: normalizeText(submatter.milestone) ? submatter.milestone ?? null : null,
       concluded: submatter.concluded,
       notes: normalizeText(submatter.notes) ? submatter.notes ?? null : null
     });
@@ -1998,6 +1998,7 @@ export function ExecutionTeamWorkspace({
                           const submatterTasks = getSubmatterTasks(matter, submatter, activeTaskMap);
                           const submatterValidation = evaluateSubmatterRow(
                             submatter,
+                            matter.milestone,
                             submatterTasks,
                             holidayDateKeysByAuthority
                           );
@@ -2271,13 +2272,9 @@ export function ExecutionTeamWorkspace({
                               </td>
                               <td>
                                 <input
-                                  className="lead-cell-input"
-                                  value={submatter.milestone || ""}
-                                  onChange={(event) =>
-                                    handleSubmatterLocalChange(matter.id, submatter.id, "milestone", event.target.value)
-                                  }
-                                  onBlur={() => handleSubmatterBlur(matter.id, submatter.id)}
-                                  placeholder="Hito..."
+                                  className="lead-cell-input matter-cell-readonly"
+                                  value={matter.milestone || ""}
+                                  readOnly
                                 />
                               </td>
                               <td className="matter-checkbox-cell">

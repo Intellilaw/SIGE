@@ -228,8 +228,7 @@ export class PrismaLeadsRepository implements LeadsRepository {
         totalFeesMxn: new Prisma.Decimal(lead.amountMxn),
         communicationChannel: (lead.communicationChannel || DEFAULT_CHANNEL) as Lead["communicationChannel"],
         nextAction: normalizeOptionalText(lead.nextInteractionLabel),
-        nextActionDueAt: lead.nextInteraction,
-        milestone: normalizeOptionalText(linkedQuote?.milestone ?? null)
+        nextActionDueAt: lead.nextInteraction
       };
 
       const existingMatterCount = await tx.matter.count({

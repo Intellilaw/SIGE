@@ -207,7 +207,7 @@ export class PrismaMattersRepository implements MattersRepository {
         nextActionDueAt: parseDateValue(payload.nextActionDueAt),
         nextActionSource: normalizeOptionalText(payload.nextActionSource),
         visibility: normalizeVisibility(payload.visibility),
-        milestone: normalizeOptionalText(linkedQuote?.milestone ?? payload.milestone),
+        milestone: normalizeOptionalText(payload.milestone),
         concluded: payload.concluded ?? false,
         stage: payload.stage ?? "INTAKE",
         origin: payload.origin ?? "MANUAL",
@@ -242,7 +242,7 @@ export class PrismaMattersRepository implements MattersRepository {
           : normalizeHolidayAuthority(matter.holidayAuthorityShortName),
         internalTelegramGroupId: normalizeOptionalText(payload.internalTelegramGroupId) ?? normalizeOptionalText(matter.internalTelegramGroupId),
         internalTelegramGroupName: normalizeOptionalText(payload.internalTelegramGroupName) ?? normalizeOptionalText(matter.internalTelegramGroupName),
-        milestone: normalizeOptionalText(payload.milestone) ?? normalizeOptionalText(matter.milestone),
+        milestone: normalizeOptionalText(matter.milestone),
         concluded: payload.concluded ?? false,
         notes: normalizeOptionalText(payload.notes),
         deletedAt: parseDateValue(payload.deletedAt)
@@ -278,9 +278,17 @@ export class PrismaMattersRepository implements MattersRepository {
     await this.findMatterOrThrow(this.prisma, matterId);
     const data = await this.buildUpdatePayload(this.prisma, matterId, payload);
 
-    const record = await this.prisma.matter.update({
-      where: { id: matterId },
-      data
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.matter.update({
+        where: { id: matterId },
+        data
+      });
+
+      if (hasOwn(payload, "milestone")) {
+        await this.syncMilestoneDependents(tx, updated);
+      }
+
+      return updated;
     });
 
     return mapMatter(record);
@@ -621,6 +629,66 @@ export class PrismaMattersRepository implements MattersRepository {
     };
   }
 
+  private async syncMilestoneDependents(
+    prisma: PrismaExecutor,
+    matter: {
+      id: string;
+      organizationId: string;
+      quoteNumber: string | null;
+      clientName: string;
+      subject: string;
+      milestone: string | null;
+    }
+  ) {
+    const milestone = normalizeOptionalText(matter.milestone);
+
+    await prisma.executionSubmatter.updateMany({
+      where: {
+        matterId: matter.id,
+        deletedAt: null
+      },
+      data: { milestone }
+    });
+
+    const filters: Prisma.FinanceRecordWhereInput[] = [];
+    const quoteNumber = normalizeOptionalText(matter.quoteNumber);
+    if (quoteNumber) {
+      filters.push({
+        quoteNumber: {
+          equals: quoteNumber,
+          mode: "insensitive"
+        }
+      });
+    }
+
+    const clientName = normalizeRequiredText(matter.clientName);
+    const subject = normalizeRequiredText(matter.subject);
+    if (clientName && subject) {
+      filters.push({
+        clientName: {
+          equals: clientName,
+          mode: "insensitive"
+        },
+        subject: {
+          equals: subject,
+          mode: "insensitive"
+        }
+      });
+    }
+
+    if (filters.length === 0) {
+      return;
+    }
+
+    await prisma.financeRecord.updateMany({
+      where: {
+        organizationId: matter.organizationId,
+        OR: filters
+      },
+      data: { milestone }
+    });
+  }
+
   private async buildUpdatePayload(
     prisma: PrismaExecutor,
     matterId: string,
@@ -648,7 +716,6 @@ export class PrismaMattersRepository implements MattersRepository {
       data.clientName = clientFields.clientName;
       data.subject = linkedQuote.subject;
       data.totalFeesMxn = new Prisma.Decimal(linkedQuote.totalMxn);
-      data.milestone = normalizeOptionalText(linkedQuote.milestone);
     } else {
       if (hasOwn(payload, "quoteId")) {
         data.quoteId = normalizeIdentifier(payload.quoteId);
@@ -804,9 +871,6 @@ export class PrismaMattersRepository implements MattersRepository {
     }
     if (hasOwn(payload, "internalTelegramGroupName")) {
       data.internalTelegramGroupName = normalizeOptionalText(payload.internalTelegramGroupName);
-    }
-    if (hasOwn(payload, "milestone")) {
-      data.milestone = normalizeOptionalText(payload.milestone);
     }
     if (hasOwn(payload, "concluded")) {
       data.concluded = payload.concluded ?? false;

@@ -823,9 +823,6 @@ export class PrismaFinanceRepository implements FinanceRepository {
         })
       );
     }
-    if (hasOwn(payload, "milestone")) {
-      data.milestone = normalizeOptionalText(payload.milestone);
-    }
     if (hasOwn(payload, "concluded")) {
       data.concluded = payload.concluded ?? false;
     }

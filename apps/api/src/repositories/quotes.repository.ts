@@ -68,7 +68,6 @@ function buildQuoteTemplateData(payload: QuoteTemplateWriteRecord) {
     tableRows: payload.tableRows as unknown as import("@prisma/client").Prisma.InputJsonValue,
     lineItems: lineItems as unknown as import("@prisma/client").Prisma.InputJsonValue,
     totalMxn,
-    milestone: payload.milestone,
     notes: payload.notes
   };
 }
@@ -95,7 +94,6 @@ function buildQuoteData(payload: QuoteWriteRecord, quoteNumber: string) {
     tableRows: payload.tableRows as unknown as import("@prisma/client").Prisma.InputJsonValue,
     lineItems: payload.lineItems as unknown as import("@prisma/client").Prisma.InputJsonValue,
     totalMxn,
-    milestone: payload.milestone,
     notes: payload.notes
   };
 }

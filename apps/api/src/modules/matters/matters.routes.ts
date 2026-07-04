@@ -87,7 +87,6 @@ const executionSubmatterSchema = z.object({
   holidayAuthorityShortName: executionHolidayAuthoritySchema.nullable().optional(),
   internalTelegramGroupId: z.string().nullable().optional(),
   internalTelegramGroupName: z.string().nullable().optional(),
-  milestone: z.string().nullable().optional(),
   concluded: z.boolean().optional(),
   notes: z.string().nullable().optional(),
   deletedAt: z.string().nullable().optional()

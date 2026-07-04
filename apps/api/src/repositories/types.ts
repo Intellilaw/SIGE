@@ -351,7 +351,6 @@ export interface QuoteWriteRecord {
   amountColumns?: Quote["amountColumns"];
   tableRows?: Quote["tableRows"];
   lineItems: Quote["lineItems"];
-  milestone?: string;
   notes?: string;
 }
 
@@ -361,7 +360,6 @@ export interface QuoteTemplateWriteRecord {
   quoteType: QuoteTemplate["quoteType"];
   amountColumns: QuoteTemplate["amountColumns"];
   tableRows: QuoteTemplate["tableRows"];
-  milestone?: string;
   notes?: string;
 }
 
@@ -454,7 +452,6 @@ export interface ExecutionSubmatterWriteRecord {
   holidayAuthorityShortName?: Matter["holidayAuthorityShortName"] | null;
   internalTelegramGroupId?: string | null;
   internalTelegramGroupName?: string | null;
-  milestone?: string | null;
   concluded?: boolean;
   notes?: string | null;
   deletedAt?: string | null;

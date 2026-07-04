@@ -9,7 +9,6 @@ type TranslationPayload = {
   name: string;
   subject: string;
   services: string;
-  milestone: string;
   notes: string;
   amountColumns: Array<{
     id: string;
@@ -37,7 +36,6 @@ const translationPayloadSchema = z.object({
   name: z.string(),
   subject: z.string(),
   services: z.string(),
-  milestone: z.string(),
   notes: z.string(),
   amountColumns: z.array(z.object({
     id: z.string(),
@@ -70,7 +68,6 @@ function buildTranslationPayload(template: QuoteTemplate): TranslationPayload {
     name: normalizeText(template.name),
     subject: normalizeText(template.subject),
     services: normalizeText(template.services),
-    milestone: normalizeText(template.milestone),
     notes: normalizeText(template.notes),
     amountColumns: template.amountColumns.map((column) => ({
       id: column.id,
@@ -129,7 +126,6 @@ function applyTranslation(template: QuoteTemplate, translated: TranslationPayloa
     name: pickTranslatedText(translated.name, template.name),
     subject: pickTranslatedText(translated.subject, template.subject),
     services: pickTranslatedText(translated.services, template.services),
-    milestone: pickTranslatedText(translated.milestone, template.milestone ?? ""),
     notes: pickTranslatedText(translated.notes, template.notes ?? ""),
     amountColumns: template.amountColumns.map((column, index) => ({
       ...column,

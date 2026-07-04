@@ -56,7 +56,6 @@ type QuoteFormState = {
   language: QuoteLanguage;
   quoteDate: string;
   subject: string;
-  milestone: string;
   notes: string;
   lineItems: EditableLineItem[];
 };
@@ -64,7 +63,6 @@ type QuoteFormState = {
 type QuoteTemplateFormState = {
   team: Team | "";
   quoteType: QuoteType;
-  milestone: string;
   services: string;
   amountColumns: [QuoteTemplateAmountColumn, QuoteTemplateAmountColumn];
   tableRows: QuoteTemplateTableRow[];
@@ -297,7 +295,6 @@ function translateQuoteTemplateToEnglish(template: QuoteTemplate): QuoteTemplate
     name: translateTextToEnglish(template.name) || template.name,
     subject: translateTextToEnglish(template.subject),
     services: translateTextToEnglish(template.services),
-    milestone: template.milestone ? translateTextToEnglish(template.milestone) : undefined,
     notes: template.notes ? translateTextToEnglish(template.notes) : undefined,
     amountColumns: template.amountColumns.map((column) => ({
       ...column,
@@ -435,7 +432,6 @@ function getTemplateSearchText(template: QuoteTemplate) {
     template.name,
     template.subject,
     template.services,
-    template.milestone,
     template.notes,
     getTeamLabel(template.team),
     getQuoteTypeLabel(template.quoteType),
@@ -466,7 +462,6 @@ function getQuoteSearchText(quote: Quote, clientNumber?: string) {
     getQuoteTypeLabel(quote.quoteType),
     getTeamLabel(quote.responsibleTeam),
     quote.subject,
-    quote.milestone,
     quote.notes,
     quote.language,
     formatCurrency(quote.totalMxn),
@@ -568,7 +563,6 @@ function buildEmptyTemplateForm(defaultTeam?: string): QuoteTemplateFormState {
   return {
     team: resolveDefaultTeam(defaultTeam),
     quoteType: "ONE_TIME",
-    milestone: "",
     services: "",
     amountColumns: createDefaultAmountColumns(),
     tableRows: [createTemplateRow()]
@@ -586,7 +580,6 @@ function buildEmptyQuoteForm(defaultTeam?: string, language: QuoteLanguage = "es
     language,
     quoteDate: getTodayDateInputValue(),
     subject: "",
-    milestone: "",
     notes: "",
     lineItems: [createEditableLineItem()]
   };
@@ -603,7 +596,6 @@ function buildTemplateFormFromTemplate(template: QuoteTemplate): QuoteTemplateFo
   return {
     team: template.team,
     quoteType: template.quoteType,
-    milestone: template.milestone ?? "",
     services: template.services,
     amountColumns: structuredClone(template.amountColumns) as [QuoteTemplateAmountColumn, QuoteTemplateAmountColumn],
     tableRows: structuredClone(template.tableRows) as QuoteTemplateTableRow[]
@@ -656,7 +648,6 @@ function buildQuoteFormFromTemplate(template: QuoteTemplate, defaultTeam?: strin
     language,
     quoteDate: getTodayDateInputValue(),
     subject: normalizeText(template.subject) || normalizeText(template.services).slice(0, 120),
-    milestone: template.milestone ?? "",
     notes: normalizeText(template.services),
     lineItems: toEditableLineItems(template.lineItems)
   };
@@ -691,7 +682,6 @@ function buildQuoteFormFromQuote(quote: Quote): QuoteFormState {
     language: quote.language ?? "es",
     quoteDate: toDateInputValue(quote.quoteDate ?? quote.createdAt),
     subject: quote.subject,
-    milestone: quote.milestone ?? "",
     notes: quote.notes ?? "",
     lineItems: toEditableLineItems(quote.lineItems)
   };
@@ -703,8 +693,7 @@ function buildTemplatePayload(form: QuoteTemplateFormState) {
     quoteType: form.quoteType,
     services: normalizeText(form.services),
     amountColumns: form.amountColumns,
-    tableRows: form.tableRows,
-    milestone: normalizeText(form.milestone) || undefined
+    tableRows: form.tableRows
   };
 }
 
@@ -1355,7 +1344,6 @@ function TemplateVisualPreview(props: {
   templateNumber: string;
   team?: Team | "";
   quoteType: QuoteType;
-  milestone?: string;
   services: string;
   servicesLabel?: string;
   emptyServicesText?: string;
@@ -1376,7 +1364,6 @@ function TemplateVisualPreview(props: {
         <div className="quote-template-visual-meta">
           <span>{getTeamLabel(props.team)}</span>
           <span>{getQuoteTypeLabel(props.quoteType)}</span>
-          <span>Hito: {normalizeText(props.milestone) || "-"}</span>
         </div>
       </div>
 
@@ -2139,7 +2126,6 @@ export function QuotesPage() {
       amountColumns: activeQuoteTemplateDraft?.amountColumns,
       tableRows: activeQuoteTemplateDraft?.tableRows,
       lineItems,
-      milestone: normalizeText(effectiveQuoteForm.milestone) || undefined,
       notes: normalizeText(effectiveQuoteForm.notes) || undefined
     };
 
@@ -2556,7 +2542,6 @@ export function QuotesPage() {
                             <div className="quotes-template-list-meta">
                               <span>{template.tableRows.length} conceptos</span>
                               <span>Total: {getTemplateAmountPreview(template)}</span>
-                              <span>Hito: {template.milestone || "-"}</span>
                               <span>Actualizada: {formatDate(template.updatedAt)}</span>
                             </div>
                           </div>
@@ -2608,7 +2593,6 @@ export function QuotesPage() {
                               templateNumber={template.templateNumber}
                               team={template.team}
                               quoteType={template.quoteType}
-                              milestone={template.milestone}
                               services={template.services}
                               amountColumns={template.amountColumns}
                               tableRows={template.tableRows}
@@ -2664,10 +2648,6 @@ export function QuotesPage() {
                 </select>
               </label>
 
-              <label className="form-field">
-                <span>Hito de conclusion</span>
-                <input type="text" value={templateForm.milestone} onChange={(event) => setTemplateForm((current) => ({ ...current, milestone: event.target.value }))} placeholder="Ej. Firma, entrega, cierre, aprobacion" />
-              </label>
             </div>
 
             <label className="form-field">
@@ -2750,7 +2730,6 @@ export function QuotesPage() {
               templateNumber={templateFormNumber}
               team={templateForm.team}
               quoteType={templateForm.quoteType}
-              milestone={templateForm.milestone}
               services={templateForm.services}
               amountColumns={templateForm.amountColumns}
               tableRows={templateForm.tableRows}
@@ -2842,7 +2821,6 @@ export function QuotesPage() {
                       <th>Equipo</th>
                       <th>Titulo</th>
                       <th>Total</th>
-                      <th>Hito de conclusion</th>
                       <th>Acciones</th>
                     </tr>
                   </thead>
@@ -2856,7 +2834,6 @@ export function QuotesPage() {
                         <td>{getTeamLabel(quote.responsibleTeam)}</td>
                         <td title={getQuoteTitle(quote)}>{getQuoteTitle(quote)}</td>
                         <td>{formatCurrency(quote.totalMxn)}</td>
-                        <td>{quote.milestone || "-"}</td>
                         <td>{renderQuoteTableActions(quote)}</td>
                       </tr>
                     ))}
@@ -2887,7 +2864,6 @@ export function QuotesPage() {
                         <th>Equipo</th>
                         <th>Titulo</th>
                         <th>Total</th>
-                        <th>Hito de conclusion</th>
                         <th>Acciones</th>
                       </tr>
                     </thead>
@@ -2900,7 +2876,6 @@ export function QuotesPage() {
                           <td>{getTeamLabel(quote.responsibleTeam)}</td>
                           <td title={getQuoteTitle(quote)}>{getQuoteTitle(quote)}</td>
                           <td>{formatCurrency(quote.totalMxn)}</td>
-                          <td>{quote.milestone || "-"}</td>
                           <td>{renderQuoteTableActions(quote)}</td>
                         </tr>
                       ))}
@@ -3131,10 +3106,6 @@ export function QuotesPage() {
                 <input type="text" value={quoteForm.subject} onChange={(event) => updateQuoteForm((current) => ({ ...current, subject: event.target.value }))} placeholder="Describe el alcance de la propuesta" />
               </label>
 
-              <label className="form-field">
-                <span>Hito de conclusion</span>
-                <input type="text" value={quoteForm.milestone} onChange={(event) => updateQuoteForm((current) => ({ ...current, milestone: event.target.value }))} placeholder="Ej. Firma, entrega, cierre, aprobacion" />
-              </label>
             </div>
 
             {sourceMode === "template" && !selectedTemplate ? (
@@ -3277,10 +3248,6 @@ export function QuotesPage() {
                 <strong>Equipo</strong>
                 <p>{getTeamLabel(viewingQuote.responsibleTeam)}</p>
               </div>
-              <div className="quotes-detail-block">
-                <strong>Hito</strong>
-                <p>{normalizeText(viewingQuote.milestone) || "-"}</p>
-              </div>
             </div>
 
             {viewingQuoteDraft ? (
@@ -3289,7 +3256,6 @@ export function QuotesPage() {
                 templateNumber={viewingQuote.quoteNumber}
                 team={viewingQuote.responsibleTeam}
                 quoteType={viewingQuote.quoteType}
-                milestone={viewingQuote.milestone}
                 services={viewingQuote.subject}
                 servicesLabel="Asunto"
                 emptyServicesText="Sin asunto capturado."

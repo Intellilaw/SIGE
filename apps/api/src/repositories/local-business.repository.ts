@@ -771,7 +771,6 @@ export class LocalBusinessStore {
       quoteDate: isoDate(row.quote_date) ?? createdAt,
       lineItems,
       totalMxn: numberValue(row.total_mxn) || lineItems.reduce((sum, item) => sum + item.amountMxn, 0),
-      milestone: optionalText(row.hito_conclusion),
       notes: optionalText(row.notes),
       createdAt,
       updatedAt

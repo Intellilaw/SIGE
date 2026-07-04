@@ -390,7 +390,6 @@ model Quote {
   tableRows       Json?
   lineItems       Json
   totalMxn        Decimal
-  milestone       String?
   notes           String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -416,7 +415,6 @@ model QuoteTemplate {
   tableRows      Json?
   lineItems      Json
   totalMxn       Decimal
-  milestone      String?
   notes          String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt

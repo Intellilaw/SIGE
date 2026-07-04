@@ -1182,7 +1182,6 @@ export function mapQuote(record: {
   tableRows: Prisma.JsonValue | null;
   lineItems: Prisma.JsonValue;
   totalMxn: Prisma.Decimal;
-  milestone: string | null;
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -1204,7 +1203,6 @@ export function mapQuote(record: {
     tableRows: record.tableRows ? asQuoteTemplateRows(record.tableRows, ((Array.isArray(record.lineItems) ? record.lineItems : []) as unknown as Quote["lineItems"])) : undefined,
     lineItems: ((Array.isArray(record.lineItems) ? record.lineItems : []) as unknown as Quote["lineItems"]),
     totalMxn: Number(record.totalMxn),
-    milestone: record.milestone ?? undefined,
     notes: record.notes ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
@@ -1223,7 +1221,6 @@ export function mapQuoteTemplate(record: {
   tableRows: Prisma.JsonValue | null;
   lineItems: Prisma.JsonValue;
   totalMxn: Prisma.Decimal;
-  milestone: string | null;
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -1241,7 +1238,6 @@ export function mapQuoteTemplate(record: {
     tableRows: asQuoteTemplateRows(record.tableRows, lineItems),
     lineItems,
     totalMxn: Number(record.totalMxn),
-    milestone: record.milestone ?? undefined,
     notes: record.notes ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()

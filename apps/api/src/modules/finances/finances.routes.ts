@@ -66,7 +66,6 @@ const financeRecordFieldsSchema = z.object({
   closingCommissionRecipient: z.string().nullable().optional(),
   highCollectionProbability: z.boolean().optional(),
   lowCollectionProbability: z.boolean().optional(),
-  milestone: z.string().nullable().optional(),
   concluded: z.boolean().optional(),
   financeComments: z.string().nullable().optional()
 });

@@ -610,7 +610,6 @@ export interface Quote {
   tableRows?: QuoteTemplateTableRow[];
   lineItems: QuoteLineItem[];
   totalMxn: number;
-  milestone?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -644,7 +643,6 @@ export interface QuoteTemplate {
   tableRows: QuoteTemplateTableRow[];
   lineItems: QuoteLineItem[];
   totalMxn: number;
-  milestone?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;

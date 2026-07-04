@@ -596,7 +596,6 @@ export function MattersPage() {
                 matter.clientName = linkedQuote.clientName;
                 matter.subject = linkedQuote.subject;
                 matter.totalFeesMxn = linkedQuote.totalMxn;
-                matter.milestone = linkedQuote.milestone;
             }
             else if (!cleanQuoteNumber) {
                 matter.quoteId = undefined;
@@ -604,7 +603,6 @@ export function MattersPage() {
                 matter.clientName = "";
                 matter.subject = "";
                 matter.totalFeesMxn = 0;
-                matter.milestone = undefined;
                 matter.matterType = "ONE_TIME";
             }
             return matter;
