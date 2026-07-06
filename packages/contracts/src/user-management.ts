@@ -139,6 +139,20 @@ const TASK_EXECUTION_TEAM_KEYS = new Set<string>([
   "TAX_COMPLIANCE"
 ]);
 
+const TASK_EXECUTION_ROLE_MODULES = [
+  { roleIncludes: "litigio", moduleId: "litigation" },
+  { roleIncludes: "corporativo-laboral", moduleId: "corporate-labor" },
+  { roleIncludes: "convenios", moduleId: "settlements" },
+  { roleIncludes: "der financiero", moduleId: "financial-law" },
+  { roleIncludes: "compliance fiscal", moduleId: "tax-compliance" }
+] as const;
+
+function addTaskExecutionModulePermissions(permissions: Set<string>, moduleId: string) {
+  permissions.add("tasks:read");
+  permissions.add(`tasks:${moduleId}`);
+  permissions.add(`execution:${moduleId}`);
+}
+
 function collapseWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -387,9 +401,7 @@ export function derivePermissions(input: {
     if (teamKey && TASK_EXECUTION_TEAM_KEYS.has(teamKey)) {
       const taskModuleId = buildTaskModuleIdFromTeamKey(teamKey);
       if (taskModuleId) {
-        permissions.add("tasks:read");
-        permissions.add(`tasks:${taskModuleId}`);
-        permissions.add(`execution:${taskModuleId}`);
+        addTaskExecutionModulePermissions(permissions, taskModuleId);
       }
     }
 
@@ -486,6 +498,12 @@ export function derivePermissions(input: {
       permissions.add("tasks:read");
       permissions.add("tasks:tax-compliance");
       permissions.add("execution:tax-compliance");
+    }
+  }
+
+  for (const roleModule of TASK_EXECUTION_ROLE_MODULES) {
+    if (hasSpecificRoleIncluding(roleModule.roleIncludes)) {
+      addTaskExecutionModulePermissions(permissions, roleModule.moduleId);
     }
   }
 

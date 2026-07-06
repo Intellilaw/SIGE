@@ -87,17 +87,28 @@ export function findTaskModuleDescriptorBySlug(modules, slug) {
 }
 export function buildTaskDashboardMembers(module) {
     const configuredMembers = TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.id]?.members ?? [];
-    const members = configuredMembers.map((member) => ({
-        ...member,
-        aliases: [...member.aliases]
-    }));
-    for (const moduleMember of module.members ?? []) {
+    const dynamicMembers = module.members ?? [];
+    if (dynamicMembers.length === 0) {
+        return configuredMembers.map((member) => ({
+            ...member,
+            aliases: [...member.aliases]
+        }));
+    }
+    const members = [];
+    for (const moduleMember of dynamicMembers) {
         const candidate = {
             id: moduleMember.shortName || moduleMember.id,
             name: moduleMember.name,
-            aliases: moduleMember.aliases
+            aliases: [...moduleMember.aliases]
         };
         const candidateAliases = [candidate.id, candidate.name, ...candidate.aliases].map(normalizeComparableText);
+        const configuredMember = configuredMembers.find((member) => {
+            const memberAliases = [member.id, member.name, ...member.aliases].map(normalizeComparableText);
+            return candidateAliases.some((alias) => alias && memberAliases.includes(alias));
+        });
+        if (configuredMember) {
+            candidate.aliases = mergeAliases(candidate.aliases, configuredMember.aliases);
+        }
         const existing = members.find((member) => {
             const memberAliases = [member.id, member.name, ...member.aliases].map(normalizeComparableText);
             return candidateAliases.some((alias) => alias && memberAliases.includes(alias));
