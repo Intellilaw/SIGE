@@ -38,6 +38,28 @@ function getFallbackIcon(module) {
 function mergeAliases(left, right) {
     return Array.from(new Set([...left, ...right].map((alias) => alias.trim()).filter(Boolean)));
 }
+function hasRoleMarker(values, marker) {
+    return values.some((value) => value.includes(`(${marker})`) || new RegExp(`\\b${marker}\\b`).test(value));
+}
+function getDashboardMemberRoleRank(member) {
+    const roleValues = (member.specificRole ? [member.specificRole] : member.aliases).map(normalizeComparableText);
+    if (hasRoleMarker(roleValues, "lider")) {
+        return 0;
+    }
+    if (hasRoleMarker(roleValues, "colaborador")) {
+        return 1;
+    }
+    return 2;
+}
+function sortDashboardMembers(members) {
+    return [...members].sort((left, right) => {
+        const roleDifference = getDashboardMemberRoleRank(left) - getDashboardMemberRoleRank(right);
+        if (roleDifference !== 0) {
+            return roleDifference;
+        }
+        return left.name.localeCompare(right.name, "es", { sensitivity: "base" });
+    });
+}
 export function buildTaskModuleDescriptor(module) {
     const legacyExecutionModule = EXECUTION_MODULE_BY_ID[module.id];
     if (legacyExecutionModule) {
@@ -89,17 +111,18 @@ export function buildTaskDashboardMembers(module) {
     const configuredMembers = TASK_DASHBOARD_CONFIG_BY_MODULE_ID[module.id]?.members ?? [];
     const dynamicMembers = module.members ?? [];
     if (dynamicMembers.length === 0) {
-        return configuredMembers.map((member) => ({
+        return sortDashboardMembers(configuredMembers.map((member) => ({
             ...member,
             aliases: [...member.aliases]
-        }));
+        })));
     }
     const members = [];
     for (const moduleMember of dynamicMembers) {
         const candidate = {
             id: moduleMember.shortName || moduleMember.id,
             name: moduleMember.name,
-            aliases: [...moduleMember.aliases]
+            aliases: [...moduleMember.aliases],
+            specificRole: moduleMember.specificRole
         };
         const candidateAliases = [candidate.id, candidate.name, ...candidate.aliases].map(normalizeComparableText);
         const configuredMember = configuredMembers.find((member) => {
@@ -108,6 +131,7 @@ export function buildTaskDashboardMembers(module) {
         });
         if (configuredMember) {
             candidate.aliases = mergeAliases(candidate.aliases, configuredMember.aliases);
+            candidate.specificRole = candidate.specificRole ?? configuredMember.specificRole;
         }
         const existing = members.find((member) => {
             const memberAliases = [member.id, member.name, ...member.aliases].map(normalizeComparableText);
@@ -115,10 +139,11 @@ export function buildTaskDashboardMembers(module) {
         });
         if (existing) {
             existing.aliases = mergeAliases(existing.aliases, candidate.aliases);
+            existing.specificRole = existing.specificRole ?? candidate.specificRole;
         }
         else {
             members.push(candidate);
         }
     }
-    return members;
+    return sortDashboardMembers(members);
 }

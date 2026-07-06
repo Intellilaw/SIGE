@@ -138,8 +138,10 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.TasksService(app.repositories.tasks);
   const EXECUTION_ALL_PERMISSION = "execution:all";
 
-  function getEffectivePermissions(request: FastifyRequest) {
-    const user = getSessionUser(request);
+  async function getEffectivePermissions(request: FastifyRequest) {
+    const sessionUser = getSessionUser(request);
+    const freshUser = await app.repositories.users.findById(sessionUser.id);
+    const user = freshUser?.isActive ? freshUser : sessionUser;
     return deriveEffectivePermissions({
       legacyRole: user.legacyRole,
       team: user.team,
@@ -153,21 +155,21 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
     });
   }
 
-  function hasExternalTaskReadAccess(request: FastifyRequest) {
+  async function hasExternalTaskReadAccess(request: FastifyRequest) {
     const user = getSessionUser(request);
-    const permissions = getEffectivePermissions(request);
+    const permissions = await getEffectivePermissions(request);
     return isExternalScopedUser(user) && permissions.includes("external-tasks:read");
   }
 
-  function hasExternalTaskWriteAccess(request: FastifyRequest) {
+  async function hasExternalTaskWriteAccess(request: FastifyRequest) {
     const user = getSessionUser(request);
-    const permissions = getEffectivePermissions(request);
+    const permissions = await getEffectivePermissions(request);
     return isExternalScopedUser(user) && permissions.includes("external-tasks:write");
   }
 
   async function getExternalMatterScope(request: FastifyRequest) {
     const user = getSessionUser(request);
-    if (!hasExternalTaskReadAccess(request)) {
+    if (!(await hasExternalTaskReadAccess(request))) {
       return null;
     }
 
@@ -201,7 +203,7 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
       return;
     }
 
-    if (!hasExternalTaskWriteAccess(request) || !record) {
+    if (!(await hasExternalTaskWriteAccess(request)) || !record) {
       throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
     }
 
@@ -239,7 +241,7 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
   }
 
   async function getAllowedTaskModules(request: FastifyRequest) {
-    const permissions = getEffectivePermissions(request);
+    const permissions = await getEffectivePermissions(request);
     const modules = await service.listModules();
     const externalScope = await getExternalMatterScope(request);
     if (externalScope) {

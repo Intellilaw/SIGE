@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  EXECUTION_HOLIDAY_AUTHORITIES,
+  EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES,
   HOLIDAY_AUTHORITIES,
-  type ExecutionHolidayAuthorityShortName,
+  type ExecutionHolidayCalendarAuthorityShortName,
   type Holiday,
   type HolidayAuthorityShortName
 } from "@sige/contracts";
@@ -26,9 +26,9 @@ type HolidayPatchPayload = {
   label?: string | null;
 };
 
-type SelectedHolidayAuthority = ExecutionHolidayAuthorityShortName | typeof ALL_AUTHORITIES_OPTION;
+type SelectedHolidayAuthority = ExecutionHolidayCalendarAuthorityShortName | typeof ALL_AUTHORITIES_OPTION;
 type HolidayOrganAuthority = {
-  shortName: ExecutionHolidayAuthorityShortName;
+  shortName: ExecutionHolidayCalendarAuthorityShortName;
   holidayShortName: HolidayAuthorityShortName;
   name: string;
 };
@@ -56,7 +56,7 @@ const MONTH_NAMES = [
 const WEEKDAY_LABELS = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const ALL_AUTHORITIES_OPTION = "ALL_AUTHORITIES" as const;
 const ALL_AUTHORITIES_LABEL = "Todos los \u00f3rganos";
-const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME: Record<ExecutionHolidayAuthorityShortName, HolidayAuthorityShortName> = {
+const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME: Record<ExecutionHolidayCalendarAuthorityShortName, HolidayAuthorityShortName> = {
   PJF: "PJF",
   TSJCDMX: "TSJCDMX",
   PJEdoMex: "PJEdoMex",
@@ -70,7 +70,7 @@ const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME: Record<ExecutionHolidayAuthorit
   APF: "APF",
   APCDMX: "APCDMX"
 };
-const HOLIDAY_ORGAN_AUTHORITIES: HolidayOrganAuthority[] = EXECUTION_HOLIDAY_AUTHORITIES.map((shortName) => {
+const HOLIDAY_ORGAN_AUTHORITIES: HolidayOrganAuthority[] = EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES.map((shortName) => {
   const holidayShortName = EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME[shortName];
   const authority = HOLIDAY_AUTHORITIES.find((candidate) => candidate.shortName === holidayShortName);
 

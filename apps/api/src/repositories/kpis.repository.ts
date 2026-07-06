@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
   buildLegalFlowSalesTasks,
   deriveEffectivePermissions,
-  EXECUTION_HOLIDAY_AUTHORITIES,
+  EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES,
   getExecutionMatterMissingFields,
   LEGALFLOW_SALES_PRODUCTS,
   LEGALFLOW_SALES_START_DATE,
@@ -31,7 +31,7 @@ const LAMR_KPI_USER_KEY = "LAMR";
 const LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID = "lamr-filas-incompletas-ejecucion";
 const LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD = 2;
 const NON_EVALUATED_KPI_DAY_UNIT = "dias-no-evaluados";
-const KPI_HOLIDAY_ORGAN_AUTHORITIES = new Set<string>(EXECUTION_HOLIDAY_AUTHORITIES);
+const KPI_HOLIDAY_ORGAN_AUTHORITIES = new Set<string>(EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES);
 const TERM_MARKED_AT_DATA_KEY = "termMarkedAt";
 const VERIFICATION_DATES_DATA_KEY = "verificationDates";
 const WRITING_PRESENTED_AT_DATA_KEY = "writingPresentedAt";
@@ -413,7 +413,7 @@ function buildKpiHolidayKeys(holidays: HolidayRecord[]) {
   return new Set(
     Array.from(authoritiesByDate.entries())
       .filter(([, authorities]) =>
-        EXECUTION_HOLIDAY_AUTHORITIES.every((authority) => authorities.has(authority))
+        EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES.every((authority) => authorities.has(authority))
       )
       .map(([dateKey]) => dateKey)
   );

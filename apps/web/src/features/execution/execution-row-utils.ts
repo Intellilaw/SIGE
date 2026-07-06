@@ -1,5 +1,6 @@
 import {
   EXECUTION_HOLIDAY_AUTHORITIES,
+  EXECUTION_HOLIDAY_NOT_APPLICABLE,
   MATTER_PROMOTION_COMMANDS,
   getExecutionMatterMissingFields,
   type Client,
@@ -126,6 +127,10 @@ function isNonBusinessDate(
   authority: ExecutionHolidayAuthorityShortName,
   holidayDateKeysByAuthority: HolidayDateKeysByAuthority
 ) {
+  if (authority === EXECUTION_HOLIDAY_NOT_APPLICABLE) {
+    return false;
+  }
+
   return isWeekendDateKey(dateKey) || Boolean(holidayDateKeysByAuthority[authority]?.has(dateKey));
 }
 
@@ -136,7 +141,7 @@ export function getEffectiveTaskDueDate(
 ) {
   const dueDate = toExecutionDateInput(task.dueDate);
   const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
-  if (!dueDate || !authority || !isExecutionDateKey(dueDate)) {
+  if (!dueDate || !authority || authority === EXECUTION_HOLIDAY_NOT_APPLICABLE || !isExecutionDateKey(dueDate)) {
     return dueDate;
   }
 
@@ -163,7 +168,7 @@ export function collectExecutionHolidayFetchPlan(matters: Matter[], taskMap: Map
 
   matters.forEach((matter) => {
     const authority = getExecutionHolidayAuthority(matter.holidayAuthorityShortName);
-    if (!authority) {
+    if (!authority || authority === EXECUTION_HOLIDAY_NOT_APPLICABLE) {
       return;
     }
 

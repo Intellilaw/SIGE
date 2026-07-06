@@ -512,7 +512,9 @@ export const HOLIDAY_AUTHORITIES = [
 export type HolidayAuthorityShortName = typeof HOLIDAY_AUTHORITIES[number]["shortName"];
 export type HolidaySource = "MANUAL" | "WEEKEND" | "LFT_OFFICIAL";
 
-export const EXECUTION_HOLIDAY_AUTHORITIES = [
+export const EXECUTION_HOLIDAY_NOT_APPLICABLE = "No aplica" as const;
+
+export const EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES = [
   "PJF",
   "TSJCDMX",
   "PJEdoMex",
@@ -527,6 +529,12 @@ export const EXECUTION_HOLIDAY_AUTHORITIES = [
   "APCDMX"
 ] as const;
 
+export const EXECUTION_HOLIDAY_AUTHORITIES = [
+  ...EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES,
+  EXECUTION_HOLIDAY_NOT_APPLICABLE
+] as const;
+
+export type ExecutionHolidayCalendarAuthorityShortName = typeof EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES[number];
 export type ExecutionHolidayAuthorityShortName = typeof EXECUTION_HOLIDAY_AUTHORITIES[number];
 
 export const MATTER_PROMOTION_COMMANDS = [

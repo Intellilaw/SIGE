@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
-import { EXECUTION_HOLIDAY_AUTHORITIES, HOLIDAY_AUTHORITIES } from "@sige/contracts";
+import { EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES, HOLIDAY_AUTHORITIES } from "@sige/contracts";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 const MONTH_NAMES = [
@@ -34,7 +34,7 @@ const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME = {
     APF: "APF",
     APCDMX: "APCDMX"
 };
-const HOLIDAY_ORGAN_AUTHORITIES = EXECUTION_HOLIDAY_AUTHORITIES.map((shortName) => {
+const HOLIDAY_ORGAN_AUTHORITIES = EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES.map((shortName) => {
     const holidayShortName = EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME[shortName];
     const authority = HOLIDAY_AUTHORITIES.find((candidate) => candidate.shortName === holidayShortName);
     return {

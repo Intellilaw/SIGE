@@ -4,6 +4,7 @@ export interface TaskDashboardMember {
   id: string;
   name: string;
   aliases: string[];
+  specificRole?: string;
 }
 
 interface TaskDashboardConfig {
