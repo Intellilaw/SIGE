@@ -734,9 +734,10 @@ export class PrismaMattersRepository implements MattersRepository {
       if (hasOwn(payload, "totalFeesMxn")) {
         data.totalFeesMxn = new Prisma.Decimal(payload.totalFeesMxn ?? 0);
       }
-      if (hasOwn(payload, "milestone")) {
-        data.milestone = normalizeOptionalText(payload.milestone);
-      }
+    }
+
+    if (hasOwn(payload, "milestone")) {
+      data.milestone = normalizeOptionalText(payload.milestone);
     }
 
     if (hasOwn(payload, "commissionAssignee")) {
