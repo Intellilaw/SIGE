@@ -1,5 +1,8 @@
 import type {
   CommissionExclusionWriteRecord,
+  CommissionPaymentAcknowledgementUpdateRecord,
+  CommissionPaymentActor,
+  CommissionPaymentReconcileRow,
   CommissionsRepository,
   CreateCommissionSnapshotRecord,
   ProjectorCommissionUpdateRecord
@@ -46,5 +49,20 @@ export class CommissionsService {
 
   public updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord) {
     return this.repository.updateProjectorCommission(entryId, payload);
+  }
+
+  public getPaymentFlowState(year: number, month: number) {
+    return this.repository.getPaymentFlowState(year, month);
+  }
+
+  public reconcilePaymentAcknowledgements(year: number, month: number, rows: CommissionPaymentReconcileRow[]) {
+    return this.repository.reconcilePaymentAcknowledgements(year, month, rows);
+  }
+
+  public updatePaymentAcknowledgement(
+    payload: CommissionPaymentAcknowledgementUpdateRecord,
+    actor: CommissionPaymentActor
+  ) {
+    return this.repository.updatePaymentAcknowledgement(payload, actor);
   }
 }

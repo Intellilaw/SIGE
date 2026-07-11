@@ -2,6 +2,11 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { ContractSignedStatus, FinanceRecord, FinanceRecordStats, FinanceSnapshotData, Matter, QuoteType } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import {
+  assertCommissionPeriodUnlocked,
+  assertFinanceCommissionSourceUnlocked,
+  getCommissionPeriodLock
+} from "./commission-period-lock";
 import { attachSalesCommissionsToFinanceRecords } from "./finance-sales-commissions";
 import { mapCommissionReceiver, mapFinanceRecord, mapFinanceSnapshot } from "./mappers";
 import type { FinanceRecordWriteRecord, FinanceRepository } from "./types";
@@ -541,7 +546,10 @@ export class PrismaFinanceRepository implements FinanceRepository {
       this.hasCollectionProbabilityColumns(),
       this.hasPeriodColumns()
     ]);
-    await this.syncRecordsWithMatters(year, month, includeCollectionProbability, includePeriod);
+    const periodLock = await getCommissionPeriodLock(this.prisma, year, month);
+    if (!periodLock.locked) {
+      await this.syncRecordsWithMatters(year, month, includeCollectionProbability, includePeriod);
+    }
     return this.listRecordsForMonth(year, month, includeCollectionProbability, includePeriod);
   }
 
@@ -569,6 +577,11 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async createRecord(year: number, month: number, payload: FinanceRecordWriteRecord = {}) {
+    await assertFinanceCommissionSourceUnlocked(this.prisma, {
+      year,
+      month,
+      quoteNumbers: [payload.quoteNumber]
+    });
     const [includeCollectionProbability, includePeriod] = await Promise.all([
       this.hasCollectionProbabilityColumns(),
       this.hasPeriodColumns()
@@ -655,6 +668,11 @@ export class PrismaFinanceRepository implements FinanceRepository {
       this.hasPeriodColumns()
     ]);
     const currentRecord = await this.findRecordOrThrow(this.prisma, recordId, includePeriod);
+    await assertFinanceCommissionSourceUnlocked(this.prisma, {
+      year: currentRecord.year,
+      month: currentRecord.month,
+      quoteNumbers: [currentRecord.quoteNumber, payload.quoteNumber]
+    });
     assertUnlockedReceivedPaymentFields(currentRecord, payload);
 
     const data: Prisma.FinanceRecordUncheckedUpdateInput = {};
@@ -865,7 +883,12 @@ export class PrismaFinanceRepository implements FinanceRepository {
   }
 
   public async deleteRecord(recordId: string) {
-    await this.findRecordOrThrow(this.prisma, recordId);
+    const current = await this.findRecordOrThrow(this.prisma, recordId);
+    await assertFinanceCommissionSourceUnlocked(this.prisma, {
+      year: current.year,
+      month: current.month,
+      quoteNumbers: [current.quoteNumber]
+    });
     await this.prisma.financeRecord.delete({
       where: { id: recordId },
       select: { id: true }
@@ -875,6 +898,18 @@ export class PrismaFinanceRepository implements FinanceRepository {
   public async bulkDelete(recordIds: string[]) {
     if (recordIds.length === 0) {
       return;
+    }
+
+    const records = await this.prisma.financeRecord.findMany({
+      where: { id: { in: recordIds } },
+      select: { year: true, month: true, quoteNumber: true }
+    });
+    for (const record of records) {
+      await assertFinanceCommissionSourceUnlocked(this.prisma, {
+        year: record.year,
+        month: record.month,
+        quoteNumbers: [record.quoteNumber]
+      });
     }
 
     await this.prisma.financeRecord.deleteMany({
@@ -933,6 +968,9 @@ export class PrismaFinanceRepository implements FinanceRepository {
       nextMonth = 1;
       nextYear += 1;
     }
+
+    await assertCommissionPeriodUnlocked(this.prisma, year, month);
+    await assertCommissionPeriodUnlocked(this.prisma, nextYear, nextMonth);
 
     let copied = 0;
     let skipped = 0;
@@ -1054,6 +1092,11 @@ export class PrismaFinanceRepository implements FinanceRepository {
       this.hasPeriodColumns()
     ]);
     const matter = await this.findMatterProjectionOrThrow(this.prisma, matterId);
+    await assertFinanceCommissionSourceUnlocked(this.prisma, {
+      year,
+      month,
+      quoteNumbers: [matter.quoteNumber]
+    });
     const matterPayload = buildMatterMirrorPayload(matter);
     const isRetainer = matter.matterType === "RETAINER";
 

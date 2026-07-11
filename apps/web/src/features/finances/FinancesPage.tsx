@@ -1029,6 +1029,8 @@ export function FinancesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentMonthMatchKeys, setCurrentMonthMatchKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [commissionPeriodLocked, setCommissionPeriodLocked] = useState(false);
+  const [commissionPeriodLockCount, setCommissionPeriodLockCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [contractFormOpen, setContractFormOpen] = useState(false);
@@ -1364,14 +1366,19 @@ export function FinancesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [nextRecords, nextClients, nextReceivers] = await Promise.all([
+      const [nextRecords, nextClients, nextReceivers, periodLock] = await Promise.all([
         apiGet<FinanceRecord[]>(`/finances/records?year=${selectedYear}&month=${selectedMonth}`),
         canWriteFinances ? apiGet<Client[]>("/clients") : Promise.resolve([]),
-        apiGet<CommissionReceiver[]>("/finances/commission-receivers")
+        apiGet<CommissionReceiver[]>("/finances/commission-receivers"),
+        apiGet<{ locked: boolean; confirmedByEmrtCount: number }>(
+          `/commissions/period-lock?year=${selectedYear}&month=${selectedMonth}`
+        )
       ]);
       setRecords(nextRecords);
       setClients(nextClients);
       setReceivers(nextReceivers);
+      setCommissionPeriodLocked(periodLock.locked);
+      setCommissionPeriodLockCount(periodLock.confirmedByEmrtCount);
       setSelectedIds(new Set());
     } catch (caughtError) {
       setError(toErrorMessage(caughtError));
@@ -1413,12 +1420,17 @@ export function FinancesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [matters, nextClients, nextContracts] = await Promise.all([
+      const [matters, nextClients, nextContracts, periodLock] = await Promise.all([
         apiGet<Matter[]>("/matters"),
         canWriteFinances ? apiGet<Client[]>("/clients") : Promise.resolve([]),
-        canReadInternalContracts ? fetchOptionalRows(apiGet<InternalContract[]>("/internal-contracts")) : Promise.resolve([])
+        canReadInternalContracts ? fetchOptionalRows(apiGet<InternalContract[]>("/internal-contracts")) : Promise.resolve([]),
+        apiGet<{ locked: boolean; confirmedByEmrtCount: number }>(
+          `/commissions/period-lock?year=${currentYear}&month=${currentMonth}`
+        )
       ]);
       setClients(nextClients);
+      setCommissionPeriodLocked(periodLock.locked);
+      setCommissionPeriodLockCount(periodLock.confirmedByEmrtCount);
       setProfessionalContracts(nextContracts.filter((contract) => contract.contractType === "PROFESSIONAL_SERVICES"));
       setActiveMatters(
         matters.map((matter) => ({
@@ -2053,7 +2065,7 @@ export function FinancesPage() {
     };
 
     return (
-      <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances}>
+      <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances || commissionPeriodLocked}>
         <div className="finance-table-shell finance-table-shell-sticky">
           <div className="finance-table-x-nav" onScroll={handleFinanceTableScroll} aria-label="Desplazamiento horizontal de la tabla mensual">
             <div className="finance-table-x-nav-spacer finance-table-monthly-x-nav-spacer" />
@@ -2335,7 +2347,7 @@ export function FinancesPage() {
     );
 
     return (
-      <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances}>
+      <fieldset className="finance-readonly-fieldset" disabled={!canWriteFinances || commissionPeriodLocked}>
         <div className="finance-active-table-shell">
           <table className="finance-active-table">
             {renderActiveColGroup()}
@@ -2440,6 +2452,12 @@ export function FinancesPage() {
       </header>
 
       {error ? <div className="message-banner message-error">{error}</div> : null}
+      {commissionPeriodLocked ? (
+        <div className="message-banner commissions-period-lock-banner">
+          Periodo cerrado por {commissionPeriodLockCount} confirmacion{commissionPeriodLockCount === 1 ? "" : "es"} de EMRT
+          en Totales de comisiones. Reabre todas para modificar Finanzas.
+        </div>
+      ) : null}
 
       <section className="panel finance-tabs-panel" ref={tabsPanelRef}>
         <div className="finance-tabs">
@@ -2523,7 +2541,7 @@ export function FinancesPage() {
             </div>
             <div className="finance-toolbar-actions">
               {canDeleteFinanceRecords && selectedIds.size > 0 ? (
-                <button className="danger-button" type="button" onClick={() => void handleBulkDelete()}>
+                <button className="danger-button" type="button" onClick={() => void handleBulkDelete()} disabled={commissionPeriodLocked}>
                   Borrar ({selectedIds.size})
                 </button>
               ) : null}
@@ -2532,7 +2550,7 @@ export function FinancesPage() {
                   <button className="secondary-button" type="button" onClick={() => void handleCreateSnapshot()}>
                     Guardar estampa
                   </button>
-                  <button className="primary-button" type="button" onClick={() => setCopyModalOpen(true)}>
+                  <button className="primary-button" type="button" onClick={() => setCopyModalOpen(true)} disabled={commissionPeriodLocked}>
                     Copiar todo al mes siguiente
                   </button>
                 </>
@@ -2750,7 +2768,7 @@ export function FinancesPage() {
             <p>Esta accion copiara al mes siguiente solo los registros faltantes y conservara intactos los asuntos que ya existan en ese mes.</p>
             <div className="finance-modal-actions">
               <button className="secondary-button" type="button" onClick={() => setCopyModalOpen(false)}>Cancelar</button>
-              <button className="primary-button" type="button" onClick={() => void handleCopyToNextMonth()} disabled={!canWriteFinances}>Continuar</button>
+              <button className="primary-button" type="button" onClick={() => void handleCopyToNextMonth()} disabled={!canWriteFinances || commissionPeriodLocked}>Continuar</button>
             </div>
           </div>
         </div>

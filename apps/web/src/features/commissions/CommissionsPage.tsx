@@ -4,6 +4,8 @@ import type {
   CommissionBreakdownEntry,
   CommissionExclusion,
   CommissionGroup1TeamBreakdown,
+  CommissionPaymentAcknowledgement,
+  CommissionPaymentFlowState,
   CommissionReceiver,
   CommissionSnapshot,
   CommissionSnapshotData,
@@ -33,6 +35,8 @@ interface CommissionsOverviewResponse {
   receivers: CommissionReceiver[];
   exclusions: CommissionExclusion[];
   projectorCommissions: ProjectorCommission[];
+  paymentAcknowledgements: CommissionPaymentAcknowledgement[];
+  periodLocked: boolean;
 }
 
 interface ComputedFinanceRecord extends FinanceRecord, FinanceRecordStats {
@@ -101,7 +105,6 @@ const EMPTY_CALCULATION: SectionCalculation = {
   deductionMxn: 0,
   netTotalMxn: 0
 };
-const EMPTY_TOTALS_RECEIVER_EXCLUSION_KEYS = new Set<string>();
 const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
 const SALES_COMMISSION_SECTION = "Ventas";
 const SALES_COMMISSION_RATE = 0.01;
@@ -195,6 +198,29 @@ function isEduardoRusconiUser(user: ReturnType<typeof useAuth>["user"]) {
     const normalized = normalizeIdentityText(value);
     return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
   });
+}
+
+function isRusconiTenant(user: ReturnType<typeof useAuth>["user"]) {
+  return Boolean(
+    user?.organizationId === "org-rusconi"
+    || normalizeText(user?.organizationSlug) === "rusconi-consulting"
+    || normalizeText(user?.organizationName) === "rusconi consulting"
+  );
+}
+
+function isAraceliLozanoUser(user: ReturnType<typeof useAuth>["user"]) {
+  const isFinance = user?.team === "FINANCE"
+    || user?.secondaryTeam === "FINANCE"
+    || [user?.legacyTeam, user?.secondaryLegacyTeam, user?.specificRole, user?.secondarySpecificRole]
+      .some((value) => normalizeText(value) === "finanzas");
+  const identities = [user?.username, user?.displayName, user?.email].map(normalizeText);
+
+  return isRusconiTenant(user) && isFinance && identities.some((identity) =>
+    identity === "araceli lozano"
+    || identity === "araceli lozano escamilla"
+    || identity.startsWith("araceli.lozano")
+    || identity.startsWith("araceli lozano")
+  );
 }
 
 function canManageCommissionExclusions(user: ReturnType<typeof useAuth>["user"]) {
@@ -386,6 +412,22 @@ function toDateKey(value?: string) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
+}
+
+function formatDateTime(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString("es-MX", {
+    dateStyle: "short",
+    timeStyle: "short"
+  });
 }
 
 function isPaymentReceived(method?: FinanceRecord["paymentMethod"] | null, received?: boolean | null) {
@@ -1210,8 +1252,15 @@ function CommissionTotalsTable(props: {
   year: number;
   month: number;
   excludedReceiverKeys: Set<string>;
+  acknowledgementsBySection: Map<string, CommissionPaymentAcknowledgement>;
+  periodLocked: boolean;
   canManageReceiverExclusions: boolean;
+  canConfirmAsAraceli: boolean;
+  canConfirmAsEmrt: boolean;
+  savingSections: Set<string>;
   onToggleReceiverExclusion: (section: string, excluded: boolean) => void;
+  onToggleReceivedByAraceli: (section: string, received: boolean) => void;
+  onToggleReceivedByEmrt: (section: string, received: boolean) => void;
 }) {
   const isReceiverExcluded = (section: string) => props.excludedReceiverKeys.has(
     buildCommissionTotalsReceiverExclusionKey({
@@ -1242,6 +1291,11 @@ function CommissionTotalsTable(props: {
           <tbody>
             {props.rows.map((row) => {
               const excluded = isReceiverExcluded(row.section);
+              const acknowledgement = props.acknowledgementsBySection.get(normalizeText(row.section));
+              const amountMxn = row.calculation.totalCommissionsMxn;
+              const eligible = !excluded && amountMxn > 0;
+              const saving = props.savingSections.has(normalizeText(row.section));
+              const araceliLocked = Boolean(acknowledgement?.receivedByEmrt);
 
               return (
                 <tr className={excluded ? "commissions-row-excluded" : undefined} key={row.section}>
@@ -1255,6 +1309,7 @@ function CommissionTotalsTable(props: {
                           <input
                             aria-label={`${excluded ? "Incluir" : "Excluir"} ${row.section} del Total general`}
                             checked={excluded}
+                            disabled={props.periodLocked || saving}
                             onChange={(event) => props.onToggleReceiverExclusion(row.section, event.target.checked)}
                             type="checkbox"
                           />
@@ -1264,9 +1319,62 @@ function CommissionTotalsTable(props: {
                     </div>
                   </td>
                   <td className="commissions-total-strong">
-                    <span className={excluded ? "commissions-amount-excluded" : undefined}>
-                      {formatCurrency(row.calculation.totalCommissionsMxn)}
-                    </span>
+                    <div className="commissions-payment-flow">
+                      <span className={excluded ? "commissions-amount-excluded" : undefined}>
+                        {formatCurrency(amountMxn)}
+                      </span>
+                      <div className="commissions-payment-flow-controls">
+                        <label className={!eligible || !props.canConfirmAsAraceli || araceliLocked ? "is-disabled" : undefined}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(acknowledgement?.receivedByAraceli)}
+                            disabled={
+                              !acknowledgement
+                              || !eligible
+                              || !props.canConfirmAsAraceli
+                              || araceliLocked
+                              || saving
+                            }
+                            onChange={(event) => props.onToggleReceivedByAraceli(row.section, event.target.checked)}
+                          />
+                          <span>Recibido por Araceli Lozano</span>
+                        </label>
+                        <label className={!eligible || !props.canConfirmAsEmrt || !acknowledgement?.receivedByAraceli ? "is-disabled" : undefined}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(acknowledgement?.receivedByEmrt)}
+                            disabled={
+                              !acknowledgement
+                              || !eligible
+                              || !props.canConfirmAsEmrt
+                              || !acknowledgement.receivedByAraceli
+                              || saving
+                            }
+                            onChange={(event) => props.onToggleReceivedByEmrt(row.section, event.target.checked)}
+                          />
+                          <span>Recibido por EMRT</span>
+                        </label>
+                      </div>
+                      {acknowledgement ? (
+                        <div className="commissions-payment-flow-meta">
+                          {acknowledgement.receivedByAraceliAt ? (
+                            <span>Araceli: {formatDateTime(acknowledgement.receivedByAraceliAt)}</span>
+                          ) : null}
+                          {acknowledgement.receivedByEmrtAt ? (
+                            <span>EMRT: {formatDateTime(acknowledgement.receivedByEmrtAt)}</span>
+                          ) : null}
+                          {acknowledgement.reopenedAt ? (
+                            <span>
+                              Reabierto: {formatDateTime(acknowledgement.reopenedAt)}
+                              {acknowledgement.reopenedByName ? ` por ${acknowledgement.reopenedByName}` : ""}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {!eligible ? (
+                        <small>{excluded ? "Receptor excluido del pago" : "Sin monto por confirmar"}</small>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               );
@@ -1441,10 +1549,13 @@ export function CommissionsPage() {
   const [snapshots, setSnapshots] = useState<CommissionSnapshot[]>([]);
   const [exclusions, setExclusions] = useState<CommissionExclusion[]>([]);
   const [projectorCommissions, setProjectorCommissions] = useState<ProjectorCommission[]>([]);
+  const [paymentAcknowledgements, setPaymentAcknowledgements] = useState<CommissionPaymentAcknowledgement[]>([]);
+  const [periodLocked, setPeriodLocked] = useState(false);
+  const [confirmedByEmrtCount, setConfirmedByEmrtCount] = useState(0);
   const [savingExclusionKeys, setSavingExclusionKeys] = useState<Set<string>>(new Set());
   const [savingProjectorCommissionIds, setSavingProjectorCommissionIds] = useState<Set<string>>(new Set());
+  const [savingPaymentSections, setSavingPaymentSections] = useState<Set<string>>(new Set());
   const [projectorAmountDrafts, setProjectorAmountDrafts] = useState<Record<string, string>>({});
-  const [excludedTotalsReceiverKeys, setExcludedTotalsReceiverKeys] = useState<Set<string>>(new Set());
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(true);
   const [savingSnapshot, setSavingSnapshot] = useState(false);
@@ -1463,6 +1574,8 @@ export function CommissionsPage() {
   const canManageExclusions = canManageCommissionExclusions(user);
   const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
   const canManageProjectorEntries = canManageProjectorCommissions(user);
+  const canConfirmPaymentsAsAraceli = isAraceliLozanoUser(user);
+  const canConfirmPaymentsAsEmrt = isRusconiTenant(user) && hasSuperadminAccess(user) && isEduardoRusconiUser(user);
   const isLegalFlow = isLegalFlowTenant(user);
   const availableCommissionSections = useMemo(
     () => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...RUSCONI_COMMISSION_SECTIONS],
@@ -1549,6 +1662,9 @@ export function CommissionsPage() {
       setReceivers(overview.receivers);
       setExclusions(overview.exclusions ?? []);
       setProjectorCommissions(overview.projectorCommissions ?? []);
+      setPaymentAcknowledgements(overview.paymentAcknowledgements ?? []);
+      setPeriodLocked(Boolean(overview.periodLocked));
+      setConfirmedByEmrtCount((overview.paymentAcknowledgements ?? []).filter((entry) => entry.receivedByEmrt).length);
       setClients(clientsResponse);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -1622,9 +1738,22 @@ export function CommissionsPage() {
     selectedMonth,
     selectedYear
   ]);
-  const effectiveExcludedTotalsReceiverKeys = canManageTotalsReceiverExclusions
-    ? excludedTotalsReceiverKeys
-    : EMPTY_TOTALS_RECEIVER_EXCLUSION_KEYS;
+  const paymentAcknowledgementsBySection = useMemo(
+    () => new Map(paymentAcknowledgements.map((entry) => [normalizeText(entry.section), entry])),
+    [paymentAcknowledgements]
+  );
+  const effectiveExcludedTotalsReceiverKeys = useMemo(
+    () => new Set(
+      paymentAcknowledgements
+        .filter((entry) => entry.excluded)
+        .map((entry) => buildCommissionTotalsReceiverExclusionKey({
+          year: entry.year,
+          month: entry.month,
+          section: entry.section
+        }))
+    ),
+    [paymentAcknowledgements]
+  );
   const includedCommissionTotalsRows = useMemo(
     () => commissionTotalsRows.filter((row) => !effectiveExcludedTotalsReceiverKeys.has(
       buildCommissionTotalsReceiverExclusionKey({
@@ -1657,32 +1786,121 @@ export function CommissionsPage() {
     [includedCommissionTotalsRows]
   );
 
-  function handleToggleCommissionTotalsReceiverExclusion(section: string, excluded: boolean) {
-    if (!canManageTotalsReceiverExclusions) {
+  const paymentReconcileSignature = useMemo(
+    () => commissionTotalsRows
+      .map((row) => `${normalizeText(row.section)}:${row.calculation.totalCommissionsMxn.toFixed(2)}`)
+      .join("|"),
+    [commissionTotalsRows]
+  );
+
+  useEffect(() => {
+    if (!isTotalsActiveSection || isLegalFlow || loadingBoard || commissionTotalsRows.length === 0) {
       return;
     }
 
-    const exclusionKey = buildCommissionTotalsReceiverExclusionKey({
+    let cancelled = false;
+    void apiPost<CommissionPaymentFlowState>("/commissions/payment-acknowledgements/reconcile", {
       year: selectedYear,
       month: selectedMonth,
-      section
-    });
+      rows: commissionTotalsRows.map((row) => ({
+        section: row.section,
+        amountMxn: row.calculation.totalCommissionsMxn
+      }))
+    })
+      .then((state) => {
+        if (!cancelled) {
+          setPaymentAcknowledgements(state.acknowledgements);
+          setPeriodLocked(state.locked);
+          setConfirmedByEmrtCount(state.confirmedByEmrtCount);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setFlash({ tone: "error", text: getErrorMessage(error) });
+        }
+      });
 
-    setExcludedTotalsReceiverKeys((current) => {
-      const next = new Set(current);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    commissionTotalsRows,
+    isLegalFlow,
+    isTotalsActiveSection,
+    loadingBoard,
+    paymentReconcileSignature,
+    selectedMonth,
+    selectedYear
+  ]);
 
-      if (excluded) {
-        next.add(exclusionKey);
-      } else {
-        next.delete(exclusionKey);
+  async function updatePaymentAcknowledgement(
+    section: string,
+    payload: { receivedByAraceli?: boolean; receivedByEmrt?: boolean; excluded?: boolean }
+  ) {
+    const savingKey = normalizeText(section);
+    setSavingPaymentSections((current) => new Set(current).add(savingKey));
+    setFlash(null);
+
+    try {
+      const state = await apiPatch<CommissionPaymentFlowState>("/commissions/payment-acknowledgements", {
+        year: selectedYear,
+        month: selectedMonth,
+        section,
+        ...payload
+      });
+      setPaymentAcknowledgements(state.acknowledgements);
+      setPeriodLocked(state.locked);
+      setConfirmedByEmrtCount(state.confirmedByEmrtCount);
+      setFlash({
+        tone: "success",
+        text: payload.receivedByEmrt === false
+          ? state.locked
+            ? "Confirmacion reabierta. El periodo sigue bloqueado por otras confirmaciones de EMRT."
+            : "Todas las confirmaciones de EMRT fueron reabiertas; Finanzas y Gastos generales quedaron habilitados."
+          : "Flujo de pago de comisiones actualizado."
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+      if (payload.receivedByEmrt) {
+        void loadBoard();
       }
+    } finally {
+      setSavingPaymentSections((current) => {
+        const next = new Set(current);
+        next.delete(savingKey);
+        return next;
+      });
+    }
+  }
 
-      return next;
-    });
+  function handleToggleCommissionTotalsReceiverExclusion(section: string, excluded: boolean) {
+    if (!canManageTotalsReceiverExclusions || periodLocked) {
+      return;
+    }
+    void updatePaymentAcknowledgement(section, { excluded });
+  }
+
+  function handleTogglePaymentReceivedByAraceli(section: string, receivedByAraceli: boolean) {
+    if (!canConfirmPaymentsAsAraceli) {
+      return;
+    }
+    void updatePaymentAcknowledgement(section, { receivedByAraceli });
+  }
+
+  function handleTogglePaymentReceivedByEmrt(section: string, receivedByEmrt: boolean) {
+    if (!canConfirmPaymentsAsEmrt) {
+      return;
+    }
+    if (!receivedByEmrt && !window.confirm(
+      "Reabrir esta confirmacion? El periodo solo se habilitara cuando no quede ninguna confirmacion de EMRT."
+    )) {
+      return;
+    }
+    void updatePaymentAcknowledgement(section, { receivedByEmrt });
   }
 
   async function handleToggleCommissionExclusion(row: CommissionBreakdownEntry, excluded: boolean) {
-    if (!canManageExclusions || !activeSection) {
+    if (!canManageExclusions || periodLocked || !activeSection) {
       return;
     }
 
@@ -1731,7 +1949,7 @@ export function CommissionsPage() {
     entry: ProjectorCommission,
     payload: { amountMxn?: number; authorized?: boolean }
   ) {
-    if (!canManageProjectorEntries) {
+    if (!canManageProjectorEntries || periodLocked) {
       return;
     }
 
@@ -1987,6 +2205,12 @@ export function CommissionsPage() {
 
       {flash ? <div className={`message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`}>{flash.text}</div> : null}
       {errorMessage ? <div className="message-banner message-error">{errorMessage}</div> : null}
+      {periodLocked && !isLegalFlow ? (
+        <div className="message-banner commissions-period-lock-banner">
+          Periodo cerrado por EMRT con {confirmedByEmrtCount} confirmacion{confirmedByEmrtCount === 1 ? "" : "es"}.
+          Finanzas, Gastos generales y los ajustes que cambian comisiones permanecen bloqueados hasta reabrir todas.
+        </div>
+      ) : null}
 
       <section className="panel">
         <div className="commissions-tabs" role="tablist" aria-label="Pestanas de comisiones">
@@ -2183,15 +2407,22 @@ export function CommissionsPage() {
                   year={selectedYear}
                   month={selectedMonth}
                   excludedReceiverKeys={effectiveExcludedTotalsReceiverKeys}
+                  acknowledgementsBySection={paymentAcknowledgementsBySection}
+                  periodLocked={periodLocked}
                   canManageReceiverExclusions={canManageTotalsReceiverExclusions}
+                  canConfirmAsAraceli={canConfirmPaymentsAsAraceli}
+                  canConfirmAsEmrt={canConfirmPaymentsAsEmrt}
+                  savingSections={savingPaymentSections}
                   onToggleReceiverExclusion={handleToggleCommissionTotalsReceiverExclusion}
+                  onToggleReceivedByAraceli={handleTogglePaymentReceivedByAraceli}
+                  onToggleReceivedByEmrt={handleTogglePaymentReceivedByEmrt}
                 />
               ) : isProjectorActiveSection ? (
                 <ProjectorCommissionTable
                   title={`Comisiones por escritos de fondo - ${activeSection}`}
                   rows={sectionCalculation.projectorCommissions}
                   mode="projector"
-                  canManage={canManageProjectorEntries}
+                  canManage={canManageProjectorEntries && !periodLocked}
                   savingIds={savingProjectorCommissionIds}
                   amountDrafts={projectorAmountDrafts}
                   onAmountDraftChange={handleProjectorAmountDraftChange}
@@ -2209,7 +2440,7 @@ export function CommissionsPage() {
                       baseNetLabel={isSalesActiveSection ? "Primer pago recibido" : undefined}
                       amountLabel={isSalesActiveSection ? "1%" : undefined}
                       showExclusionControls
-                      canManageExclusions={canManageExclusions}
+                      canManageExclusions={canManageExclusions && !periodLocked}
                       savingExclusionKeys={savingExclusionKeys}
                       year={selectedYear}
                       month={selectedMonth}
@@ -2221,7 +2452,7 @@ export function CommissionsPage() {
                       toneClass="tone-secondary"
                       rows={sectionCalculation.clientRecords}
                       showExclusionControls
-                      canManageExclusions={canManageExclusions}
+                      canManageExclusions={canManageExclusions && !periodLocked}
                       savingExclusionKeys={savingExclusionKeys}
                       year={selectedYear}
                       month={selectedMonth}
@@ -2233,7 +2464,7 @@ export function CommissionsPage() {
                       toneClass="tone-tertiary"
                       rows={sectionCalculation.closingRecords}
                       showExclusionControls
-                      canManageExclusions={canManageExclusions}
+                      canManageExclusions={canManageExclusions && !periodLocked}
                       savingExclusionKeys={savingExclusionKeys}
                       year={selectedYear}
                       month={selectedMonth}

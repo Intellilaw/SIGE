@@ -931,6 +931,37 @@ export interface CommissionExclusion {
   updatedAt: string;
 }
 
+export interface CommissionPaymentAcknowledgement {
+  id: string;
+  year: number;
+  month: number;
+  section: string;
+  amountMxn: number;
+  sourceHash: string;
+  excluded: boolean;
+  receivedByAraceli: boolean;
+  receivedByAraceliAt?: string;
+  receivedByAraceliUserId?: string;
+  receivedByAraceliName?: string;
+  receivedByEmrt: boolean;
+  receivedByEmrtAt?: string;
+  receivedByEmrtUserId?: string;
+  receivedByEmrtName?: string;
+  reopenedAt?: string;
+  reopenedByUserId?: string;
+  reopenedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommissionPaymentFlowState {
+  year: number;
+  month: number;
+  locked: boolean;
+  confirmedByEmrtCount: number;
+  acknowledgements: CommissionPaymentAcknowledgement[];
+}
+
 export interface CommissionSnapshotFinanceRecord extends FinanceRecord, FinanceRecordStats {
   effectiveClientNumber?: string;
   highlighted: boolean;

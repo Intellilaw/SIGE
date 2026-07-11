@@ -1,5 +1,7 @@
 import { type PrismaClient } from "@prisma/client";
 
+import { assertCommissionPeriodUnlocked } from "./commission-period-lock";
+
 export const RUSCONI_ORGANIZATION_ID = "org-rusconi";
 export const PROJECTOR_COMMISSION_DEFAULT_MXN = 500;
 export const PROJECTOR_COMMISSION_FINAL_STAGE = 5;
@@ -96,6 +98,7 @@ export async function syncProjectorCommissionForTrackingRecord(
 
   if (!isEligible || !recipient) {
     if (existing && !existing.authorized) {
+      await assertCommissionPeriodUnlocked(prisma, existing.year, existing.month);
       await prisma.projectorCommission.delete({ where: { id: existing.id } });
     }
     return;
@@ -119,6 +122,10 @@ export async function syncProjectorCommissionForTrackingRecord(
   };
 
   if (existing) {
+    await assertCommissionPeriodUnlocked(prisma, existing.year, existing.month);
+    if (existing.year !== period.year || existing.month !== period.month) {
+      await assertCommissionPeriodUnlocked(prisma, period.year, period.month);
+    }
     await prisma.projectorCommission.update({
       where: { id: existing.id },
       data
@@ -126,6 +133,7 @@ export async function syncProjectorCommissionForTrackingRecord(
     return;
   }
 
+  await assertCommissionPeriodUnlocked(prisma, period.year, period.month);
   await prisma.projectorCommission.create({
     data: {
       taskTrackingRecordId: record.id,

@@ -1,10 +1,17 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
+import {
+  assertCommissionPeriodUnlocked,
+  buildCommissionPeriodSourceHash,
+  getCommissionPeriodLock,
+  isRusconiCommissionPaymentFlow
+} from "./commission-period-lock";
 import { getRequiredCommissionReceiverNames } from "./commission-receiver-defaults";
 import { attachSalesCommissionsToFinanceRecords } from "./finance-sales-commissions";
 import {
   mapCommissionExclusion,
+  mapCommissionPaymentAcknowledgement,
   mapCommissionReceiver,
   mapCommissionSnapshot,
   mapFinanceRecord,
@@ -13,6 +20,9 @@ import {
 } from "./mappers";
 import type {
   CommissionExclusionWriteRecord,
+  CommissionPaymentAcknowledgementUpdateRecord,
+  CommissionPaymentActor,
+  CommissionPaymentReconcileRow,
   CommissionsRepository,
   CreateCommissionSnapshotRecord,
   ProjectorCommissionUpdateRecord
@@ -26,13 +36,21 @@ function asSnapshotJson(value: unknown) {
   return value as Prisma.InputJsonValue;
 }
 
+function normalizeMoney(value: number) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function moneyChanged(left: number | Prisma.Decimal, right: number | Prisma.Decimal) {
+  return normalizeMoney(Number(left)) !== normalizeMoney(Number(right));
+}
+
 export class PrismaCommissionsRepository implements CommissionsRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async getOverview(year: number, month: number) {
     await this.ensureDefaultReceivers();
 
-    const [financeRecords, generalExpenses, receivers, exclusions, projectorCommissions] = await Promise.all([
+    const [financeRecords, generalExpenses, receivers, exclusions, projectorCommissions, paymentFlow] = await Promise.all([
       this.prisma.financeRecord.findMany({
         where: { year, month },
         orderBy: [{ clientNumber: "asc" }, { clientName: "asc" }, { subject: "asc" }, { createdAt: "asc" }]
@@ -55,7 +73,8 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       this.prisma.projectorCommission.findMany({
         where: { year, month },
         orderBy: [{ section: "asc" }, { completedAt: "asc" }, { createdAt: "asc" }]
-      })
+      }),
+      this.getPaymentFlowState(year, month)
     ]);
     const enrichedFinanceRecords = await attachSalesCommissionsToFinanceRecords(
       this.prisma,
@@ -67,7 +86,9 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       generalExpenses: generalExpenses.map(mapGeneralExpense),
       receivers: receivers.map(mapCommissionReceiver),
       exclusions: exclusions.map(mapCommissionExclusion),
-      projectorCommissions: projectorCommissions.map(mapProjectorCommission)
+      projectorCommissions: projectorCommissions.map(mapProjectorCommission),
+      paymentAcknowledgements: paymentFlow.acknowledgements,
+      periodLocked: paymentFlow.locked
     };
   }
 
@@ -175,6 +196,7 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
   }
 
   public async setExclusion(payload: CommissionExclusionWriteRecord) {
+    await assertCommissionPeriodUnlocked(this.prisma, payload.year, payload.month);
     const organizationId = getCurrentOrganizationIdOrDefault();
     const record = await this.prisma.commissionExclusion.upsert({
       where: {
@@ -206,6 +228,7 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
   }
 
   public async clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">) {
+    await assertCommissionPeriodUnlocked(this.prisma, payload.year, payload.month);
     await this.prisma.commissionExclusion.deleteMany({
       where: {
         year: payload.year,
@@ -226,6 +249,8 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       return null;
     }
 
+    await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
+
     const authorizationChanged = payload.authorized !== undefined && payload.authorized !== current.authorized;
     const record = await this.prisma.projectorCommission.update({
       where: { id: entryId },
@@ -241,6 +266,277 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
     });
 
     return mapProjectorCommission(record);
+  }
+
+  public async getPaymentFlowState(year: number, month: number) {
+    if (!isRusconiCommissionPaymentFlow()) {
+      return {
+        year,
+        month,
+        locked: false,
+        confirmedByEmrtCount: 0,
+        acknowledgements: []
+      };
+    }
+
+    const [records, lock] = await Promise.all([
+      this.prisma.commissionPaymentAcknowledgement.findMany({
+        where: { year, month },
+        orderBy: [{ section: "asc" }, { createdAt: "asc" }]
+      }),
+      getCommissionPeriodLock(this.prisma, year, month)
+    ]);
+
+    return {
+      year,
+      month,
+      ...lock,
+      acknowledgements: records.map(mapCommissionPaymentAcknowledgement)
+    };
+  }
+
+  public async reconcilePaymentAcknowledgements(
+    year: number,
+    month: number,
+    rows: CommissionPaymentReconcileRow[]
+  ) {
+    if (!isRusconiCommissionPaymentFlow()) {
+      throw new AppError(404, "COMMISSION_PAYMENT_FLOW_NOT_FOUND", "El flujo de pagos de comisiones no aplica a este tenant.");
+    }
+
+    const lock = await getCommissionPeriodLock(this.prisma, year, month);
+    if (lock.locked) {
+      return this.getPaymentFlowState(year, month);
+    }
+
+    const sourceHash = await buildCommissionPeriodSourceHash(this.prisma, year, month);
+    const normalizedRows = [...new Map(
+      rows.map((row) => {
+        const section = normalizeRequiredText(row.section);
+        if (!section) {
+          throw new AppError(400, "COMMISSION_PAYMENT_SECTION_REQUIRED", "El receptor de comisiones es obligatorio.");
+        }
+        return [section, { section, amountMxn: normalizeMoney(row.amountMxn) }];
+      })
+    ).values()];
+
+    await this.prisma.$transaction(async (transaction) => {
+      for (const row of normalizedRows) {
+        const current = await transaction.commissionPaymentAcknowledgement.findFirst({
+          where: { year, month, section: row.section }
+        });
+
+        if (!current) {
+          await transaction.commissionPaymentAcknowledgement.create({
+            data: {
+              year,
+              month,
+              section: row.section,
+              amountMxn: new Prisma.Decimal(row.amountMxn),
+              sourceHash
+            }
+          });
+          continue;
+        }
+
+        const amountHasChanged = moneyChanged(current.amountMxn, row.amountMxn);
+        const invalidateAraceli = amountHasChanged && current.receivedByAraceli;
+        await transaction.commissionPaymentAcknowledgement.update({
+          where: { id: current.id },
+          data: {
+            amountMxn: new Prisma.Decimal(row.amountMxn),
+            sourceHash,
+            ...(invalidateAraceli ? {
+              receivedByAraceli: false,
+              receivedByAraceliAt: null,
+              receivedByAraceliUserId: null,
+              receivedByAraceliName: null
+            } : {})
+          }
+        });
+
+        if (invalidateAraceli) {
+          await transaction.commissionPaymentAcknowledgementEvent.create({
+            data: {
+              acknowledgementId: current.id,
+              action: "ARACELI_INVALIDATED_AMOUNT_CHANGE",
+              amountMxn: new Prisma.Decimal(row.amountMxn),
+              details: {
+                previousAmountMxn: normalizeMoney(Number(current.amountMxn)),
+                nextAmountMxn: row.amountMxn
+              }
+            }
+          });
+        }
+      }
+    });
+
+    return this.getPaymentFlowState(year, month);
+  }
+
+  public async updatePaymentAcknowledgement(
+    payload: CommissionPaymentAcknowledgementUpdateRecord,
+    actor: CommissionPaymentActor
+  ) {
+    if (!isRusconiCommissionPaymentFlow()) {
+      throw new AppError(404, "COMMISSION_PAYMENT_FLOW_NOT_FOUND", "El flujo de pagos de comisiones no aplica a este tenant.");
+    }
+
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const section = normalizeRequiredText(payload.section);
+    const current = await this.prisma.commissionPaymentAcknowledgement.findUnique({
+      where: {
+        organizationId_year_month_section: {
+          organizationId,
+          year: payload.year,
+          month: payload.month,
+          section
+        }
+      }
+    });
+
+    if (!current) {
+      throw new AppError(404, "COMMISSION_PAYMENT_ACK_NOT_FOUND", "Actualiza Totales de comisiones antes de confirmar este pago.");
+    }
+
+    if (payload.excluded !== undefined) {
+      await assertCommissionPeriodUnlocked(this.prisma, payload.year, payload.month);
+      const excluded = payload.excluded;
+      const invalidateAraceli = excluded && current.receivedByAraceli;
+      await this.prisma.$transaction(async (transaction) => {
+        await transaction.commissionPaymentAcknowledgement.update({
+          where: { id: current.id },
+          data: {
+            excluded,
+            ...(invalidateAraceli ? {
+              receivedByAraceli: false,
+              receivedByAraceliAt: null,
+              receivedByAraceliUserId: null,
+              receivedByAraceliName: null
+            } : {})
+          }
+        });
+        await transaction.commissionPaymentAcknowledgementEvent.create({
+          data: {
+            acknowledgementId: current.id,
+            action: excluded ? "RECEIVER_EXCLUDED" : "RECEIVER_INCLUDED",
+            amountMxn: current.amountMxn,
+            actorUserId: actor.userId,
+            actorName: actor.displayName
+          }
+        });
+      });
+      return this.getPaymentFlowState(payload.year, payload.month);
+    }
+
+    if (payload.receivedByAraceli !== undefined) {
+      if (current.receivedByEmrt) {
+        throw new AppError(423, "COMMISSION_PAYMENT_EMRT_LOCKED", "EMRT debe reabrir esta confirmacion antes de modificar la recepcion de Araceli.");
+      }
+      if (payload.receivedByAraceli && (current.excluded || Number(current.amountMxn) <= 0)) {
+        throw new AppError(400, "COMMISSION_PAYMENT_NOT_ELIGIBLE", "Las comisiones excluidas o en cero no requieren confirmacion.");
+      }
+      if (payload.receivedByAraceli) {
+        const sourceHash = await buildCommissionPeriodSourceHash(this.prisma, payload.year, payload.month);
+        if (current.sourceHash !== sourceHash) {
+          throw new AppError(409, "COMMISSION_PAYMENT_REFRESH_REQUIRED", "Los datos del periodo cambiaron. Refresca Totales de comisiones antes de confirmar.");
+        }
+      }
+
+      const received = payload.receivedByAraceli;
+      await this.prisma.$transaction(async (transaction) => {
+        await transaction.commissionPaymentAcknowledgement.update({
+          where: { id: current.id },
+          data: {
+            receivedByAraceli: received,
+            receivedByAraceliAt: received ? current.receivedByAraceliAt ?? new Date() : null,
+            receivedByAraceliUserId: received ? actor.userId : null,
+            receivedByAraceliName: received ? actor.displayName : null
+          }
+        });
+        await transaction.commissionPaymentAcknowledgementEvent.create({
+          data: {
+            acknowledgementId: current.id,
+            action: received ? "ARACELI_RECEIVED" : "ARACELI_UNCHECKED",
+            amountMxn: current.amountMxn,
+            actorUserId: actor.userId,
+            actorName: actor.displayName
+          }
+        });
+      });
+      return this.getPaymentFlowState(payload.year, payload.month);
+    }
+
+    if (payload.receivedByEmrt !== undefined) {
+      const received = payload.receivedByEmrt;
+      if (received && !current.receivedByAraceli) {
+        throw new AppError(400, "COMMISSION_PAYMENT_ARACELI_REQUIRED", "Araceli debe confirmar primero la recepcion de esta comision.");
+      }
+      if (received && (current.excluded || Number(current.amountMxn) <= 0)) {
+        throw new AppError(400, "COMMISSION_PAYMENT_NOT_ELIGIBLE", "Las comisiones excluidas o en cero no requieren confirmacion.");
+      }
+      if (received) {
+        const sourceHash = await buildCommissionPeriodSourceHash(this.prisma, payload.year, payload.month);
+        if (current.sourceHash !== sourceHash) {
+          if (current.receivedByAraceli) {
+            await this.prisma.$transaction(async (transaction) => {
+              await transaction.commissionPaymentAcknowledgement.update({
+                where: { id: current.id },
+                data: {
+                  receivedByAraceli: false,
+                  receivedByAraceliAt: null,
+                  receivedByAraceliUserId: null,
+                  receivedByAraceliName: null
+                }
+              });
+              await transaction.commissionPaymentAcknowledgementEvent.create({
+                data: {
+                  acknowledgementId: current.id,
+                  action: "ARACELI_INVALIDATED_SOURCE_CHANGE",
+                  amountMxn: current.amountMxn,
+                  details: { previousSourceHash: current.sourceHash, nextSourceHash: sourceHash }
+                }
+              });
+            });
+          }
+          throw new AppError(409, "COMMISSION_PAYMENT_REFRESH_REQUIRED", "Los datos del periodo cambiaron. Araceli debe confirmar nuevamente el monto actualizado.");
+        }
+      }
+
+      await this.prisma.$transaction(async (transaction) => {
+        await transaction.commissionPaymentAcknowledgement.update({
+          where: { id: current.id },
+          data: received
+            ? {
+                receivedByEmrt: true,
+                receivedByEmrtAt: current.receivedByEmrtAt ?? new Date(),
+                receivedByEmrtUserId: actor.userId,
+                receivedByEmrtName: actor.displayName
+              }
+            : {
+                receivedByEmrt: false,
+                receivedByEmrtAt: null,
+                receivedByEmrtUserId: null,
+                receivedByEmrtName: null,
+                reopenedAt: new Date(),
+                reopenedByUserId: actor.userId,
+                reopenedByName: actor.displayName
+              }
+        });
+        await transaction.commissionPaymentAcknowledgementEvent.create({
+          data: {
+            acknowledgementId: current.id,
+            action: received ? "EMRT_RECEIVED" : "EMRT_REOPENED",
+            amountMxn: current.amountMxn,
+            actorUserId: actor.userId,
+            actorName: actor.displayName
+          }
+        });
+      });
+      return this.getPaymentFlowState(payload.year, payload.month);
+    }
+
+    throw new AppError(400, "COMMISSION_PAYMENT_EMPTY_PAYLOAD", "No se recibio ningun cambio para el flujo de comisiones.");
   }
 
   private async ensureDefaultReceivers() {

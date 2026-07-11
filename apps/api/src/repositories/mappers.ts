@@ -13,6 +13,7 @@ import type {
   BudgetPlanSnapshot,
   Client,
   CommissionExclusion,
+  CommissionPaymentAcknowledgement,
   CommissionReceiver,
   CommissionSnapshot,
   ProjectorCommission,
@@ -1499,6 +1500,52 @@ export function mapCommissionExclusion(record: {
     financeRecordId: record.financeRecordId,
     createdByUserId: record.createdByUserId ?? undefined,
     createdByName: record.createdByName ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapCommissionPaymentAcknowledgement(record: {
+  id: string;
+  year: number;
+  month: number;
+  section: string;
+  amountMxn: Prisma.Decimal;
+  sourceHash: string;
+  excluded: boolean;
+  receivedByAraceli: boolean;
+  receivedByAraceliAt: Date | null;
+  receivedByAraceliUserId: string | null;
+  receivedByAraceliName: string | null;
+  receivedByEmrt: boolean;
+  receivedByEmrtAt: Date | null;
+  receivedByEmrtUserId: string | null;
+  receivedByEmrtName: string | null;
+  reopenedAt: Date | null;
+  reopenedByUserId: string | null;
+  reopenedByName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): CommissionPaymentAcknowledgement {
+  return {
+    id: record.id,
+    year: record.year,
+    month: record.month,
+    section: repairMojibakeText(record.section) ?? record.section,
+    amountMxn: Number(record.amountMxn),
+    sourceHash: record.sourceHash,
+    excluded: record.excluded,
+    receivedByAraceli: record.receivedByAraceli,
+    receivedByAraceliAt: record.receivedByAraceliAt?.toISOString(),
+    receivedByAraceliUserId: record.receivedByAraceliUserId ?? undefined,
+    receivedByAraceliName: record.receivedByAraceliName ?? undefined,
+    receivedByEmrt: record.receivedByEmrt,
+    receivedByEmrtAt: record.receivedByEmrtAt?.toISOString(),
+    receivedByEmrtUserId: record.receivedByEmrtUserId ?? undefined,
+    receivedByEmrtName: record.receivedByEmrtName ?? undefined,
+    reopenedAt: record.reopenedAt?.toISOString(),
+    reopenedByUserId: record.reopenedByUserId ?? undefined,
+    reopenedByName: record.reopenedByName ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

@@ -762,6 +762,8 @@ export function GeneralExpensesPage() {
   const [loadingEmrtAcknowledgements, setLoadingEmrtAcknowledgements] = useState(true);
   const [loadingPayroll, setLoadingPayroll] = useState(true);
   const [loadingPayrollEmployees, setLoadingPayrollEmployees] = useState(true);
+  const [commissionPeriodLocked, setCommissionPeriodLocked] = useState(false);
+  const [commissionPeriodLockCount, setCommissionPeriodLockCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState<string | null>(null);
   const [pendingScrollExpenseId, setPendingScrollExpenseId] = useState<string | null>(null);
@@ -778,9 +780,9 @@ export function GeneralExpensesPage() {
     isExternal: user.isExternal
   }) : [], [user]);
   const canRead = hasPermission(effectivePermissions, "general-expenses:read") || hasPermission(effectivePermissions, "general-expenses:write");
-  const canWrite = hasPermission(effectivePermissions, "general-expenses:write");
-  const canApprove = Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN");
-  const canStampPayroll = Boolean(user && isAraceliLozano({
+  const canWrite = !commissionPeriodLocked && hasPermission(effectivePermissions, "general-expenses:write");
+  const canApprove = !commissionPeriodLocked && Boolean(user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN");
+  const canStampPayroll = !commissionPeriodLocked && Boolean(user && isAraceliLozano({
     username: user.username,
     displayName: user.displayName,
     email: user.email,
@@ -791,7 +793,7 @@ export function GeneralExpensesPage() {
     specificRole: user.specificRole,
     secondarySpecificRole: user.secondarySpecificRole
   }));
-  const canPay = Boolean(user && isFinanceUser({
+  const canPay = !commissionPeriodLocked && Boolean(user && isFinanceUser({
     team: user.team,
     legacyTeam: user.legacyTeam,
     secondaryTeam: user.secondaryTeam,
@@ -799,11 +801,11 @@ export function GeneralExpensesPage() {
     specificRole: user.specificRole,
     secondarySpecificRole: user.secondarySpecificRole
   }));
-  const canEditEmrtDate = Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
+  const canEditEmrtDate = !commissionPeriodLocked && Boolean(user && isEduardoRusconi({ username: user.username, displayName: user.displayName, email: user.email }));
   const canEditEmrtReimbursement = canApprove && canEditEmrtDate;
   const canReceiveEmrtCashAsAle = canStampPayroll;
   const canConfirmEmrtCashPayment = canApprove && canEditEmrtDate;
-  const canReviewJnlsFlag = Boolean(user && canReviewJnls({
+  const canReviewJnlsFlag = !commissionPeriodLocked && Boolean(user && canReviewJnls({
     role: user.role,
     legacyRole: user.legacyRole,
     team: user.team,
@@ -843,8 +845,15 @@ export function GeneralExpensesPage() {
     setErrorMessage(null);
 
     try {
-      const response = await apiGet<GeneralExpense[]>(`/general-expenses?year=${selectedYear}&month=${selectedMonth}`);
+      const [response, periodLock] = await Promise.all([
+        apiGet<GeneralExpense[]>(`/general-expenses?year=${selectedYear}&month=${selectedMonth}`),
+        apiGet<{ locked: boolean; confirmedByEmrtCount: number }>(
+          `/commissions/period-lock?year=${selectedYear}&month=${selectedMonth}`
+        )
+      ]);
       setRecords((current) => mergeRecordsPreservingOrder(current, response));
+      setCommissionPeriodLocked(periodLock.locked);
+      setCommissionPeriodLockCount(periodLock.confirmedByEmrtCount);
       setDrafts({});
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -1957,6 +1966,12 @@ export function GeneralExpensesPage() {
       </section>
 
       {errorMessage ? <div className="message-banner message-error">{errorMessage}</div> : null}
+      {commissionPeriodLocked ? (
+        <div className="message-banner commissions-period-lock-banner">
+          Periodo cerrado por {commissionPeriodLockCount} confirmacion{commissionPeriodLockCount === 1 ? "" : "es"} de EMRT
+          en Totales de comisiones. Reabre todas para modificar Gastos generales o Nomina.
+        </div>
+      ) : null}
 
       <section className="panel general-expenses-toolbar">
         <div className="general-expenses-filters">

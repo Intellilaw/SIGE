@@ -11,6 +11,7 @@ import type {
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 import { getLaborDailySalaryRiStatus } from "../modules/labor-files/labor-salary-intelligence";
+import { assertCommissionPeriodUnlocked } from "./commission-period-lock";
 import {
   buildVacationSummary,
   mapGeneralExpense,
@@ -871,6 +872,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     actor: GeneralExpenseActor
   ): Promise<GeneralExpenseEmrtDailyAcknowledgement> {
     const dateKey = parseDateKey(date);
+    const period = getYearMonthFromDateKey(dateKey);
+    await assertCommissionPeriodUnlocked(this.prisma, period.year, period.month);
     const payloadKeys = Object.keys(payload);
 
     if (payloadKeys.length !== 1) {
@@ -905,6 +908,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const year = payload.year ?? now.getFullYear();
     const month = payload.month ?? now.getMonth() + 1;
     assertMonth(month);
+    await assertCommissionPeriodUnlocked(this.prisma, year, month);
     const organizationId = this.getOrganizationId();
 
     const record = await this.prisma.generalExpense.create({
@@ -942,6 +946,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async update(expenseId: string, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor) {
     const current = await this.findOrThrow(expenseId);
+    await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
     await this.assertFieldAccess(current, payload, actor);
 
     const data = this.buildUpdatePayload(current, payload);
@@ -955,6 +960,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async delete(expenseId: string) {
     const current = await this.findOrThrow(expenseId);
+    await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
     if (current.approvedByEmrt) {
       throw new AppError(400, "GENERAL_EXPENSE_APPROVED_LOCKED", "Approved expenses cannot be deleted.");
     }
@@ -978,6 +984,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const organizationId = this.getOrganizationId();
 
     const { year: targetYear, month: targetMonth } = getNextMonth(year, month);
+    await assertCommissionPeriodUnlocked(this.prisma, year, month);
+    await assertCommissionPeriodUnlocked(this.prisma, targetYear, targetMonth);
     const recurringRows = await this.prisma.generalExpense.findMany({
       where: {
         organizationId,
@@ -1083,6 +1091,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const organizationId = this.getOrganizationId();
 
     const { year: targetYear, month: targetMonth } = getNextMonth(year, month);
+    await assertCommissionPeriodUnlocked(this.prisma, year, month);
+    await assertCommissionPeriodUnlocked(this.prisma, targetYear, targetMonth);
     const [sourceRows, existingTargetRows] = await Promise.all([
       this.prisma.generalExpensePayrollEntry.findMany({
         where: { organizationId, year, month },
@@ -1152,6 +1162,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const half = payload.half ?? 1;
     assertMonth(month);
     assertPayrollHalf(half);
+    await assertCommissionPeriodUnlocked(this.prisma, year, month);
     const organizationId = this.getOrganizationId();
     const laborFile = payload.laborFileId ? await this.findPayrollLaborFileOrThrow(payload.laborFileId) : null;
     const dailySalaryMxn = Number(laborFile?.dailySalaryMxn ?? 0);
@@ -1195,6 +1206,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     actor: GeneralExpenseActor
   ) {
     const current = await this.findPayrollEntryOrThrow(payrollEntryId);
+    await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
     this.assertPayrollFieldAccess(current, payload, actor);
 
     const organizationId = this.getOrganizationId();
@@ -1219,6 +1231,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   public async deletePayrollEntry(payrollEntryId: string) {
     const current = await this.findPayrollEntryOrThrow(payrollEntryId);
+    await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
     if (current.finalPaymentApprovedByEmrt) {
       throw new AppError(400, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_LOCKED", "La fila ya fue autorizada por EMRT y no puede borrarse.");
     }

@@ -48,6 +48,33 @@ const projectorCommissionBodySchema = z.object({
   message: "At least one projector commission field is required."
 });
 
+const paymentAcknowledgementReconcileSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  rows: z.array(z.object({
+    section: z.string().min(1).max(120),
+    amountMxn: z.number().finite().min(0).max(1000000000)
+  })).max(100)
+});
+
+const paymentAcknowledgementUpdateSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  section: z.string().min(1).max(120),
+  receivedByAraceli: z.boolean().optional(),
+  receivedByEmrt: z.boolean().optional(),
+  excluded: z.boolean().optional()
+}).superRefine((payload, context) => {
+  const fields = ["receivedByAraceli", "receivedByEmrt", "excluded"]
+    .filter((field) => Object.prototype.hasOwnProperty.call(payload, field));
+  if (fields.length !== 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Update exactly one commission payment field at a time."
+    });
+  }
+});
+
 function normalizeComparableText(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
@@ -147,9 +174,66 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
     return getCurrentOrganizationIdOrDefault() === "org-rusconi" && hasSuperadminAccess && isEduardoRusconi;
   }
 
+  function isAraceliLozano(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    const isFinance = user.team === "FINANCE"
+      || user.secondaryTeam === "FINANCE"
+      || [user.legacyTeam, user.secondaryLegacyTeam, user.specificRole, user.secondarySpecificRole]
+        .some((value) => normalizeComparableText(value) === "finanzas");
+    const identities = [user.username, user.displayName, user.email].map(normalizeComparableText);
+
+    return getCurrentOrganizationIdOrDefault() === "org-rusconi" && isFinance && identities.some((identity) =>
+      identity === "araceli lozano"
+      || identity === "araceli lozano escamilla"
+      || identity.startsWith("araceli.lozano")
+      || identity.startsWith("araceli lozano")
+    );
+  }
+
+  function isEmrtSuperadmin(request: FastifyRequest) {
+    return canManageProjectorCommissions(request);
+  }
+
   app.get("/commissions/overview", { preHandler: readGuards }, async (request) => {
     const query = periodQuerySchema.parse(request.query);
     return service.getOverview(query.year, query.month);
+  });
+
+  app.get("/commissions/period-lock", { preHandler: [requireAuth] }, async (request) => {
+    const query = periodQuerySchema.parse(request.query);
+    const state = await service.getPaymentFlowState(query.year, query.month);
+    return {
+      year: state.year,
+      month: state.month,
+      locked: state.locked,
+      confirmedByEmrtCount: state.confirmedByEmrtCount
+    };
+  });
+
+  app.post("/commissions/payment-acknowledgements/reconcile", { preHandler: readGuards }, async (request) => {
+    const permissions = getEffectivePermissions(request);
+    if (!canReadAllCommissions(permissions)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Only users with full commission access can reconcile payment totals.");
+    }
+
+    const payload = paymentAcknowledgementReconcileSchema.parse(request.body ?? {});
+    return service.reconcilePaymentAcknowledgements(payload.year, payload.month, payload.rows);
+  });
+
+  app.patch("/commissions/payment-acknowledgements", { preHandler: [requireAuth] }, async (request) => {
+    const payload = paymentAcknowledgementUpdateSchema.parse(request.body ?? {});
+    if (payload.receivedByAraceli !== undefined && !isAraceliLozano(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Solo Araceli Lozano puede confirmar su recepcion de comisiones.");
+    }
+    if ((payload.receivedByEmrt !== undefined || payload.excluded !== undefined) && !isEmrtSuperadmin(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Solo EMRT puede cerrar, reabrir o excluir pagos de comisiones.");
+    }
+
+    const user = getSessionUser(request);
+    return service.updatePaymentAcknowledgement(payload, {
+      userId: user.id,
+      displayName: user.displayName
+    });
   });
 
   app.get("/commissions/receivers", { preHandler: readGuards }, async () => service.listReceivers());

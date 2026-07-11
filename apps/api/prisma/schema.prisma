@@ -33,6 +33,8 @@ model Organization {
   commissionReceivers              CommissionReceiver[]
   commissionExclusions             CommissionExclusion[]
   projectorCommissions             ProjectorCommission[]
+  commissionPaymentAcknowledgements CommissionPaymentAcknowledgement[]
+  commissionPaymentAcknowledgementEvents CommissionPaymentAcknowledgementEvent[]
   financeRecords                   FinanceRecord[]
   financeSnapshots                 FinanceSnapshot[]
   commissionSnapshots              CommissionSnapshot[]
@@ -739,6 +741,52 @@ model ProjectorCommission {
   @@unique([organizationId, taskTrackingRecordId])
   @@index([organizationId, year, month, section])
   @@index([organizationId, year, month, authorized])
+}
+
+model CommissionPaymentAcknowledgement {
+  id                      String                                  @id @default(uuid())
+  organizationId          String                                  @default("org-rusconi")
+  year                    Int
+  month                   Int
+  section                 String
+  amountMxn               Decimal                                 @default(0)
+  sourceHash              String                                  @default("")
+  excluded                Boolean                                 @default(false)
+  receivedByAraceli       Boolean                                 @default(false)
+  receivedByAraceliAt     DateTime?
+  receivedByAraceliUserId String?
+  receivedByAraceliName   String?
+  receivedByEmrt          Boolean                                 @default(false)
+  receivedByEmrtAt        DateTime?
+  receivedByEmrtUserId    String?
+  receivedByEmrtName      String?
+  reopenedAt              DateTime?
+  reopenedByUserId        String?
+  reopenedByName          String?
+  createdAt               DateTime                                @default(now())
+  updatedAt               DateTime                                @updatedAt
+  organization            Organization                            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  events                  CommissionPaymentAcknowledgementEvent[]
+
+  @@unique([organizationId, year, month, section])
+  @@index([organizationId, year, month, receivedByEmrt])
+}
+
+model CommissionPaymentAcknowledgementEvent {
+  id                String                           @id @default(uuid())
+  organizationId    String                           @default("org-rusconi")
+  acknowledgementId String
+  action            String
+  amountMxn         Decimal                          @default(0)
+  actorUserId       String?
+  actorName         String?
+  details           Json?
+  createdAt         DateTime                         @default(now())
+  organization      Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  acknowledgement   CommissionPaymentAcknowledgement @relation(fields: [acknowledgementId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, acknowledgementId, createdAt])
+  @@index([organizationId, action, createdAt])
 }
 
 model FinanceRecord {

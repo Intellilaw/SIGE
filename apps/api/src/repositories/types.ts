@@ -23,6 +23,8 @@ import type {
   Client,
   CommissionReceiver,
   CommissionExclusion,
+  CommissionPaymentAcknowledgement,
+  CommissionPaymentFlowState,
   CommissionSnapshot,
   ProjectorCommission,
   CreateManagedUserInput,
@@ -701,6 +703,8 @@ export interface CommissionsOverviewRecord {
   receivers: CommissionReceiver[];
   exclusions: CommissionExclusion[];
   projectorCommissions: ProjectorCommission[];
+  paymentAcknowledgements: CommissionPaymentAcknowledgement[];
+  periodLocked: boolean;
 }
 
 export interface CreateCommissionSnapshotRecord {
@@ -729,6 +733,25 @@ export interface ProjectorCommissionUpdateRecord {
   authorizedByName?: string;
 }
 
+export interface CommissionPaymentActor {
+  userId?: string;
+  displayName?: string;
+}
+
+export interface CommissionPaymentReconcileRow {
+  section: string;
+  amountMxn: number;
+}
+
+export interface CommissionPaymentAcknowledgementUpdateRecord {
+  year: number;
+  month: number;
+  section: string;
+  receivedByAraceli?: boolean;
+  receivedByEmrt?: boolean;
+  excluded?: boolean;
+}
+
 export interface CommissionsRepository {
   getOverview(year: number, month: number): Promise<CommissionsOverviewRecord>;
   listReceivers(): Promise<CommissionReceiver[]>;
@@ -740,6 +763,16 @@ export interface CommissionsRepository {
   setExclusion(payload: CommissionExclusionWriteRecord): Promise<CommissionExclusion>;
   clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">): Promise<void>;
   updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord): Promise<ProjectorCommission | null>;
+  getPaymentFlowState(year: number, month: number): Promise<CommissionPaymentFlowState>;
+  reconcilePaymentAcknowledgements(
+    year: number,
+    month: number,
+    rows: CommissionPaymentReconcileRow[]
+  ): Promise<CommissionPaymentFlowState>;
+  updatePaymentAcknowledgement(
+    payload: CommissionPaymentAcknowledgementUpdateRecord,
+    actor: CommissionPaymentActor
+  ): Promise<CommissionPaymentFlowState>;
 }
 
 export interface KpiAccessScope extends Pick<

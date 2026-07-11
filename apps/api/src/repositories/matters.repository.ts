@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { EXECUTION_HOLIDAY_AUTHORITIES, findTaskModule, type Matter } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
+import { assertCommissionPeriodUnlocked } from "./commission-period-lock";
 import { mapMatter } from "./mappers";
 import type { ExecutionSubmatterWriteRecord, MattersRepository, MatterWriteRecord } from "./types";
 
@@ -678,6 +679,22 @@ export class PrismaMattersRepository implements MattersRepository {
 
     if (filters.length === 0) {
       return;
+    }
+
+    const affectedFinancePeriods = await prisma.financeRecord.findMany({
+      where: {
+        organizationId: matter.organizationId,
+        OR: filters
+      },
+      select: { year: true, month: true }
+    });
+    const checkedPeriods = new Set<string>();
+    for (const period of affectedFinancePeriods) {
+      const key = `${period.year}-${period.month}`;
+      if (!checkedPeriods.has(key)) {
+        checkedPeriods.add(key);
+        await assertCommissionPeriodUnlocked(prisma, period.year, period.month);
+      }
     }
 
     await prisma.financeRecord.updateMany({
