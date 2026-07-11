@@ -11,6 +11,7 @@ import {
   mapTaskTrackingRecord
 } from "./mappers";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
+import { syncProjectorCommissionForTrackingRecord } from "./projector-commissions";
 import type {
   TaskAdditionalTaskWriteRecord,
   TaskDistributionEventWriteRecord,
@@ -464,6 +465,8 @@ export class PrismaTasksRepository implements TasksRepository {
       }
     });
 
+    await syncProjectorCommissionForTrackingRecord(this.prisma, record);
+
     return mapTaskTrackingRecord(record);
   }
 
@@ -553,6 +556,8 @@ export class PrismaTasksRepository implements TasksRepository {
           data: termData
         });
       }
+
+      await syncProjectorCommissionForTrackingRecord(this.prisma, record);
     }
 
     return record ? mapTaskTrackingRecord(record) : null;
@@ -567,6 +572,8 @@ export class PrismaTasksRepository implements TasksRepository {
     if (!record) {
       return;
     }
+
+    await syncProjectorCommissionForTrackingRecord(this.prisma, record);
 
     await this.prisma.taskTerm.updateMany({
       where: {

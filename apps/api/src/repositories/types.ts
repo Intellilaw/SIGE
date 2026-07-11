@@ -24,6 +24,7 @@ import type {
   CommissionReceiver,
   CommissionExclusion,
   CommissionSnapshot,
+  ProjectorCommission,
   CreateManagedUserInput,
   DailyDocumentAssignment,
   DailyDocumentTemplateId,
@@ -699,6 +700,7 @@ export interface CommissionsOverviewRecord {
   generalExpenses: GeneralExpense[];
   receivers: CommissionReceiver[];
   exclusions: CommissionExclusion[];
+  projectorCommissions: ProjectorCommission[];
 }
 
 export interface CreateCommissionSnapshotRecord {
@@ -720,6 +722,13 @@ export interface CommissionExclusionWriteRecord {
   createdByName?: string;
 }
 
+export interface ProjectorCommissionUpdateRecord {
+  amountMxn?: number;
+  authorized?: boolean;
+  authorizedByUserId?: string;
+  authorizedByName?: string;
+}
+
 export interface CommissionsRepository {
   getOverview(year: number, month: number): Promise<CommissionsOverviewRecord>;
   listReceivers(): Promise<CommissionReceiver[]>;
@@ -730,6 +739,7 @@ export interface CommissionsRepository {
   createSnapshot(payload: CreateCommissionSnapshotRecord): Promise<CommissionSnapshot>;
   setExclusion(payload: CommissionExclusionWriteRecord): Promise<CommissionExclusion>;
   clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">): Promise<void>;
+  updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord): Promise<ProjectorCommission | null>;
 }
 
 export interface KpiAccessScope extends Pick<

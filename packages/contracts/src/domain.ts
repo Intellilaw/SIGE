@@ -763,19 +763,19 @@ export interface CommissionReceiver {
 }
 
 export const COMMISSION_SECTIONS = [
-  "Direccion general",
-  "Litigio (lider)",
+  "Dirección general",
+  "Litigio (líder)",
   "Litigio (colaborador)",
-  "Corporativo-laboral (lider)",
+  "Corporativo-laboral (líder)",
   "Corporativo-laboral (colaborador)",
-  "Convenios (lider)",
+  "Convenios (líder)",
   "Convenios (colaborador)",
-  "Der Financiero (lider)",
+  "Der Financiero (líder)",
   "Der Financiero (colaborador)",
-  "Compliance Fiscal (lider)",
+  "Compliance Fiscal (líder)",
   "Compliance Fiscal (colaborador)",
   "Ventas",
-  "Comunicacion con cliente",
+  "Comunicación con cliente",
   "Finanzas",
   "Emilio Petith",
   "Joaquín Pani",
@@ -950,6 +950,9 @@ export interface CommissionSnapshotData {
   group1PayableMxn?: number;
   group2TotalMxn?: number;
   group3TotalMxn?: number;
+  projectorPayableMxn?: number;
+  projectorBonusMxn?: number;
+  projectorCommissions?: ProjectorCommission[];
   totalCommissionsMxn?: number;
   grossTotalMxn: number;
   deductionRate: number;
@@ -1091,6 +1094,26 @@ export interface GeneralExpense {
   reviewedByJnls: boolean;
   paid: boolean;
   paidAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectorCommission {
+  id: string;
+  taskTrackingRecordId: string;
+  year: number;
+  month: number;
+  section: string;
+  responsibleCode: string;
+  projectorName: string;
+  clientName: string;
+  subject: string;
+  amountMxn: number;
+  authorized: boolean;
+  completedAt: string;
+  authorizedAt?: string;
+  authorizedByUserId?: string;
+  authorizedByName?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -6807,6 +6807,7 @@ div.sales-product-card-main {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  min-width: 0;
 }
 
 .commissions-tabs {
@@ -7078,6 +7079,68 @@ div.sales-product-card-main {
 
 .commissions-row-excluded td {
   background: rgba(148, 163, 184, 0.16);
+}
+
+.commissions-projector-table {
+  min-width: 860px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.commissions-group-panel,
+.commissions-group-panel .table-scroll {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.commissions-projector-table th:first-child,
+.commissions-projector-table td:first-child {
+  width: 20%;
+}
+
+.commissions-projector-table th:nth-child(2),
+.commissions-projector-table td:nth-child(2) {
+  width: 34%;
+}
+
+.commissions-projector-amount-cell {
+  text-align: right;
+  width: 150px;
+}
+
+.commissions-projector-amount-input {
+  max-width: 132px;
+  min-width: 112px;
+  text-align: right;
+  width: 100%;
+}
+
+.commissions-projector-authorization-heading,
+.commissions-projector-authorization-cell {
+  text-align: center;
+  white-space: nowrap;
+  width: 132px;
+}
+
+.commissions-projector-authorization-toggle {
+  align-items: center;
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  margin-inline: auto;
+  width: 24px;
+}
+
+.commissions-projector-authorization-toggle input {
+  accent-color: #1d4ed8;
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.commissions-row-pending-authorization td {
+  background: rgba(180, 83, 9, 0.08);
 }
 
 .commissions-caption {

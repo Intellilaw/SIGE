@@ -8,9 +8,15 @@ import {
   mapCommissionReceiver,
   mapCommissionSnapshot,
   mapFinanceRecord,
-  mapGeneralExpense
+  mapGeneralExpense,
+  mapProjectorCommission
 } from "./mappers";
-import type { CommissionExclusionWriteRecord, CommissionsRepository, CreateCommissionSnapshotRecord } from "./types";
+import type {
+  CommissionExclusionWriteRecord,
+  CommissionsRepository,
+  CreateCommissionSnapshotRecord,
+  ProjectorCommissionUpdateRecord
+} from "./types";
 
 function normalizeRequiredText(value: string) {
   return value.trim();
@@ -26,7 +32,7 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
   public async getOverview(year: number, month: number) {
     await this.ensureDefaultReceivers();
 
-    const [financeRecords, generalExpenses, receivers, exclusions] = await Promise.all([
+    const [financeRecords, generalExpenses, receivers, exclusions, projectorCommissions] = await Promise.all([
       this.prisma.financeRecord.findMany({
         where: { year, month },
         orderBy: [{ clientNumber: "asc" }, { clientName: "asc" }, { subject: "asc" }, { createdAt: "asc" }]
@@ -45,6 +51,10 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       this.prisma.commissionExclusion.findMany({
         where: { year, month },
         orderBy: [{ section: "asc" }, { group: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.projectorCommission.findMany({
+        where: { year, month },
+        orderBy: [{ section: "asc" }, { completedAt: "asc" }, { createdAt: "asc" }]
       })
     ]);
     const enrichedFinanceRecords = await attachSalesCommissionsToFinanceRecords(
@@ -56,7 +66,8 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       financeRecords: enrichedFinanceRecords,
       generalExpenses: generalExpenses.map(mapGeneralExpense),
       receivers: receivers.map(mapCommissionReceiver),
-      exclusions: exclusions.map(mapCommissionExclusion)
+      exclusions: exclusions.map(mapCommissionExclusion),
+      projectorCommissions: projectorCommissions.map(mapProjectorCommission)
     };
   }
 
@@ -204,6 +215,32 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
         financeRecordId: payload.financeRecordId
       }
     });
+  }
+
+  public async updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord) {
+    const current = await this.prisma.projectorCommission.findUnique({
+      where: { id: entryId }
+    });
+
+    if (!current) {
+      return null;
+    }
+
+    const authorizationChanged = payload.authorized !== undefined && payload.authorized !== current.authorized;
+    const record = await this.prisma.projectorCommission.update({
+      where: { id: entryId },
+      data: {
+        ...(payload.amountMxn === undefined ? {} : { amountMxn: new Prisma.Decimal(payload.amountMxn) }),
+        ...(payload.authorized === undefined ? {} : { authorized: payload.authorized }),
+        ...(authorizationChanged ? {
+          authorizedAt: payload.authorized ? new Date() : null,
+          authorizedByUserId: payload.authorized ? payload.authorizedByUserId : null,
+          authorizedByName: payload.authorized ? payload.authorizedByName : null
+        } : {})
+      }
+    });
+
+    return mapProjectorCommission(record);
   }
 
   private async ensureDefaultReceivers() {

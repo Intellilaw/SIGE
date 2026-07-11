@@ -30,6 +30,9 @@ const EMPTY_CALCULATION = {
     group1PayableMxn: 0,
     group2TotalMxn: 0,
     group3TotalMxn: 0,
+    projectorPayableMxn: 0,
+    projectorBonusMxn: 0,
+    projectorCommissions: [],
     totalCommissionsMxn: 0,
     grossTotalMxn: 0,
     deductionRate: 0,
@@ -42,6 +45,14 @@ const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
 const SALES_COMMISSION_SECTION = "Ventas";
 const SALES_COMMISSION_RATE = 0.01;
 const COMMISSION_TOTALS_SECTION = "Totales de comisiones";
+const LITIGATION_LEADER_COMMISSION_SECTION = "Litigio (lider)";
+const PROJECTOR_COMMISSION_SECTIONS = [
+    { role: "Proyectista 1", code: "EKPO", section: "Proyectista 1 (EKPO)" },
+    { role: "Proyectista 2", code: "NBSG", section: "Proyectista 2 (NBSG)" }
+];
+const RUSCONI_COMMISSION_SECTIONS = COMMISSION_SECTIONS.flatMap((section) => normalizeText(section) === normalizeText("Litigio (colaborador)")
+    ? [section, ...PROJECTOR_COMMISSION_SECTIONS.map((entry) => entry.section)]
+    : [section]);
 const LEGALFLOW_COMMISSION_SECTIONS = [
     SALES_COMMISSION_SECTION,
     CLIENT_RELATIONS_COMMISSION_SECTION,
@@ -115,6 +126,10 @@ function canManageCommissionExclusions(user) {
 function canManageCommissionTotalsReceiverExclusions(user) {
     return hasSuperadminAccess(user) && isEduardoRusconiUser(user);
 }
+function canManageProjectorCommissions(user) {
+    const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+    return !isLegalFlowTenant(user) && isSuperadmin && isEduardoRusconiUser(user);
+}
 function isLegalFlowTenant(user) {
     return Boolean(user?.organizationId === "org-legalflow" ||
         normalizeText(user?.organizationSlug) === "legalflow" ||
@@ -147,6 +162,15 @@ function usesOnePercentGroupBreakdown(section) {
 }
 function isSalesCommissionSection(section) {
     return normalizeText(section) === normalizeText(SALES_COMMISSION_SECTION);
+}
+function getProjectorCommissionSectionForRole(role) {
+    return PROJECTOR_COMMISSION_SECTIONS.find((entry) => normalizeText(entry.role) === normalizeText(role))?.section;
+}
+function isProjectorCommissionSection(section) {
+    return PROJECTOR_COMMISSION_SECTIONS.some((entry) => normalizeText(entry.section) === normalizeText(section));
+}
+function isLitigationLeaderCommissionSection(section) {
+    return normalizeText(section) === normalizeText(LITIGATION_LEADER_COMMISSION_SECTION);
 }
 function isCommissionTotalsSection(section) {
     return normalizeText(section) === normalizeText(COMMISSION_TOTALS_SECTION);
@@ -188,15 +212,21 @@ function getSnapshotCommissionTotals(data) {
         ? group1TeamBreakdowns.reduce((sum, team) => sum + team.payableMxn, 0)
         : group1GrossMxn - data.deductionMxn);
     const group1PayableMxn = data.group1PayableMxn ?? (hasTeamBreakdowns ? group1NetMxn : Math.max(group1NetMxn, 0));
+    const projectorPayableMxn = data.projectorPayableMxn ?? 0;
+    const projectorBonusMxn = data.projectorBonusMxn ?? 0;
     const totalCommissionsMxn = data.totalCommissionsMxn ?? data.netTotalMxn ?? (group1PayableMxn +
         group2TotalMxn +
-        group3TotalMxn);
+        group3TotalMxn +
+        projectorPayableMxn +
+        projectorBonusMxn);
     return {
         group1GrossMxn,
         group1NetMxn,
         group1PayableMxn,
         group2TotalMxn,
         group3TotalMxn,
+        projectorPayableMxn,
+        projectorBonusMxn,
         totalCommissionsMxn,
         group1TeamBreakdowns
     };
@@ -483,9 +513,22 @@ function buildHighlightReason(record, stats, clients) {
     }
     return parts.join(" ");
 }
-function calculateSection(financeRecords, generalExpenses, clients, section, year, month, exclusions) {
+function calculateSection(financeRecords, generalExpenses, clients, section, year, month, exclusions, projectorCommissions) {
     if (!section) {
         return EMPTY_CALCULATION;
+    }
+    const periodProjectorCommissions = projectorCommissions.filter((entry) => entry.year === year && entry.month === month);
+    if (isProjectorCommissionSection(section)) {
+        const sectionProjectorCommissions = periodProjectorCommissions.filter((entry) => normalizeText(entry.section) === normalizeText(section));
+        const projectorPayableMxn = sectionProjectorCommissions.reduce((sum, entry) => sum + (entry.authorized ? entry.amountMxn : 0), 0);
+        return {
+            ...EMPTY_CALCULATION,
+            projectorPayableMxn,
+            projectorCommissions: sectionProjectorCommissions,
+            totalCommissionsMxn: projectorPayableMxn,
+            grossTotalMxn: projectorPayableMxn,
+            netTotalMxn: projectorPayableMxn
+        };
     }
     const exclusionKeys = new Set(exclusions
         .filter((exclusion) => exclusion.year === year &&
@@ -592,8 +635,12 @@ function calculateSection(financeRecords, generalExpenses, clients, section, yea
     const group1PayableMxn = usesOnePercentGroupBreakdown(section)
         ? group1NetMxn
         : Math.max(group1NetMxn, 0);
-    const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn;
-    const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn;
+    const mirroredProjectorCommissions = isLitigationLeaderCommissionSection(section)
+        ? periodProjectorCommissions.filter((entry) => entry.authorized)
+        : [];
+    const projectorBonusMxn = mirroredProjectorCommissions.reduce((sum, entry) => sum + entry.amountMxn, 0);
+    const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn + projectorBonusMxn;
+    const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn + projectorBonusMxn;
     return {
         financeRecords: computedRecords,
         executionRecords,
@@ -606,6 +653,9 @@ function calculateSection(financeRecords, generalExpenses, clients, section, yea
         group1PayableMxn,
         group2TotalMxn,
         group3TotalMxn,
+        projectorPayableMxn: 0,
+        projectorBonusMxn,
+        projectorCommissions: mirroredProjectorCommissions,
         totalCommissionsMxn,
         grossTotalMxn,
         deductionRate: deductionConfiguration.rate,
@@ -653,6 +703,21 @@ function CommissionGroupTable(props) {
                                                     : "Solo Eduardo Rusconi o Finanzas puede cambiar esta exclusion", children: _jsx("input", { type: "checkbox", checked: Boolean(row.excluded), disabled: !props.canManageExclusions || savingExclusion, "aria-label": `Excluir ${row.clientName || "registro"} del calculo de esta seccion`, onChange: (event) => props.onToggleExclusion?.(row, event.target.checked) }) }) })) : null] }, `${row.group}-${row.financeRecordId}`));
                             })) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { colSpan: totalLabelColumns, children: "Total rubro" }), _jsx("td", { children: formatCurrency(total) }), props.showExclusionControls ? _jsx("td", { className: "commissions-exclusion-cell", "aria-label": "Excluir gasto" }) : null] }) })] }) })] }));
 }
+function ProjectorCommissionTable(props) {
+    const isProjectorView = props.mode === "projector";
+    const totalAuthorizedMxn = props.rows.reduce((sum, entry) => sum + (entry.authorized ? entry.amountMxn : 0), 0);
+    const totalColumns = 5;
+    const totalLabelColumns = isProjectorView ? 3 : 4;
+    return (_jsxs("section", { className: "panel commissions-group-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: props.title }), _jsxs("span", { children: [props.rows.length, " registros"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table commissions-group-table commissions-projector-table tone-primary", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Cliente" }), _jsx("th", { children: "Asunto" }), !isProjectorView ? _jsx("th", { children: "Proyectista" }) : null, _jsx("th", { children: "Fecha terminada" }), _jsx("th", { children: "Monto" }), isProjectorView ? _jsx("th", { className: "commissions-projector-authorization-heading", children: "Autorizar pago" }) : null] }) }), _jsx("tbody", { children: props.rows.length === 0 ? (_jsx("tr", { children: _jsx("td", { colSpan: totalColumns, children: "No hay escritos terminados en este periodo." }) })) : (props.rows.map((entry) => {
+                                const saving = props.savingIds?.has(entry.id) ?? false;
+                                const amountDraft = props.amountDrafts?.[entry.id] ?? String(entry.amountMxn);
+                                return (_jsxs("tr", { className: !entry.authorized ? "commissions-row-pending-authorization" : undefined, title: !entry.authorized ? "Pendiente de autorización; no forma parte del total." : "Comisión autorizada.", children: [_jsx("td", { children: entry.clientName || "-" }), _jsx("td", { children: entry.subject || "-" }), !isProjectorView ? (_jsxs("td", { children: [entry.projectorName, " (", entry.responsibleCode, ")"] })) : null, _jsx("td", { children: formatDate(entry.completedAt) }), _jsx("td", { className: "commissions-projector-amount-cell", children: isProjectorView && props.canManage ? (_jsx("input", { className: "commissions-projector-amount-input", type: "number", min: "0", step: "50", value: amountDraft, disabled: saving, "aria-label": `Monto de comisión para ${entry.subject || entry.clientName}`, onChange: (event) => props.onAmountDraftChange?.(entry.id, event.target.value), onBlur: () => props.onCommitAmount?.(entry), onKeyDown: (event) => {
+                                                    if (event.key === "Enter") {
+                                                        event.currentTarget.blur();
+                                                    }
+                                                } })) : (_jsx("span", { children: formatCurrency(entry.amountMxn) })) }), isProjectorView ? (_jsx("td", { className: "commissions-projector-authorization-cell", children: _jsx("label", { className: "commissions-projector-authorization-toggle", title: props.canManage ? "Autorizar el pago de esta comisión" : "Solo Eduardo Rusconi puede autorizar este pago", children: _jsx("input", { type: "checkbox", checked: entry.authorized, disabled: !props.canManage || saving, "aria-label": `Autorizar comisión de ${entry.projectorName} por ${entry.subject || entry.clientName}`, onChange: (event) => props.onToggleAuthorization?.(entry, event.target.checked) }) }) })) : null] }, entry.id));
+                            })) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { colSpan: totalLabelColumns, children: "Total autorizado" }), _jsx("td", { children: formatCurrency(totalAuthorizedMxn) }), isProjectorView ? _jsx("td", { className: "commissions-projector-authorization-cell", "aria-label": "Autorizar pago" }) : null] }) })] }) })] }));
+}
 function CommissionTotalsTable(props) {
     const isReceiverExcluded = (section) => props.excludedReceiverKeys.has(buildCommissionTotalsReceiverExclusionKey({
         year: props.year,
@@ -671,10 +736,14 @@ function SnapshotDetailModal(props) {
     const snapshotGroup1RateLabel = getGroup1RateLabel(props.snapshot.section);
     const snapshotUsesTeamBreakdown = Boolean(totals?.group1TeamBreakdowns.length);
     const snapshotIsSalesSection = isSalesCommissionSection(props.snapshot.section);
+    const snapshotIsProjectorSection = isProjectorCommissionSection(props.snapshot.section);
+    const snapshotIsLitigationLeaderSection = isLitigationLeaderCommissionSection(props.snapshot.section);
+    const snapshotProjectorCommissions = data?.projectorCommissions ?? [];
+    const snapshotProjectorPendingMxn = snapshotProjectorCommissions.reduce((sum, entry) => sum + (entry.authorized ? 0 : entry.amountMxn), 0);
     const snapshotExecutionRecords = snapshotIsSalesSection
         ? withSalesCommissionBase(data?.executionRecords ?? [])
         : data?.executionRecords ?? [];
-    return (_jsx("div", { className: "commissions-modal-backdrop", onClick: props.onClose, children: _jsxs("div", { className: "commissions-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "commissions-modal-header", children: [_jsxs("div", { children: [_jsx("h2", { children: props.snapshot.title }), _jsxs("p", { className: "muted", children: [props.snapshot.section, " | ", MONTH_NAMES[props.snapshot.month - 1], " ", props.snapshot.year] })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: props.onClose, children: "Cerrar" })] }), !data ? (_jsx("div", { className: "commissions-modal-body", children: _jsx("p", { className: "muted", children: "No hay detalle disponible para esta estampa." }) })) : (_jsxs("div", { className: "commissions-modal-body", children: [_jsxs("div", { className: "commissions-metrics-grid", children: [snapshotUsesTeamBreakdown ? (_jsx(CommissionTeamBreakdownCards, { teams: totals?.group1TeamBreakdowns ?? [] })) : (_jsxs(_Fragment, { children: [_jsx(CurrencyMetricCard, { label: `Comisiones brutas Grupo 1 (${snapshotGroup1RateLabel})`, value: totals?.group1GrossMxn ?? 0, accentClass: "is-primary" }), _jsx(CurrencyMetricCard, { label: "Deduccion por gastos", value: data.deductionMxn, accentClass: "is-warning", helper: `${Math.round(data.deductionRate * 100)}% de ${formatCurrency(data.deductionBaseMxn)}` })] })), _jsx(CurrencyMetricCard, { label: `Comisiones netas Grupo 1 (${snapshotGroup1RateLabel})`, value: totals?.group1NetMxn ?? 0, accentClass: "is-success" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 2 (20%)", value: totals?.group2TotalMxn ?? 0, accentClass: "is-neutral" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 3 (10%)", value: totals?.group3TotalMxn ?? 0, accentClass: "is-neutral" }), _jsx(CurrencyMetricCard, { label: "Comisiones totales", value: totals?.totalCommissionsMxn ?? 0, accentClass: "is-success" })] }), _jsx(CommissionGroupTable, { title: "1. Comision por ejecucion", toneClass: "tone-primary", rows: snapshotExecutionRecords, showBaseNet: true, baseNetLabel: snapshotIsSalesSection ? "Primer pago recibido" : undefined, amountLabel: snapshotIsSalesSection ? "1%" : undefined }), _jsx(CommissionGroupTable, { title: "2. Comision por cliente", toneClass: "tone-secondary", rows: data.clientRecords, showBaseNet: true }), _jsx(CommissionGroupTable, { title: "3. Comision por cierre", toneClass: "tone-tertiary", rows: data.closingRecords, showBaseNet: true })] }))] }) }));
+    return (_jsx("div", { className: "commissions-modal-backdrop", onClick: props.onClose, children: _jsxs("div", { className: "commissions-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "commissions-modal-header", children: [_jsxs("div", { children: [_jsx("h2", { children: props.snapshot.title }), _jsxs("p", { className: "muted", children: [props.snapshot.section, " | ", MONTH_NAMES[props.snapshot.month - 1], " ", props.snapshot.year] })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: props.onClose, children: "Cerrar" })] }), !data ? (_jsx("div", { className: "commissions-modal-body", children: _jsx("p", { className: "muted", children: "No hay detalle disponible para esta estampa." }) })) : (_jsxs("div", { className: "commissions-modal-body", children: [_jsx("div", { className: "commissions-metrics-grid", children: snapshotIsProjectorSection ? (_jsxs(_Fragment, { children: [_jsx(CurrencyMetricCard, { label: "Comisiones pendientes de autorizar", value: snapshotProjectorPendingMxn, accentClass: "is-warning" }), _jsx(CurrencyMetricCard, { label: "Comisiones autorizadas", value: totals?.projectorPayableMxn ?? 0, accentClass: "is-primary" }), _jsx(CurrencyMetricCard, { label: "Comisiones totales", value: totals?.totalCommissionsMxn ?? 0, accentClass: "is-success" })] })) : (_jsxs(_Fragment, { children: [snapshotUsesTeamBreakdown ? (_jsx(CommissionTeamBreakdownCards, { teams: totals?.group1TeamBreakdowns ?? [] })) : (_jsxs(_Fragment, { children: [_jsx(CurrencyMetricCard, { label: `Comisiones brutas Grupo 1 (${snapshotGroup1RateLabel})`, value: totals?.group1GrossMxn ?? 0, accentClass: "is-primary" }), _jsx(CurrencyMetricCard, { label: "Deducci\u00F3n por gastos", value: data.deductionMxn, accentClass: "is-warning", helper: `${Math.round(data.deductionRate * 100)}% de ${formatCurrency(data.deductionBaseMxn)}` })] })), _jsx(CurrencyMetricCard, { label: `Comisiones netas Grupo 1 (${snapshotGroup1RateLabel})`, value: totals?.group1NetMxn ?? 0, accentClass: "is-success" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 2 (20%)", value: totals?.group2TotalMxn ?? 0, accentClass: "is-neutral" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 3 (10%)", value: totals?.group3TotalMxn ?? 0, accentClass: "is-neutral" }), snapshotIsLitigationLeaderSection ? (_jsx(CurrencyMetricCard, { label: "Comisiones espejo de proyectistas", value: totals?.projectorBonusMxn ?? 0, accentClass: "is-primary" })) : null, _jsx(CurrencyMetricCard, { label: "Comisiones totales", value: totals?.totalCommissionsMxn ?? 0, accentClass: "is-success" })] })) }), snapshotIsProjectorSection ? (_jsx(ProjectorCommissionTable, { title: `Comisiones por escritos de fondo - ${props.snapshot.section}`, rows: snapshotProjectorCommissions, mode: "projector" })) : (_jsxs(_Fragment, { children: [_jsx(CommissionGroupTable, { title: "1. Comision por ejecucion", toneClass: "tone-primary", rows: snapshotExecutionRecords, showBaseNet: true, baseNetLabel: snapshotIsSalesSection ? "Primer pago recibido" : undefined, amountLabel: snapshotIsSalesSection ? "1%" : undefined }), _jsx(CommissionGroupTable, { title: "2. Comision por cliente", toneClass: "tone-secondary", rows: data.clientRecords, showBaseNet: true }), _jsx(CommissionGroupTable, { title: "3. Comision por cierre", toneClass: "tone-tertiary", rows: data.closingRecords, showBaseNet: true }), snapshotIsLitigationLeaderSection ? (_jsx(ProjectorCommissionTable, { title: "COMISIONES ESPEJO: Escritos de fondo autorizados", rows: snapshotProjectorCommissions, mode: "leader-mirror" })) : null] }))] }))] }) }));
 }
 export function CommissionsPage() {
     const { user } = useAuth();
@@ -688,7 +757,10 @@ export function CommissionsPage() {
     const [clients, setClients] = useState([]);
     const [snapshots, setSnapshots] = useState([]);
     const [exclusions, setExclusions] = useState([]);
+    const [projectorCommissions, setProjectorCommissions] = useState([]);
     const [savingExclusionKeys, setSavingExclusionKeys] = useState(new Set());
+    const [savingProjectorCommissionIds, setSavingProjectorCommissionIds] = useState(new Set());
+    const [projectorAmountDrafts, setProjectorAmountDrafts] = useState({});
     const [excludedTotalsReceiverKeys, setExcludedTotalsReceiverKeys] = useState(new Set());
     const [loadingBoard, setLoadingBoard] = useState(true);
     const [loadingSnapshots, setLoadingSnapshots] = useState(true);
@@ -707,17 +779,19 @@ export function CommissionsPage() {
     const canReadClients = hasPermission(user, "clients:read");
     const canManageExclusions = canManageCommissionExclusions(user);
     const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
+    const canManageProjectorEntries = canManageProjectorCommissions(user);
     const isLegalFlow = isLegalFlowTenant(user);
-    const availableCommissionSections = useMemo(() => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...COMMISSION_SECTIONS], [isLegalFlow]);
+    const availableCommissionSections = useMemo(() => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...RUSCONI_COMMISSION_SECTIONS], [isLegalFlow]);
     const visibleSections = useMemo(() => {
         const userRole = normalizeText(user?.specificRole);
+        const projectorRoleSection = getProjectorCommissionSectionForRole(user?.specificRole);
         if (canReadAllCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
             return isLegalFlow ? availableCommissionSections : [...availableCommissionSections, COMMISSION_TOTALS_SECTION];
         }
         if (canWriteClientRelationsCommissions) {
             return availableCommissionSections.filter((section) => normalizeText(section) === normalizeText(CLIENT_RELATIONS_COMMISSION_SECTION));
         }
-        return availableCommissionSections.filter((section) => normalizeText(section) === userRole);
+        return availableCommissionSections.filter((section) => normalizeText(section) === normalizeText(projectorRoleSection ?? userRole));
     }, [
         availableCommissionSections,
         canReadAllCommissions,
@@ -762,6 +836,7 @@ export function CommissionsPage() {
             setGeneralExpenses(overview.generalExpenses);
             setReceivers(overview.receivers);
             setExclusions(overview.exclusions ?? []);
+            setProjectorCommissions(overview.projectorCommissions ?? []);
             setClients(clientsResponse);
         }
         catch (error) {
@@ -790,7 +865,7 @@ export function CommissionsPage() {
     useEffect(() => {
         void loadSnapshots();
     }, []);
-    const sectionCalculation = useMemo(() => calculateSection(financeRecords, generalExpenses, clients, activeSection, selectedYear, selectedMonth, exclusions), [activeSection, clients, exclusions, financeRecords, generalExpenses, selectedMonth, selectedYear]);
+    const sectionCalculation = useMemo(() => calculateSection(financeRecords, generalExpenses, clients, activeSection, selectedYear, selectedMonth, exclusions, projectorCommissions), [activeSection, clients, exclusions, financeRecords, generalExpenses, projectorCommissions, selectedMonth, selectedYear]);
     const commissionTotalsRows = useMemo(() => {
         if (!isTotalsActiveSection) {
             return [];
@@ -799,7 +874,7 @@ export function CommissionsPage() {
             .filter((section) => normalizeText(section) !== normalizeText("Direccion general"))
             .map((section) => ({
             section,
-            calculation: calculateSection(financeRecords, generalExpenses, clients, section, selectedYear, selectedMonth, exclusions)
+            calculation: calculateSection(financeRecords, generalExpenses, clients, section, selectedYear, selectedMonth, exclusions, projectorCommissions)
         }));
     }, [
         availableCommissionSections,
@@ -808,6 +883,7 @@ export function CommissionsPage() {
         financeRecords,
         generalExpenses,
         isTotalsActiveSection,
+        projectorCommissions,
         selectedMonth,
         selectedYear
     ]);
@@ -823,11 +899,15 @@ export function CommissionsPage() {
         group1PayableMxn: acc.group1PayableMxn + row.calculation.group1PayableMxn,
         group2TotalMxn: acc.group2TotalMxn + row.calculation.group2TotalMxn,
         group3TotalMxn: acc.group3TotalMxn + row.calculation.group3TotalMxn,
+        projectorPayableMxn: acc.projectorPayableMxn + row.calculation.projectorPayableMxn,
+        projectorBonusMxn: acc.projectorBonusMxn + row.calculation.projectorBonusMxn,
         totalCommissionsMxn: acc.totalCommissionsMxn + row.calculation.totalCommissionsMxn
     }), {
         group1PayableMxn: 0,
         group2TotalMxn: 0,
         group3TotalMxn: 0,
+        projectorPayableMxn: 0,
+        projectorBonusMxn: 0,
         totalCommissionsMxn: 0
     }), [includedCommissionTotalsRows]);
     function handleToggleCommissionTotalsReceiverExclusion(section, excluded) {
@@ -885,6 +965,78 @@ export function CommissionsPage() {
                 return next;
             });
         }
+    }
+    function handleProjectorAmountDraftChange(entryId, value) {
+        setProjectorAmountDrafts((current) => ({ ...current, [entryId]: value }));
+    }
+    async function updateProjectorCommission(entry, payload) {
+        if (!canManageProjectorEntries) {
+            return;
+        }
+        setSavingProjectorCommissionIds((current) => new Set(current).add(entry.id));
+        setFlash(null);
+        try {
+            const updated = await apiPatch(`/commissions/projector-commissions/${entry.id}`, payload);
+            setProjectorCommissions((current) => current.map((item) => item.id === updated.id ? updated : item));
+            setProjectorAmountDrafts((current) => {
+                const next = { ...current };
+                delete next[entry.id];
+                return next;
+            });
+            setFlash({
+                tone: "success",
+                text: updated.authorized
+                    ? "Comisión autorizada para la proyectista y para Litigio líder."
+                    : "Comisión actualizada; permanece fuera de ambos totales."
+            });
+        }
+        catch (error) {
+            setFlash({ tone: "error", text: getErrorMessage(error) });
+        }
+        finally {
+            setSavingProjectorCommissionIds((current) => {
+                const next = new Set(current);
+                next.delete(entry.id);
+                return next;
+            });
+        }
+    }
+    function handleCommitProjectorAmount(entry) {
+        const draft = projectorAmountDrafts[entry.id];
+        if (draft === undefined) {
+            return;
+        }
+        const amountMxn = Number(draft);
+        if (!Number.isFinite(amountMxn) || amountMxn < 0) {
+            setProjectorAmountDrafts((current) => {
+                const next = { ...current };
+                delete next[entry.id];
+                return next;
+            });
+            setFlash({ tone: "error", text: "El monto de la comisión debe ser un número igual o mayor a cero." });
+            return;
+        }
+        if (amountMxn === entry.amountMxn) {
+            setProjectorAmountDrafts((current) => {
+                const next = { ...current };
+                delete next[entry.id];
+                return next;
+            });
+            return;
+        }
+        void updateProjectorCommission(entry, { amountMxn });
+    }
+    function handleToggleProjectorAuthorization(entry, authorized) {
+        const draft = projectorAmountDrafts[entry.id];
+        const amountMxn = draft === undefined ? entry.amountMxn : Number(draft);
+        if (!Number.isFinite(amountMxn) || amountMxn < 0) {
+            setFlash({ tone: "error", text: "Corrige el monto antes de autorizar la comisión." });
+            return;
+        }
+        void updateProjectorCommission(entry, {
+            authorized,
+            ...(amountMxn === entry.amountMxn ? {} : { amountMxn })
+        });
     }
     async function handleCreateReceiver() {
         if (!canWriteCommissions) {
@@ -980,6 +1132,9 @@ export function CommissionsPage() {
             group1PayableMxn: sectionCalculation.group1PayableMxn,
             group2TotalMxn: sectionCalculation.group2TotalMxn,
             group3TotalMxn: sectionCalculation.group3TotalMxn,
+            projectorPayableMxn: sectionCalculation.projectorPayableMxn,
+            projectorBonusMxn: sectionCalculation.projectorBonusMxn,
+            projectorCommissions: sectionCalculation.projectorCommissions,
             totalCommissionsMxn: sectionCalculation.totalCommissionsMxn,
             grossTotalMxn: sectionCalculation.grossTotalMxn,
             deductionRate: sectionCalculation.deductionRate,
@@ -1013,18 +1168,23 @@ export function CommissionsPage() {
             ? snapshots
             : snapshots.filter((snapshot) => visibleSectionKeys.has(normalizeText(snapshot.section)));
     const activeSectionLabel = activeSection || "Sin seccion";
-    const shouldShowDeductionPanel = Boolean(activeSection && normalizeText(activeSection) !== normalizeText("Direccion general"));
+    const shouldShowDeductionPanel = Boolean(activeSection
+        && normalizeText(activeSection) !== normalizeText("Direccion general")
+        && !isProjectorCommissionSection(activeSection));
+    const isProjectorActiveSection = isProjectorCommissionSection(activeSection);
+    const isLitigationLeaderActiveSection = isLitigationLeaderCommissionSection(activeSection);
+    const projectorPendingMxn = sectionCalculation.projectorCommissions.reduce((sum, entry) => sum + (entry.authorized ? 0 : entry.amountMxn), 0);
     const isSalesActiveSection = isSalesCommissionSection(activeSection);
     const group1RateLabel = getGroup1RateLabel(activeSection);
     const group1RateLabelSuffix = group1RateLabel ? ` (${group1RateLabel})` : "";
     const usesTeamGroup1Breakdown = sectionCalculation.group1TeamBreakdowns.length > 0;
     const hasNegativeTeamBalance = sectionCalculation.group1TeamBreakdowns.some((team) => team.netMxn < 0);
     const yearOptions = Array.from({ length: 7 }, (_, index) => 2024 + index);
-    return (_jsxs("section", { className: "page-stack commissions-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Com" }), _jsx("div", { children: _jsx("h2", { children: "Comisiones" }) })] }), _jsx("p", { className: "muted", children: "Calculo por seccion, deduccion por gastos pagados, receptores editables, estampas historicas y resaltado visual en rojo sobre filas derivadas de registros incompletos." })] }), flash ? _jsx("div", { className: `message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`, children: flash.text }) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsx("section", { className: "panel", children: _jsxs("div", { className: "commissions-tabs", role: "tablist", "aria-label": "Pestanas de comisiones", children: [_jsx("button", { type: "button", className: `commissions-tab ${activeTab === "calculation" ? "is-active" : ""}`, onClick: () => setActiveTab("calculation"), children: "Calculo de comisiones" }), canReadAllCommissions ? (_jsx("button", { type: "button", className: `commissions-tab ${activeTab === "receivers" ? "is-active" : ""}`, onClick: () => setActiveTab("receivers"), children: "Receptores" })) : null, _jsx("button", { type: "button", className: `commissions-tab ${activeTab === "snapshots" ? "is-active" : ""}`, onClick: () => setActiveTab("snapshots"), children: "Estampas guardadas" })] }) }), activeTab === "calculation" ? (canAccessCalculation ? (_jsxs("div", { className: "commissions-layout", children: [_jsxs("aside", { className: "panel commissions-sidebar", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Secciones" }), _jsx("span", { children: visibleSections.length })] }), _jsx("div", { className: "commissions-sidebar-list", children: visibleSections.map((section) => (_jsx("button", { type: "button", className: `commissions-sidebar-button ${section === activeSection ? "is-active" : ""}`, onClick: () => setActiveSection(section), children: section }, section))) })] }), _jsxs("div", { className: "commissions-main", children: [_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: activeSectionLabel }), _jsxs("span", { children: [MONTH_NAMES[selectedMonth - 1], " ", selectedYear] })] }), _jsxs("div", { className: "commissions-toolbar", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: yearOptions.map((year) => (_jsx("option", { value: year, children: year }, year))) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: MONTH_NAMES.map((monthLabel, index) => (_jsx("option", { value: index + 1, children: monthLabel }, monthLabel))) })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => void loadBoard(), children: "Refrescar" }), !isTotalsActiveSection ? (_jsx("button", { className: "primary-button", type: "button", onClick: () => void handleCreateSnapshot(), disabled: savingSnapshot || !canWriteActiveSection, children: savingSnapshot ? "Guardando..." : "Guardar estampa" })) : null] }), _jsxs("div", { className: `commissions-metrics-grid${isTotalsActiveSection ? " is-totals" : ""}`, children: [!isTotalsActiveSection ? (usesTeamGroup1Breakdown ? (_jsx(CommissionTeamBreakdownCards, { teams: sectionCalculation.group1TeamBreakdowns })) : (_jsxs(_Fragment, { children: [_jsx(CurrencyMetricCard, { label: `Comisiones brutas Grupo 1${group1RateLabelSuffix}`, value: sectionCalculation.group1GrossMxn, accentClass: "is-primary" }), _jsx(CurrencyMetricCard, { label: "Deduccion por gastos", value: sectionCalculation.deductionMxn, accentClass: "is-warning", helper: `${Math.round(sectionCalculation.deductionRate * 100)}% de ${formatCurrency(sectionCalculation.deductionBaseMxn)}` })] }))) : null, _jsx(CurrencyMetricCard, { label: isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1${group1RateLabelSuffix}`, value: isTotalsActiveSection ? commissionTotalsSummary.group1PayableMxn : sectionCalculation.group1NetMxn, accentClass: "is-success" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 2 (20%)", value: isTotalsActiveSection ? commissionTotalsSummary.group2TotalMxn : sectionCalculation.group2TotalMxn, accentClass: "is-neutral" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 3 (10%)", value: isTotalsActiveSection ? commissionTotalsSummary.group3TotalMxn : sectionCalculation.group3TotalMxn, accentClass: "is-neutral" }), isTotalsActiveSection ? (_jsx(CurrencyMetricCard, { label: "Total a pagar", value: commissionTotalsSummary.totalCommissionsMxn, accentClass: "is-success" })) : (_jsx(CurrencyMetricCard, { label: "Comisiones totales", value: sectionCalculation.totalCommissionsMxn, accentClass: "is-success", helper: usesTeamGroup1Breakdown && hasNegativeTeamBalance
-                                                    ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
-                                                    : sectionCalculation.group1NetMxn < 0
-                                                        ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
-                                                        : undefined }))] })] }), loadingBoard ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando informacion de comisiones..." }) })) : isTotalsActiveSection ? (_jsx(CommissionTotalsTable, { rows: commissionTotalsRows, year: selectedYear, month: selectedMonth, excludedReceiverKeys: effectiveExcludedTotalsReceiverKeys, canManageReceiverExclusions: canManageTotalsReceiverExclusions, onToggleReceiverExclusion: handleToggleCommissionTotalsReceiverExclusion })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-group-grid", children: [_jsx(CommissionGroupTable, { title: "PRIMER GRUPO: Comisiones de Ejecucion", toneClass: "tone-primary", rows: sectionCalculation.executionRecords, showBaseNet: isSalesActiveSection, baseNetLabel: isSalesActiveSection ? "Primer pago recibido" : undefined, amountLabel: isSalesActiveSection ? "1%" : undefined, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "SEGUNDO GRUPO: Comisiones de Cliente (20%)", toneClass: "tone-secondary", rows: sectionCalculation.clientRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "TERCER GRUPO: Comisiones de Cierre (10%)", toneClass: "tone-tertiary", rows: sectionCalculation.closingRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion })] }), shouldShowDeductionPanel ? (_jsxs("section", { className: "panel commissions-deduction-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Deduccion de gastos sobre Grupo 1 (", Math.round(sectionCalculation.deductionRate * 100), "%)"] }), _jsx("span", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), usesTeamGroup1Breakdown ? (_jsx("p", { className: "muted commissions-caption", children: "Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo positivo." })) : (_jsxs("p", { className: "muted commissions-caption", children: ["El total de gastos atribuibles a tu equipo este mes asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionBaseMxn) }), ". De dicha suma, el", " ", Math.round(sectionCalculation.deductionRate * 100), "%, que asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) }), ", se restara unicamente de las comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque el Grupo 1 quede con saldo negativo."] })), _jsxs("div", { className: "commissions-deduction-summary", children: [_jsxs("span", { children: ["Comisiones brutas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1GrossMxn) })] }), _jsxs("span", { children: ["(-) Deduccion Gastos: ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), _jsxs("span", { children: ["Comisiones netas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1NetMxn) })] }), _jsxs("span", { children: ["Grupo 1 aplicado al total: ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1PayableMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 2 (20%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group2TotalMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 3 (10%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group3TotalMxn) })] }), _jsxs("span", { children: ["Comisiones totales: ", _jsx("strong", { children: formatCurrency(sectionCalculation.totalCommissionsMxn) })] })] })] })) : null] }))] })] })) : (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No tienes asignado un rol de comisiones o no cuentas con permisos para esta pestana." }) }))) : null, activeTab === "receivers" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Receptores de comisiones" }), _jsxs("span", { children: [receivers.length, " registros"] })] }), canWriteCommissions ? (_jsxs("div", { className: "commissions-receiver-form", children: [_jsxs("label", { className: "form-field commissions-receiver-input", children: [_jsx("span", { children: "Nuevo receptor" }), _jsx("input", { type: "text", value: newReceiverName, onChange: (event) => setNewReceiverName(event.target.value), placeholder: "Ej. Juan Perez o un puesto", onKeyDown: (event) => {
+    return (_jsxs("section", { className: "page-stack commissions-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "Com" }), _jsx("div", { children: _jsx("h2", { children: "Comisiones" }) })] }), _jsx("p", { className: "muted", children: "Calculo por seccion, deduccion por gastos pagados, receptores editables, estampas historicas y resaltado visual en rojo sobre filas derivadas de registros incompletos." })] }), flash ? _jsx("div", { className: `message-banner ${flash.tone === "success" ? "message-success" : "message-error"}`, children: flash.text }) : null, errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsx("section", { className: "panel", children: _jsxs("div", { className: "commissions-tabs", role: "tablist", "aria-label": "Pestanas de comisiones", children: [_jsx("button", { type: "button", className: `commissions-tab ${activeTab === "calculation" ? "is-active" : ""}`, onClick: () => setActiveTab("calculation"), children: "Calculo de comisiones" }), canReadAllCommissions ? (_jsx("button", { type: "button", className: `commissions-tab ${activeTab === "receivers" ? "is-active" : ""}`, onClick: () => setActiveTab("receivers"), children: "Receptores" })) : null, _jsx("button", { type: "button", className: `commissions-tab ${activeTab === "snapshots" ? "is-active" : ""}`, onClick: () => setActiveTab("snapshots"), children: "Estampas guardadas" })] }) }), activeTab === "calculation" ? (canAccessCalculation ? (_jsxs("div", { className: "commissions-layout", children: [_jsxs("aside", { className: "panel commissions-sidebar", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Secciones" }), _jsx("span", { children: visibleSections.length })] }), _jsx("div", { className: "commissions-sidebar-list", children: visibleSections.map((section) => (_jsx("button", { type: "button", className: `commissions-sidebar-button ${section === activeSection ? "is-active" : ""}`, onClick: () => setActiveSection(section), children: section }, section))) })] }), _jsxs("div", { className: "commissions-main", children: [_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: activeSectionLabel }), _jsxs("span", { children: [MONTH_NAMES[selectedMonth - 1], " ", selectedYear] })] }), _jsxs("div", { className: "commissions-toolbar", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: yearOptions.map((year) => (_jsx("option", { value: year, children: year }, year))) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: MONTH_NAMES.map((monthLabel, index) => (_jsx("option", { value: index + 1, children: monthLabel }, monthLabel))) })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => void loadBoard(), children: "Refrescar" }), !isTotalsActiveSection ? (_jsx("button", { className: "primary-button", type: "button", onClick: () => void handleCreateSnapshot(), disabled: savingSnapshot || !canWriteActiveSection, children: savingSnapshot ? "Guardando..." : "Guardar estampa" })) : null] }), _jsx("div", { className: `commissions-metrics-grid${isTotalsActiveSection ? " is-totals" : ""}`, children: isProjectorActiveSection ? (_jsxs(_Fragment, { children: [_jsx(CurrencyMetricCard, { label: "Comisiones pendientes de autorizar", value: projectorPendingMxn, accentClass: "is-warning" }), _jsx(CurrencyMetricCard, { label: "Comisiones autorizadas", value: sectionCalculation.projectorPayableMxn, accentClass: "is-primary" }), _jsx(CurrencyMetricCard, { label: "Total a pagar", value: sectionCalculation.totalCommissionsMxn, accentClass: "is-success", helper: "Solo las entradas autorizadas forman parte del total" })] })) : (_jsxs(_Fragment, { children: [!isTotalsActiveSection ? (usesTeamGroup1Breakdown ? (_jsx(CommissionTeamBreakdownCards, { teams: sectionCalculation.group1TeamBreakdowns })) : (_jsxs(_Fragment, { children: [_jsx(CurrencyMetricCard, { label: `Comisiones brutas Grupo 1${group1RateLabelSuffix}`, value: sectionCalculation.group1GrossMxn, accentClass: "is-primary" }), _jsx(CurrencyMetricCard, { label: "Deducci\u00F3n por gastos", value: sectionCalculation.deductionMxn, accentClass: "is-warning", helper: `${Math.round(sectionCalculation.deductionRate * 100)}% de ${formatCurrency(sectionCalculation.deductionBaseMxn)}` })] }))) : null, _jsx(CurrencyMetricCard, { label: isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1${group1RateLabelSuffix}`, value: isTotalsActiveSection ? commissionTotalsSummary.group1PayableMxn : sectionCalculation.group1NetMxn, accentClass: "is-success" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 2 (20%)", value: isTotalsActiveSection ? commissionTotalsSummary.group2TotalMxn : sectionCalculation.group2TotalMxn, accentClass: "is-neutral" }), _jsx(CurrencyMetricCard, { label: "Comisiones Grupo 3 (10%)", value: isTotalsActiveSection ? commissionTotalsSummary.group3TotalMxn : sectionCalculation.group3TotalMxn, accentClass: "is-neutral" }), isTotalsActiveSection ? (_jsx(CurrencyMetricCard, { label: "Proyectistas y espejo Litigio l\u00EDder", value: commissionTotalsSummary.projectorPayableMxn + commissionTotalsSummary.projectorBonusMxn, accentClass: "is-neutral" })) : isLitigationLeaderActiveSection ? (_jsx(CurrencyMetricCard, { label: "Comisiones espejo de proyectistas", value: sectionCalculation.projectorBonusMxn, accentClass: "is-primary", helper: "Se entregan completas y no est\u00E1n sujetas a deducciones" })) : null, isTotalsActiveSection ? (_jsx(CurrencyMetricCard, { label: "Total a pagar", value: commissionTotalsSummary.totalCommissionsMxn, accentClass: "is-success" })) : (_jsx(CurrencyMetricCard, { label: "Comisiones totales", value: sectionCalculation.totalCommissionsMxn, accentClass: "is-success", helper: usesTeamGroup1Breakdown && hasNegativeTeamBalance
+                                                        ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
+                                                        : sectionCalculation.group1NetMxn < 0
+                                                            ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
+                                                            : undefined }))] })) })] }), loadingBoard ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando informacion de comisiones..." }) })) : isTotalsActiveSection ? (_jsx(CommissionTotalsTable, { rows: commissionTotalsRows, year: selectedYear, month: selectedMonth, excludedReceiverKeys: effectiveExcludedTotalsReceiverKeys, canManageReceiverExclusions: canManageTotalsReceiverExclusions, onToggleReceiverExclusion: handleToggleCommissionTotalsReceiverExclusion })) : isProjectorActiveSection ? (_jsx(ProjectorCommissionTable, { title: `Comisiones por escritos de fondo - ${activeSection}`, rows: sectionCalculation.projectorCommissions, mode: "projector", canManage: canManageProjectorEntries, savingIds: savingProjectorCommissionIds, amountDrafts: projectorAmountDrafts, onAmountDraftChange: handleProjectorAmountDraftChange, onCommitAmount: handleCommitProjectorAmount, onToggleAuthorization: handleToggleProjectorAuthorization })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-group-grid", children: [_jsx(CommissionGroupTable, { title: "PRIMER GRUPO: Comisiones de Ejecucion", toneClass: "tone-primary", rows: sectionCalculation.executionRecords, showBaseNet: isSalesActiveSection, baseNetLabel: isSalesActiveSection ? "Primer pago recibido" : undefined, amountLabel: isSalesActiveSection ? "1%" : undefined, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "SEGUNDO GRUPO: Comisiones de Cliente (20%)", toneClass: "tone-secondary", rows: sectionCalculation.clientRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "TERCER GRUPO: Comisiones de Cierre (10%)", toneClass: "tone-tertiary", rows: sectionCalculation.closingRecords, showExclusionControls: true, canManageExclusions: canManageExclusions, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion })] }), isLitigationLeaderActiveSection ? (_jsx(ProjectorCommissionTable, { title: "COMISIONES ESPEJO: Escritos de fondo autorizados", rows: sectionCalculation.projectorCommissions, mode: "leader-mirror" })) : null, shouldShowDeductionPanel ? (_jsxs("section", { className: "panel commissions-deduction-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Deduccion de gastos sobre Grupo 1 (", Math.round(sectionCalculation.deductionRate * 100), "%)"] }), _jsx("span", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), usesTeamGroup1Breakdown ? (_jsx("p", { className: "muted commissions-caption", children: "Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo positivo." })) : (_jsxs("p", { className: "muted commissions-caption", children: ["El total de gastos atribuibles a tu equipo este mes asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionBaseMxn) }), ". De dicha suma, el", " ", Math.round(sectionCalculation.deductionRate * 100), "%, que asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) }), ", se restara unicamente de las comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque el Grupo 1 quede con saldo negativo."] })), _jsxs("div", { className: "commissions-deduction-summary", children: [_jsxs("span", { children: ["Comisiones brutas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1GrossMxn) })] }), _jsxs("span", { children: ["(-) Deduccion Gastos: ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), _jsxs("span", { children: ["Comisiones netas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1NetMxn) })] }), _jsxs("span", { children: ["Grupo 1 aplicado al total: ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1PayableMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 2 (20%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group2TotalMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 3 (10%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group3TotalMxn) })] }), sectionCalculation.projectorBonusMxn > 0 ? (_jsxs("span", { children: ["(+) Comisiones espejo de proyectistas: ", _jsx("strong", { children: formatCurrency(sectionCalculation.projectorBonusMxn) })] })) : null, _jsxs("span", { children: ["Comisiones totales: ", _jsx("strong", { children: formatCurrency(sectionCalculation.totalCommissionsMxn) })] })] })] })) : null] }))] })] })) : (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No tienes asignado un rol de comisiones o no cuentas con permisos para esta pestana." }) }))) : null, activeTab === "receivers" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Receptores de comisiones" }), _jsxs("span", { children: [receivers.length, " registros"] })] }), canWriteCommissions ? (_jsxs("div", { className: "commissions-receiver-form", children: [_jsxs("label", { className: "form-field commissions-receiver-input", children: [_jsx("span", { children: "Nuevo receptor" }), _jsx("input", { type: "text", value: newReceiverName, onChange: (event) => setNewReceiverName(event.target.value), placeholder: "Ej. Juan Perez o un puesto", onKeyDown: (event) => {
                                             if (event.key === "Enter") {
                                                 event.preventDefault();
                                                 void handleCreateReceiver();

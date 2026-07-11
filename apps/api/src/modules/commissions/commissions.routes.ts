@@ -3,6 +3,7 @@ import { deriveEffectivePermissions } from "@sige/contracts";
 import { z } from "zod";
 
 import { getSessionUser, requireAnyPermissions, requireAuth } from "../../core/auth/guards";
+import { getCurrentOrganizationIdOrDefault } from "../../core/tenant/tenant-context";
 import type { CreateCommissionSnapshotRecord } from "../../repositories/types";
 
 const periodQuerySchema = z.object({
@@ -36,6 +37,17 @@ const exclusionBodySchema = z.object({
   excluded: z.boolean()
 });
 
+const projectorCommissionParamsSchema = z.object({
+  entryId: z.string().min(1)
+});
+
+const projectorCommissionBodySchema = z.object({
+  amountMxn: z.number().finite().min(0).max(1000000000).optional(),
+  authorized: z.boolean().optional()
+}).refine((payload) => payload.amountMxn !== undefined || payload.authorized !== undefined, {
+  message: "At least one projector commission field is required."
+});
+
 function normalizeComparableText(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
@@ -57,7 +69,12 @@ function isClientRelationsSection(section: string) {
 
 function isOwnCommissionSection(section: string, request: FastifyRequest) {
   const user = getSessionUser(request);
-  return Boolean(user.specificRole) && normalizeComparableText(section) === normalizeComparableText(user.specificRole);
+  const roleSections: Record<string, string> = {
+    [normalizeComparableText("Proyectista 1")]: "Proyectista 1 (EKPO)",
+    [normalizeComparableText("Proyectista 2")]: "Proyectista 2 (NBSG)"
+  };
+  const expectedSection = roleSections[normalizeComparableText(user.specificRole)] ?? user.specificRole;
+  return Boolean(expectedSection) && normalizeComparableText(section) === normalizeComparableText(expectedSection);
 }
 
 export const commissionsRoutes: FastifyPluginAsync = async (app) => {
@@ -117,6 +134,19 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
     return canWriteCommissionExclusions || (hasSuperadminAccess && isEduardoRusconi);
   }
 
+  function canManageProjectorCommissions(request: FastifyRequest) {
+    const user = getSessionUser(request);
+    const emailLocalPart = user.email?.includes("@") ? user.email.slice(0, user.email.indexOf("@")) : user.email;
+    const isEduardoRusconi = [user.shortName, user.username, user.displayName, user.email, emailLocalPart].some((value) => {
+      const normalized = normalizeIdentityText(value);
+      return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
+    });
+    const hasSuperadminAccess = user.role === "SUPERADMIN"
+      || user.legacyRole === "SUPERADMIN";
+
+    return getCurrentOrganizationIdOrDefault() === "org-rusconi" && hasSuperadminAccess && isEduardoRusconi;
+  }
+
   app.get("/commissions/overview", { preHandler: readGuards }, async (request) => {
     const query = periodQuerySchema.parse(request.query);
     return service.getOverview(query.year, query.month);
@@ -147,6 +177,27 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
       createdByUserId: getSessionUser(request).id,
       createdByName: getSessionUser(request).displayName
     });
+  });
+
+  app.patch("/commissions/projector-commissions/:entryId", { preHandler: [requireAuth] }, async (request) => {
+    if (!canManageProjectorCommissions(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Only Eduardo Rusconi can manage projector commissions.");
+    }
+
+    const params = projectorCommissionParamsSchema.parse(request.params);
+    const payload = projectorCommissionBodySchema.parse(request.body ?? {});
+    const user = getSessionUser(request);
+    const record = await service.updateProjectorCommission(params.entryId, {
+      ...payload,
+      authorizedByUserId: user.id,
+      authorizedByName: user.displayName
+    });
+
+    if (!record) {
+      throw new app.errors.AppError(404, "PROJECTOR_COMMISSION_NOT_FOUND", "The projector commission does not exist.");
+    }
+
+    return record;
   });
 
   app.post("/commissions/receivers", { preHandler: writeGuards }, async (request) => {

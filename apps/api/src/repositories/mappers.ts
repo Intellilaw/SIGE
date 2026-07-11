@@ -15,6 +15,7 @@ import type {
   CommissionExclusion,
   CommissionReceiver,
   CommissionSnapshot,
+  ProjectorCommission,
   DailyDocumentAssignment,
   ExecutionSubmatter,
   FinanceRecord,
@@ -51,6 +52,15 @@ import { ORGANIZATIONS, getDefaultOrganization } from "@sige/contracts";
 import type { RefreshTokenRecord, StoredUser } from "./types";
 
 const PAYROLL_BONUS_RATE = 0.1;
+
+function repairMojibakeText(value?: string | null) {
+  if (!value || !/[ÃÂâ]/.test(value)) {
+    return value;
+  }
+
+  const decoded = Buffer.from(value, "latin1").toString("utf8");
+  return decoded.includes("�") ? value : decoded;
+}
 
 function roundMoney(value: number) {
   return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
@@ -235,25 +245,25 @@ export function mapUser(record: {
     organizationSlug: organization.slug,
     organizationName: organization.name,
     email: record.email,
-    username: record.username,
-    displayName: record.displayName,
+    username: repairMojibakeText(record.username) ?? record.username,
+    displayName: repairMojibakeText(record.displayName) ?? record.displayName,
     shortName: record.shortName ?? undefined,
     role: record.role as AuthUser["role"],
     legacyRole: record.legacyRole as AuthUser["legacyRole"],
     team: (record.team ?? undefined) as AuthUser["team"],
-    legacyTeam: record.legacyTeam ?? undefined,
+    legacyTeam: repairMojibakeText(record.legacyTeam) ?? undefined,
     secondaryTeam: (record.secondaryTeam ?? undefined) as AuthUser["secondaryTeam"],
-    secondaryLegacyTeam: record.secondaryLegacyTeam ?? undefined,
-    specificRole: record.specificRole ?? undefined,
-    secondarySpecificRole: record.secondarySpecificRole ?? undefined,
+    secondaryLegacyTeam: repairMojibakeText(record.secondaryLegacyTeam) ?? undefined,
+    specificRole: repairMojibakeText(record.specificRole) ?? undefined,
+    secondarySpecificRole: repairMojibakeText(record.secondarySpecificRole) ?? undefined,
     permissions: deriveEffectivePermissions({
       legacyRole: record.legacyRole as AuthUser["legacyRole"],
       team: (record.team ?? undefined) as AuthUser["team"],
-      legacyTeam: record.legacyTeam,
+      legacyTeam: repairMojibakeText(record.legacyTeam),
       secondaryTeam: (record.secondaryTeam ?? undefined) as AuthUser["secondaryTeam"],
-      secondaryLegacyTeam: record.secondaryLegacyTeam,
-      specificRole: record.specificRole,
-      secondarySpecificRole: record.secondarySpecificRole,
+      secondaryLegacyTeam: repairMojibakeText(record.secondaryLegacyTeam),
+      specificRole: repairMojibakeText(record.specificRole),
+      secondarySpecificRole: repairMojibakeText(record.secondarySpecificRole),
       permissions: Array.isArray(record.permissions)
         ? record.permissions.filter((permission): permission is string => typeof permission === "string")
         : [],
@@ -342,7 +352,7 @@ export function mapManagedTeam(record: {
   return {
     id: record.id,
     key: record.key,
-    label: record.label,
+    label: repairMojibakeText(record.label) ?? record.label,
     isActive: record.isActive,
     sortOrder: record.sortOrder,
     memberCount,
@@ -1462,7 +1472,7 @@ export function mapCommissionReceiver(record: {
 }): CommissionReceiver {
   return {
     id: record.id,
-    name: record.name,
+    name: repairMojibakeText(record.name) ?? record.name,
     active: record.active,
     createdAt: record.createdAt.toISOString()
   };
@@ -1489,6 +1499,46 @@ export function mapCommissionExclusion(record: {
     financeRecordId: record.financeRecordId,
     createdByUserId: record.createdByUserId ?? undefined,
     createdByName: record.createdByName ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
+export function mapProjectorCommission(record: {
+  id: string;
+  taskTrackingRecordId: string;
+  year: number;
+  month: number;
+  section: string;
+  responsibleCode: string;
+  projectorName: string;
+  clientName: string;
+  subject: string;
+  amountMxn: Prisma.Decimal;
+  authorized: boolean;
+  completedAt: Date;
+  authorizedAt: Date | null;
+  authorizedByUserId: string | null;
+  authorizedByName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ProjectorCommission {
+  return {
+    id: record.id,
+    taskTrackingRecordId: record.taskTrackingRecordId,
+    year: record.year,
+    month: record.month,
+    section: record.section,
+    responsibleCode: record.responsibleCode,
+    projectorName: record.projectorName,
+    clientName: record.clientName,
+    subject: record.subject,
+    amountMxn: Number(record.amountMxn),
+    authorized: record.authorized,
+    completedAt: record.completedAt.toISOString(),
+    authorizedAt: record.authorizedAt?.toISOString(),
+    authorizedByUserId: record.authorizedByUserId ?? undefined,
+    authorizedByName: record.authorizedByName ?? undefined,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };
@@ -1919,7 +1969,7 @@ export function mapAccountingAccount(record: {
   return {
     id: record.id,
     code: record.code,
-    name: record.name,
+    name: repairMojibakeText(record.name) ?? record.name,
     type: record.type as AccountingAccount["type"],
     subtype: record.subtype ?? undefined,
     satGroupingCode: record.satGroupingCode ?? undefined,

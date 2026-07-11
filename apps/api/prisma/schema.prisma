@@ -32,6 +32,7 @@ model Organization {
   budgetPlanSnapshots              BudgetPlanSnapshot[]
   commissionReceivers              CommissionReceiver[]
   commissionExclusions             CommissionExclusion[]
+  projectorCommissions             ProjectorCommission[]
   financeRecords                   FinanceRecord[]
   financeSnapshots                 FinanceSnapshot[]
   commissionSnapshots              CommissionSnapshot[]
@@ -712,6 +713,32 @@ model CommissionExclusion {
 
   @@unique([organizationId, year, month, section, group, financeRecordId])
   @@index([organizationId, year, month, section])
+}
+
+model ProjectorCommission {
+  id                   String       @id @default(uuid())
+  organizationId       String       @default("org-rusconi")
+  taskTrackingRecordId String
+  year                 Int
+  month                Int
+  section              String
+  responsibleCode      String
+  projectorName        String
+  clientName           String       @default("")
+  subject              String       @default("")
+  amountMxn            Decimal      @default(500)
+  authorized           Boolean      @default(false)
+  completedAt          DateTime
+  authorizedAt         DateTime?
+  authorizedByUserId   String?
+  authorizedByName     String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, taskTrackingRecordId])
+  @@index([organizationId, year, month, section])
+  @@index([organizationId, year, month, authorized])
 }
 
 model FinanceRecord {

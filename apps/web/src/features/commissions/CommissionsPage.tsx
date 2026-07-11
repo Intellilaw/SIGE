@@ -9,7 +9,8 @@ import type {
   CommissionSnapshotData,
   FinanceRecord,
   FinanceRecordStats,
-  GeneralExpense
+  GeneralExpense,
+  ProjectorCommission
 } from "@sige/contracts";
 import { COMMISSION_SECTIONS } from "@sige/contracts";
 
@@ -31,6 +32,7 @@ interface CommissionsOverviewResponse {
   generalExpenses: GeneralExpense[];
   receivers: CommissionReceiver[];
   exclusions: CommissionExclusion[];
+  projectorCommissions: ProjectorCommission[];
 }
 
 interface ComputedFinanceRecord extends FinanceRecord, FinanceRecordStats {
@@ -51,6 +53,9 @@ interface SectionCalculation {
   group1PayableMxn: number;
   group2TotalMxn: number;
   group3TotalMxn: number;
+  projectorPayableMxn: number;
+  projectorBonusMxn: number;
+  projectorCommissions: ProjectorCommission[];
   totalCommissionsMxn: number;
   grossTotalMxn: number;
   deductionRate: number;
@@ -86,6 +91,9 @@ const EMPTY_CALCULATION: SectionCalculation = {
   group1PayableMxn: 0,
   group2TotalMxn: 0,
   group3TotalMxn: 0,
+  projectorPayableMxn: 0,
+  projectorBonusMxn: 0,
+  projectorCommissions: [],
   totalCommissionsMxn: 0,
   grossTotalMxn: 0,
   deductionRate: 0,
@@ -98,6 +106,16 @@ const CLIENT_RELATIONS_COMMISSION_SECTION = "Comunicacion con cliente";
 const SALES_COMMISSION_SECTION = "Ventas";
 const SALES_COMMISSION_RATE = 0.01;
 const COMMISSION_TOTALS_SECTION = "Totales de comisiones";
+const LITIGATION_LEADER_COMMISSION_SECTION = "Litigio (lider)";
+const PROJECTOR_COMMISSION_SECTIONS = [
+  { role: "Proyectista 1", code: "EKPO", section: "Proyectista 1 (EKPO)" },
+  { role: "Proyectista 2", code: "NBSG", section: "Proyectista 2 (NBSG)" }
+] as const;
+const RUSCONI_COMMISSION_SECTIONS = COMMISSION_SECTIONS.flatMap((section) =>
+  normalizeText(section) === normalizeText("Litigio (colaborador)")
+    ? [section, ...PROJECTOR_COMMISSION_SECTIONS.map((entry) => entry.section)]
+    : [section]
+);
 const LEGALFLOW_COMMISSION_SECTIONS = [
   SALES_COMMISSION_SECTION,
   CLIENT_RELATIONS_COMMISSION_SECTION,
@@ -189,6 +207,11 @@ function canManageCommissionTotalsReceiverExclusions(user: ReturnType<typeof use
   return hasSuperadminAccess(user) && isEduardoRusconiUser(user);
 }
 
+function canManageProjectorCommissions(user: ReturnType<typeof useAuth>["user"]) {
+  const isSuperadmin = user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+  return !isLegalFlowTenant(user) && isSuperadmin && isEduardoRusconiUser(user);
+}
+
 function isLegalFlowTenant(user: ReturnType<typeof useAuth>["user"]) {
   return Boolean(
     user?.organizationId === "org-legalflow" ||
@@ -238,6 +261,22 @@ function usesOnePercentGroupBreakdown(section?: string | null) {
 
 function isSalesCommissionSection(section?: string | null) {
   return normalizeText(section) === normalizeText(SALES_COMMISSION_SECTION);
+}
+
+function getProjectorCommissionSectionForRole(role?: string | null) {
+  return PROJECTOR_COMMISSION_SECTIONS.find(
+    (entry) => normalizeText(entry.role) === normalizeText(role)
+  )?.section;
+}
+
+function isProjectorCommissionSection(section?: string | null) {
+  return PROJECTOR_COMMISSION_SECTIONS.some(
+    (entry) => normalizeText(entry.section) === normalizeText(section)
+  );
+}
+
+function isLitigationLeaderCommissionSection(section?: string | null) {
+  return normalizeText(section) === normalizeText(LITIGATION_LEADER_COMMISSION_SECTION);
 }
 
 function isCommissionTotalsSection(section?: string | null) {
@@ -295,10 +334,14 @@ function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
   const group1PayableMxn = data.group1PayableMxn ?? (
     hasTeamBreakdowns ? group1NetMxn : Math.max(group1NetMxn, 0)
   );
+  const projectorPayableMxn = data.projectorPayableMxn ?? 0;
+  const projectorBonusMxn = data.projectorBonusMxn ?? 0;
   const totalCommissionsMxn = data.totalCommissionsMxn ?? data.netTotalMxn ?? (
     group1PayableMxn +
     group2TotalMxn +
-    group3TotalMxn
+    group3TotalMxn +
+    projectorPayableMxn +
+    projectorBonusMxn
   );
 
   return {
@@ -307,6 +350,8 @@ function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
     group1PayableMxn,
     group2TotalMxn,
     group3TotalMxn,
+    projectorPayableMxn,
+    projectorBonusMxn,
     totalCommissionsMxn,
     group1TeamBreakdowns
   };
@@ -673,10 +718,34 @@ function calculateSection(
   section: string,
   year: number,
   month: number,
-  exclusions: CommissionExclusion[]
+  exclusions: CommissionExclusion[],
+  projectorCommissions: ProjectorCommission[]
 ): SectionCalculation {
   if (!section) {
     return EMPTY_CALCULATION;
+  }
+
+  const periodProjectorCommissions = projectorCommissions.filter(
+    (entry) => entry.year === year && entry.month === month
+  );
+
+  if (isProjectorCommissionSection(section)) {
+    const sectionProjectorCommissions = periodProjectorCommissions.filter(
+      (entry) => normalizeText(entry.section) === normalizeText(section)
+    );
+    const projectorPayableMxn = sectionProjectorCommissions.reduce(
+      (sum, entry) => sum + (entry.authorized ? entry.amountMxn : 0),
+      0
+    );
+
+    return {
+      ...EMPTY_CALCULATION,
+      projectorPayableMxn,
+      projectorCommissions: sectionProjectorCommissions,
+      totalCommissionsMxn: projectorPayableMxn,
+      grossTotalMxn: projectorPayableMxn,
+      netTotalMxn: projectorPayableMxn
+    };
   }
 
   const exclusionKeys = new Set(
@@ -806,8 +875,12 @@ function calculateSection(
   const group1PayableMxn = usesOnePercentGroupBreakdown(section)
     ? group1NetMxn
     : Math.max(group1NetMxn, 0);
-  const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn;
-  const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn;
+  const mirroredProjectorCommissions = isLitigationLeaderCommissionSection(section)
+    ? periodProjectorCommissions.filter((entry) => entry.authorized)
+    : [];
+  const projectorBonusMxn = mirroredProjectorCommissions.reduce((sum, entry) => sum + entry.amountMxn, 0);
+  const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn + projectorBonusMxn;
+  const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn + projectorBonusMxn;
 
   return {
     financeRecords: computedRecords,
@@ -821,6 +894,9 @@ function calculateSection(
     group1PayableMxn,
     group2TotalMxn,
     group3TotalMxn,
+    projectorPayableMxn: 0,
+    projectorBonusMxn,
+    projectorCommissions: mirroredProjectorCommissions,
     totalCommissionsMxn,
     grossTotalMxn,
     deductionRate: deductionConfiguration.rate,
@@ -1010,6 +1086,121 @@ function CommissionGroupTable(props: {
   );
 }
 
+function ProjectorCommissionTable(props: {
+  title: string;
+  rows: ProjectorCommission[];
+  mode: "projector" | "leader-mirror";
+  canManage?: boolean;
+  savingIds?: Set<string>;
+  amountDrafts?: Record<string, string>;
+  onAmountDraftChange?: (entryId: string, value: string) => void;
+  onCommitAmount?: (entry: ProjectorCommission) => void;
+  onToggleAuthorization?: (entry: ProjectorCommission, authorized: boolean) => void;
+}) {
+  const isProjectorView = props.mode === "projector";
+  const totalAuthorizedMxn = props.rows.reduce(
+    (sum, entry) => sum + (entry.authorized ? entry.amountMxn : 0),
+    0
+  );
+  const totalColumns = 5;
+  const totalLabelColumns = isProjectorView ? 3 : 4;
+
+  return (
+    <section className="panel commissions-group-panel">
+      <div className="panel-header">
+        <h2>{props.title}</h2>
+        <span>{props.rows.length} registros</span>
+      </div>
+      <div className="table-scroll">
+        <table className="data-table commissions-group-table commissions-projector-table tone-primary">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Asunto</th>
+              {!isProjectorView ? <th>Proyectista</th> : null}
+              <th>Fecha terminada</th>
+              <th>Monto</th>
+              {isProjectorView ? <th className="commissions-projector-authorization-heading">Autorizar pago</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {props.rows.length === 0 ? (
+              <tr>
+                <td colSpan={totalColumns}>No hay escritos terminados en este periodo.</td>
+              </tr>
+            ) : (
+              props.rows.map((entry) => {
+                const saving = props.savingIds?.has(entry.id) ?? false;
+                const amountDraft = props.amountDrafts?.[entry.id] ?? String(entry.amountMxn);
+
+                return (
+                  <tr
+                    key={entry.id}
+                    className={!entry.authorized ? "commissions-row-pending-authorization" : undefined}
+                    title={!entry.authorized ? "Pendiente de autorización; no forma parte del total." : "Comisión autorizada."}
+                  >
+                    <td>{entry.clientName || "-"}</td>
+                    <td>{entry.subject || "-"}</td>
+                    {!isProjectorView ? (
+                      <td>{entry.projectorName} ({entry.responsibleCode})</td>
+                    ) : null}
+                    <td>{formatDate(entry.completedAt)}</td>
+                    <td className="commissions-projector-amount-cell">
+                      {isProjectorView && props.canManage ? (
+                        <input
+                          className="commissions-projector-amount-input"
+                          type="number"
+                          min="0"
+                          step="50"
+                          value={amountDraft}
+                          disabled={saving}
+                          aria-label={`Monto de comisión para ${entry.subject || entry.clientName}`}
+                          onChange={(event) => props.onAmountDraftChange?.(entry.id, event.target.value)}
+                          onBlur={() => props.onCommitAmount?.(entry)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <span>{formatCurrency(entry.amountMxn)}</span>
+                      )}
+                    </td>
+                    {isProjectorView ? (
+                      <td className="commissions-projector-authorization-cell">
+                        <label
+                          className="commissions-projector-authorization-toggle"
+                          title={props.canManage ? "Autorizar el pago de esta comisión" : "Solo Eduardo Rusconi puede autorizar este pago"}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={entry.authorized}
+                            disabled={!props.canManage || saving}
+                            aria-label={`Autorizar comisión de ${entry.projectorName} por ${entry.subject || entry.clientName}`}
+                            onChange={(event) => props.onToggleAuthorization?.(entry, event.target.checked)}
+                          />
+                        </label>
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={totalLabelColumns}>Total autorizado</td>
+              <td>{formatCurrency(totalAuthorizedMxn)}</td>
+              {isProjectorView ? <td className="commissions-projector-authorization-cell" aria-label="Autorizar pago" /> : null}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function CommissionTotalsTable(props: {
   rows: CommissionTotalsRow[];
   year: number;
@@ -1098,6 +1289,13 @@ function SnapshotDetailModal(props: {
   const snapshotGroup1RateLabel = getGroup1RateLabel(props.snapshot.section);
   const snapshotUsesTeamBreakdown = Boolean(totals?.group1TeamBreakdowns.length);
   const snapshotIsSalesSection = isSalesCommissionSection(props.snapshot.section);
+  const snapshotIsProjectorSection = isProjectorCommissionSection(props.snapshot.section);
+  const snapshotIsLitigationLeaderSection = isLitigationLeaderCommissionSection(props.snapshot.section);
+  const snapshotProjectorCommissions = data?.projectorCommissions ?? [];
+  const snapshotProjectorPendingMxn = snapshotProjectorCommissions.reduce(
+    (sum, entry) => sum + (entry.authorized ? 0 : entry.amountMxn),
+    0
+  );
   const snapshotExecutionRecords = snapshotIsSalesSection
     ? withSalesCommissionBase(data?.executionRecords ?? [])
     : data?.executionRecords ?? [];
@@ -1124,55 +1322,101 @@ function SnapshotDetailModal(props: {
         ) : (
           <div className="commissions-modal-body">
             <div className="commissions-metrics-grid">
-              {snapshotUsesTeamBreakdown ? (
-                <CommissionTeamBreakdownCards teams={totals?.group1TeamBreakdowns ?? []} />
-              ) : (
+              {snapshotIsProjectorSection ? (
                 <>
                   <CurrencyMetricCard
-                    label={`Comisiones brutas Grupo 1 (${snapshotGroup1RateLabel})`}
-                    value={totals?.group1GrossMxn ?? 0}
+                    label="Comisiones pendientes de autorizar"
+                    value={snapshotProjectorPendingMxn}
+                    accentClass="is-warning"
+                  />
+                  <CurrencyMetricCard
+                    label="Comisiones autorizadas"
+                    value={totals?.projectorPayableMxn ?? 0}
                     accentClass="is-primary"
                   />
                   <CurrencyMetricCard
-                    label="Deduccion por gastos"
-                    value={data.deductionMxn}
-                    accentClass="is-warning"
-                    helper={`${Math.round(data.deductionRate * 100)}% de ${formatCurrency(data.deductionBaseMxn)}`}
+                    label="Comisiones totales"
+                    value={totals?.totalCommissionsMxn ?? 0}
+                    accentClass="is-success"
+                  />
+                </>
+              ) : (
+                <>
+                  {snapshotUsesTeamBreakdown ? (
+                    <CommissionTeamBreakdownCards teams={totals?.group1TeamBreakdowns ?? []} />
+                  ) : (
+                    <>
+                      <CurrencyMetricCard
+                        label={`Comisiones brutas Grupo 1 (${snapshotGroup1RateLabel})`}
+                        value={totals?.group1GrossMxn ?? 0}
+                        accentClass="is-primary"
+                      />
+                      <CurrencyMetricCard
+                        label="Deducción por gastos"
+                        value={data.deductionMxn}
+                        accentClass="is-warning"
+                        helper={`${Math.round(data.deductionRate * 100)}% de ${formatCurrency(data.deductionBaseMxn)}`}
+                      />
+                    </>
+                  )}
+                  <CurrencyMetricCard
+                    label={`Comisiones netas Grupo 1 (${snapshotGroup1RateLabel})`}
+                    value={totals?.group1NetMxn ?? 0}
+                    accentClass="is-success"
+                  />
+                  <CurrencyMetricCard
+                    label="Comisiones Grupo 2 (20%)"
+                    value={totals?.group2TotalMxn ?? 0}
+                    accentClass="is-neutral"
+                  />
+                  <CurrencyMetricCard
+                    label="Comisiones Grupo 3 (10%)"
+                    value={totals?.group3TotalMxn ?? 0}
+                    accentClass="is-neutral"
+                  />
+                  {snapshotIsLitigationLeaderSection ? (
+                    <CurrencyMetricCard
+                      label="Comisiones espejo de proyectistas"
+                      value={totals?.projectorBonusMxn ?? 0}
+                      accentClass="is-primary"
+                    />
+                  ) : null}
+                  <CurrencyMetricCard
+                    label="Comisiones totales"
+                    value={totals?.totalCommissionsMxn ?? 0}
+                    accentClass="is-success"
                   />
                 </>
               )}
-              <CurrencyMetricCard
-                label={`Comisiones netas Grupo 1 (${snapshotGroup1RateLabel})`}
-                value={totals?.group1NetMxn ?? 0}
-                accentClass="is-success"
-              />
-              <CurrencyMetricCard
-                label="Comisiones Grupo 2 (20%)"
-                value={totals?.group2TotalMxn ?? 0}
-                accentClass="is-neutral"
-              />
-              <CurrencyMetricCard
-                label="Comisiones Grupo 3 (10%)"
-                value={totals?.group3TotalMxn ?? 0}
-                accentClass="is-neutral"
-              />
-              <CurrencyMetricCard
-                label="Comisiones totales"
-                value={totals?.totalCommissionsMxn ?? 0}
-                accentClass="is-success"
-              />
             </div>
 
-            <CommissionGroupTable
-              title="1. Comision por ejecucion"
-              toneClass="tone-primary"
-              rows={snapshotExecutionRecords}
-              showBaseNet
-              baseNetLabel={snapshotIsSalesSection ? "Primer pago recibido" : undefined}
-              amountLabel={snapshotIsSalesSection ? "1%" : undefined}
-            />
-            <CommissionGroupTable title="2. Comision por cliente" toneClass="tone-secondary" rows={data.clientRecords} showBaseNet />
-            <CommissionGroupTable title="3. Comision por cierre" toneClass="tone-tertiary" rows={data.closingRecords} showBaseNet />
+            {snapshotIsProjectorSection ? (
+              <ProjectorCommissionTable
+                title={`Comisiones por escritos de fondo - ${props.snapshot.section}`}
+                rows={snapshotProjectorCommissions}
+                mode="projector"
+              />
+            ) : (
+              <>
+                <CommissionGroupTable
+                  title="1. Comision por ejecucion"
+                  toneClass="tone-primary"
+                  rows={snapshotExecutionRecords}
+                  showBaseNet
+                  baseNetLabel={snapshotIsSalesSection ? "Primer pago recibido" : undefined}
+                  amountLabel={snapshotIsSalesSection ? "1%" : undefined}
+                />
+                <CommissionGroupTable title="2. Comision por cliente" toneClass="tone-secondary" rows={data.clientRecords} showBaseNet />
+                <CommissionGroupTable title="3. Comision por cierre" toneClass="tone-tertiary" rows={data.closingRecords} showBaseNet />
+                {snapshotIsLitigationLeaderSection ? (
+                  <ProjectorCommissionTable
+                    title="COMISIONES ESPEJO: Escritos de fondo autorizados"
+                    rows={snapshotProjectorCommissions}
+                    mode="leader-mirror"
+                  />
+                ) : null}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1192,7 +1436,10 @@ export function CommissionsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [snapshots, setSnapshots] = useState<CommissionSnapshot[]>([]);
   const [exclusions, setExclusions] = useState<CommissionExclusion[]>([]);
+  const [projectorCommissions, setProjectorCommissions] = useState<ProjectorCommission[]>([]);
   const [savingExclusionKeys, setSavingExclusionKeys] = useState<Set<string>>(new Set());
+  const [savingProjectorCommissionIds, setSavingProjectorCommissionIds] = useState<Set<string>>(new Set());
+  const [projectorAmountDrafts, setProjectorAmountDrafts] = useState<Record<string, string>>({});
   const [excludedTotalsReceiverKeys, setExcludedTotalsReceiverKeys] = useState<Set<string>>(new Set());
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(true);
@@ -1211,14 +1458,16 @@ export function CommissionsPage() {
   const canReadClients = hasPermission(user, "clients:read");
   const canManageExclusions = canManageCommissionExclusions(user);
   const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
+  const canManageProjectorEntries = canManageProjectorCommissions(user);
   const isLegalFlow = isLegalFlowTenant(user);
   const availableCommissionSections = useMemo(
-    () => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...COMMISSION_SECTIONS],
+    () => isLegalFlow ? [...LEGALFLOW_COMMISSION_SECTIONS] : [...RUSCONI_COMMISSION_SECTIONS],
     [isLegalFlow]
   );
 
   const visibleSections = useMemo(() => {
     const userRole = normalizeText(user?.specificRole);
+    const projectorRoleSection = getProjectorCommissionSectionForRole(user?.specificRole);
 
     if (canReadAllCommissions || user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN") {
       return isLegalFlow ? availableCommissionSections : [...availableCommissionSections, COMMISSION_TOTALS_SECTION];
@@ -1230,7 +1479,9 @@ export function CommissionsPage() {
       );
     }
 
-    return availableCommissionSections.filter((section) => normalizeText(section) === userRole);
+    return availableCommissionSections.filter((section) =>
+      normalizeText(section) === normalizeText(projectorRoleSection ?? userRole)
+    );
   }, [
     availableCommissionSections,
     canReadAllCommissions,
@@ -1293,6 +1544,7 @@ export function CommissionsPage() {
       setGeneralExpenses(overview.generalExpenses);
       setReceivers(overview.receivers);
       setExclusions(overview.exclusions ?? []);
+      setProjectorCommissions(overview.projectorCommissions ?? []);
       setClients(clientsResponse);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -1323,8 +1575,17 @@ export function CommissionsPage() {
   }, []);
 
   const sectionCalculation = useMemo(
-    () => calculateSection(financeRecords, generalExpenses, clients, activeSection, selectedYear, selectedMonth, exclusions),
-    [activeSection, clients, exclusions, financeRecords, generalExpenses, selectedMonth, selectedYear]
+    () => calculateSection(
+      financeRecords,
+      generalExpenses,
+      clients,
+      activeSection,
+      selectedYear,
+      selectedMonth,
+      exclusions,
+      projectorCommissions
+    ),
+    [activeSection, clients, exclusions, financeRecords, generalExpenses, projectorCommissions, selectedMonth, selectedYear]
   );
   const commissionTotalsRows = useMemo<CommissionTotalsRow[]>(() => {
     if (!isTotalsActiveSection) {
@@ -1335,7 +1596,16 @@ export function CommissionsPage() {
       .filter((section) => normalizeText(section) !== normalizeText("Direccion general"))
       .map((section) => ({
         section,
-        calculation: calculateSection(financeRecords, generalExpenses, clients, section, selectedYear, selectedMonth, exclusions)
+        calculation: calculateSection(
+          financeRecords,
+          generalExpenses,
+          clients,
+          section,
+          selectedYear,
+          selectedMonth,
+          exclusions,
+          projectorCommissions
+        )
       }));
   }, [
     availableCommissionSections,
@@ -1344,6 +1614,7 @@ export function CommissionsPage() {
     financeRecords,
     generalExpenses,
     isTotalsActiveSection,
+    projectorCommissions,
     selectedMonth,
     selectedYear
   ]);
@@ -1366,12 +1637,16 @@ export function CommissionsPage() {
         group1PayableMxn: acc.group1PayableMxn + row.calculation.group1PayableMxn,
         group2TotalMxn: acc.group2TotalMxn + row.calculation.group2TotalMxn,
         group3TotalMxn: acc.group3TotalMxn + row.calculation.group3TotalMxn,
+        projectorPayableMxn: acc.projectorPayableMxn + row.calculation.projectorPayableMxn,
+        projectorBonusMxn: acc.projectorBonusMxn + row.calculation.projectorBonusMxn,
         totalCommissionsMxn: acc.totalCommissionsMxn + row.calculation.totalCommissionsMxn
       }),
       {
         group1PayableMxn: 0,
         group2TotalMxn: 0,
         group3TotalMxn: 0,
+        projectorPayableMxn: 0,
+        projectorBonusMxn: 0,
         totalCommissionsMxn: 0
       }
     ),
@@ -1442,6 +1717,92 @@ export function CommissionsPage() {
         return next;
       });
     }
+  }
+
+  function handleProjectorAmountDraftChange(entryId: string, value: string) {
+    setProjectorAmountDrafts((current) => ({ ...current, [entryId]: value }));
+  }
+
+  async function updateProjectorCommission(
+    entry: ProjectorCommission,
+    payload: { amountMxn?: number; authorized?: boolean }
+  ) {
+    if (!canManageProjectorEntries) {
+      return;
+    }
+
+    setSavingProjectorCommissionIds((current) => new Set(current).add(entry.id));
+    setFlash(null);
+
+    try {
+      const updated = await apiPatch<ProjectorCommission>(
+        `/commissions/projector-commissions/${entry.id}`,
+        payload
+      );
+      setProjectorCommissions((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setProjectorAmountDrafts((current) => {
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+      setFlash({
+        tone: "success",
+        text: updated.authorized
+          ? "Comisión autorizada para la proyectista y para Litigio líder."
+          : "Comisión actualizada; permanece fuera de ambos totales."
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setSavingProjectorCommissionIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }
+
+  function handleCommitProjectorAmount(entry: ProjectorCommission) {
+    const draft = projectorAmountDrafts[entry.id];
+    if (draft === undefined) {
+      return;
+    }
+
+    const amountMxn = Number(draft);
+    if (!Number.isFinite(amountMxn) || amountMxn < 0) {
+      setProjectorAmountDrafts((current) => {
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+      setFlash({ tone: "error", text: "El monto de la comisión debe ser un número igual o mayor a cero." });
+      return;
+    }
+
+    if (amountMxn === entry.amountMxn) {
+      setProjectorAmountDrafts((current) => {
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+      return;
+    }
+
+    void updateProjectorCommission(entry, { amountMxn });
+  }
+
+  function handleToggleProjectorAuthorization(entry: ProjectorCommission, authorized: boolean) {
+    const draft = projectorAmountDrafts[entry.id];
+    const amountMxn = draft === undefined ? entry.amountMxn : Number(draft);
+    if (!Number.isFinite(amountMxn) || amountMxn < 0) {
+      setFlash({ tone: "error", text: "Corrige el monto antes de autorizar la comisión." });
+      return;
+    }
+
+    void updateProjectorCommission(entry, {
+      authorized,
+      ...(amountMxn === entry.amountMxn ? {} : { amountMxn })
+    });
   }
 
   async function handleCreateReceiver() {
@@ -1549,6 +1910,9 @@ export function CommissionsPage() {
       group1PayableMxn: sectionCalculation.group1PayableMxn,
       group2TotalMxn: sectionCalculation.group2TotalMxn,
       group3TotalMxn: sectionCalculation.group3TotalMxn,
+      projectorPayableMxn: sectionCalculation.projectorPayableMxn,
+      projectorBonusMxn: sectionCalculation.projectorBonusMxn,
+      projectorCommissions: sectionCalculation.projectorCommissions,
       totalCommissionsMxn: sectionCalculation.totalCommissionsMxn,
       grossTotalMxn: sectionCalculation.grossTotalMxn,
       deductionRate: sectionCalculation.deductionRate,
@@ -1582,7 +1946,17 @@ export function CommissionsPage() {
       ? snapshots
       : snapshots.filter((snapshot) => visibleSectionKeys.has(normalizeText(snapshot.section)));
   const activeSectionLabel = activeSection || "Sin seccion";
-  const shouldShowDeductionPanel = Boolean(activeSection && normalizeText(activeSection) !== normalizeText("Direccion general"));
+  const shouldShowDeductionPanel = Boolean(
+    activeSection
+    && normalizeText(activeSection) !== normalizeText("Direccion general")
+    && !isProjectorCommissionSection(activeSection)
+  );
+  const isProjectorActiveSection = isProjectorCommissionSection(activeSection);
+  const isLitigationLeaderActiveSection = isLitigationLeaderCommissionSection(activeSection);
+  const projectorPendingMxn = sectionCalculation.projectorCommissions.reduce(
+    (sum, entry) => sum + (entry.authorized ? 0 : entry.amountMxn),
+    0
+  );
   const isSalesActiveSection = isSalesCommissionSection(activeSection);
   const group1RateLabel = getGroup1RateLabel(activeSection);
   const group1RateLabelSuffix = group1RateLabel ? ` (${group1RateLabel})` : "";
@@ -1701,59 +2075,96 @@ export function CommissionsPage() {
                 </div>
 
                 <div className={`commissions-metrics-grid${isTotalsActiveSection ? " is-totals" : ""}`}>
-                  {!isTotalsActiveSection ? (
-                    usesTeamGroup1Breakdown ? (
-                      <CommissionTeamBreakdownCards teams={sectionCalculation.group1TeamBreakdowns} />
-                    ) : (
-                      <>
-                        <CurrencyMetricCard
-                          label={`Comisiones brutas Grupo 1${group1RateLabelSuffix}`}
-                          value={sectionCalculation.group1GrossMxn}
-                          accentClass="is-primary"
-                        />
-                        <CurrencyMetricCard
-                          label="Deduccion por gastos"
-                          value={sectionCalculation.deductionMxn}
-                          accentClass="is-warning"
-                          helper={`${Math.round(sectionCalculation.deductionRate * 100)}% de ${formatCurrency(sectionCalculation.deductionBaseMxn)}`}
-                        />
-                      </>
-                    )
-                  ) : null}
-                  <CurrencyMetricCard
-                    label={isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1${group1RateLabelSuffix}`}
-                    value={isTotalsActiveSection ? commissionTotalsSummary.group1PayableMxn : sectionCalculation.group1NetMxn}
-                    accentClass="is-success"
-                  />
-                  <CurrencyMetricCard
-                    label="Comisiones Grupo 2 (20%)"
-                    value={isTotalsActiveSection ? commissionTotalsSummary.group2TotalMxn : sectionCalculation.group2TotalMxn}
-                    accentClass="is-neutral"
-                  />
-                  <CurrencyMetricCard
-                    label="Comisiones Grupo 3 (10%)"
-                    value={isTotalsActiveSection ? commissionTotalsSummary.group3TotalMxn : sectionCalculation.group3TotalMxn}
-                    accentClass="is-neutral"
-                  />
-                  {isTotalsActiveSection ? (
-                    <CurrencyMetricCard
-                      label="Total a pagar"
-                      value={commissionTotalsSummary.totalCommissionsMxn}
-                      accentClass="is-success"
-                    />
+                  {isProjectorActiveSection ? (
+                    <>
+                      <CurrencyMetricCard
+                        label="Comisiones pendientes de autorizar"
+                        value={projectorPendingMxn}
+                        accentClass="is-warning"
+                      />
+                      <CurrencyMetricCard
+                        label="Comisiones autorizadas"
+                        value={sectionCalculation.projectorPayableMxn}
+                        accentClass="is-primary"
+                      />
+                      <CurrencyMetricCard
+                        label="Total a pagar"
+                        value={sectionCalculation.totalCommissionsMxn}
+                        accentClass="is-success"
+                        helper="Solo las entradas autorizadas forman parte del total"
+                      />
+                    </>
                   ) : (
-                    <CurrencyMetricCard
-                      label="Comisiones totales"
-                      value={sectionCalculation.totalCommissionsMxn}
-                      accentClass="is-success"
-                      helper={
-                        usesTeamGroup1Breakdown && hasNegativeTeamBalance
-                          ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
-                          : sectionCalculation.group1NetMxn < 0
-                            ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
-                            : undefined
-                      }
-                    />
+                    <>
+                      {!isTotalsActiveSection ? (
+                        usesTeamGroup1Breakdown ? (
+                          <CommissionTeamBreakdownCards teams={sectionCalculation.group1TeamBreakdowns} />
+                        ) : (
+                          <>
+                            <CurrencyMetricCard
+                              label={`Comisiones brutas Grupo 1${group1RateLabelSuffix}`}
+                              value={sectionCalculation.group1GrossMxn}
+                              accentClass="is-primary"
+                            />
+                            <CurrencyMetricCard
+                              label="Deducción por gastos"
+                              value={sectionCalculation.deductionMxn}
+                              accentClass="is-warning"
+                              helper={`${Math.round(sectionCalculation.deductionRate * 100)}% de ${formatCurrency(sectionCalculation.deductionBaseMxn)}`}
+                            />
+                          </>
+                        )
+                      ) : null}
+                      <CurrencyMetricCard
+                        label={isTotalsActiveSection ? "Comisiones Grupo 1" : `Comisiones netas Grupo 1${group1RateLabelSuffix}`}
+                        value={isTotalsActiveSection ? commissionTotalsSummary.group1PayableMxn : sectionCalculation.group1NetMxn}
+                        accentClass="is-success"
+                      />
+                      <CurrencyMetricCard
+                        label="Comisiones Grupo 2 (20%)"
+                        value={isTotalsActiveSection ? commissionTotalsSummary.group2TotalMxn : sectionCalculation.group2TotalMxn}
+                        accentClass="is-neutral"
+                      />
+                      <CurrencyMetricCard
+                        label="Comisiones Grupo 3 (10%)"
+                        value={isTotalsActiveSection ? commissionTotalsSummary.group3TotalMxn : sectionCalculation.group3TotalMxn}
+                        accentClass="is-neutral"
+                      />
+                      {isTotalsActiveSection ? (
+                        <CurrencyMetricCard
+                          label="Proyectistas y espejo Litigio líder"
+                          value={commissionTotalsSummary.projectorPayableMxn + commissionTotalsSummary.projectorBonusMxn}
+                          accentClass="is-neutral"
+                        />
+                      ) : isLitigationLeaderActiveSection ? (
+                        <CurrencyMetricCard
+                          label="Comisiones espejo de proyectistas"
+                          value={sectionCalculation.projectorBonusMxn}
+                          accentClass="is-primary"
+                          helper="Se entregan completas y no están sujetas a deducciones"
+                        />
+                      ) : null}
+                      {isTotalsActiveSection ? (
+                        <CurrencyMetricCard
+                          label="Total a pagar"
+                          value={commissionTotalsSummary.totalCommissionsMxn}
+                          accentClass="is-success"
+                        />
+                      ) : (
+                        <CurrencyMetricCard
+                          label="Comisiones totales"
+                          value={sectionCalculation.totalCommissionsMxn}
+                          accentClass="is-success"
+                          helper={
+                            usesTeamGroup1Breakdown && hasNegativeTeamBalance
+                              ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
+                              : sectionCalculation.group1NetMxn < 0
+                                ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
+                                : undefined
+                          }
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               </section>
@@ -1770,6 +2181,18 @@ export function CommissionsPage() {
                   excludedReceiverKeys={effectiveExcludedTotalsReceiverKeys}
                   canManageReceiverExclusions={canManageTotalsReceiverExclusions}
                   onToggleReceiverExclusion={handleToggleCommissionTotalsReceiverExclusion}
+                />
+              ) : isProjectorActiveSection ? (
+                <ProjectorCommissionTable
+                  title={`Comisiones por escritos de fondo - ${activeSection}`}
+                  rows={sectionCalculation.projectorCommissions}
+                  mode="projector"
+                  canManage={canManageProjectorEntries}
+                  savingIds={savingProjectorCommissionIds}
+                  amountDrafts={projectorAmountDrafts}
+                  onAmountDraftChange={handleProjectorAmountDraftChange}
+                  onCommitAmount={handleCommitProjectorAmount}
+                  onToggleAuthorization={handleToggleProjectorAuthorization}
                 />
               ) : (
                 <>
@@ -1815,6 +2238,14 @@ export function CommissionsPage() {
                     />
                   </div>
 
+                  {isLitigationLeaderActiveSection ? (
+                    <ProjectorCommissionTable
+                      title="COMISIONES ESPEJO: Escritos de fondo autorizados"
+                      rows={sectionCalculation.projectorCommissions}
+                      mode="leader-mirror"
+                    />
+                  ) : null}
+
                   {shouldShowDeductionPanel ? (
                     <section className="panel commissions-deduction-panel">
                       <div className="panel-header">
@@ -1844,6 +2275,9 @@ export function CommissionsPage() {
                         <span>Grupo 1 aplicado al total: <strong>{formatCurrency(sectionCalculation.group1PayableMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 2 (20%): <strong>{formatCurrency(sectionCalculation.group2TotalMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 3 (10%): <strong>{formatCurrency(sectionCalculation.group3TotalMxn)}</strong></span>
+                        {sectionCalculation.projectorBonusMxn > 0 ? (
+                          <span>(+) Comisiones espejo de proyectistas: <strong>{formatCurrency(sectionCalculation.projectorBonusMxn)}</strong></span>
+                        ) : null}
                         <span>Comisiones totales: <strong>{formatCurrency(sectionCalculation.totalCommissionsMxn)}</strong></span>
                       </div>
                     </section>

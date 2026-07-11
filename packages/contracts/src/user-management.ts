@@ -36,7 +36,7 @@ export const TEAM_OPTIONS: TeamOption[] = [
   { key: "SETTLEMENTS", label: "Convenios" },
   { key: "FINANCIAL_LAW", label: "Der Financiero" },
   { key: "TAX_COMPLIANCE", label: "Compliance Fiscal" },
-  { key: "AUDIT", label: "Auditoria" },
+  { key: "AUDIT", label: "Auditoría" },
   { key: "CLIENT_RELATIONS", label: "Comunicación con cliente" },
   { key: "SALES", label: "Ventas" },
   { key: "FINANCE", label: "Finanzas" },

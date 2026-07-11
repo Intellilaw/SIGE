@@ -1,7 +1,8 @@
 import type {
   CommissionExclusionWriteRecord,
   CommissionsRepository,
-  CreateCommissionSnapshotRecord
+  CreateCommissionSnapshotRecord,
+  ProjectorCommissionUpdateRecord
 } from "../../repositories/types";
 
 export class CommissionsService {
@@ -41,5 +42,9 @@ export class CommissionsService {
 
   public clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">) {
     return this.repository.clearExclusion(payload);
+  }
+
+  public updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord) {
+    return this.repository.updateProjectorCommission(entryId, payload);
   }
 }

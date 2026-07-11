@@ -1806,7 +1806,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         throw new AppError(
           400,
           "GENERAL_EXPENSE_PAYROLL_ADVANCE_VACATION_WITHOUT_LABOR_FILE",
-          "La fila debe estar vinculada a un expediente laboral para marcar estos dÃ­as como pagados."
+          "La fila debe estar vinculada a un expediente laboral para marcar estos días como pagados."
         );
       }
 
@@ -1814,7 +1814,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         throw new AppError(
           400,
           "GENERAL_EXPENSE_PAYROLL_ADVANCE_VACATION_PATCH_CONFLICT",
-          "Actualiza primero el colaborador y luego marca los dÃ­as disfrutados por adelantado como pagados."
+          "Actualiza primero el colaborador y luego marca los días disfrutados por adelantado como pagados."
         );
       }
 
@@ -1828,7 +1828,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
           throw new AppError(
             400,
             "GENERAL_EXPENSE_PAYROLL_ADVANCE_VACATION_PAYMENT_NOT_ALLOWED",
-            "Los dÃ­as disfrutados por adelantado solo pueden pagarse cuando llegue la fecha de corte correspondiente."
+            "Los días disfrutados por adelantado solo pueden pagarse cuando llegue la fecha de corte correspondiente."
           );
         }
 
