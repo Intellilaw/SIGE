@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
+import { formatMoneyInputValue, getMoneyCurrency, moneyAmountInWords, moneyAmountWithWords, moneyCurrencyLabels } from "./daily-document-money";
 function dateInputValue(date) {
     const month = `${date.getMonth() + 1}`.padStart(2, "0");
     const day = `${date.getDate()}`.padStart(2, "0");
@@ -37,14 +38,6 @@ const laborPowerAttorneyFallback = "APODERADOS PENDIENTES";
 const grantorTypeLabels = {
     physical: "Persona física",
     moral: "Persona moral"
-};
-const moneyCurrencyLabels = {
-    MXN: "Pesos (MXN)",
-    USD: "Dólares (USD)"
-};
-const moneyCurrencyLegalNames = {
-    MXN: "Moneda Nacional",
-    USD: "Dólares de los Estados Unidos de América"
 };
 const interestPeriodLabels = {
     daily: "Diario",
@@ -177,35 +170,6 @@ function formatDateField(values, fieldName, fallback = blankDateMarker) {
 function formatPlaceDate(values) {
     return `${value(values, "place", "lugar pendiente")}, ${formatDateField(values, "date")}`;
 }
-function parseMoneyAmount(rawAmount) {
-    const normalizedAmount = normalizeText(rawAmount)
-        .replace(/\$/g, "")
-        .replace(/,/g, "")
-        .replace(/\s*(?:m\.?n\.?|mxn|usd)\s*$/i, "")
-        .trim();
-    return Number(normalizedAmount || 0);
-}
-function formatMoneyInputValue(rawAmount, forceDecimals = false) {
-    const normalizedAmount = normalizeText(rawAmount)
-        .replace(/\$/g, "")
-        .replace(/,/g, "")
-        .replace(/[^\d.]/g, "");
-    if (!normalizedAmount) {
-        return "";
-    }
-    const hasDecimalPoint = normalizedAmount.includes(".");
-    const [rawIntegerPart, ...rawDecimalParts] = normalizedAmount.split(".");
-    const integerPart = rawIntegerPart.replace(/^0+(?=\d)/g, "") || "0";
-    const decimalPart = rawDecimalParts.join("").slice(0, 2);
-    const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    if (forceDecimals) {
-        return `${groupedInteger}.${decimalPart.padEnd(2, "0")}`;
-    }
-    return hasDecimalPoint ? `${groupedInteger}.${decimalPart}` : groupedInteger;
-}
-function getMoneyCurrency(values) {
-    return values.currency === "USD" ? "USD" : "MXN";
-}
 function formatPercentageInputValue(rawPercentage) {
     return normalizeText(rawPercentage)
         .replace(/,/g, ".")
@@ -222,21 +186,6 @@ function getInterestPeriod(values) {
         return values.interestPeriod;
     }
     return "monthly";
-}
-function amountLabel(values, options) {
-    const amount = parseMoneyAmount(values.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-        return value(values, "amount", "cantidad pendiente");
-    }
-    const currency = getMoneyCurrency(values);
-    const formattedAmount = new Intl.NumberFormat("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    }).format(amount);
-    return `$${formattedAmount}${options?.includeCurrencyCode ? ` ${currency}` : ""}`;
-}
-function moneyReceiptAmountLabel(values) {
-    return `${amountLabel(values)} M.N.`;
 }
 function moneyReceiptConcept(values) {
     const concept = value(values, "concept", "concepto pendiente").replace(/[.\s]+$/g, "");
@@ -386,9 +335,7 @@ function getPromissoryNoteDebtor(values) {
     };
 }
 function promissoryNoteAmountText(values) {
-    const amountInWords = value(values, "amountInWords", "cantidad con letra pendiente");
-    const currency = getMoneyCurrency(values);
-    return `${amountLabel(values, { includeCurrencyCode: true })} (${amountInWords}, ${moneyCurrencyLegalNames[currency]})`;
+    return moneyAmountWithWords(values);
 }
 const dailyDocumentTemplates = [
     {
@@ -537,6 +484,8 @@ const dailyDocumentTemplates = [
             },
             { name: "paymentType", label: "Pago parcial / pago total", type: "payment-type", defaultValue: "Pago total" },
             { name: "amount", label: "Monto", type: "currency", placeholder: "1,500.00" },
+            { name: "currency", label: "Moneda", type: "currency-type", defaultValue: "MXN" },
+            { name: "amountInWords", label: "Cantidad con letra", type: "currency-words" },
             { name: "receivedBy", label: "Nombre de quien recibe", placeholder: "Ma. Del Carmen Hernández" },
             { name: "date", label: "Fecha de recibido", type: "date" }
         ],
@@ -550,7 +499,7 @@ const dailyDocumentTemplates = [
                 type: "money-receipt",
                 concept: moneyReceiptConcept(values),
                 paymentType: fallbackValue(values, ["paymentType", "paymentMethod"], "pago pendiente"),
-                amount: moneyReceiptAmountLabel(values),
+                amount: moneyAmountWithWords(values),
                 receivedBy: value(values, "receivedBy", "pendiente"),
                 receivedDate: formatDateField(values, "date")
             }
@@ -696,7 +645,7 @@ const dailyDocumentTemplates = [
             { name: "dueDate", label: "Fecha de pago / vencimiento", type: "date" },
             { name: "amount", label: "Cantidad con número", type: "currency", placeholder: "150,000.00" },
             { name: "currency", label: "Moneda", type: "currency-type", defaultValue: "MXN" },
-            { name: "amountInWords", label: "Cantidad con letra", placeholder: "Ciento cincuenta mil pesos 00/100" },
+            { name: "amountInWords", label: "Cantidad con letra", type: "currency-words" },
             {
                 name: "defaultInterestRate",
                 label: "Interés moratorio",
@@ -940,6 +889,9 @@ function getRcDeliveredForm(document) {
 function getMoneyReceiptForm(document) {
     return document.formLayout?.type === "money-receipt" ? document.formLayout : null;
 }
+function moneyReceiptSignatureName(form) {
+    return (normalizeText(form.receivedBy) || "Nombre de quien recibe").toLocaleUpperCase("es-MX");
+}
 function rcDeliveredFormText(form) {
     const documentLines = form.documentRows
         .filter((row) => normalizeText(row.description))
@@ -1002,15 +954,15 @@ function moneyReceiptFormText(form) {
         "PAGO RECIBIDO POR RUSCONI CONSULTING",
         `NOMBRE DE QUIEN RECIBE: ${form.receivedBy}`,
         `FECHA DE RECIBIDO: ${form.receivedDate}`,
-        `FIRMA DE QUIEN RECIBE EL DINERO:\n______________________________\n${form.receivedBy || "pendiente"}`
+        `______________________________\n${moneyReceiptSignatureName(form)}`
     ];
 }
 function moneyReceiptFormHtml(form) {
     return `<section class="money-receipt-form">
     <div class="money-receipt-lines">
-      <p><strong>CONCEPTO:</strong> ${escapeHtml(form.concept)}</p>
-      <p><strong>PAGO PARCIAL/PAGO TOTAL:</strong> ${escapeHtml(form.paymentType)}</p>
-      <p><strong>MONTO:</strong> ${escapeHtml(form.amount)}</p>
+      <p><strong>CONCEPTO:</strong>&nbsp;${escapeHtml(form.concept)}</p>
+      <p><strong>PAGO PARCIAL/PAGO TOTAL:</strong>&nbsp;${escapeHtml(form.paymentType)}</p>
+      <p><strong>MONTO:</strong>&nbsp;${escapeHtml(form.amount)}</p>
     </div>
     <table class="money-receipt-table">
       <thead>
@@ -1028,8 +980,7 @@ function moneyReceiptFormHtml(form) {
       </tbody>
     </table>
     <div class="money-receiver-signature">
-      <strong>${escapeHtml(form.receivedBy || "Nombre de quien recibe")}</strong>
-      <em>Firma de quien recibe el dinero</em>
+      <strong>${escapeHtml(moneyReceiptSignatureName(form))}</strong>
     </div>
   </section>`;
 }
@@ -1333,9 +1284,9 @@ async function downloadWordDocument(document) {
         });
         const tableHeaderShading = { fill: "D9D9D9" };
         children.push(new Paragraph({ spacing: { after: 700 }, text: "" }));
-        children.push(moneyLine("CONCEPTO: ", moneyForm.concept));
-        children.push(moneyLine("PAGO PARCIAL/PAGO TOTAL: ", moneyForm.paymentType));
-        children.push(moneyLine("MONTO: ", moneyForm.amount));
+        children.push(moneyLine("CONCEPTO:\u00A0", moneyForm.concept));
+        children.push(moneyLine("PAGO PARCIAL/PAGO TOTAL:\u00A0", moneyForm.paymentType));
+        children.push(moneyLine("MONTO:\u00A0", moneyForm.amount));
         children.push(new Paragraph({ spacing: { after: 560 }, text: "" }));
         children.push(new Table({
             width: { size: 92, type: WidthType.PERCENTAGE },
@@ -1379,12 +1330,7 @@ async function downloadWordDocument(document) {
         children.push(new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { before: 100 },
-            children: [moneyTextRun(moneyForm.receivedBy || "Nombre de quien recibe", true)]
-        }));
-        children.push(new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { before: 60 },
-            children: [moneyTextRun("Firma de quien recibe el dinero", true)]
+            children: [moneyTextRun(moneyReceiptSignatureName(moneyForm), true)]
         }));
     }
     document.paragraphs.forEach((paragraph) => {
@@ -1715,9 +1661,9 @@ async function downloadPdfDocument(document) {
             pdf.text(lines, x + width / 2, textY, { align: "center", maxWidth: width - 12 });
         }
         y += 32;
-        addMoneyLabeledLine("CONCEPTO: ", moneyForm.concept, 28);
-        addMoneyLabeledLine("PAGO PARCIAL/PAGO TOTAL: ", moneyForm.paymentType, 28);
-        addMoneyLabeledLine("MONTO: ", moneyForm.amount, 64);
+        addMoneyLabeledLine("CONCEPTO:\u00A0", moneyForm.concept, 28);
+        addMoneyLabeledLine("PAGO PARCIAL/PAGO TOTAL:\u00A0", moneyForm.paymentType, 28);
+        addMoneyLabeledLine("MONTO:\u00A0", moneyForm.amount, 64);
         ensureSpace(tableRowHeight * 3);
         const halfWidth = tableWidth / 2;
         pdf.setDrawColor(17, 17, 17);
@@ -1741,17 +1687,12 @@ async function downloadPdfDocument(document) {
         const moneySignatureWidth = tableWidth * 0.58;
         const moneySignatureX = tableX + (tableWidth - moneySignatureWidth) / 2;
         const moneySignatureCenter = tableX + tableWidth / 2;
-        const receiverNameLines = splitPdfText(pdf, moneyForm.receivedBy || "Nombre de quien recibe", moneySignatureWidth - 12);
+        const receiverNameLines = splitPdfText(pdf, moneyReceiptSignatureName(moneyForm), moneySignatureWidth - 12);
         pdf.setDrawColor(17, 17, 17);
         pdf.line(moneySignatureX, y, moneySignatureX + moneySignatureWidth, y);
         pdf.setFont("times", "bold");
         pdf.setFontSize(11);
         pdf.text(receiverNameLines, moneySignatureCenter, y + 18, { align: "center", maxWidth: moneySignatureWidth - 12 });
-        pdf.setFontSize(10);
-        pdf.text("Firma de quien recibe el dinero", moneySignatureCenter, y + 24 + receiverNameLines.length * 12, {
-            align: "center",
-            maxWidth: moneySignatureWidth - 12
-        });
         y += 78;
     }
     document.paragraphs.forEach(addParagraph);
@@ -1827,7 +1768,7 @@ function DocumentPreview({ document }) {
     const signatureClassName = `daily-doc-signatures${document.signatureColumns === 2 ? " daily-doc-signatures-two-column" : ""}`;
     const paperClassName = `daily-doc-paper${hasRusconiLetterhead(document) ? " daily-doc-paper-letterhead" : ""}${form ? " daily-doc-paper-rc-receipt" : ""}${moneyForm ? " daily-doc-paper-money-receipt" : ""}`;
     const paragraphBlock = document.paragraphs.length ? (_jsx("div", { className: `daily-doc-paper-body${form || moneyForm ? " daily-doc-paper-body-supplemental" : ""}`, children: document.paragraphs.map((paragraph, index) => (_jsx("p", { className: isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined, children: paragraph }, `${paragraph}-${index}`))) })) : null;
-    return (_jsxs("article", { className: paperClassName, "aria-live": "polite", children: [_jsxs("header", { children: [_jsx("h3", { children: document.title }), document.subtitle ? (_jsx("span", { className: document.subtitleAlignment === "right" ? "daily-doc-subtitle-right" : undefined, children: document.subtitle })) : null] }), form ? (_jsxs("section", { className: "daily-doc-rc-delivered-form", children: [_jsxs("table", { className: "daily-doc-rc-docs-table", children: [_jsx("thead", { children: _jsx("tr", { children: _jsx("th", { colSpan: 3, children: form.descriptionHeading.split("\n").map((headingLine, index) => (_jsxs("span", { children: [index > 0 ? _jsx("br", {}) : null, headingLine] }, headingLine))) }) }) }), _jsx("tbody", { children: form.documentRows.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { className: "daily-doc-rc-doc-description", children: row.description || "\u00A0" }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "original" ? " is-checked" : ""}` }), receiptDocumentKindLabels.original] })) : ("\u00A0") }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "simple" ? " is-checked" : ""}` }), receiptDocumentKindLabels.simple] })) : ("\u00A0") })] }, `${row.description}-${index}`))) })] }), _jsx("table", { className: "daily-doc-rc-meta-table", children: _jsxs("tbody", { children: [_jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN ENTREGA" }), _jsx("th", { children: "FECHA" })] }), _jsxs("tr", { children: [_jsx("td", { children: form.deliveredBy }), _jsx("td", { children: form.date })] }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("td", { children: form.receivedBy })] })] }) }), _jsxs("div", { className: "daily-doc-rc-receiver-signature", children: [_jsx("strong", { children: form.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe los documentos" })] })] })) : moneyForm ? (_jsxs("section", { className: "daily-doc-money-receipt-form", children: [_jsxs("div", { className: "daily-doc-money-receipt-lines", children: [_jsxs("p", { children: [_jsx("strong", { children: "CONCEPTO:" }), " ", moneyForm.concept] }), _jsxs("p", { children: [_jsx("strong", { children: "PAGO PARCIAL/PAGO TOTAL:" }), " ", moneyForm.paymentType] }), _jsxs("p", { children: [_jsx("strong", { children: "MONTO:" }), " ", moneyForm.amount] })] }), _jsxs("table", { className: "daily-doc-money-receipt-table", children: [_jsxs("thead", { children: [_jsx("tr", { children: _jsx("th", { colSpan: 2, children: "PAGO RECIBIDO POR RUSCONI CONSULTING" }) }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("th", { children: "FECHA DE RECIBIDO" })] })] }), _jsx("tbody", { children: _jsxs("tr", { children: [_jsx("td", { children: moneyForm.receivedBy }), _jsx("td", { children: moneyForm.receivedDate })] }) })] }), _jsxs("div", { className: "daily-doc-money-receiver-signature", children: [_jsx("strong", { children: moneyForm.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe el dinero" })] })] })) : (paragraphBlock), form || moneyForm ? paragraphBlock : null, document.details?.length ? (_jsx("dl", { className: "daily-doc-details", children: document.details.map((detail) => (_jsxs("div", { children: [_jsx("dt", { children: detail.label }), _jsx("dd", { children: detail.value })] }, detail.label))) })) : null, signatures.length ? (_jsx("footer", { className: signatureClassName, children: signatures.map((signature, index) => (_jsxs("div", { children: [_jsx("span", {}), _jsx("strong", { children: signature.name }), signature.role ? _jsx("em", { children: signature.role }) : null] }, `${signature.name}-${signature.role ?? ""}-${index}`))) })) : null, shouldShowPageNumbers(document) ? _jsx("div", { className: "daily-doc-page-number", children: pageNumberLabel(1, 1) }) : null] }));
+    return (_jsxs("article", { className: paperClassName, "aria-live": "polite", children: [_jsxs("header", { children: [_jsx("h3", { children: document.title }), document.subtitle ? (_jsx("span", { className: document.subtitleAlignment === "right" ? "daily-doc-subtitle-right" : undefined, children: document.subtitle })) : null] }), form ? (_jsxs("section", { className: "daily-doc-rc-delivered-form", children: [_jsxs("table", { className: "daily-doc-rc-docs-table", children: [_jsx("thead", { children: _jsx("tr", { children: _jsx("th", { colSpan: 3, children: form.descriptionHeading.split("\n").map((headingLine, index) => (_jsxs("span", { children: [index > 0 ? _jsx("br", {}) : null, headingLine] }, headingLine))) }) }) }), _jsx("tbody", { children: form.documentRows.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { className: "daily-doc-rc-doc-description", children: row.description || "\u00A0" }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "original" ? " is-checked" : ""}` }), receiptDocumentKindLabels.original] })) : ("\u00A0") }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "simple" ? " is-checked" : ""}` }), receiptDocumentKindLabels.simple] })) : ("\u00A0") })] }, `${row.description}-${index}`))) })] }), _jsx("table", { className: "daily-doc-rc-meta-table", children: _jsxs("tbody", { children: [_jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN ENTREGA" }), _jsx("th", { children: "FECHA" })] }), _jsxs("tr", { children: [_jsx("td", { children: form.deliveredBy }), _jsx("td", { children: form.date })] }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("td", { children: form.receivedBy })] })] }) }), _jsxs("div", { className: "daily-doc-rc-receiver-signature", children: [_jsx("strong", { children: form.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe los documentos" })] })] })) : moneyForm ? (_jsxs("section", { className: "daily-doc-money-receipt-form", children: [_jsxs("div", { className: "daily-doc-money-receipt-lines", children: [_jsxs("p", { children: [_jsx("strong", { children: "CONCEPTO:" }), "\u00A0", moneyForm.concept] }), _jsxs("p", { children: [_jsx("strong", { children: "PAGO PARCIAL/PAGO TOTAL:" }), "\u00A0", moneyForm.paymentType] }), _jsxs("p", { children: [_jsx("strong", { children: "MONTO:" }), "\u00A0", moneyForm.amount] })] }), _jsxs("table", { className: "daily-doc-money-receipt-table", children: [_jsxs("thead", { children: [_jsx("tr", { children: _jsx("th", { colSpan: 2, children: "PAGO RECIBIDO POR RUSCONI CONSULTING" }) }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("th", { children: "FECHA DE RECIBIDO" })] })] }), _jsx("tbody", { children: _jsxs("tr", { children: [_jsx("td", { children: moneyForm.receivedBy }), _jsx("td", { children: moneyForm.receivedDate })] }) })] }), _jsx("div", { className: "daily-doc-money-receiver-signature", children: _jsx("strong", { children: moneyReceiptSignatureName(moneyForm) }) })] })) : (paragraphBlock), form || moneyForm ? paragraphBlock : null, document.details?.length ? (_jsx("dl", { className: "daily-doc-details", children: document.details.map((detail) => (_jsxs("div", { children: [_jsx("dt", { children: detail.label }), _jsx("dd", { children: detail.value })] }, detail.label))) })) : null, signatures.length ? (_jsx("footer", { className: signatureClassName, children: signatures.map((signature, index) => (_jsxs("div", { children: [_jsx("span", {}), _jsx("strong", { children: signature.name }), signature.role ? _jsx("em", { children: signature.role }) : null] }, `${signature.name}-${signature.role ?? ""}-${index}`))) })) : null, shouldShowPageNumbers(document) ? _jsx("div", { className: "daily-doc-page-number", children: pageNumberLabel(1, 1) }) : null] }));
 }
 export function DailyDocumentsPage() {
     const { user } = useAuth();
@@ -2267,6 +2208,9 @@ export function DailyDocumentsPage() {
                                                 if (field.type === "currency-type") {
                                                     return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsx("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "MXN", children: ["MXN", "USD"].map((currency) => (_jsx("option", { value: currency, children: moneyCurrencyLabels[currency] }, currency))) })] }, field.name));
                                                 }
+                                                if (field.type === "currency-words") {
+                                                    return (_jsxs("label", { className: "form-field daily-doc-field-wide daily-doc-amount-words-field", children: [_jsx("span", { children: field.label }), _jsx("output", { "aria-live": "polite", children: moneyAmountInWords(values) })] }, field.name));
+                                                }
                                                 if (field.type === "interest-period") {
                                                     return (_jsxs("label", { className: "form-field", children: [_jsx("span", { children: field.label }), _jsx("select", { disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.value), value: values[field.name] ?? "monthly", children: ["daily", "monthly", "annual"].map((period) => (_jsx("option", { value: period, children: interestPeriodLabels[period] }, period))) })] }, field.name));
                                                 }
@@ -2277,7 +2221,7 @@ export function DailyDocumentsPage() {
                                                     return (_jsxs("label", { className: "daily-doc-field-wide checkbox-row daily-doc-inline-checkbox", children: [_jsx("input", { checked: values[field.name] === "true", disabled: savingAssignment, onChange: (event) => updateValue(field.name, event.target.checked ? "true" : ""), type: "checkbox" }), _jsx("span", { children: field.label })] }, field.name));
                                                 }
                                                 if (field.type === "currency") {
-                                                    const fieldCurrency = selectedTemplate.id === "promissory-note" ? getMoneyCurrency(values) : "MXN";
+                                                    const fieldCurrency = getMoneyCurrency(values);
                                                     return (_jsxs("label", { className: "form-field daily-doc-currency-field", children: [_jsx("span", { children: field.label }), _jsxs("div", { className: "money-input-control has-suffix", children: [_jsx("span", { className: "money-input-prefix", children: "$" }), _jsx("input", { disabled: savingAssignment, inputMode: "decimal", onBlur: (event) => updateValue(field.name, formatMoneyInputValue(event.target.value, true)), onChange: (event) => updateValue(field.name, formatMoneyInputValue(event.target.value)), placeholder: field.placeholder, type: "text", value: formatMoneyInputValue(values[field.name] ?? "") }), _jsx("span", { className: "money-input-suffix", children: fieldCurrency })] })] }, field.name));
                                                 }
                                                 if (field.type === "date") {

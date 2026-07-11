@@ -4,6 +4,14 @@ import type { Client, DailyDocumentAssignment, DailyDocumentTemplateId } from "@
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canReadModule, canWriteModule } from "../auth/permissions";
+import {
+  formatMoneyInputValue,
+  getMoneyCurrency,
+  moneyAmountInWords,
+  moneyAmountWithWords,
+  moneyCurrencyLabels,
+  type MoneyCurrency
+} from "./daily-document-money";
 
 type DailyDocumentField = {
   name: string;
@@ -20,6 +28,7 @@ type DailyDocumentField = {
     | "grantor-type"
     | "payment-type"
     | "currency-type"
+    | "currency-words"
     | "interest-period"
     | "creditor-list"
     | "checkbox";
@@ -40,7 +49,6 @@ type DailyDocumentTemplate = {
 type DailyDocumentValues = Record<string, string>;
 
 type GrantorType = "physical" | "moral";
-type MoneyCurrency = "MXN" | "USD";
 type InterestPeriod = "daily" | "monthly" | "annual";
 type ReceiptDocumentKind = "original" | "simple";
 
@@ -147,14 +155,6 @@ const laborPowerAttorneyFallback = "APODERADOS PENDIENTES";
 const grantorTypeLabels: Record<GrantorType, string> = {
   physical: "Persona física",
   moral: "Persona moral"
-};
-const moneyCurrencyLabels: Record<MoneyCurrency, string> = {
-  MXN: "Pesos (MXN)",
-  USD: "Dólares (USD)"
-};
-const moneyCurrencyLegalNames: Record<MoneyCurrency, string> = {
-  MXN: "Moneda Nacional",
-  USD: "Dólares de los Estados Unidos de América"
 };
 const interestPeriodLabels: Record<InterestPeriod, string> = {
   daily: "Diario",
@@ -325,43 +325,6 @@ function formatPlaceDate(values: DailyDocumentValues) {
   return `${value(values, "place", "lugar pendiente")}, ${formatDateField(values, "date")}`;
 }
 
-function parseMoneyAmount(rawAmount?: string | null) {
-  const normalizedAmount = normalizeText(rawAmount)
-    .replace(/\$/g, "")
-    .replace(/,/g, "")
-    .replace(/\s*(?:m\.?n\.?|mxn|usd)\s*$/i, "")
-    .trim();
-
-  return Number(normalizedAmount || 0);
-}
-
-function formatMoneyInputValue(rawAmount?: string | null, forceDecimals = false) {
-  const normalizedAmount = normalizeText(rawAmount)
-    .replace(/\$/g, "")
-    .replace(/,/g, "")
-    .replace(/[^\d.]/g, "");
-
-  if (!normalizedAmount) {
-    return "";
-  }
-
-  const hasDecimalPoint = normalizedAmount.includes(".");
-  const [rawIntegerPart, ...rawDecimalParts] = normalizedAmount.split(".");
-  const integerPart = rawIntegerPart.replace(/^0+(?=\d)/g, "") || "0";
-  const decimalPart = rawDecimalParts.join("").slice(0, 2);
-  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
-  if (forceDecimals) {
-    return `${groupedInteger}.${decimalPart.padEnd(2, "0")}`;
-  }
-
-  return hasDecimalPoint ? `${groupedInteger}.${decimalPart}` : groupedInteger;
-}
-
-function getMoneyCurrency(values: DailyDocumentValues): MoneyCurrency {
-  return values.currency === "USD" ? "USD" : "MXN";
-}
-
 function formatPercentageInputValue(rawPercentage?: string | null) {
   return normalizeText(rawPercentage)
     .replace(/,/g, ".")
@@ -382,26 +345,6 @@ function getInterestPeriod(values: DailyDocumentValues): InterestPeriod {
   }
 
   return "monthly";
-}
-
-function amountLabel(values: DailyDocumentValues, options?: { includeCurrencyCode?: boolean }) {
-  const amount = parseMoneyAmount(values.amount);
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return value(values, "amount", "cantidad pendiente");
-  }
-
-  const currency = getMoneyCurrency(values);
-  const formattedAmount = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(amount);
-
-  return `$${formattedAmount}${options?.includeCurrencyCode ? ` ${currency}` : ""}`;
-}
-
-function moneyReceiptAmountLabel(values: DailyDocumentValues) {
-  return `${amountLabel(values)} M.N.`;
 }
 
 function moneyReceiptConcept(values: DailyDocumentValues) {
@@ -591,10 +534,7 @@ function getPromissoryNoteDebtor(values: DailyDocumentValues) {
 }
 
 function promissoryNoteAmountText(values: DailyDocumentValues) {
-  const amountInWords = value(values, "amountInWords", "cantidad con letra pendiente");
-  const currency = getMoneyCurrency(values);
-
-  return `${amountLabel(values, { includeCurrencyCode: true })} (${amountInWords}, ${moneyCurrencyLegalNames[currency]})`;
+  return moneyAmountWithWords(values);
 }
 
 const dailyDocumentTemplates: DailyDocumentTemplate[] = [
@@ -756,6 +696,8 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
       },
       { name: "paymentType", label: "Pago parcial / pago total", type: "payment-type", defaultValue: "Pago total" },
       { name: "amount", label: "Monto", type: "currency", placeholder: "1,500.00" },
+      { name: "currency", label: "Moneda", type: "currency-type", defaultValue: "MXN" },
+      { name: "amountInWords", label: "Cantidad con letra", type: "currency-words" },
       { name: "receivedBy", label: "Nombre de quien recibe", placeholder: "Ma. Del Carmen Hernández" },
       { name: "date", label: "Fecha de recibido", type: "date" }
     ],
@@ -769,7 +711,7 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
         type: "money-receipt",
         concept: moneyReceiptConcept(values),
         paymentType: fallbackValue(values, ["paymentType", "paymentMethod"], "pago pendiente"),
-        amount: moneyReceiptAmountLabel(values),
+        amount: moneyAmountWithWords(values),
         receivedBy: value(values, "receivedBy", "pendiente"),
         receivedDate: formatDateField(values, "date")
       }
@@ -931,7 +873,7 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
       { name: "dueDate", label: "Fecha de pago / vencimiento", type: "date" },
       { name: "amount", label: "Cantidad con número", type: "currency", placeholder: "150,000.00" },
       { name: "currency", label: "Moneda", type: "currency-type", defaultValue: "MXN" },
-      { name: "amountInWords", label: "Cantidad con letra", placeholder: "Ciento cincuenta mil pesos 00/100" },
+      { name: "amountInWords", label: "Cantidad con letra", type: "currency-words" },
       {
         name: "defaultInterestRate",
         label: "Interés moratorio",
@@ -1233,6 +1175,10 @@ function getMoneyReceiptForm(document: GeneratedDocument) {
   return document.formLayout?.type === "money-receipt" ? document.formLayout : null;
 }
 
+function moneyReceiptSignatureName(form: MoneyReceiptForm) {
+  return (normalizeText(form.receivedBy) || "Nombre de quien recibe").toLocaleUpperCase("es-MX");
+}
+
 function rcDeliveredFormText(form: RcDeliveredDocumentReceiptForm) {
   const documentLines = form.documentRows
     .filter((row) => normalizeText(row.description))
@@ -1305,16 +1251,16 @@ function moneyReceiptFormText(form: MoneyReceiptForm) {
     "PAGO RECIBIDO POR RUSCONI CONSULTING",
     `NOMBRE DE QUIEN RECIBE: ${form.receivedBy}`,
     `FECHA DE RECIBIDO: ${form.receivedDate}`,
-    `FIRMA DE QUIEN RECIBE EL DINERO:\n______________________________\n${form.receivedBy || "pendiente"}`
+    `______________________________\n${moneyReceiptSignatureName(form)}`
   ];
 }
 
 function moneyReceiptFormHtml(form: MoneyReceiptForm) {
   return `<section class="money-receipt-form">
     <div class="money-receipt-lines">
-      <p><strong>CONCEPTO:</strong> ${escapeHtml(form.concept)}</p>
-      <p><strong>PAGO PARCIAL/PAGO TOTAL:</strong> ${escapeHtml(form.paymentType)}</p>
-      <p><strong>MONTO:</strong> ${escapeHtml(form.amount)}</p>
+      <p><strong>CONCEPTO:</strong>&nbsp;${escapeHtml(form.concept)}</p>
+      <p><strong>PAGO PARCIAL/PAGO TOTAL:</strong>&nbsp;${escapeHtml(form.paymentType)}</p>
+      <p><strong>MONTO:</strong>&nbsp;${escapeHtml(form.amount)}</p>
     </div>
     <table class="money-receipt-table">
       <thead>
@@ -1332,8 +1278,7 @@ function moneyReceiptFormHtml(form: MoneyReceiptForm) {
       </tbody>
     </table>
     <div class="money-receiver-signature">
-      <strong>${escapeHtml(form.receivedBy || "Nombre de quien recibe")}</strong>
-      <em>Firma de quien recibe el dinero</em>
+      <strong>${escapeHtml(moneyReceiptSignatureName(form))}</strong>
     </div>
   </section>`;
 }
@@ -1707,9 +1652,9 @@ async function downloadWordDocument(document: GeneratedDocument) {
     const tableHeaderShading = { fill: "D9D9D9" };
 
     children.push(new Paragraph({ spacing: { after: 700 }, text: "" }));
-    children.push(moneyLine("CONCEPTO: ", moneyForm.concept));
-    children.push(moneyLine("PAGO PARCIAL/PAGO TOTAL: ", moneyForm.paymentType));
-    children.push(moneyLine("MONTO: ", moneyForm.amount));
+    children.push(moneyLine("CONCEPTO:\u00A0", moneyForm.concept));
+    children.push(moneyLine("PAGO PARCIAL/PAGO TOTAL:\u00A0", moneyForm.paymentType));
+    children.push(moneyLine("MONTO:\u00A0", moneyForm.amount));
     children.push(new Paragraph({ spacing: { after: 560 }, text: "" }));
     children.push(
       new Table({
@@ -1758,14 +1703,7 @@ async function downloadWordDocument(document: GeneratedDocument) {
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { before: 100 },
-        children: [moneyTextRun(moneyForm.receivedBy || "Nombre de quien recibe", true)]
-      })
-    );
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { before: 60 },
-        children: [moneyTextRun("Firma de quien recibe el dinero", true)]
+        children: [moneyTextRun(moneyReceiptSignatureName(moneyForm), true)]
       })
     );
   }
@@ -2149,9 +2087,9 @@ async function downloadPdfDocument(document: GeneratedDocument) {
     }
 
     y += 32;
-    addMoneyLabeledLine("CONCEPTO: ", moneyForm.concept, 28);
-    addMoneyLabeledLine("PAGO PARCIAL/PAGO TOTAL: ", moneyForm.paymentType, 28);
-    addMoneyLabeledLine("MONTO: ", moneyForm.amount, 64);
+    addMoneyLabeledLine("CONCEPTO:\u00A0", moneyForm.concept, 28);
+    addMoneyLabeledLine("PAGO PARCIAL/PAGO TOTAL:\u00A0", moneyForm.paymentType, 28);
+    addMoneyLabeledLine("MONTO:\u00A0", moneyForm.amount, 64);
 
     ensureSpace(tableRowHeight * 3);
     const halfWidth = tableWidth / 2;
@@ -2177,18 +2115,13 @@ async function downloadPdfDocument(document: GeneratedDocument) {
     const moneySignatureWidth = tableWidth * 0.58;
     const moneySignatureX = tableX + (tableWidth - moneySignatureWidth) / 2;
     const moneySignatureCenter = tableX + tableWidth / 2;
-    const receiverNameLines = splitPdfText(pdf, moneyForm.receivedBy || "Nombre de quien recibe", moneySignatureWidth - 12);
+    const receiverNameLines = splitPdfText(pdf, moneyReceiptSignatureName(moneyForm), moneySignatureWidth - 12);
 
     pdf.setDrawColor(17, 17, 17);
     pdf.line(moneySignatureX, y, moneySignatureX + moneySignatureWidth, y);
     pdf.setFont("times", "bold");
     pdf.setFontSize(11);
     pdf.text(receiverNameLines, moneySignatureCenter, y + 18, { align: "center", maxWidth: moneySignatureWidth - 12 });
-    pdf.setFontSize(10);
-    pdf.text("Firma de quien recibe el dinero", moneySignatureCenter, y + 24 + receiverNameLines.length * 12, {
-      align: "center",
-      maxWidth: moneySignatureWidth - 12
-    });
     y += 78;
   }
 
@@ -2375,13 +2308,13 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
         <section className="daily-doc-money-receipt-form">
           <div className="daily-doc-money-receipt-lines">
             <p>
-              <strong>CONCEPTO:</strong> {moneyForm.concept}
+              <strong>CONCEPTO:</strong>{"\u00A0"}{moneyForm.concept}
             </p>
             <p>
-              <strong>PAGO PARCIAL/PAGO TOTAL:</strong> {moneyForm.paymentType}
+              <strong>PAGO PARCIAL/PAGO TOTAL:</strong>{"\u00A0"}{moneyForm.paymentType}
             </p>
             <p>
-              <strong>MONTO:</strong> {moneyForm.amount}
+              <strong>MONTO:</strong>{"\u00A0"}{moneyForm.amount}
             </p>
           </div>
 
@@ -2404,8 +2337,7 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
           </table>
 
           <div className="daily-doc-money-receiver-signature">
-            <strong>{moneyForm.receivedBy || "Nombre de quien recibe"}</strong>
-            <em>Firma de quien recibe el dinero</em>
+            <strong>{moneyReceiptSignatureName(moneyForm)}</strong>
           </div>
         </section>
       ) : (
@@ -3345,6 +3277,15 @@ export function DailyDocumentsPage() {
                     );
                   }
 
+                  if (field.type === "currency-words") {
+                    return (
+                      <label className="form-field daily-doc-field-wide daily-doc-amount-words-field" key={field.name}>
+                        <span>{field.label}</span>
+                        <output aria-live="polite">{moneyAmountInWords(values)}</output>
+                      </label>
+                    );
+                  }
+
                   if (field.type === "interest-period") {
                     return (
                       <label className="form-field" key={field.name}>
@@ -3398,7 +3339,7 @@ export function DailyDocumentsPage() {
                   }
 
                   if (field.type === "currency") {
-                    const fieldCurrency = selectedTemplate.id === "promissory-note" ? getMoneyCurrency(values) : "MXN";
+                    const fieldCurrency = getMoneyCurrency(values);
 
                     return (
                       <label className="form-field daily-doc-currency-field" key={field.name}>

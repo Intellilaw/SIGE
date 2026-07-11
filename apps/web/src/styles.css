@@ -1406,11 +1406,15 @@ textarea {
 
 .daily-doc-preview-head {
   align-items: flex-start;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .daily-doc-preview-head > div:first-child {
   display: grid;
   gap: 4px;
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .daily-doc-preview-head span {
@@ -1420,10 +1424,23 @@ textarea {
 }
 
 .daily-doc-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(92px, 100%), 1fr));
   gap: 10px;
-  justify-content: flex-end;
+  justify-content: end;
+  flex: 1 1 320px;
+  width: min(100%, 440px);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.daily-doc-actions .primary-button,
+.daily-doc-actions .secondary-button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: 14px;
+  white-space: nowrap;
 }
 
 .daily-doc-paper {
@@ -2140,6 +2157,20 @@ textarea {
 .form-field .money-input-control:focus-within {
   border-color: #9fb7ff;
   box-shadow: 0 0 0 3px rgba(75, 111, 255, 0.12);
+}
+
+.daily-doc-amount-words-field output {
+  display: block;
+  min-height: 48px;
+  width: 100%;
+  border: 1px solid #d9e2ec;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #f5f7fa;
+  color: #334e68;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .daily-doc-percentage-control input {
@@ -7106,12 +7137,31 @@ div.sales-product-card-main {
 
 .commissions-projector-amount-cell {
   text-align: right;
-  width: 150px;
+  width: 190px;
+}
+
+.commissions-projector-amount-control {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(96px, 1fr) auto;
+  gap: 6px;
+  justify-content: end;
+}
+
+.commissions-projector-currency-symbol,
+.commissions-projector-currency-code {
+  color: #475569;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.commissions-projector-currency-code {
+  font-size: 0.78rem;
 }
 
 .commissions-projector-amount-input {
-  max-width: 132px;
-  min-width: 112px;
+  max-width: 116px;
+  min-width: 96px;
   text-align: right;
   width: 100%;
 }
@@ -9653,6 +9703,7 @@ div.sales-product-card-main {
 
   .daily-doc-actions {
     justify-content: flex-start;
+    width: 100%;
   }
 
   .daily-doc-attorney-list-head,

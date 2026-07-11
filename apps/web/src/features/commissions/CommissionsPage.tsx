@@ -1119,7 +1119,7 @@ function ProjectorCommissionTable(props: {
               <th>Asunto</th>
               {!isProjectorView ? <th>Proyectista</th> : null}
               <th>Fecha terminada</th>
-              <th>Monto</th>
+              <th>Monto (MXN)</th>
               {isProjectorView ? <th className="commissions-projector-authorization-heading">Autorizar pago</th> : null}
             </tr>
           </thead>
@@ -1131,7 +1131,7 @@ function ProjectorCommissionTable(props: {
             ) : (
               props.rows.map((entry) => {
                 const saving = props.savingIds?.has(entry.id) ?? false;
-                const amountDraft = props.amountDrafts?.[entry.id] ?? String(entry.amountMxn);
+                const amountDraft = props.amountDrafts?.[entry.id] ?? entry.amountMxn.toFixed(2);
 
                 return (
                   <tr
@@ -1147,22 +1147,26 @@ function ProjectorCommissionTable(props: {
                     <td>{formatDate(entry.completedAt)}</td>
                     <td className="commissions-projector-amount-cell">
                       {isProjectorView && props.canManage ? (
-                        <input
-                          className="commissions-projector-amount-input"
-                          type="number"
-                          min="0"
-                          step="50"
-                          value={amountDraft}
-                          disabled={saving}
-                          aria-label={`Monto de comisión para ${entry.subject || entry.clientName}`}
-                          onChange={(event) => props.onAmountDraftChange?.(entry.id, event.target.value)}
-                          onBlur={() => props.onCommitAmount?.(entry)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.currentTarget.blur();
-                            }
-                          }}
-                        />
+                        <div className="commissions-projector-amount-control">
+                          <span className="commissions-projector-currency-symbol" aria-hidden="true">$</span>
+                          <input
+                            className="commissions-projector-amount-input"
+                            type="number"
+                            min="0"
+                            step="50"
+                            value={amountDraft}
+                            disabled={saving}
+                            aria-label={`Monto en pesos mexicanos de la comisión para ${entry.subject || entry.clientName}`}
+                            onChange={(event) => props.onAmountDraftChange?.(entry.id, event.target.value)}
+                            onBlur={() => props.onCommitAmount?.(entry)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                          <span className="commissions-projector-currency-code">MXN</span>
+                        </div>
                       ) : (
                         <span>{formatCurrency(entry.amountMxn)}</span>
                       )}
