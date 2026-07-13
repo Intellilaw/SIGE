@@ -129,6 +129,20 @@ interface SupervisionKpiWeekReference {
   };
 }
 
+interface SupervisionKpiOverridePeriod {
+  key: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  users: Array<{
+    userId: string;
+    metrics: Array<{
+      id: string;
+      dailyBreakdown: KpiMetric["dailyBreakdown"];
+    }>;
+  }>;
+}
+
 interface KpiWeekIncidentItem {
   key: string;
   status: KpiMetricStatus;
@@ -148,6 +162,7 @@ interface GeneralSupervisionOverview {
   currentMonthStart: string;
   currentMonthEnd: string;
   kpiOverrides: KpiEmrtOverride[];
+  kpiOverridePeriods: SupervisionKpiOverridePeriod[];
   taskOverview: SupervisionTaskOverview;
   termBuckets: SupervisionTermBucket[];
   kpiPeriods: SupervisionKpiPeriod[];
@@ -814,6 +829,7 @@ function TaskUserRow(props: {
   kpiAlerts: SupervisionUserKpiAlertPeriod[];
   kpiWeekReference: SupervisionKpiWeekReference;
   kpiOverrides: KpiEmrtOverride[];
+  kpiOverridePeriods: SupervisionKpiOverridePeriod[];
   muted?: boolean;
   saving: boolean;
   savingKpiOverrideKey: string;
@@ -825,6 +841,7 @@ function TaskUserRow(props: {
     kpiAlerts,
     kpiWeekReference,
     kpiOverrides,
+    kpiOverridePeriods,
     muted = false,
     saving,
     savingKpiOverrideKey,
@@ -977,6 +994,7 @@ function TaskUserRow(props: {
                       showCommissionRelease={isObserved && !muted}
                       userId={user.userId}
                       kpiOverrides={kpiOverrides}
+                      kpiOverridePeriods={kpiOverridePeriods}
                       savingKpiOverrideKey={savingKpiOverrideKey}
                       onToggleKpiOverride={onToggleKpiOverride}
                       commissionRequirement={user.commissionRequirements?.find((requirement) =>
@@ -1005,6 +1023,7 @@ function TaskOverviewPanel(props: {
   kpiAlertsByUser: Map<string, SupervisionUserKpiAlertPeriod[]>;
   kpiWeekReference: SupervisionKpiWeekReference;
   kpiOverrides: KpiEmrtOverride[];
+  kpiOverridePeriods: SupervisionKpiOverridePeriod[];
   savingObservedUserId: string;
   savingKpiOverrideKey: string;
   onToggleObserved: (userId: string, isObserved: boolean) => void;
@@ -1015,6 +1034,7 @@ function TaskOverviewPanel(props: {
     kpiAlertsByUser,
     kpiWeekReference,
     kpiOverrides,
+    kpiOverridePeriods,
     savingObservedUserId,
     savingKpiOverrideKey,
     onToggleObserved,
@@ -1070,6 +1090,7 @@ function TaskOverviewPanel(props: {
                 kpiAlerts={kpiAlertsByUser.get(user.userId) ?? []}
                 kpiWeekReference={kpiWeekReference}
                 kpiOverrides={kpiOverrides}
+                kpiOverridePeriods={kpiOverridePeriods}
                 saving={savingObservedUserId === user.userId}
                 savingKpiOverrideKey={savingKpiOverrideKey}
                 onToggleObserved={onToggleObserved}
@@ -1102,6 +1123,7 @@ function TaskOverviewPanel(props: {
                   kpiAlerts={kpiAlertsByUser.get(user.userId) ?? []}
                   kpiWeekReference={kpiWeekReference}
                   kpiOverrides={kpiOverrides}
+                  kpiOverridePeriods={kpiOverridePeriods}
                   muted
                   saving={savingObservedUserId === user.userId}
                   savingKpiOverrideKey={savingKpiOverrideKey}
@@ -1171,6 +1193,7 @@ function KpiMetricRow({
   commissionRequirement,
   userId,
   kpiOverrides,
+  kpiOverridePeriods,
   savingKpiOverrideKey,
   onToggleKpiOverride
 }: {
@@ -1182,6 +1205,7 @@ function KpiMetricRow({
   commissionRequirement?: KpiCommissionMetricRequirement;
   userId: string;
   kpiOverrides: KpiEmrtOverride[];
+  kpiOverridePeriods: SupervisionKpiOverridePeriod[];
   savingKpiOverrideKey: string;
   onToggleKpiOverride: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
 }) {
@@ -1238,6 +1262,7 @@ function KpiMetricRow({
               periods={periods}
               weekReference={weekReference}
               overrides={kpiOverrides}
+              calendarPeriods={kpiOverridePeriods}
               savingKey={savingKpiOverrideKey}
               onToggle={onToggleKpiOverride}
             />
@@ -1280,25 +1305,58 @@ function KpiOverrideControls(props: {
   periods: SupervisionUserKpiAlertPeriod[];
   weekReference: SupervisionKpiWeekReference;
   overrides: KpiEmrtOverride[];
+  calendarPeriods: SupervisionKpiOverridePeriod[];
   savingKey: string;
   onToggle: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
 }) {
-  const groups = [
-    { label: "Semana actual", ...props.weekReference.currentWeek },
-    { label: "Semana pasada", ...props.weekReference.lastWeek }
+  const [showOlderWeeks, setShowOlderWeeks] = useState(false);
+  const fallbackGroups: SupervisionKpiOverridePeriod[] = [
+    { key: "currentWeek", label: "Semana actual", ...props.weekReference.currentWeek, users: [] },
+    { key: "previousWeek1", label: "Semana pasada", ...props.weekReference.lastWeek, users: [] }
   ];
+  const groups = (props.calendarPeriods.length > 0 ? props.calendarPeriods : fallbackGroups)
+    .slice()
+    .sort((left, right) => right.startDate.localeCompare(left.startDate))
+    .slice(0, 6);
+  const visibleGroups = showOlderWeeks ? groups : groups.slice(0, 2);
+  const olderGroups = groups.slice(2);
   const activeDates = new Set(
     props.overrides
       .filter((override) => override.userId === props.userId && override.metricId === props.metric.id && override.isExcluded)
       .map((override) => override.date)
   );
   const dailyByDate = new Map(
-    props.periods.flatMap((period) =>
-      period.metrics
-        .filter((metric) => metric.id === props.metric.id)
-        .flatMap((metric) => metric.dailyBreakdown)
-    ).map((day) => [day.date, day])
+    [
+      ...props.calendarPeriods.flatMap((period) =>
+        period.users
+          .filter((user) => user.userId === props.userId)
+          .flatMap((user) => user.metrics)
+          .filter((metric) => metric.id === props.metric.id)
+          .flatMap((metric) => metric.dailyBreakdown)
+      ),
+      ...props.periods.flatMap((period) =>
+        period.metrics
+          .filter((metric) => metric.id === props.metric.id)
+          .flatMap((metric) => metric.dailyBreakdown)
+      )
+    ].map((day) => [day.date, day])
   );
+  const olderActiveOverrideCount = olderGroups.reduce(
+    (total, group) => total + getWeekdayKeys(group.startDate, group.endDate)
+      .filter((date) => activeDates.has(date)).length,
+    0
+  );
+  const olderWeeksId = `kpi-override-older-${props.userId}-${props.metric.id}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+
+  function getGroupLabel(group: SupervisionKpiOverridePeriod, index: number) {
+    if (index === 0) {
+      return "Semana actual";
+    }
+    if (index === 1) {
+      return "Semana pasada";
+    }
+    return `Semana del ${formatShortDate(group.startDate)} al ${formatShortDate(group.endDate)}`;
+  }
 
   return (
     <section className="supervision-kpi-override-panel" aria-label={`Overrides de EMRT para ${props.metric.label}`}>
@@ -1307,9 +1365,13 @@ function KpiOverrideControls(props: {
         <span>El dia no contara como cumplido ni incumplido.</span>
       </header>
       <div className="supervision-kpi-override-weeks">
-        {groups.map((group) => (
-          <div className="supervision-kpi-override-week" key={group.label}>
-            <strong>{group.label}</strong>
+        {visibleGroups.map((group, index) => (
+          <div
+            className="supervision-kpi-override-week"
+            id={index === 2 ? olderWeeksId : undefined}
+            key={group.key}
+          >
+            <strong>{getGroupLabel(group, index)}</strong>
             <div>
               {getWeekdayKeys(group.startDate, group.endDate).map((date) => {
                 const checked = activeDates.has(date);
@@ -1340,6 +1402,22 @@ function KpiOverrideControls(props: {
           </div>
         ))}
       </div>
+      {olderGroups.length > 0 ? (
+        <div className="supervision-kpi-override-history-toggle">
+          <button
+            type="button"
+            className="secondary-button"
+            aria-controls={olderWeeksId}
+            aria-expanded={showOlderWeeks}
+            onClick={() => setShowOlderWeeks((current) => !current)}
+          >
+            <span>{showOlderWeeks ? "Ocultar semanas anteriores" : `Ver ${olderGroups.length} semanas anteriores`}</span>
+            <strong>
+              {olderActiveOverrideCount} {olderActiveOverrideCount === 1 ? "override activo" : "overrides activos"}
+            </strong>
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1599,6 +1677,7 @@ export function GeneralSupervisionPage() {
               kpiAlertsByUser={kpiAlertsByUser}
               kpiWeekReference={kpiWeekReference}
               kpiOverrides={overview.kpiOverrides ?? []}
+              kpiOverridePeriods={overview.kpiOverridePeriods ?? []}
               savingObservedUserId={savingObservedUserId}
               savingKpiOverrideKey={savingKpiOverrideKey}
               onToggleObserved={handleToggleObserved}

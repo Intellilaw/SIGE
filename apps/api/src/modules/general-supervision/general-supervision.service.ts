@@ -42,6 +42,13 @@ interface KpiDateRange {
   endDate: string;
 }
 
+interface KpiOverrideDateRange {
+  key: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+}
+
 interface SupervisionUserReference {
   userId: string;
   displayName: string;
@@ -613,6 +620,23 @@ function buildKpiRanges(todayKey: string): KpiDateRange[] {
   ];
 }
 
+function buildKpiOverrideRanges(todayKey: string): KpiOverrideDateRange[] {
+  const calendarWeek = getBusinessWeekRange(todayKey);
+  const currentWeek = isWeekendDateKey(todayKey)
+    ? getBusinessWeekRange(addDaysKey(calendarWeek.startDate, 7))
+    : calendarWeek;
+
+  return Array.from({ length: 6 }, (_, index) => {
+    const range = getBusinessWeekRange(addDaysKey(currentWeek.startDate, index * -7));
+    return {
+      key: index === 0 ? "currentWeek" : `previousWeek${index}`,
+      label: index === 0 ? "Semana actual" : index === 1 ? "Semana pasada" : `Semana anterior ${index}`,
+      startDate: range.startDate,
+      endDate: range.endDate
+    };
+  });
+}
+
 function getUserDashboardPath(moduleId: string, user: SupervisionUserReference) {
   const basePath = getModulePath(moduleId);
   if (basePath === "/app/tasks" || !user.shortName) {
@@ -814,6 +838,26 @@ function flattenKpiAlerts(period: KpiDateRange, overview: Awaited<ReturnType<Kpi
       0
     ),
     users: userAlerts
+  };
+}
+
+function flattenKpiOverridePeriod(
+  period: KpiOverrideDateRange,
+  overview: Awaited<ReturnType<KpisRepository["getPeriodOverview"]>>
+) {
+  return {
+    ...period,
+    users: overview.teams.flatMap((team) =>
+      team.users.map((user) => ({
+        userId: user.userId,
+        metrics: user.metrics.map((metric) => ({
+          id: metric.id,
+          dailyBreakdown: metric.dailyBreakdown.filter((day) =>
+            day.date >= period.startDate && day.date <= period.endDate
+          )
+        })).filter((metric) => metric.dailyBreakdown.length > 0)
+      })).filter((user) => user.metrics.length > 0)
+    )
   };
 }
 
@@ -1182,6 +1226,7 @@ export class GeneralSupervisionService {
     const todayKey = getCurrentDateKey();
     const dashboardRanges = buildDashboardRanges(todayKey);
     const kpiRanges = buildKpiRanges(todayKey);
+    const kpiOverrideRanges = buildKpiOverrideRanges(todayKey);
     const displayWeekReference = isWeekendDateKey(todayKey)
       ? getBusinessWeekRange(addDaysKey(getWeekStartKey(todayKey), 7))
       : getBusinessWeekRange(todayKey);
@@ -1190,14 +1235,8 @@ export class GeneralSupervisionService {
     const currentMonthStart = getMonthStartKey(todayKey);
     const currentMonthEnd = getMonthEndKey(todayKey);
     const currentWeekHolidayPeriods = getMonthPeriodsInRange(currentWeekStart, currentWeekEnd);
-    const kpiOverrideStart = kpiRanges.reduce(
-      (earliest, range) => range.startDate < earliest ? range.startDate : earliest,
-      kpiRanges[0]?.startDate ?? currentWeekStart
-    );
-    const kpiOverrideEnd = kpiRanges.reduce(
-      (latest, range) => range.endDate > latest ? range.endDate : latest,
-      kpiRanges[0]?.endDate ?? currentWeekEnd
-    );
+    const kpiOverrideStart = kpiOverrideRanges.at(-1)?.startDate ?? currentWeekStart;
+    const kpiOverrideEnd = kpiOverrideRanges[0]?.endDate ?? currentWeekEnd;
 
     const [storedModules, trackingRecords, users, activeLaborFileUserIds, observedUserSettings, kpiOverrides, currentWeekHolidaysByPeriod] = await Promise.all([
       this.repositories.tasks.listModules(),
@@ -1277,12 +1316,15 @@ export class GeneralSupervisionService {
       legacyRole: "SUPERADMIN",
       permissions: ["*"]
     };
-    const [kpiOverviews, currentMonthKpiOverview, commissionEligibility] = await Promise.all([
+    const [kpiOverviews, kpiOverrideOverview, currentMonthKpiOverview, commissionEligibility] = await Promise.all([
       Promise.all(
         kpiRanges.map((range) =>
           this.repositories.kpis.getPeriodOverview(range.startDate, range.endDate, kpiAccessScope)
         )
       ),
+      this.repositories.kpis.getPeriodOverview(kpiOverrideStart, kpiOverrideEnd, kpiAccessScope, {
+        includeFutureNonEvaluatedDays: true
+      }),
       this.repositories.kpis.getPeriodOverview(currentMonthStart, currentMonthEnd, kpiAccessScope),
       this.repositories.kpiCommissionRequirements.getCurrentEligibility()
     ]);
@@ -1316,6 +1358,9 @@ export class GeneralSupervisionService {
       };
     });
     const kpiPeriods = kpiRanges.map((range, index) => flattenKpiAlerts(range, kpiOverviews[index]));
+    const kpiOverridePeriods = kpiOverrideRanges.map((range) =>
+      flattenKpiOverridePeriod(range, kpiOverrideOverview)
+    );
 
     return {
       generatedAt: new Date().toISOString(),
@@ -1327,6 +1372,7 @@ export class GeneralSupervisionService {
       currentMonthStart,
       currentMonthEnd,
       kpiOverrides,
+      kpiOverridePeriods,
       taskOverview,
       termBuckets,
       kpiPeriods,

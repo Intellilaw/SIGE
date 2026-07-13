@@ -12316,6 +12316,37 @@ div.sales-product-card-main {
   opacity: 0.52;
 }
 
+.supervision-kpi-override-history-toggle {
+  display: flex;
+  justify-content: flex-start;
+  border-top: 1px solid #e1e9f0;
+  padding-top: 10px;
+}
+
+.supervision-kpi-override-history-toggle .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  border-radius: 6px;
+  padding: 8px 10px 8px 14px;
+}
+
+.supervision-kpi-override-history-toggle .secondary-button > span {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.supervision-kpi-override-history-toggle .secondary-button > strong {
+  border-radius: 999px;
+  background: #e8eefb;
+  color: #1d4ed8;
+  padding: 5px 8px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
 .supervision-kpi-override-locked {
   border-top: 1px solid #f1c7cf;
   color: #9f1239;
@@ -12342,6 +12373,10 @@ div.sales-product-card-main {
 @media (max-width: 640px) {
   .supervision-kpi-override-week > div {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .supervision-kpi-override-history-toggle .secondary-button {
+    width: 100%;
   }
 }
 

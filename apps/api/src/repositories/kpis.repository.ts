@@ -19,7 +19,7 @@ import {
   type Team
 } from "@sige/contracts";
 
-import type { KpiAccessScope, KpisRepository } from "./types";
+import type { KpiAccessScope, KpiPeriodOverviewOptions, KpisRepository } from "./types";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 
 const LITIGATION_MODULE_ID = "litigation";
@@ -253,6 +253,7 @@ interface PeriodContext {
   startKey: string;
   endKey: string;
   cutoffKey: string;
+  nonEvaluatedThroughKey: string;
   todayKey: string;
   businessDaysInPeriod: number;
   businessDaysElapsed: number;
@@ -460,7 +461,7 @@ function getExcludedDateLabel(dateKey: string, period: PeriodContext) {
 function buildNonEvaluatedDailyBreakdown(period: PeriodContext) {
   const evaluatedKeys = new Set(period.evaluatedDateKeys);
 
-  return getWeekdayDateKeys(period.startKey, period.cutoffKey)
+  return getWeekdayDateKeys(period.startKey, period.nonEvaluatedThroughKey)
     .filter((dateKey) => !evaluatedKeys.has(dateKey))
     .filter((dateKey) => period.holidayKeys.has(dateKey) || period.excludedDateKeys.has(dateKey))
     .map((dateKey) => {
@@ -2489,11 +2490,21 @@ export class PrismaKpisRepository implements KpisRepository {
     return this.getOverviewForPeriod(startKey, endKey, accessScope);
   }
 
-  public async getPeriodOverview(startDate: string, endDate: string, accessScope: KpiAccessScope): Promise<KpiOverview> {
-    return this.getOverviewForPeriod(toDateKey(startDate), toDateKey(endDate), accessScope);
+  public async getPeriodOverview(
+    startDate: string,
+    endDate: string,
+    accessScope: KpiAccessScope,
+    options: KpiPeriodOverviewOptions = {}
+  ): Promise<KpiOverview> {
+    return this.getOverviewForPeriod(toDateKey(startDate), toDateKey(endDate), accessScope, options);
   }
 
-  private async getOverviewForPeriod(startKey: string, endKey: string, accessScope: KpiAccessScope): Promise<KpiOverview> {
+  private async getOverviewForPeriod(
+    startKey: string,
+    endKey: string,
+    accessScope: KpiAccessScope,
+    options: KpiPeriodOverviewOptions = {}
+  ): Promise<KpiOverview> {
     const year = Number(startKey.slice(0, 4));
     const month = Number(startKey.slice(5, 7));
     const todayKey = getBusinessDateKey();
@@ -2654,6 +2665,7 @@ export class PrismaKpisRepository implements KpisRepository {
       startKey,
       endKey,
       cutoffKey,
+      nonEvaluatedThroughKey: options.includeFutureNonEvaluatedDays ? endKey : cutoffKey,
       todayKey,
       businessDaysInPeriod,
       businessDaysElapsed,

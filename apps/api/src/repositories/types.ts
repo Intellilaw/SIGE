@@ -805,9 +805,18 @@ export interface KpiAccessScope extends Pick<
   "role" | "legacyRole" | "team" | "legacyTeam" | "secondaryTeam" | "secondaryLegacyTeam" | "specificRole" | "secondarySpecificRole" | "permissions"
 > {}
 
+export interface KpiPeriodOverviewOptions {
+  includeFutureNonEvaluatedDays?: boolean;
+}
+
 export interface KpisRepository {
   getOverview(year: number, month: number, accessScope: KpiAccessScope): Promise<KpiOverview>;
-  getPeriodOverview(startDate: string, endDate: string, accessScope: KpiAccessScope): Promise<KpiOverview>;
+  getPeriodOverview(
+    startDate: string,
+    endDate: string,
+    accessScope: KpiAccessScope,
+    options?: KpiPeriodOverviewOptions
+  ): Promise<KpiOverview>;
 }
 
 export interface SalesWriteActor {
