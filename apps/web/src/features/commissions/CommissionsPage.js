@@ -1,9 +1,10 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
 import { COMMISSION_SECTIONS } from "@sige/contracts";
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteModule, hasPermission } from "../auth/permissions";
+import { buildCommissionMoneyReceipt, DocumentPreview, downloadPdfDocument, downloadWordDocument, generatedDocumentToHtml } from "../modules/DailyDocumentsPage";
 const MONTH_NAMES = [
     "Enero",
     "Febrero",
@@ -93,6 +94,31 @@ const COMMISSION_GROUP_TEAMS = [
         distributionKey: "pctTaxCompliance"
     }
 ];
+const MAX_SIGNED_RECEIPT_BYTES = 10 * 1024 * 1024;
+function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = String(reader.result ?? "");
+            const separatorIndex = result.indexOf(",");
+            resolve(separatorIndex >= 0 ? result.slice(separatorIndex + 1) : result);
+        };
+        reader.onerror = () => reject(new Error("No fue posible leer el recibo firmado."));
+        reader.readAsDataURL(file);
+    });
+}
+function isPdfFile(file) {
+    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+function formatFileSize(bytes) {
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 function normalizeText(value) {
     return (value ?? "")
         .normalize("NFD")
@@ -123,13 +149,15 @@ function isRusconiTenant(user) {
         || normalizeText(user?.organizationSlug) === "rusconi-consulting"
         || normalizeText(user?.organizationName) === "rusconi consulting");
 }
-function isAraceliLozanoUser(user) {
-    const isFinance = user?.team === "FINANCE"
+function isFinanceTeamUser(user) {
+    return Boolean(user?.team === "FINANCE"
         || user?.secondaryTeam === "FINANCE"
         || [user?.legacyTeam, user?.secondaryLegacyTeam, user?.specificRole, user?.secondarySpecificRole]
-            .some((value) => normalizeText(value) === "finanzas");
+            .some((value) => normalizeText(value) === "finanzas"));
+}
+function isAraceliLozanoUser(user) {
     const identities = [user?.username, user?.displayName, user?.email].map(normalizeText);
-    return isRusconiTenant(user) && isFinance && identities.some((identity) => identity === "araceli lozano"
+    return isRusconiTenant(user) && isFinanceTeamUser(user) && identities.some((identity) => identity === "araceli lozano"
         || identity === "araceli lozano escamilla"
         || identity.startsWith("araceli.lozano")
         || identity.startsWith("araceli lozano"));
@@ -753,23 +781,116 @@ function CommissionTotalsTable(props) {
         section
     }));
     const totalCommissionsMxn = props.rows.reduce((sum, row) => sum + (isReceiverExcluded(row.section) ? 0 : row.calculation.totalCommissionsMxn), 0);
+    const pendingCommissionsMxn = props.rows.reduce((sum, row) => {
+        if (isReceiverExcluded(row.section)) {
+            return sum;
+        }
+        const acknowledgement = props.acknowledgementsBySection.get(normalizeText(row.section));
+        return acknowledgement?.paidByTransfer || acknowledgement?.receivedByEmrt
+            ? sum
+            : sum + row.calculation.totalCommissionsMxn;
+    }, 0);
     return (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Comisiones a pagar por receptor" }), _jsxs("span", { children: [props.rows.length, " secciones"] })] }), _jsx("div", { className: "table-scroll", children: _jsxs("table", { className: "data-table commissions-totals-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Receptor" }), _jsx("th", { children: "Comision a pagar" })] }) }), _jsx("tbody", { children: props.rows.map((row) => {
                                 const excluded = isReceiverExcluded(row.section);
                                 const acknowledgement = props.acknowledgementsBySection.get(normalizeText(row.section));
+                                const recipientAssignment = props.recipientAssignmentsBySection.get(normalizeText(row.section));
+                                const recipientName = recipientAssignment?.recipientName;
+                                const releaseEligibility = recipientAssignment?.userId
+                                    ? props.releaseEligibilityByUserId.get(recipientAssignment.userId)
+                                    : undefined;
+                                const paymentBlocked = Boolean(releaseEligibility?.blocked);
                                 const amountMxn = row.calculation.totalCommissionsMxn;
                                 const eligible = !excluded && amountMxn > 0;
                                 const saving = props.savingSections.has(normalizeText(row.section));
-                                const araceliLocked = Boolean(acknowledgement?.receivedByEmrt);
-                                return (_jsxs("tr", { className: excluded ? "commissions-row-excluded" : undefined, children: [_jsx("td", { children: _jsxs("div", { className: "commissions-total-receiver-cell", children: [props.canManageReceiverExclusions ? (_jsx("label", { className: "commissions-total-exclusion-toggle", title: excluded ? "Incluir receptor en el Total general" : "Excluir receptor del Total general", children: _jsx("input", { "aria-label": `${excluded ? "Incluir" : "Excluir"} ${row.section} del Total general`, checked: excluded, disabled: props.periodLocked || saving, onChange: (event) => props.onToggleReceiverExclusion(row.section, event.target.checked), type: "checkbox" }) })) : null, _jsx("span", { className: excluded ? "commissions-amount-excluded" : undefined, children: row.section })] }) }), _jsx("td", { className: "commissions-total-strong", children: _jsxs("div", { className: "commissions-payment-flow", children: [_jsx("span", { className: excluded ? "commissions-amount-excluded" : undefined, children: formatCurrency(amountMxn) }), _jsxs("div", { className: "commissions-payment-flow-controls", children: [_jsxs("label", { className: !eligible || !props.canConfirmAsAraceli || araceliLocked ? "is-disabled" : undefined, children: [_jsx("input", { type: "checkbox", checked: Boolean(acknowledgement?.receivedByAraceli), disabled: !acknowledgement
+                                const uploadingSignedReceipt = props.uploadingSignedReceiptSections.has(normalizeText(row.section));
+                                const paidByTransfer = Boolean(acknowledgement?.paidByTransfer);
+                                const araceliLocked = paidByTransfer || Boolean(acknowledgement?.receivedByEmrt);
+                                const hasSignedReceipt = Boolean(acknowledgement?.signedReceiptUploadedAt && acknowledgement.signedReceiptFileName);
+                                const missingSignedReceipt = Boolean(acknowledgement?.receivedByEmrt && !hasSignedReceipt);
+                                const rowClassName = [
+                                    excluded ? "commissions-row-excluded" : "",
+                                    missingSignedReceipt ? "commissions-row-missing-signed-receipt" : ""
+                                ].filter(Boolean).join(" ") || undefined;
+                                return (_jsxs("tr", { className: rowClassName, children: [_jsx("td", { children: _jsxs("div", { className: "commissions-total-receiver-cell", children: [props.canManageReceiverExclusions ? (_jsx("label", { className: "commissions-total-exclusion-toggle", title: excluded ? "Incluir receptor en el Total general" : "Excluir receptor del Total general", children: _jsx("input", { "aria-label": `${excluded ? "Incluir" : "Excluir"} ${row.section} del Total general`, checked: excluded, disabled: props.periodLocked || saving, onChange: (event) => props.onToggleReceiverExclusion(row.section, event.target.checked), type: "checkbox" }) })) : null, _jsxs("span", { className: `commissions-total-receiver-identity${excluded ? " commissions-amount-excluded" : ""}`, children: [_jsx("strong", { children: recipientName ?? row.section }), recipientName && normalizeText(recipientName) !== normalizeText(row.section) ? (_jsx("small", { children: row.section })) : null, !recipientName ? _jsx("small", { children: "Titular activo no asignado" }) : null] })] }) }), _jsx("td", { className: "commissions-total-strong", children: _jsxs("div", { className: "commissions-payment-flow", children: [_jsx("span", { className: excluded ? "commissions-amount-excluded" : undefined, children: formatCurrency(amountMxn) }), _jsxs("div", { className: "commissions-payment-flow-controls", children: [_jsxs("label", { className: !eligible || paymentBlocked || !props.canMarkPaidByTransfer || props.periodLocked ? "is-disabled" : undefined, children: [_jsx("input", { type: "checkbox", checked: paidByTransfer, disabled: !acknowledgement
+                                                                            || !eligible
+                                                                            || (paymentBlocked && !paidByTransfer)
+                                                                            || !props.canMarkPaidByTransfer
+                                                                            || props.periodLocked
+                                                                            || saving, onChange: (event) => props.onTogglePaidByTransfer(row.section, event.target.checked) }), _jsx("span", { children: "Pagado mediante transferencia" })] }), _jsxs("label", { className: !eligible || !props.canConfirmAsAraceli || araceliLocked ? "is-disabled" : undefined, children: [_jsx("input", { type: "checkbox", checked: Boolean(acknowledgement?.receivedByAraceli), disabled: !acknowledgement
                                                                             || !eligible
                                                                             || !props.canConfirmAsAraceli
                                                                             || araceliLocked
-                                                                            || saving, onChange: (event) => props.onToggleReceivedByAraceli(row.section, event.target.checked) }), _jsx("span", { children: "Recibido por Araceli Lozano" })] }), _jsxs("label", { className: !eligible || !props.canConfirmAsEmrt || !acknowledgement?.receivedByAraceli ? "is-disabled" : undefined, children: [_jsx("input", { type: "checkbox", checked: Boolean(acknowledgement?.receivedByEmrt), disabled: !acknowledgement
+                                                                            || saving, onChange: (event) => props.onToggleReceivedByAraceli(row.section, event.target.checked) }), _jsx("span", { children: "Recibido por Araceli Lozano" })] }), _jsxs("label", { className: !eligible || paymentBlocked || !props.canConfirmAsEmrt || !acknowledgement?.receivedByAraceli ? "is-disabled" : undefined, children: [_jsx("input", { type: "checkbox", checked: Boolean(acknowledgement?.receivedByEmrt), disabled: !acknowledgement
                                                                             || !eligible
+                                                                            || (paymentBlocked && !acknowledgement.receivedByEmrt)
                                                                             || !props.canConfirmAsEmrt
                                                                             || !acknowledgement.receivedByAraceli
-                                                                            || saving, onChange: (event) => props.onToggleReceivedByEmrt(row.section, event.target.checked) }), _jsx("span", { children: "Recibido por EMRT" })] })] }), acknowledgement ? (_jsxs("div", { className: "commissions-payment-flow-meta", children: [acknowledgement.receivedByAraceliAt ? (_jsxs("span", { children: ["Araceli: ", formatDateTime(acknowledgement.receivedByAraceliAt)] })) : null, acknowledgement.receivedByEmrtAt ? (_jsxs("span", { children: ["EMRT: ", formatDateTime(acknowledgement.receivedByEmrtAt)] })) : null, acknowledgement.reopenedAt ? (_jsxs("span", { children: ["Reabierto: ", formatDateTime(acknowledgement.reopenedAt), acknowledgement.reopenedByName ? ` por ${acknowledgement.reopenedByName}` : ""] })) : null] })) : null, !eligible ? (_jsx("small", { children: excluded ? "Receptor excluido del pago" : "Sin monto por confirmar" })) : null] }) })] }, row.section));
-                            }) }), _jsx("tfoot", { children: _jsxs("tr", { children: [_jsx("td", { children: "Total general" }), _jsx("td", { children: formatCurrency(totalCommissionsMxn) })] }) })] }) })] }));
+                                                                            || paidByTransfer
+                                                                            || saving, onChange: (event) => props.onToggleReceivedByEmrt(row.section, event.target.checked) }), _jsx("span", { children: "Pagado por EMRT" })] })] }), releaseEligibility?.blocked ? (_jsxs("section", { className: "commissions-kpi-payment-block", role: "alert", children: [_jsx("strong", { children: "Pago retenido" }), _jsx("span", { children: "Estas comisiones no pueden pagarse hasta reparar los pendientes aplicables a este mes." }), _jsx("ul", { children: releaseEligibility.requirements.map((requirement) => (_jsxs("li", { children: [_jsx("strong", { children: requirement.metricLabel }), _jsxs("span", { children: [requirement.pendingAmount, " ", requirement.unit, requirement.oldestOriginDate ? `; pendiente desde ${requirement.oldestOriginDate}` : ""] }), _jsx("div", { className: "commissions-kpi-payment-requirements", children: requirement.requirements.map((item) => (_jsxs("small", { children: [item.summary, " (", item.originDate, ")"] }, item.obligationId))) })] }, requirement.metricId))) }), releaseEligibility.auditAlert ? (_jsx("span", { className: "commissions-kpi-payment-audit", children: "Alerta de auditoria: el pago ya estaba registrado cuando se detecto este incumplimiento retroactivo. No se revirtio." })) : null] })) : null, _jsx("button", { className: "secondary-button commissions-generate-receipt-button", disabled: !eligible || !props.canGenerateReceipts || !recipientName, onClick: () => recipientName && props.onGenerateReceipt(row, recipientName), title: !recipientName ? "Asigna un titular activo a este cargo para generar el recibo" : undefined, type: "button", children: "Generar recibo" }), _jsxs("div", { className: "commissions-signed-receipt-controls", children: [_jsxs("label", { className: `secondary-button commissions-signed-receipt-upload${!eligible || !props.canManageSignedReceipts || uploadingSignedReceipt ? " is-disabled" : ""}`, children: [_jsx("input", { accept: ".pdf,application/pdf", "aria-label": `${hasSignedReceipt ? "Reemplazar" : "Cargar"} recibo firmado de ${recipientName ?? row.section}`, disabled: !acknowledgement || !eligible || !props.canManageSignedReceipts || uploadingSignedReceipt, onChange: (event) => {
+                                                                            const file = event.currentTarget.files?.[0];
+                                                                            event.currentTarget.value = "";
+                                                                            if (file) {
+                                                                                props.onUploadSignedReceipt(row.section, file);
+                                                                            }
+                                                                        }, type: "file" }), _jsx("span", { children: uploadingSignedReceipt
+                                                                            ? "Cargando PDF..."
+                                                                            : hasSignedReceipt
+                                                                                ? "Reemplazar recibo firmado"
+                                                                                : "Cargar recibo firmado" })] }), hasSignedReceipt && acknowledgement ? (_jsx("button", { className: "secondary-button commissions-signed-receipt-open", onClick: () => props.onOpenSignedReceipt(acknowledgement), type: "button", children: "Ver recibo firmado" })) : null] }), hasSignedReceipt && acknowledgement ? (_jsxs("div", { className: "commissions-signed-receipt-meta", children: [_jsx("span", { children: acknowledgement.signedReceiptFileName }), acknowledgement.signedReceiptSizeBytes ? (_jsx("span", { children: formatFileSize(acknowledgement.signedReceiptSizeBytes) })) : null, acknowledgement.signedReceiptUploadedAt ? (_jsxs("span", { children: ["Cargado: ", formatDateTime(acknowledgement.signedReceiptUploadedAt)] })) : null] })) : null, missingSignedReceipt ? (_jsx("div", { className: "commissions-signed-receipt-alert", role: "alert", children: "Falta cargar el recibo firmado en PDF." })) : null, acknowledgement ? (_jsxs("div", { className: "commissions-payment-flow-meta", children: [acknowledgement.receivedByAraceliAt ? (_jsxs("span", { children: ["Araceli: ", formatDateTime(acknowledgement.receivedByAraceliAt)] })) : null, acknowledgement.receivedByEmrtAt ? (_jsxs("span", { children: ["Pagado por EMRT: ", formatDateTime(acknowledgement.receivedByEmrtAt)] })) : null, acknowledgement.reopenedAt ? (_jsxs("span", { children: ["Reabierto: ", formatDateTime(acknowledgement.reopenedAt), acknowledgement.reopenedByName ? ` por ${acknowledgement.reopenedByName}` : ""] })) : null] })) : null, !eligible ? (_jsx("small", { children: excluded ? "Receptor excluido del pago" : "Sin monto por confirmar" })) : null] }) })] }, row.section));
+                            }) }), _jsxs("tfoot", { children: [_jsxs("tr", { children: [_jsx("td", { children: "Total general" }), _jsx("td", { children: formatCurrency(totalCommissionsMxn) })] }), _jsxs("tr", { children: [_jsx("td", { children: "Total pendiente de pago" }), _jsx("td", { children: formatCurrency(pendingCommissionsMxn) })] })] })] }) })] }));
+}
+function CommissionReceiptModal(props) {
+    const [busyAction, setBusyAction] = useState(null);
+    const [status, setStatus] = useState("");
+    useEffect(() => {
+        function handleKeyDown(event) {
+            if (event.key === "Escape") {
+                props.onClose();
+            }
+        }
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [props.onClose]);
+    async function downloadWord() {
+        setBusyAction("word");
+        setStatus("Generando Word...");
+        try {
+            await downloadWordDocument(props.draft.document, props.draft.filenameBase);
+            setStatus("Word descargado.");
+        }
+        catch {
+            setStatus("No se pudo generar el archivo Word.");
+        }
+        finally {
+            setBusyAction(null);
+        }
+    }
+    async function downloadPdf() {
+        setBusyAction("pdf");
+        setStatus("Generando PDF...");
+        try {
+            await downloadPdfDocument(props.draft.document, props.draft.filenameBase);
+            setStatus("PDF descargado.");
+        }
+        catch {
+            setStatus("No se pudo generar el archivo PDF.");
+        }
+        finally {
+            setBusyAction(null);
+        }
+    }
+    function printReceipt() {
+        const popup = window.open("", "_blank");
+        if (!popup) {
+            setStatus("No se pudo abrir la vista de impresion.");
+            return;
+        }
+        popup.document.write(generatedDocumentToHtml(props.draft.document));
+        popup.document.close();
+        popup.focus();
+        popup.print();
+    }
+    return (_jsx("div", { className: "commissions-modal-backdrop", onClick: props.onClose, children: _jsxs("div", { "aria-labelledby": "commission-receipt-modal-title", "aria-modal": "true", className: "commissions-modal commissions-receipt-modal", onClick: (event) => event.stopPropagation(), role: "dialog", children: [_jsxs("div", { className: "commissions-modal-header", children: [_jsxs("div", { children: [_jsx("h2", { id: "commission-receipt-modal-title", children: "Recibo de comisiones" }), _jsxs("p", { className: "muted", children: [props.draft.recipientName, " | ", props.draft.section, " | ", props.draft.periodLabel, " | ", formatCurrency(props.draft.amountMxn)] })] }), _jsxs("div", { className: "commissions-receipt-actions", children: [_jsx("button", { className: "secondary-button", disabled: busyAction !== null, onClick: () => void downloadWord(), type: "button", children: busyAction === "word" ? "Generando..." : "Word" }), _jsx("button", { className: "secondary-button", disabled: busyAction !== null, onClick: () => void downloadPdf(), type: "button", children: busyAction === "pdf" ? "Generando..." : "PDF" }), _jsx("button", { className: "secondary-button", disabled: busyAction !== null, onClick: printReceipt, type: "button", children: "Imprimir" }), _jsx("button", { className: "secondary-button", onClick: props.onClose, type: "button", children: "Cerrar" })] })] }), _jsxs("div", { className: "commissions-modal-body commissions-receipt-modal-body", children: [status ? _jsx("p", { className: "muted commissions-receipt-status", children: status }) : null, _jsx("div", { className: "daily-doc-preview-viewport commissions-receipt-preview", children: _jsx(DocumentPreview, { document: props.draft.document }) })] })] }) }));
 }
 function SnapshotDetailModal(props) {
     const data = props.snapshot.snapshotData;
@@ -795,16 +916,19 @@ export function CommissionsPage() {
     const [financeRecords, setFinanceRecords] = useState([]);
     const [generalExpenses, setGeneralExpenses] = useState([]);
     const [receivers, setReceivers] = useState([]);
+    const [recipientAssignments, setRecipientAssignments] = useState([]);
     const [clients, setClients] = useState([]);
     const [snapshots, setSnapshots] = useState([]);
     const [exclusions, setExclusions] = useState([]);
     const [projectorCommissions, setProjectorCommissions] = useState([]);
     const [paymentAcknowledgements, setPaymentAcknowledgements] = useState([]);
+    const [commissionReleaseEligibilities, setCommissionReleaseEligibilities] = useState([]);
     const [periodLocked, setPeriodLocked] = useState(false);
     const [confirmedByEmrtCount, setConfirmedByEmrtCount] = useState(0);
     const [savingExclusionKeys, setSavingExclusionKeys] = useState(new Set());
     const [savingProjectorCommissionIds, setSavingProjectorCommissionIds] = useState(new Set());
     const [savingPaymentSections, setSavingPaymentSections] = useState(new Set());
+    const [uploadingSignedReceiptSections, setUploadingSignedReceiptSections] = useState(new Set());
     const [projectorAmountDrafts, setProjectorAmountDrafts] = useState({});
     const [loadingBoard, setLoadingBoard] = useState(true);
     const [loadingSnapshots, setLoadingSnapshots] = useState(true);
@@ -816,6 +940,7 @@ export function CommissionsPage() {
     const [editingReceiverId, setEditingReceiverId] = useState(null);
     const [editingReceiverName, setEditingReceiverName] = useState("");
     const [viewingSnapshot, setViewingSnapshot] = useState(null);
+    const [commissionReceiptDraft, setCommissionReceiptDraft] = useState(null);
     const canWriteCommissions = canWriteModule(user, "commissions");
     const canReadAllCommissions = canWriteCommissions || hasPermission(user, "commissions:all:read");
     const canWriteClientRelationsCommissions = hasPermission(user, "commissions:client-relations:write");
@@ -824,6 +949,7 @@ export function CommissionsPage() {
     const canManageExclusions = canManageCommissionExclusions(user);
     const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
     const canManageProjectorEntries = canManageProjectorCommissions(user);
+    const canMarkPaymentsByTransfer = isRusconiTenant(user) && (isFinanceTeamUser(user) || (hasSuperadminAccess(user) && isEduardoRusconiUser(user)));
     const canConfirmPaymentsAsAraceli = isAraceliLozanoUser(user);
     const canConfirmPaymentsAsEmrt = isRusconiTenant(user) && hasSuperadminAccess(user) && isEduardoRusconiUser(user);
     const isLegalFlow = isLegalFlowTenant(user);
@@ -881,9 +1007,11 @@ export function CommissionsPage() {
             setFinanceRecords(overview.financeRecords);
             setGeneralExpenses(overview.generalExpenses);
             setReceivers(overview.receivers);
+            setRecipientAssignments(overview.recipientAssignments ?? []);
             setExclusions(overview.exclusions ?? []);
             setProjectorCommissions(overview.projectorCommissions ?? []);
             setPaymentAcknowledgements(overview.paymentAcknowledgements ?? []);
+            setCommissionReleaseEligibilities(overview.commissionReleaseEligibilities ?? []);
             setPeriodLocked(Boolean(overview.periodLocked));
             setConfirmedByEmrtCount((overview.paymentAcknowledgements ?? []).filter((entry) => entry.receivedByEmrt).length);
             setClients(clientsResponse);
@@ -937,6 +1065,8 @@ export function CommissionsPage() {
         selectedYear
     ]);
     const paymentAcknowledgementsBySection = useMemo(() => new Map(paymentAcknowledgements.map((entry) => [normalizeText(entry.section), entry])), [paymentAcknowledgements]);
+    const recipientAssignmentsBySection = useMemo(() => new Map(recipientAssignments.map((entry) => [normalizeText(entry.section), entry])), [recipientAssignments]);
+    const releaseEligibilityByUserId = useMemo(() => new Map(commissionReleaseEligibilities.map((entry) => [entry.userId, entry])), [commissionReleaseEligibilities]);
     const effectiveExcludedTotalsReceiverKeys = useMemo(() => new Set(paymentAcknowledgements
         .filter((entry) => entry.excluded)
         .map((entry) => buildCommissionTotalsReceiverExclusionKey({
@@ -1020,11 +1150,15 @@ export function CommissionsPage() {
             setConfirmedByEmrtCount(state.confirmedByEmrtCount);
             setFlash({
                 tone: "success",
-                text: payload.receivedByEmrt === false
-                    ? state.locked
-                        ? "Confirmacion reabierta. El periodo sigue bloqueado por otras confirmaciones de EMRT."
-                        : "Todas las confirmaciones de EMRT fueron reabiertas; Finanzas y Gastos generales quedaron habilitados."
-                    : "Flujo de pago de comisiones actualizado."
+                text: payload.paidByTransfer !== undefined
+                    ? payload.paidByTransfer
+                        ? "Pago mediante transferencia registrado. Las confirmaciones de recepcion quedaron deshabilitadas."
+                        : "Pago mediante transferencia desmarcado. Las confirmaciones de recepcion volvieron a estar disponibles."
+                    : payload.receivedByEmrt === false
+                        ? state.locked
+                            ? "Pago por EMRT reabierto. El periodo sigue bloqueado por otros pagos de EMRT."
+                            : "Todos los pagos por EMRT fueron reabiertos; Finanzas y Gastos generales quedaron habilitados."
+                        : "Flujo de pago de comisiones actualizado."
             });
         }
         catch (error) {
@@ -1047,17 +1181,105 @@ export function CommissionsPage() {
         }
         void updatePaymentAcknowledgement(section, { excluded });
     }
+    function handleGenerateCommissionReceipt(row, recipientName) {
+        if (!canMarkPaymentsByTransfer || row.calculation.totalCommissionsMxn <= 0) {
+            return;
+        }
+        const periodLabel = `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`;
+        const filenamePeriod = `${selectedYear}-${`${selectedMonth}`.padStart(2, "0")}`;
+        setCommissionReceiptDraft({
+            amountMxn: row.calculation.totalCommissionsMxn,
+            document: buildCommissionMoneyReceipt({
+                amountMxn: row.calculation.totalCommissionsMxn,
+                concept: `Comisiones correspondientes a ${MONTH_NAMES[selectedMonth - 1]} de ${selectedYear}`,
+                recipientName
+            }),
+            filenameBase: `recibo-comisiones-${recipientName}-${filenamePeriod}`,
+            periodLabel,
+            recipientName,
+            section: row.section
+        });
+    }
+    async function handleUploadSignedReceipt(section, file) {
+        if (!canMarkPaymentsByTransfer) {
+            return;
+        }
+        if (!isPdfFile(file)) {
+            setFlash({ tone: "error", text: "El recibo firmado debe ser un archivo PDF." });
+            return;
+        }
+        if (file.size <= 0 || file.size > MAX_SIGNED_RECEIPT_BYTES) {
+            setFlash({ tone: "error", text: "El recibo firmado debe pesar entre 1 byte y 10 MB." });
+            return;
+        }
+        const uploadingKey = normalizeText(section);
+        setUploadingSignedReceiptSections((current) => new Set(current).add(uploadingKey));
+        setFlash(null);
+        try {
+            const fileBase64 = await readFileAsBase64(file);
+            const state = await apiPost("/commissions/payment-acknowledgements/signed-receipt", {
+                year: selectedYear,
+                month: selectedMonth,
+                section,
+                originalFileName: file.name,
+                fileBase64
+            });
+            setPaymentAcknowledgements(state.acknowledgements);
+            setPeriodLocked(state.locked);
+            setConfirmedByEmrtCount(state.confirmedByEmrtCount);
+            setFlash({ tone: "success", text: "Recibo firmado cargado correctamente." });
+        }
+        catch (error) {
+            setFlash({ tone: "error", text: getErrorMessage(error) });
+        }
+        finally {
+            setUploadingSignedReceiptSections((current) => {
+                const next = new Set(current);
+                next.delete(uploadingKey);
+                return next;
+            });
+        }
+    }
+    async function handleOpenSignedReceipt(acknowledgement) {
+        setFlash(null);
+        try {
+            const query = new URLSearchParams({
+                year: String(acknowledgement.year),
+                month: String(acknowledgement.month),
+                section: acknowledgement.section
+            });
+            const { blob } = await apiDownload(`/commissions/payment-acknowledgements/signed-receipt?${query.toString()}`);
+            const objectUrl = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = objectUrl;
+            anchor.target = "_blank";
+            anchor.rel = "noopener noreferrer";
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        }
+        catch (error) {
+            setFlash({ tone: "error", text: getErrorMessage(error) });
+        }
+    }
     function handleTogglePaymentReceivedByAraceli(section, receivedByAraceli) {
         if (!canConfirmPaymentsAsAraceli) {
             return;
         }
         void updatePaymentAcknowledgement(section, { receivedByAraceli });
     }
+    function handleTogglePaymentPaidByTransfer(section, paidByTransfer) {
+        if (!canMarkPaymentsByTransfer || periodLocked) {
+            return;
+        }
+        void updatePaymentAcknowledgement(section, { paidByTransfer });
+    }
     function handleTogglePaymentReceivedByEmrt(section, receivedByEmrt) {
         if (!canConfirmPaymentsAsEmrt) {
             return;
         }
-        if (!receivedByEmrt && !window.confirm("Reabrir esta confirmacion? El periodo solo se habilitara cuando no quede ninguna confirmacion de EMRT.")) {
+        if (!receivedByEmrt && !window.confirm("Reabrir este pago por EMRT? El periodo solo se habilitara cuando no quede ningun pago de EMRT.")) {
             return;
         }
         void updatePaymentAcknowledgement(section, { receivedByEmrt });
@@ -1316,7 +1538,7 @@ export function CommissionsPage() {
                                                         ? "Los equipos negativos aportan $0 y no afectan a los equipos positivos"
                                                         : sectionCalculation.group1NetMxn < 0
                                                             ? "El saldo negativo del Grupo 1 no se resta a los grupos 2 y 3"
-                                                            : undefined }))] })) })] }), loadingBoard ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando informacion de comisiones..." }) })) : isTotalsActiveSection ? (_jsx(CommissionTotalsTable, { rows: commissionTotalsRows, year: selectedYear, month: selectedMonth, excludedReceiverKeys: effectiveExcludedTotalsReceiverKeys, acknowledgementsBySection: paymentAcknowledgementsBySection, periodLocked: periodLocked, canManageReceiverExclusions: canManageTotalsReceiverExclusions, canConfirmAsAraceli: canConfirmPaymentsAsAraceli, canConfirmAsEmrt: canConfirmPaymentsAsEmrt, savingSections: savingPaymentSections, onToggleReceiverExclusion: handleToggleCommissionTotalsReceiverExclusion, onToggleReceivedByAraceli: handleTogglePaymentReceivedByAraceli, onToggleReceivedByEmrt: handleTogglePaymentReceivedByEmrt })) : isProjectorActiveSection ? (_jsx(ProjectorCommissionTable, { title: `Comisiones por escritos de fondo - ${activeSection}`, rows: sectionCalculation.projectorCommissions, mode: "projector", canManage: canManageProjectorEntries && !periodLocked, savingIds: savingProjectorCommissionIds, amountDrafts: projectorAmountDrafts, onAmountDraftChange: handleProjectorAmountDraftChange, onCommitAmount: handleCommitProjectorAmount, onToggleAuthorization: handleToggleProjectorAuthorization })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-group-grid", children: [_jsx(CommissionGroupTable, { title: "PRIMER GRUPO: Comisiones de Ejecucion", toneClass: "tone-primary", rows: sectionCalculation.executionRecords, showBaseNet: isSalesActiveSection, baseNetLabel: isSalesActiveSection ? "Primer pago recibido" : undefined, amountLabel: isSalesActiveSection ? "1%" : undefined, showExclusionControls: true, canManageExclusions: canManageExclusions && !periodLocked, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "SEGUNDO GRUPO: Comisiones de Cliente (20%)", toneClass: "tone-secondary", rows: sectionCalculation.clientRecords, showExclusionControls: true, canManageExclusions: canManageExclusions && !periodLocked, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "TERCER GRUPO: Comisiones de Cierre (10%)", toneClass: "tone-tertiary", rows: sectionCalculation.closingRecords, showExclusionControls: true, canManageExclusions: canManageExclusions && !periodLocked, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion })] }), isLitigationLeaderActiveSection ? (_jsx(ProjectorCommissionTable, { title: "COMISIONES ESPEJO: Escritos de fondo autorizados", rows: sectionCalculation.projectorCommissions, mode: "leader-mirror" })) : null, shouldShowDeductionPanel ? (_jsxs("section", { className: "panel commissions-deduction-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Deduccion de gastos sobre Grupo 1 (", Math.round(sectionCalculation.deductionRate * 100), "%)"] }), _jsx("span", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), usesTeamGroup1Breakdown ? (_jsx("p", { className: "muted commissions-caption", children: "Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo positivo." })) : (_jsxs("p", { className: "muted commissions-caption", children: ["El total de gastos atribuibles a tu equipo este mes asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionBaseMxn) }), ". De dicha suma, el", " ", Math.round(sectionCalculation.deductionRate * 100), "%, que asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) }), ", se restara unicamente de las comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque el Grupo 1 quede con saldo negativo."] })), _jsxs("div", { className: "commissions-deduction-summary", children: [_jsxs("span", { children: ["Comisiones brutas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1GrossMxn) })] }), _jsxs("span", { children: ["(-) Deduccion Gastos: ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), _jsxs("span", { children: ["Comisiones netas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1NetMxn) })] }), _jsxs("span", { children: ["Grupo 1 aplicado al total: ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1PayableMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 2 (20%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group2TotalMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 3 (10%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group3TotalMxn) })] }), sectionCalculation.projectorBonusMxn > 0 ? (_jsxs("span", { children: ["(+) Comisiones espejo de proyectistas: ", _jsx("strong", { children: formatCurrency(sectionCalculation.projectorBonusMxn) })] })) : null, _jsxs("span", { children: ["Comisiones totales: ", _jsx("strong", { children: formatCurrency(sectionCalculation.totalCommissionsMxn) })] })] })] })) : null] }))] })] })) : (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No tienes asignado un rol de comisiones o no cuentas con permisos para esta pestana." }) }))) : null, activeTab === "receivers" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Receptores de comisiones" }), _jsxs("span", { children: [receivers.length, " registros"] })] }), canWriteCommissions ? (_jsxs("div", { className: "commissions-receiver-form", children: [_jsxs("label", { className: "form-field commissions-receiver-input", children: [_jsx("span", { children: "Nuevo receptor" }), _jsx("input", { type: "text", value: newReceiverName, onChange: (event) => setNewReceiverName(event.target.value), placeholder: "Ej. Juan Perez o un puesto", onKeyDown: (event) => {
+                                                            : undefined }))] })) })] }), loadingBoard ? (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "Cargando informacion de comisiones..." }) })) : isTotalsActiveSection ? (_jsx(CommissionTotalsTable, { rows: commissionTotalsRows, year: selectedYear, month: selectedMonth, excludedReceiverKeys: effectiveExcludedTotalsReceiverKeys, acknowledgementsBySection: paymentAcknowledgementsBySection, recipientAssignmentsBySection: recipientAssignmentsBySection, releaseEligibilityByUserId: releaseEligibilityByUserId, periodLocked: periodLocked, canManageReceiverExclusions: canManageTotalsReceiverExclusions, canMarkPaidByTransfer: canMarkPaymentsByTransfer, canGenerateReceipts: canMarkPaymentsByTransfer, canManageSignedReceipts: canMarkPaymentsByTransfer, canConfirmAsAraceli: canConfirmPaymentsAsAraceli, canConfirmAsEmrt: canConfirmPaymentsAsEmrt, savingSections: savingPaymentSections, uploadingSignedReceiptSections: uploadingSignedReceiptSections, onToggleReceiverExclusion: handleToggleCommissionTotalsReceiverExclusion, onTogglePaidByTransfer: handleTogglePaymentPaidByTransfer, onToggleReceivedByAraceli: handleTogglePaymentReceivedByAraceli, onToggleReceivedByEmrt: handleTogglePaymentReceivedByEmrt, onGenerateReceipt: handleGenerateCommissionReceipt, onUploadSignedReceipt: handleUploadSignedReceipt, onOpenSignedReceipt: handleOpenSignedReceipt })) : isProjectorActiveSection ? (_jsx(ProjectorCommissionTable, { title: `Comisiones por escritos de fondo - ${activeSection}`, rows: sectionCalculation.projectorCommissions, mode: "projector", canManage: canManageProjectorEntries && !periodLocked, savingIds: savingProjectorCommissionIds, amountDrafts: projectorAmountDrafts, onAmountDraftChange: handleProjectorAmountDraftChange, onCommitAmount: handleCommitProjectorAmount, onToggleAuthorization: handleToggleProjectorAuthorization })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-group-grid", children: [_jsx(CommissionGroupTable, { title: "PRIMER GRUPO: Comisiones de Ejecucion", toneClass: "tone-primary", rows: sectionCalculation.executionRecords, showBaseNet: isSalesActiveSection, baseNetLabel: isSalesActiveSection ? "Primer pago recibido" : undefined, amountLabel: isSalesActiveSection ? "1%" : undefined, showExclusionControls: true, canManageExclusions: canManageExclusions && !periodLocked, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "SEGUNDO GRUPO: Comisiones de Cliente (20%)", toneClass: "tone-secondary", rows: sectionCalculation.clientRecords, showExclusionControls: true, canManageExclusions: canManageExclusions && !periodLocked, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion }), _jsx(CommissionGroupTable, { title: "TERCER GRUPO: Comisiones de Cierre (10%)", toneClass: "tone-tertiary", rows: sectionCalculation.closingRecords, showExclusionControls: true, canManageExclusions: canManageExclusions && !periodLocked, savingExclusionKeys: savingExclusionKeys, year: selectedYear, month: selectedMonth, section: activeSection, onToggleExclusion: handleToggleCommissionExclusion })] }), isLitigationLeaderActiveSection ? (_jsx(ProjectorCommissionTable, { title: "COMISIONES ESPEJO: Escritos de fondo autorizados", rows: sectionCalculation.projectorCommissions, mode: "leader-mirror" })) : null, shouldShowDeductionPanel ? (_jsxs("section", { className: "panel commissions-deduction-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Deduccion de gastos sobre Grupo 1 (", Math.round(sectionCalculation.deductionRate * 100), "%)"] }), _jsx("span", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), usesTeamGroup1Breakdown ? (_jsx("p", { className: "muted commissions-caption", children: "Para Finanzas y Comunicacion con cliente, el 1% se calcula por equipo. Si el neto de un equipo queda en cero o negativo, ese equipo aporta $0 y no resta a los equipos con saldo positivo." })) : (_jsxs("p", { className: "muted commissions-caption", children: ["El total de gastos atribuibles a tu equipo este mes asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionBaseMxn) }), ". De dicha suma, el", " ", Math.round(sectionCalculation.deductionRate * 100), "%, que asciende a", " ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) }), ", se restara unicamente de las comisiones del Grupo 1. Las comisiones de los grupos 2 y 3 se entregan completas, aunque el Grupo 1 quede con saldo negativo."] })), _jsxs("div", { className: "commissions-deduction-summary", children: [_jsxs("span", { children: ["Comisiones brutas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1GrossMxn) })] }), _jsxs("span", { children: ["(-) Deduccion Gastos: ", _jsx("strong", { children: formatCurrency(sectionCalculation.deductionMxn) })] }), _jsxs("span", { children: ["Comisiones netas Grupo 1", group1RateLabelSuffix, ": ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1NetMxn) })] }), _jsxs("span", { children: ["Grupo 1 aplicado al total: ", _jsx("strong", { children: formatCurrency(sectionCalculation.group1PayableMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 2 (20%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group2TotalMxn) })] }), _jsxs("span", { children: ["(+) Comisiones Grupo 3 (10%): ", _jsx("strong", { children: formatCurrency(sectionCalculation.group3TotalMxn) })] }), sectionCalculation.projectorBonusMxn > 0 ? (_jsxs("span", { children: ["(+) Comisiones espejo de proyectistas: ", _jsx("strong", { children: formatCurrency(sectionCalculation.projectorBonusMxn) })] })) : null, _jsxs("span", { children: ["Comisiones totales: ", _jsx("strong", { children: formatCurrency(sectionCalculation.totalCommissionsMxn) })] })] })] })) : null] }))] })] })) : (_jsx("section", { className: "panel", children: _jsx("div", { className: "centered-inline-message", children: "No tienes asignado un rol de comisiones o no cuentas con permisos para esta pestana." }) }))) : null, activeTab === "receivers" ? (_jsxs("section", { className: "panel", children: [_jsxs("div", { className: "panel-header", children: [_jsx("h2", { children: "Receptores de comisiones" }), _jsxs("span", { children: [receivers.length, " registros"] })] }), canWriteCommissions ? (_jsxs("div", { className: "commissions-receiver-form", children: [_jsxs("label", { className: "form-field commissions-receiver-input", children: [_jsx("span", { children: "Nuevo receptor" }), _jsx("input", { type: "text", value: newReceiverName, onChange: (event) => setNewReceiverName(event.target.value), placeholder: "Ej. Juan Perez o un puesto", onKeyDown: (event) => {
                                             if (event.key === "Enter") {
                                                 event.preventDefault();
                                                 void handleCreateReceiver();
@@ -1331,5 +1553,5 @@ export function CommissionsPage() {
                             const data = snapshot.snapshotData;
                             const totals = data ? getSnapshotCommissionTotals(data) : null;
                             return (_jsxs("article", { className: "commissions-snapshot-card", children: [_jsxs("div", { className: "commissions-snapshot-head", children: [_jsx("strong", { children: snapshot.title }), _jsxs("span", { children: ["ID: ", snapshot.id] })] }), _jsx("div", { className: "commissions-snapshot-total", children: formatCurrency(snapshot.totalNetMxn) }), _jsxs("div", { className: "commissions-snapshot-meta", children: [_jsxs("span", { children: ["Seccion: ", snapshot.section] }), _jsxs("span", { children: ["Periodo: ", MONTH_NAMES[snapshot.month - 1], " ", snapshot.year] }), _jsxs("span", { children: ["Guardado: ", formatDate(snapshot.createdAt)] })] }), data ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "commissions-snapshot-financials", children: [_jsxs("span", { children: ["Grupo 1 bruto: ", _jsx("strong", { children: formatCurrency(totals?.group1GrossMxn ?? 0) })] }), _jsxs("span", { children: ["Deduccion: ", _jsxs("strong", { children: ["-", formatCurrency(data.deductionMxn)] })] }), _jsxs("span", { children: ["Total: ", _jsx("strong", { children: formatCurrency(totals?.totalCommissionsMxn ?? snapshot.totalNetMxn) })] })] }), _jsxs("div", { className: "commissions-snapshot-breakdown", children: [_jsxs("span", { children: [_jsx("strong", { children: formatCurrency(totals?.group1NetMxn ?? 0) }), " Neto Grupo 1 (", data.executionRecords.length, ")"] }), _jsxs("span", { children: [_jsx("strong", { children: formatCurrency(totals?.group2TotalMxn ?? 0) }), " Cliente (", data.clientRecords.length, ")"] }), _jsxs("span", { children: [_jsx("strong", { children: formatCurrency(totals?.group3TotalMxn ?? 0) }), " Cierre (", data.closingRecords.length, ")"] })] })] })) : (_jsxs("div", { className: "commissions-snapshot-breakdown", children: [_jsx("span", { children: "Reg. Finanzas: 0" }), _jsx("span", { children: "Gastos Gral.: 0" }), _jsx("span", { children: "Reg. Manuales: 0" })] })), data ? (_jsx("button", { className: "secondary-button", type: "button", onClick: () => setViewingSnapshot(snapshot), children: "Ver detalle" })) : null] }, snapshot.id));
-                        })) })) : null] })) : null, viewingSnapshot ? _jsx(SnapshotDetailModal, { snapshot: viewingSnapshot, onClose: () => setViewingSnapshot(null) }) : null] }));
+                        })) })) : null] })) : null, viewingSnapshot ? _jsx(SnapshotDetailModal, { snapshot: viewingSnapshot, onClose: () => setViewingSnapshot(null) }) : null, commissionReceiptDraft ? (_jsx(CommissionReceiptModal, { draft: commissionReceiptDraft, onClose: () => setCommissionReceiptDraft(null) })) : null] }));
 }

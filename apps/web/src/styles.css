@@ -993,14 +993,17 @@ textarea {
 }
 
 .daily-documents-page {
-  max-width: 1480px;
+  width: 100%;
+  max-width: 1600px;
 }
 
 .daily-documents-layout {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.35fr);
   gap: 18px;
   align-items: start;
+  min-width: 0;
+  width: 100%;
 }
 
 .daily-doc-tabs-panel {
@@ -1434,6 +1437,10 @@ textarea {
   max-width: 100%;
 }
 
+.daily-doc-preview-panel {
+  overflow: hidden;
+}
+
 .daily-doc-actions .primary-button,
 .daily-doc-actions .secondary-button {
   width: 100%;
@@ -1443,9 +1450,21 @@ textarea {
   white-space: nowrap;
 }
 
+.daily-doc-preview-viewport {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 4px;
+}
+
 .daily-doc-paper {
   display: grid;
   gap: 20px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 760px;
   padding: clamp(24px, 4vw, 52px);
   border: 1px solid rgba(31, 41, 51, 0.1);
@@ -1461,7 +1480,7 @@ textarea {
   background-position: center top;
   background-repeat: no-repeat;
   background-size: 100% 100%;
-  min-height: clamp(760px, 92vw, 980px);
+  min-height: 0;
   padding: clamp(96px, 10vw, 128px) clamp(36px, 5vw, 70px) clamp(118px, 11vw, 148px);
 }
 
@@ -1679,7 +1698,7 @@ textarea {
 
 .daily-doc-money-receiver-signature {
   width: min(58%, 420px);
-  margin: -14px auto 0;
+  margin: 40px auto 0;
   padding-top: 8px;
   border-top: 1px solid #111;
   color: #000;
@@ -3539,7 +3558,6 @@ textarea {
   left: 0;
   min-width: 64px;
   width: 64px;
-  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
 }
 
 .general-expense-table thead th:first-child {
@@ -3548,6 +3566,24 @@ textarea {
 }
 
 .general-expense-table .general-expense-row-index {
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.general-expense-table .general-expense-detail-column {
+  position: sticky;
+  left: 64px;
+  min-width: 376px;
+  width: 376px;
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
+}
+
+.general-expense-table thead .general-expense-detail-column {
+  z-index: 4;
+  background: #eef4fb;
+}
+
+.general-expense-detail-column {
   z-index: 1;
   background: rgba(255, 255, 255, 0.96);
 }
@@ -7042,6 +7078,24 @@ div.sales-product-card-main {
   min-width: 0;
 }
 
+.commissions-total-receiver-identity {
+  display: grid;
+  gap: 3px;
+}
+
+.commissions-total-receiver-identity strong {
+  color: #1f2937;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.commissions-total-receiver-identity small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
 .commissions-total-exclusion-toggle {
   align-items: center;
   cursor: pointer;
@@ -7247,6 +7301,142 @@ div.sales-product-card-main {
   font-weight: 500;
 }
 
+.commissions-kpi-payment-block {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 520px);
+  border: 1px solid #f2b8c6;
+  border-left: 4px solid #be123c;
+  border-radius: 8px;
+  background: #fff7f9;
+  color: #102a43;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.commissions-kpi-payment-block > strong {
+  color: #be123c;
+  font-size: 0.95rem;
+}
+
+.commissions-kpi-payment-block > span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.commissions-kpi-payment-block ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.commissions-kpi-payment-block li {
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid rgba(190, 18, 60, 0.12);
+  padding-top: 6px;
+}
+
+.commissions-kpi-payment-block li span {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.commissions-kpi-payment-requirements {
+  display: grid;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.commissions-kpi-payment-requirements small {
+  color: #475569;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.commissions-kpi-payment-audit {
+  border-radius: 6px;
+  background: #fff1c2;
+  color: #854d0e;
+  padding: 7px 8px;
+}
+
+.commissions-generate-receipt-button {
+  min-width: 138px;
+  padding: 8px 14px;
+}
+
+.commissions-signed-receipt-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.commissions-signed-receipt-upload {
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+}
+
+.commissions-signed-receipt-upload input[type="file"] {
+  cursor: pointer;
+  height: 100%;
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.commissions-signed-receipt-upload.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.commissions-signed-receipt-upload.is-disabled input[type="file"] {
+  cursor: not-allowed;
+}
+
+.commissions-signed-receipt-open {
+  white-space: nowrap;
+}
+
+.commissions-signed-receipt-meta {
+  color: var(--muted-text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: 0.3rem 0.65rem;
+  justify-content: flex-end;
+  max-width: 28rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.commissions-signed-receipt-alert {
+  background: #fff1f2;
+  border: 1px solid #fda4af;
+  border-radius: 0.65rem;
+  color: #b42318;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0.55rem 0.7rem;
+  text-align: right;
+}
+
+.commissions-row-missing-signed-receipt > td {
+  background: rgba(255, 241, 242, 0.62);
+}
+
+.commissions-row-missing-signed-receipt > td:first-child {
+  box-shadow: inset 4px 0 0 #dc2626;
+}
+
 .commissions-period-lock-banner {
   background: #fff7ed;
   border-color: #fdba74;
@@ -7377,6 +7567,48 @@ div.sales-product-card-main {
   gap: 20px;
   overflow: auto;
   padding: 20px 24px 24px;
+}
+
+.commissions-receipt-modal {
+  max-height: 96vh;
+  max-width: 1100px;
+  width: min(1100px, 100%);
+}
+
+.commissions-receipt-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.commissions-receipt-modal-body {
+  background: #e7ecf2;
+  padding: 24px;
+}
+
+.commissions-receipt-status {
+  margin: 0;
+  text-align: right;
+}
+
+.commissions-receipt-preview {
+  align-items: flex-start;
+  background: #d9e0e8;
+  border: 1px solid rgba(71, 85, 105, 0.14);
+  border-radius: 16px;
+  display: flex;
+  justify-content: center;
+  overflow: visible;
+  padding: 24px;
+}
+
+.commissions-receipt-preview .daily-doc-paper {
+  align-self: flex-start;
+  flex: none;
+  height: auto;
+  width: min(720px, 100%);
 }
 
 .kpis-layout {
@@ -8477,6 +8709,7 @@ div.sales-product-card-main {
 
 .supervision-kpi-metric {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
   gap: 12px;
   border: 1px solid rgba(124, 58, 237, 0.16);
   border-radius: 8px;
@@ -8513,8 +8746,11 @@ div.sales-product-card-main {
 .supervision-kpi-values span {
   border-radius: 8px;
   background: #f8fafc;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 7px 9px;
   font-weight: 700;
+  white-space: normal;
 }
 
 .supervision-kpi-week-reference {
@@ -11913,6 +12149,199 @@ div.sales-product-card-main {
 
   .sales-product-logo-shell {
     min-height: 92px;
+  }
+}
+
+.supervision-kpi-metric-evaluation {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.supervision-kpi-commission-release {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid #b7d8ca;
+  border-left: 4px solid #138a72;
+  border-radius: 8px;
+  background: #f1fbf7;
+  color: #102a43;
+  padding: 12px;
+}
+
+.supervision-kpi-commission-release.is-blocked {
+  border-color: #f2b8c6;
+  border-left-color: #be123c;
+  background: #fff7f9;
+}
+
+.supervision-kpi-commission-release > strong {
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.supervision-kpi-commission-release > span,
+.supervision-kpi-commission-release > small {
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.supervision-kpi-commission-total {
+  border-radius: 6px;
+  background: #fbe4ea;
+  color: #be123c;
+  font-weight: 800;
+  padding: 8px 9px;
+}
+
+.supervision-kpi-commission-release ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.supervision-kpi-commission-release li {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid rgba(190, 18, 60, 0.14);
+  padding-top: 8px;
+}
+
+.supervision-kpi-commission-release li strong,
+.supervision-kpi-commission-release li span,
+.supervision-kpi-commission-release li small {
+  overflow-wrap: anywhere;
+}
+
+.supervision-kpi-commission-release li span {
+  color: #be123c;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.supervision-kpi-commission-release li small {
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.supervision-kpi-override-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #bfd7ea;
+  padding-top: 12px;
+}
+
+.supervision-kpi-override-panel > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.supervision-kpi-override-panel > header strong {
+  color: #123b5d;
+  font-size: 0.88rem;
+}
+
+.supervision-kpi-override-panel > header span {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.supervision-kpi-override-weeks {
+  display: grid;
+  gap: 9px;
+}
+
+.supervision-kpi-override-week {
+  display: grid;
+  gap: 6px;
+}
+
+.supervision-kpi-override-week > strong {
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.supervision-kpi-override-week > div {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.supervision-kpi-override-day {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid #d9e4ee;
+  border-radius: 6px;
+  background: #f8fbfd;
+  color: #334155;
+  cursor: pointer;
+  padding: 8px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.supervision-kpi-override-day input {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #0f766e;
+}
+
+.supervision-kpi-override-day span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.supervision-kpi-override-day.is-excluded {
+  border-color: #5ea99a;
+  background: #e8f6f2;
+  color: #0f5d52;
+}
+
+.supervision-kpi-override-day.is-unavailable {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.supervision-kpi-override-locked {
+  border-top: 1px solid #f1c7cf;
+  color: #9f1239;
+  padding-top: 10px;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+@media (max-width: 960px) {
+  .supervision-kpi-metric {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .supervision-kpi-override-panel > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .supervision-kpi-override-panel > header span {
+    text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .supervision-kpi-override-week > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

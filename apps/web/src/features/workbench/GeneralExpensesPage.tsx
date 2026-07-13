@@ -2057,7 +2057,7 @@ export function GeneralExpensesPage() {
                   <thead>
                     <tr>
                       <th>No.</th>
-                      <th>Detalle de Gasto</th>
+                      <th className="general-expense-detail-column">Detalle de Gasto</th>
                       <th>Monto</th>
                       <th>IVA</th>
                       <th className="general-expense-withholding-column">Ret. IVA</th>
@@ -2141,7 +2141,7 @@ export function GeneralExpensesPage() {
                               ].filter(Boolean).join(" ") || undefined}
                             >
                               <td className="general-expense-row-index">{index + 1}</td>
-                              <td>
+                              <td className="general-expense-detail-column">
                                 <textarea
                                   className="general-expense-input general-expense-textarea"
                                   value={drafts[expense.id]?.detail ?? expense.detail ?? ""}

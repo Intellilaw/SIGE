@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import type { KpiIncident, KpiMetric, KpiMetricStatus, KpiOverview } from "@sige/contracts";
+import type {
+  KpiCommissionMetricRequirement,
+  KpiEmrtOverride,
+  KpiIncident,
+  KpiMetric,
+  KpiMetricStatus,
+  KpiOverview
+} from "@sige/contracts";
 
 import { apiGet, apiPatch } from "../../api/http-client";
 import { canAccessGeneralSupervision } from "../../config/modules";
@@ -46,6 +53,7 @@ interface SupervisionTaskUserSummary {
   isObserved?: boolean;
   canToggleObservation?: boolean;
   isSynthetic?: boolean;
+  commissionRequirements?: KpiCommissionMetricRequirement[];
   dashboardLinks: SupervisionTaskDashboardLink[];
 }
 
@@ -139,6 +147,7 @@ interface GeneralSupervisionOverview {
   currentWeekEnd: string;
   currentMonthStart: string;
   currentMonthEnd: string;
+  kpiOverrides: KpiEmrtOverride[];
   taskOverview: SupervisionTaskOverview;
   termBuckets: SupervisionTermBucket[];
   kpiPeriods: SupervisionKpiPeriod[];
@@ -274,6 +283,29 @@ function isWeekdayDateKey(value: string) {
 
 function isWeekendDateKey(value: string) {
   return !isWeekdayDateKey(value);
+}
+
+const OVERRIDE_DAY_FORMATTER = new Intl.DateTimeFormat("es-MX", {
+  day: "2-digit",
+  month: "2-digit",
+  timeZone: "UTC",
+  weekday: "short"
+});
+
+function formatOverrideDay(value: string) {
+  return capitalizeFirst(OVERRIDE_DAY_FORMATTER.format(dateFromKey(value)).replace(".", ""));
+}
+
+function getWeekdayKeys(startDate: string, endDate: string) {
+  const dates: string[] = [];
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    if (isWeekdayDateKey(cursor)) {
+      dates.push(cursor);
+    }
+    cursor = addDaysKey(cursor, 1);
+  }
+  return dates;
 }
 
 function getBusinessWeekRange(value: string) {
@@ -773,15 +805,32 @@ function getKpiDetailCountLabel(view: KpiDetailView, metrics: KpiMetric[]) {
     : primaryLabel;
 }
 
+function getKpiOverrideKey(userId: string, metricId: string, date: string) {
+  return `${userId}:${metricId}:${date}`;
+}
+
 function TaskUserRow(props: {
   user: SupervisionTaskUserSummary;
   kpiAlerts: SupervisionUserKpiAlertPeriod[];
   kpiWeekReference: SupervisionKpiWeekReference;
+  kpiOverrides: KpiEmrtOverride[];
   muted?: boolean;
   saving: boolean;
+  savingKpiOverrideKey: string;
   onToggleObserved: (userId: string, isObserved: boolean) => void;
+  onToggleKpiOverride: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
 }) {
-  const { user, kpiAlerts, kpiWeekReference, muted = false, saving, onToggleObserved } = props;
+  const {
+    user,
+    kpiAlerts,
+    kpiWeekReference,
+    kpiOverrides,
+    muted = false,
+    saving,
+    savingKpiOverrideKey,
+    onToggleObserved,
+    onToggleKpiOverride
+  } = props;
   const [showDetail, setShowDetail] = useState(false);
   const [kpiDetailView, setKpiDetailView] = useState<KpiDetailView>("unmet");
   const canToggle = canToggleUserObservation(user);
@@ -925,6 +974,14 @@ function TaskUserRow(props: {
                       periods={kpiAlerts}
                       weekReference={kpiWeekReference}
                       view={kpiDetailView}
+                      showCommissionRelease={isObserved && !muted}
+                      userId={user.userId}
+                      kpiOverrides={kpiOverrides}
+                      savingKpiOverrideKey={savingKpiOverrideKey}
+                      onToggleKpiOverride={onToggleKpiOverride}
+                      commissionRequirement={user.commissionRequirements?.find((requirement) =>
+                        requirement.metricId === metric.id
+                      )}
                     />
                   ))}
                 </div>
@@ -947,10 +1004,22 @@ function TaskOverviewPanel(props: {
   overview: SupervisionTaskOverview;
   kpiAlertsByUser: Map<string, SupervisionUserKpiAlertPeriod[]>;
   kpiWeekReference: SupervisionKpiWeekReference;
+  kpiOverrides: KpiEmrtOverride[];
   savingObservedUserId: string;
+  savingKpiOverrideKey: string;
   onToggleObserved: (userId: string, isObserved: boolean) => void;
+  onToggleKpiOverride: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
 }) {
-  const { overview, kpiAlertsByUser, kpiWeekReference, savingObservedUserId, onToggleObserved } = props;
+  const {
+    overview,
+    kpiAlertsByUser,
+    kpiWeekReference,
+    kpiOverrides,
+    savingObservedUserId,
+    savingKpiOverrideKey,
+    onToggleObserved,
+    onToggleKpiOverride
+  } = props;
   const [showUnobserved, setShowUnobserved] = useState(false);
   const observedUsers = overview.users.filter(isObservedTaskUser);
   const unobservedUsers = overview.users.filter((user) => !isObservedTaskUser(user));
@@ -1000,8 +1069,11 @@ function TaskOverviewPanel(props: {
                 user={user}
                 kpiAlerts={kpiAlertsByUser.get(user.userId) ?? []}
                 kpiWeekReference={kpiWeekReference}
+                kpiOverrides={kpiOverrides}
                 saving={savingObservedUserId === user.userId}
+                savingKpiOverrideKey={savingKpiOverrideKey}
                 onToggleObserved={onToggleObserved}
+                onToggleKpiOverride={onToggleKpiOverride}
               />
             ))
           )}
@@ -1029,9 +1101,12 @@ function TaskOverviewPanel(props: {
                   user={user}
                   kpiAlerts={kpiAlertsByUser.get(user.userId) ?? []}
                   kpiWeekReference={kpiWeekReference}
+                  kpiOverrides={kpiOverrides}
                   muted
                   saving={savingObservedUserId === user.userId}
+                  savingKpiOverrideKey={savingKpiOverrideKey}
                   onToggleObserved={onToggleObserved}
+                  onToggleKpiOverride={onToggleKpiOverride}
                 />
               ))
             )}
@@ -1091,12 +1166,24 @@ function KpiMetricRow({
   metric,
   periods,
   weekReference,
-  view
+  view,
+  showCommissionRelease,
+  commissionRequirement,
+  userId,
+  kpiOverrides,
+  savingKpiOverrideKey,
+  onToggleKpiOverride
 }: {
   metric: KpiMetric;
   periods: SupervisionUserKpiAlertPeriod[];
   weekReference: SupervisionKpiWeekReference;
   view: KpiDetailView;
+  showCommissionRelease: boolean;
+  commissionRequirement?: KpiCommissionMetricRequirement;
+  userId: string;
+  kpiOverrides: KpiEmrtOverride[];
+  savingKpiOverrideKey: string;
+  onToggleKpiOverride: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
 }) {
   const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek", view);
   const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek", view);
@@ -1107,36 +1194,151 @@ function KpiMetricRow({
 
   return (
     <section className={`supervision-kpi-metric is-${metric.status}`}>
-      <div className="supervision-kpi-metric-head">
-        <strong className="supervision-kpi-metric-title">{metric.label}</strong>
-        <span className={`kpis-status-badge is-${metric.status}`}>{statusLabel}</span>
+      <div className="supervision-kpi-metric-evaluation">
+        <div className="supervision-kpi-metric-head">
+          <strong className="supervision-kpi-metric-title">{metric.label}</strong>
+          <span className={`kpis-status-badge is-${metric.status}`}>{statusLabel}</span>
+        </div>
+        <div className="supervision-kpi-values">
+          <span>{metric.actualLabel}</span>
+        </div>
+        <div className="kpis-progress-track" aria-label={`Avance ${metric.progressPct}%`}>
+          <span style={{ width: `${metric.progressPct}%` }} />
+        </div>
+        {metric.incidents.length > 0 ? (
+          <small>{metric.incidents.length} incidencias detectadas</small>
+        ) : (
+          <small>{metric.helper}</small>
+        )}
+        <div className="supervision-kpi-week-reference">
+          <KpiWeekIncidents
+            incidents={currentWeekIncidents}
+            label="Semana actual"
+            startDate={weekReference.currentWeek.startDate}
+            endDate={weekReference.currentWeek.endDate}
+            emptyLabel={emptyLabel}
+          />
+          <KpiWeekIncidents
+            incidents={lastWeekIncidents}
+            label="Semana pasada"
+            startDate={weekReference.lastWeek.startDate}
+            endDate={weekReference.lastWeek.endDate}
+            emptyLabel={emptyLabel}
+          />
+        </div>
+        {showCommissionRelease ? (
+          metric.emrtOverridePolicy === "not-allowed" ? (
+            <div className="supervision-kpi-override-locked">
+              Los KPI de terminos y vencimientos no admiten override.
+            </div>
+          ) : (
+            <KpiOverrideControls
+              userId={userId}
+              metric={metric}
+              periods={periods}
+              weekReference={weekReference}
+              overrides={kpiOverrides}
+              savingKey={savingKpiOverrideKey}
+              onToggle={onToggleKpiOverride}
+            />
+          )
+        ) : null}
       </div>
-      <div className="supervision-kpi-values">
-        <span>{metric.actualLabel}</span>
-      </div>
-      <div className="kpis-progress-track" aria-label={`Avance ${metric.progressPct}%`}>
-        <span style={{ width: `${metric.progressPct}%` }} />
-      </div>
-      {metric.incidents.length > 0 ? (
-        <small>{metric.incidents.length} incidencias detectadas</small>
-      ) : (
-        <small>{metric.helper}</small>
-      )}
-      <div className="supervision-kpi-week-reference">
-        <KpiWeekIncidents
-          incidents={currentWeekIncidents}
-          label="Semana actual"
-          startDate={weekReference.currentWeek.startDate}
-          endDate={weekReference.currentWeek.endDate}
-          emptyLabel={emptyLabel}
-        />
-        <KpiWeekIncidents
-          incidents={lastWeekIncidents}
-          label="Semana pasada"
-          startDate={weekReference.lastWeek.startDate}
-          endDate={weekReference.lastWeek.endDate}
-          emptyLabel={emptyLabel}
-        />
+      {showCommissionRelease ? (
+        <aside className={`supervision-kpi-commission-release ${commissionRequirement?.blocked ? "is-blocked" : "is-clear"}`}>
+          <strong>Requisitos para liberar comisiones</strong>
+          {commissionRequirement?.blocked ? (
+            <>
+              <span className="supervision-kpi-commission-total">
+                Pendiente: {commissionRequirement.pendingAmount} {commissionRequirement.unit}
+              </span>
+              {commissionRequirement.oldestOriginDate ? (
+                <small>Origen mas antiguo: {commissionRequirement.oldestOriginDate}</small>
+              ) : null}
+              <ul>
+                {commissionRequirement.requirements.map((requirement) => (
+                  <li key={requirement.obligationId}>
+                    <strong>{requirement.summary}</strong>
+                    <span>{requirement.pendingAmount} {requirement.unit} - {requirement.originDate}</span>
+                    {requirement.details.map((detail) => <small key={detail}>{detail}</small>)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <span>Sin pendientes de este KPI que bloqueen el pago.</span>
+          )}
+        </aside>
+      ) : null}
+    </section>
+  );
+}
+
+function KpiOverrideControls(props: {
+  userId: string;
+  metric: KpiMetric;
+  periods: SupervisionUserKpiAlertPeriod[];
+  weekReference: SupervisionKpiWeekReference;
+  overrides: KpiEmrtOverride[];
+  savingKey: string;
+  onToggle: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
+}) {
+  const groups = [
+    { label: "Semana actual", ...props.weekReference.currentWeek },
+    { label: "Semana pasada", ...props.weekReference.lastWeek }
+  ];
+  const activeDates = new Set(
+    props.overrides
+      .filter((override) => override.userId === props.userId && override.metricId === props.metric.id && override.isExcluded)
+      .map((override) => override.date)
+  );
+  const dailyByDate = new Map(
+    props.periods.flatMap((period) =>
+      period.metrics
+        .filter((metric) => metric.id === props.metric.id)
+        .flatMap((metric) => metric.dailyBreakdown)
+    ).map((day) => [day.date, day])
+  );
+
+  return (
+    <section className="supervision-kpi-override-panel" aria-label={`Overrides de EMRT para ${props.metric.label}`}>
+      <header>
+        <strong>Excluir dia por override de EMRT</strong>
+        <span>El dia no contara como cumplido ni incumplido.</span>
+      </header>
+      <div className="supervision-kpi-override-weeks">
+        {groups.map((group) => (
+          <div className="supervision-kpi-override-week" key={group.label}>
+            <strong>{group.label}</strong>
+            <div>
+              {getWeekdayKeys(group.startDate, group.endDate).map((date) => {
+                const checked = activeDates.has(date);
+                const day = dailyByDate.get(date);
+                const unavailable = Boolean(day && isNonEvaluatedKpiDay(day) && !day.emrtExcluded && !checked);
+                return (
+                  <label
+                    className={`supervision-kpi-override-day ${checked ? "is-excluded" : ""} ${unavailable ? "is-unavailable" : ""}`}
+                    key={date}
+                    title={unavailable ? day?.actualLabel : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={unavailable || Boolean(props.savingKey)}
+                      onChange={(event) => props.onToggle(
+                        props.userId,
+                        props.metric.id,
+                        date,
+                        event.currentTarget.checked
+                      )}
+                    />
+                    <span>{formatOverrideDay(date)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -1176,6 +1378,8 @@ export function GeneralSupervisionPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [savingObservedUserId, setSavingObservedUserId] = useState("");
+  const [savingKpiOverrideKey, setSavingKpiOverrideKey] = useState("");
+  const [kpiRefreshVersion, setKpiRefreshVersion] = useState(0);
 
   useEffect(() => {
     if (!canAccess) {
@@ -1248,7 +1452,7 @@ export function GeneralSupervisionPage() {
     return () => {
       mounted = false;
     };
-  }, [canAccess, overview?.today]);
+  }, [canAccess, overview?.today, kpiRefreshVersion]);
 
   async function handleToggleObserved(userId: string, isObserved: boolean) {
     if (!overview) {
@@ -1289,6 +1493,34 @@ export function GeneralSupervisionPage() {
       setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar la preferencia de observacion.");
     } finally {
       setSavingObservedUserId("");
+    }
+  }
+
+  async function handleToggleKpiOverride(
+    userId: string,
+    metricId: string,
+    date: string,
+    isExcluded: boolean
+  ) {
+    const key = getKpiOverrideKey(userId, metricId, date);
+    setSavingKpiOverrideKey(key);
+    setErrorMessage("");
+
+    try {
+      await apiPatch<KpiEmrtOverride>("/general-supervision/kpi-overrides", {
+        userId,
+        metricId,
+        date,
+        isExcluded
+      });
+      const reloaded = await apiGet<GeneralSupervisionOverview>("/general-supervision/overview");
+      setClientKpiPeriods(null);
+      setOverview(reloaded);
+      setKpiRefreshVersion((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo guardar el override de KPI.");
+    } finally {
+      setSavingKpiOverrideKey("");
     }
   }
 
@@ -1366,8 +1598,11 @@ export function GeneralSupervisionPage() {
               overview={overview.taskOverview}
               kpiAlertsByUser={kpiAlertsByUser}
               kpiWeekReference={kpiWeekReference}
+              kpiOverrides={overview.kpiOverrides ?? []}
               savingObservedUserId={savingObservedUserId}
+              savingKpiOverrideKey={savingKpiOverrideKey}
               onToggleObserved={handleToggleObserved}
+              onToggleKpiOverride={handleToggleKpiOverride}
             />
           </section>
 

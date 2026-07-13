@@ -809,7 +809,6 @@ async function main() {
         quoteType: mapQuoteType(pickFirst(row, ["quote_type", "matter_type"])),
         lineItems: asInputJson(lineItems),
         totalMxn,
-        milestone: normalizeOptionalText(pickFirst(row, ["hito_conclusion", "milestone"])),
         notes: normalizeOptionalText(row.notes)
       },
       create: {
@@ -822,7 +821,6 @@ async function main() {
         quoteType: mapQuoteType(pickFirst(row, ["quote_type", "matter_type"])),
         lineItems: asInputJson(lineItems),
         totalMxn,
-        milestone: normalizeOptionalText(pickFirst(row, ["hito_conclusion", "milestone"])),
         notes: normalizeOptionalText(row.notes),
         createdAt: normalizeDate(pickFirst(row, ["created_at", "quote_date"])) ?? new Date()
       }

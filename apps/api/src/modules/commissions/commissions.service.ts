@@ -3,6 +3,7 @@ import type {
   CommissionPaymentAcknowledgementUpdateRecord,
   CommissionPaymentActor,
   CommissionPaymentReconcileRow,
+  CommissionSignedReceiptUploadRecord,
   CommissionsRepository,
   CreateCommissionSnapshotRecord,
   ProjectorCommissionUpdateRecord
@@ -64,5 +65,13 @@ export class CommissionsService {
     actor: CommissionPaymentActor
   ) {
     return this.repository.updatePaymentAcknowledgement(payload, actor);
+  }
+
+  public uploadSignedReceipt(payload: CommissionSignedReceiptUploadRecord, actor: CommissionPaymentActor) {
+    return this.repository.uploadSignedReceipt(payload, actor);
+  }
+
+  public findSignedReceipt(year: number, month: number, section: string) {
+    return this.repository.findSignedReceipt(year, month, section);
   }
 }

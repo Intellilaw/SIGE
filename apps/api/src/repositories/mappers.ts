@@ -1513,6 +1513,10 @@ export function mapCommissionPaymentAcknowledgement(record: {
   amountMxn: Prisma.Decimal;
   sourceHash: string;
   excluded: boolean;
+  paidByTransfer: boolean;
+  paidByTransferAt: Date | null;
+  paidByTransferUserId: string | null;
+  paidByTransferName: string | null;
   receivedByAraceli: boolean;
   receivedByAraceliAt: Date | null;
   receivedByAraceliUserId: string | null;
@@ -1521,6 +1525,12 @@ export function mapCommissionPaymentAcknowledgement(record: {
   receivedByEmrtAt: Date | null;
   receivedByEmrtUserId: string | null;
   receivedByEmrtName: string | null;
+  signedReceiptFileName: string | null;
+  signedReceiptMimeType: string | null;
+  signedReceiptSizeBytes: number | null;
+  signedReceiptUploadedAt: Date | null;
+  signedReceiptUserId: string | null;
+  signedReceiptUserName: string | null;
   reopenedAt: Date | null;
   reopenedByUserId: string | null;
   reopenedByName: string | null;
@@ -1535,6 +1545,10 @@ export function mapCommissionPaymentAcknowledgement(record: {
     amountMxn: Number(record.amountMxn),
     sourceHash: record.sourceHash,
     excluded: record.excluded,
+    paidByTransfer: record.paidByTransfer,
+    paidByTransferAt: record.paidByTransferAt?.toISOString(),
+    paidByTransferUserId: record.paidByTransferUserId ?? undefined,
+    paidByTransferName: record.paidByTransferName ?? undefined,
     receivedByAraceli: record.receivedByAraceli,
     receivedByAraceliAt: record.receivedByAraceliAt?.toISOString(),
     receivedByAraceliUserId: record.receivedByAraceliUserId ?? undefined,
@@ -1543,6 +1557,12 @@ export function mapCommissionPaymentAcknowledgement(record: {
     receivedByEmrtAt: record.receivedByEmrtAt?.toISOString(),
     receivedByEmrtUserId: record.receivedByEmrtUserId ?? undefined,
     receivedByEmrtName: record.receivedByEmrtName ?? undefined,
+    signedReceiptFileName: record.signedReceiptFileName ?? undefined,
+    signedReceiptMimeType: record.signedReceiptMimeType ?? undefined,
+    signedReceiptSizeBytes: record.signedReceiptSizeBytes ?? undefined,
+    signedReceiptUploadedAt: record.signedReceiptUploadedAt?.toISOString(),
+    signedReceiptUserId: record.signedReceiptUserId ?? undefined,
+    signedReceiptUserName: record.signedReceiptUserName ?? undefined,
     reopenedAt: record.reopenedAt?.toISOString(),
     reopenedByUserId: record.reopenedByUserId ?? undefined,
     reopenedByName: record.reopenedByName ?? undefined,

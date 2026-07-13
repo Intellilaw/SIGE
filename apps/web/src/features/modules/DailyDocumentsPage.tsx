@@ -93,11 +93,12 @@ type MoneyReceiptForm = {
   amount: string;
   receivedBy: string;
   receivedDate: string;
+  receiptHeading?: string;
 };
 
 type DailyDocumentFormLayout = RcDeliveredDocumentReceiptForm | MoneyReceiptForm;
 
-type GeneratedDocument = {
+export type GeneratedDocument = {
   title: string;
   subtitle: string;
   subtitleAlignment?: "center" | "right";
@@ -1004,6 +1005,32 @@ function findTemplate(templateId: DailyDocumentTemplateId | "document-receipt") 
   return dailyDocumentTemplates.find((template) => template.id === normalizedTemplateId) ?? dailyDocumentTemplates[0];
 }
 
+export function buildCommissionMoneyReceipt(input: {
+  amountMxn: number;
+  concept: string;
+  recipientName: string;
+  generatedAt?: Date;
+}): GeneratedDocument {
+  const document = findTemplate("money-receipt").build({
+    amount: input.amountMxn.toFixed(2),
+    concept: input.concept,
+    currency: "MXN",
+    date: dateInputValue(input.generatedAt ?? new Date()),
+    paymentType: "Pago total",
+    receivedBy: input.recipientName
+  });
+
+  return document.formLayout?.type === "money-receipt"
+    ? {
+        ...document,
+        formLayout: {
+          ...document.formLayout,
+          receiptHeading: "PAGO DE COMISIONES RECIBIDO"
+        }
+      }
+    : document;
+}
+
 function buildBaseDocument(template: DailyDocumentTemplate, values: DailyDocumentValues) {
   return template.build(values);
 }
@@ -1179,6 +1206,10 @@ function moneyReceiptSignatureName(form: MoneyReceiptForm) {
   return (normalizeText(form.receivedBy) || "Nombre de quien recibe").toLocaleUpperCase("es-MX");
 }
 
+function moneyReceiptHeading(form: MoneyReceiptForm) {
+  return normalizeText(form.receiptHeading) || "PAGO RECIBIDO POR RUSCONI CONSULTING";
+}
+
 function rcDeliveredFormText(form: RcDeliveredDocumentReceiptForm) {
   const documentLines = form.documentRows
     .filter((row) => normalizeText(row.description))
@@ -1248,10 +1279,10 @@ function moneyReceiptFormText(form: MoneyReceiptForm) {
     `CONCEPTO: ${form.concept}`,
     `PAGO PARCIAL/PAGO TOTAL: ${form.paymentType}`,
     `MONTO: ${form.amount}`,
-    "PAGO RECIBIDO POR RUSCONI CONSULTING",
+    moneyReceiptHeading(form),
     `NOMBRE DE QUIEN RECIBE: ${form.receivedBy}`,
     `FECHA DE RECIBIDO: ${form.receivedDate}`,
-    `______________________________\n${moneyReceiptSignatureName(form)}`
+    `______________________________\n${moneyReceiptSignatureName(form)}\nFirma de conformidad`
   ];
 }
 
@@ -1264,7 +1295,7 @@ function moneyReceiptFormHtml(form: MoneyReceiptForm) {
     </div>
     <table class="money-receipt-table">
       <thead>
-        <tr><th colspan="2">PAGO RECIBIDO POR RUSCONI CONSULTING</th></tr>
+        <tr><th colspan="2">${escapeHtml(moneyReceiptHeading(form))}</th></tr>
         <tr>
           <th>NOMBRE DE QUIEN RECIBE</th>
           <th>FECHA DE RECIBIDO</th>
@@ -1279,6 +1310,7 @@ function moneyReceiptFormHtml(form: MoneyReceiptForm) {
     </table>
     <div class="money-receiver-signature">
       <strong>${escapeHtml(moneyReceiptSignatureName(form))}</strong>
+      <em>Firma de conformidad</em>
     </div>
   </section>`;
 }
@@ -1304,7 +1336,7 @@ function generatedDocumentToText(document: GeneratedDocument) {
     .join("\n\n");
 }
 
-function generatedDocumentToHtml(document: GeneratedDocument) {
+export function generatedDocumentToHtml(document: GeneratedDocument) {
   const form = getRcDeliveredForm(document);
   const moneyForm = getMoneyReceiptForm(document);
   const signatures = getDocumentSignatures(document);
@@ -1376,7 +1408,7 @@ function generatedDocumentToHtml(document: GeneratedDocument) {
     .money-receipt-table th, .money-receipt-table td { border: 1px solid #111; color: #000; padding: 2px 8px; text-align: center; }
     .money-receipt-table th { background: #d9d9d9; font-size: 17px; font-weight: 700; line-height: 1.1; }
     .money-receipt-table td { font-size: 16px; font-weight: 700; line-height: 1.2; }
-    .money-receiver-signature { border-top: 1px solid #111; color: #000; font-family: "Times New Roman", serif; margin: -10px auto 0; padding-top: 8px; text-align: center; width: 58%; }
+    .money-receiver-signature { border-top: 1px solid #111; color: #000; font-family: "Times New Roman", serif; margin: 36px auto 0; padding-top: 8px; text-align: center; width: 58%; }
     .money-receiver-signature strong, .money-receiver-signature em { display: block; overflow-wrap: anywhere; }
     .money-receiver-signature strong { font-size: 15px; font-weight: 700; }
     .money-receiver-signature em { font-size: 13px; font-style: normal; font-weight: 700; margin-top: 4px; }
@@ -1402,8 +1434,8 @@ function generatedDocumentToHtml(document: GeneratedDocument) {
 </html>`;
 }
 
-function documentFileName(document: GeneratedDocument, extension: "docx" | "pdf") {
-  return `${slugify(document.title)}.${extension}`;
+function documentFileName(document: GeneratedDocument, extension: "docx" | "pdf", filenameBase?: string) {
+  return `${slugify(filenameBase || document.title)}.${extension}`;
 }
 
 function saveBlob(blob: Blob, filename: string) {
@@ -1419,7 +1451,7 @@ function saveBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function downloadWordDocument(document: GeneratedDocument) {
+export async function downloadWordDocument(document: GeneratedDocument, filenameBase?: string) {
   const {
     AlignmentType,
     Document: WordDocument,
@@ -1665,7 +1697,7 @@ async function downloadWordDocument(document: GeneratedDocument) {
               new TableCell({
                 columnSpan: 2,
                 shading: tableHeaderShading,
-                children: [moneyCellParagraph("PAGO RECIBIDO POR RUSCONI CONSULTING", true)]
+                children: [moneyCellParagraph(moneyReceiptHeading(moneyForm), true)]
               })
             ]
           }),
@@ -1692,7 +1724,7 @@ async function downloadWordDocument(document: GeneratedDocument) {
         ]
       })
     );
-    children.push(new Paragraph({ spacing: { after: 560 }, text: "" }));
+    children.push(new Paragraph({ spacing: { after: 960 }, text: "" }));
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
@@ -1702,8 +1734,14 @@ async function downloadWordDocument(document: GeneratedDocument) {
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { before: 100 },
+        spacing: { before: 100, after: 60 },
         children: [moneyTextRun(moneyReceiptSignatureName(moneyForm), true)]
+      })
+    );
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: "Firma de conformidad", italics: true, size: 20, font: "Times New Roman", color: "52606D" })]
       })
     );
   }
@@ -1876,7 +1914,7 @@ async function downloadWordDocument(document: GeneratedDocument) {
   });
   const blob = await Packer.toBlob(wordDocument);
 
-  saveBlob(blob, documentFileName(document, "docx"));
+  saveBlob(blob, documentFileName(document, "docx", filenameBase));
 }
 
 function splitPdfText(pdf: PdfDocument, text: string, maxWidth: number) {
@@ -1884,7 +1922,7 @@ function splitPdfText(pdf: PdfDocument, text: string, maxWidth: number) {
   return Array.isArray(lines) ? lines.map(String) : [String(lines)];
 }
 
-async function downloadPdfDocument(document: GeneratedDocument) {
+export async function downloadPdfDocument(document: GeneratedDocument, filenameBase?: string) {
   const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ format: "letter", unit: "pt" });
   const form = getRcDeliveredForm(document);
@@ -2096,7 +2134,7 @@ async function downloadPdfDocument(document: GeneratedDocument) {
     pdf.setDrawColor(17, 17, 17);
     pdf.setFillColor(217, 217, 217);
     pdf.rect(tableX, y, tableWidth, tableRowHeight, "FD");
-    drawMoneyCell("PAGO RECIBIDO POR RUSCONI CONSULTING", tableX, y, tableWidth, tableRowHeight, true);
+    drawMoneyCell(moneyReceiptHeading(moneyForm), tableX, y, tableWidth, tableRowHeight, true);
     y += tableRowHeight;
     pdf.setFillColor(217, 217, 217);
     pdf.rect(tableX, y, halfWidth, tableRowHeight, "FD");
@@ -2110,8 +2148,8 @@ async function downloadPdfDocument(document: GeneratedDocument) {
     drawMoneyCell(moneyForm.receivedDate, tableX + halfWidth, y, halfWidth, tableRowHeight, true);
     y += tableRowHeight;
 
-    y += 48;
-    ensureSpace(86);
+    y += 70;
+    ensureSpace(96);
     const moneySignatureWidth = tableWidth * 0.58;
     const moneySignatureX = tableX + (tableWidth - moneySignatureWidth) / 2;
     const moneySignatureCenter = tableX + tableWidth / 2;
@@ -2122,7 +2160,12 @@ async function downloadPdfDocument(document: GeneratedDocument) {
     pdf.setFont("times", "bold");
     pdf.setFontSize(11);
     pdf.text(receiverNameLines, moneySignatureCenter, y + 18, { align: "center", maxWidth: moneySignatureWidth - 12 });
-    y += 78;
+    pdf.setFont("times", "italic");
+    pdf.setFontSize(9);
+    pdf.setTextColor(82, 96, 109);
+    pdf.text("Firma de conformidad", moneySignatureCenter, y + 34, { align: "center" });
+    pdf.setTextColor(0, 0, 0);
+    y += 90;
   }
 
   document.paragraphs.forEach(addParagraph);
@@ -2201,10 +2244,10 @@ async function downloadPdfDocument(document: GeneratedDocument) {
     pdf.setTextColor(0, 0, 0);
   }
 
-  pdf.save(documentFileName(document, "pdf"));
+  pdf.save(documentFileName(document, "pdf", filenameBase));
 }
 
-function DocumentPreview({ document }: { document: GeneratedDocument }) {
+export function DocumentPreview({ document }: { document: GeneratedDocument }) {
   const form = getRcDeliveredForm(document);
   const moneyForm = getMoneyReceiptForm(document);
   const signatures = getDocumentSignatures(document);
@@ -2321,7 +2364,7 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
           <table className="daily-doc-money-receipt-table">
             <thead>
               <tr>
-                <th colSpan={2}>PAGO RECIBIDO POR RUSCONI CONSULTING</th>
+                <th colSpan={2}>{moneyReceiptHeading(moneyForm)}</th>
               </tr>
               <tr>
                 <th>NOMBRE DE QUIEN RECIBE</th>
@@ -2338,6 +2381,7 @@ function DocumentPreview({ document }: { document: GeneratedDocument }) {
 
           <div className="daily-doc-money-receiver-signature">
             <strong>{moneyReceiptSignatureName(moneyForm)}</strong>
+            <em>Firma de conformidad</em>
           </div>
         </section>
       ) : (
@@ -3506,7 +3550,9 @@ export function DailyDocumentsPage() {
                 </button>
               </div>
             </div>
-            <DocumentPreview document={generatedDocument} />
+            <div className="daily-doc-preview-viewport">
+              <DocumentPreview document={generatedDocument} />
+            </div>
           </section>
         </section>
       ) : (

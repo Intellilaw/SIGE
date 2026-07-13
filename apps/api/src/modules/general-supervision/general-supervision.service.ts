@@ -16,10 +16,13 @@ import type {
   HolidaysRepository,
   KpiAccessScope,
   KpisRepository,
+  LaborFilesRepository,
   MattersRepository,
   TasksRepository,
   UsersRepository
 } from "../../repositories/types";
+import type { KpiCommissionRequirementsService } from "../../repositories/kpi-commission-requirements";
+import { AppError } from "../../core/errors/app-error";
 
 type SupervisionBucketKey = "today" | "tomorrow" | "restOfWeek";
 type TaskSummaryKey = "today" | "overdue";
@@ -628,7 +631,7 @@ function getObservationState(user: SupervisionUserReference, observedUserPrefere
   }
 
   return {
-    isObserved: observedUserPreferences.get(user.userId) ?? true,
+    isObserved: observedUserPreferences.get(user.userId) ?? false,
     canToggleObservation: true
   };
 }
@@ -638,9 +641,11 @@ function buildTaskOverviewByUser(
   tasks: SupervisionTaskCandidate[],
   completedTasks: SupervisionCompletedTaskCandidate[],
   aliasLookup: Map<string, SupervisionUserReference>,
+  eligibleUsers: SupervisionUserReference[],
   monthlyKpiDaysByUser: Map<string, { user: SupervisionUserReference; metDays: number; missedDays: number }>,
   observedUserPreferences: Map<string, boolean>
 ) {
+  const eligibleUserIds = new Set(eligibleUsers.map((user) => user.userId));
   const groups = new Map<
     string,
     GroupedUserTaskSummary & { linkLookup: Map<string, SupervisionTaskDashboardLink> }
@@ -667,29 +672,33 @@ function buildTaskOverviewByUser(
     return group;
   }
 
+  eligibleUsers.forEach(getOrCreateGroup);
+
   sortTasks(completedTasks.map((task) => ({
     ...task,
     dueDate: task.completedDate,
     clientName: "",
     taskLabel: task.id
   }))).forEach((task) => {
-    resolveResponsibleUsers(task.responsible, aliasLookup).forEach((user) => {
-      const group = getOrCreateGroup(user);
-      const link = group.linkLookup.get(task.moduleId) ?? {
-        moduleId: task.moduleId,
-        label: task.moduleLabel,
-        path: getUserDashboardPath(task.moduleId, user),
-        total: 0,
-        today: 0,
-        overdue: 0
-      };
+    resolveResponsibleUsers(task.responsible, aliasLookup)
+      .filter((user) => eligibleUserIds.has(user.userId))
+      .forEach((user) => {
+        const group = getOrCreateGroup(user);
+        const link = group.linkLookup.get(task.moduleId) ?? {
+          moduleId: task.moduleId,
+          label: task.moduleLabel,
+          path: getUserDashboardPath(task.moduleId, user),
+          total: 0,
+          today: 0,
+          overdue: 0
+        };
 
-      group.completedThisMonth += 1;
-      group.total = group.completedThisMonth;
-      link.total += 1;
-      group.linkLookup.set(task.moduleId, link);
-      groups.set(user.userId, group);
-    });
+        group.completedThisMonth += 1;
+        group.total = group.completedThisMonth;
+        link.total += 1;
+        group.linkLookup.set(task.moduleId, link);
+        groups.set(user.userId, group);
+      });
   });
 
   sortTasks(tasks).forEach((task) => {
@@ -698,28 +707,34 @@ function buildTaskOverviewByUser(
       return;
     }
 
-    resolveResponsibleUsers(task.responsible, aliasLookup).forEach((user) => {
-      const group = getOrCreateGroup(user);
-      const link = group.linkLookup.get(task.moduleId) ?? {
-        moduleId: task.moduleId,
-        label: task.moduleLabel,
-        path: getUserDashboardPath(task.moduleId, user),
-        total: 0,
-        today: 0,
-        overdue: 0
-      };
+    resolveResponsibleUsers(task.responsible, aliasLookup)
+      .filter((user) => eligibleUserIds.has(user.userId))
+      .forEach((user) => {
+        const group = getOrCreateGroup(user);
+        const link = group.linkLookup.get(task.moduleId) ?? {
+          moduleId: task.moduleId,
+          label: task.moduleLabel,
+          path: getUserDashboardPath(task.moduleId, user),
+          total: 0,
+          today: 0,
+          overdue: 0
+        };
 
-      summaryKeys.forEach((summaryKey) => {
-        group[summaryKey] += 1;
-        link[summaryKey] += 1;
+        summaryKeys.forEach((summaryKey) => {
+          group[summaryKey] += 1;
+          link[summaryKey] += 1;
+        });
+        link.total += 1;
+        group.linkLookup.set(task.moduleId, link);
+        groups.set(user.userId, group);
       });
-      link.total += 1;
-      group.linkLookup.set(task.moduleId, link);
-      groups.set(user.userId, group);
-    });
   });
 
   monthlyKpiDaysByUser.forEach((kpiSummary, userId) => {
+    if (!eligibleUserIds.has(userId)) {
+      return;
+    }
+
     const group = getOrCreateGroup(kpiSummary.user);
     group.kpiMetDays = kpiSummary.metDays;
     group.kpiMissedDays = kpiSummary.missedDays;
@@ -811,6 +826,9 @@ function buildMonthlyKpiDaysByUser(overview: Awaited<ReturnType<KpisRepository["
 
       user.metrics.forEach((metric) => {
         metric.dailyBreakdown.forEach((day) => {
+          if (day.status === "not-configured") {
+            return;
+          }
           statusesByDate.set(day.date, [...(statusesByDate.get(day.date) ?? []), day.status]);
         });
       });
@@ -1111,7 +1129,9 @@ export class GeneralSupervisionService {
       tasks: TasksRepository;
       matters: MattersRepository;
       users: UsersRepository;
+      laborFiles: LaborFilesRepository;
       kpis: KpisRepository;
+      kpiCommissionRequirements: KpiCommissionRequirementsService;
       holidays: HolidaysRepository;
       supervisionPreferences: GeneralSupervisionPreferencesRepository;
     }
@@ -1119,6 +1139,43 @@ export class GeneralSupervisionService {
 
   public async setObservedUser(userId: string, isObserved: boolean, actor: GeneralSupervisionObservationActor) {
     return this.repositories.supervisionPreferences.setObservedUser(userId, isObserved, actor);
+  }
+
+  public async setKpiOverride(
+    userId: string,
+    metricId: string,
+    date: string,
+    isExcluded: boolean,
+    actor: GeneralSupervisionObservationActor
+  ) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isWeekendDateKey(date)) {
+      throw new AppError(400, "KPI_OVERRIDE_DATE_INVALID", "El override solo puede aplicarse a un dia habil.");
+    }
+
+    const overview = await this.repositories.kpis.getPeriodOverview(date, date, {
+      role: "SUPERADMIN",
+      legacyRole: "SUPERADMIN",
+      permissions: ["*"]
+    });
+    const user = overview.teams.flatMap((team) => team.users).find((candidate) => candidate.userId === userId);
+    const metric = user?.metrics.find((candidate) => candidate.id === metricId);
+
+    if (!metric) {
+      throw new AppError(404, "KPI_OVERRIDE_METRIC_NOT_FOUND", "No se encontro este KPI para la persona seleccionada.");
+    }
+    if (metric.emrtOverridePolicy === "not-allowed" || !metric.emrtOverridePolicy) {
+      throw new AppError(409, "KPI_OVERRIDE_NOT_ALLOWED", "Los KPI de terminos y vencimientos no admiten override.");
+    }
+
+    const saved = await this.repositories.supervisionPreferences.setKpiOverride(
+      userId,
+      metricId,
+      date,
+      isExcluded,
+      actor
+    );
+    await this.repositories.kpiCommissionRequirements.synchronize();
+    return saved;
   }
 
   public async getOverview() {
@@ -1133,12 +1190,22 @@ export class GeneralSupervisionService {
     const currentMonthStart = getMonthStartKey(todayKey);
     const currentMonthEnd = getMonthEndKey(todayKey);
     const currentWeekHolidayPeriods = getMonthPeriodsInRange(currentWeekStart, currentWeekEnd);
+    const kpiOverrideStart = kpiRanges.reduce(
+      (earliest, range) => range.startDate < earliest ? range.startDate : earliest,
+      kpiRanges[0]?.startDate ?? currentWeekStart
+    );
+    const kpiOverrideEnd = kpiRanges.reduce(
+      (latest, range) => range.endDate > latest ? range.endDate : latest,
+      kpiRanges[0]?.endDate ?? currentWeekEnd
+    );
 
-    const [storedModules, trackingRecords, users, observedUserSettings, currentWeekHolidaysByPeriod] = await Promise.all([
+    const [storedModules, trackingRecords, users, activeLaborFileUserIds, observedUserSettings, kpiOverrides, currentWeekHolidaysByPeriod] = await Promise.all([
       this.repositories.tasks.listModules(),
       this.repositories.tasks.listTrackingRecords({ includeDeleted: false }),
       this.repositories.users.list(),
+      this.repositories.laborFiles.listActiveUserIds(),
       this.repositories.supervisionPreferences.listObservedUsers(),
+      this.repositories.supervisionPreferences.listKpiOverrides(kpiOverrideStart, kpiOverrideEnd),
       Promise.all(
         currentWeekHolidayPeriods.map((period) =>
           this.repositories.holidays.list(period.year, period.month)
@@ -1170,6 +1237,20 @@ export class GeneralSupervisionService {
     const allTerms = termsByModule.flat();
     const allAdditionalTasks = additionalTasksByModule.flat();
     const { aliasLookup } = buildUserDirectory(users, Array.from(moduleDefinitions.values()));
+    const activeUsersById = new Map(
+      users
+        .filter((user) =>
+          user.isActive
+          && user.createLaborFile
+          && user.role !== "SUPERADMIN"
+          && user.legacyRole !== "SUPERADMIN"
+        )
+        .map((user) => [user.id, user])
+    );
+    const eligibleUsers = activeLaborFileUserIds
+      .map((userId) => activeUsersById.get(userId))
+      .filter((user): user is ManagedUser => Boolean(user))
+      .map(userReferenceFromManagedUser);
     const observedUserPreferences = new Map(observedUserSettings.map((setting) => [setting.userId, setting.isObserved]));
     const taskCandidates = buildTaskCandidates({
       trackingRecords,
@@ -1196,24 +1277,36 @@ export class GeneralSupervisionService {
       legacyRole: "SUPERADMIN",
       permissions: ["*"]
     };
-    const [kpiOverviews, currentMonthKpiOverview] = await Promise.all([
+    const [kpiOverviews, currentMonthKpiOverview, commissionEligibility] = await Promise.all([
       Promise.all(
         kpiRanges.map((range) =>
           this.repositories.kpis.getPeriodOverview(range.startDate, range.endDate, kpiAccessScope)
         )
       ),
-      this.repositories.kpis.getPeriodOverview(currentMonthStart, currentMonthEnd, kpiAccessScope)
+      this.repositories.kpis.getPeriodOverview(currentMonthStart, currentMonthEnd, kpiAccessScope),
+      this.repositories.kpiCommissionRequirements.getCurrentEligibility()
     ]);
 
     const monthlyKpiDaysByUser = buildMonthlyKpiDaysByUser(currentMonthKpiOverview);
-    const taskOverview = buildTaskOverviewByUser(
+    const baseTaskOverview = buildTaskOverviewByUser(
       todayKey,
       taskCandidates,
       completedTaskCandidates,
       aliasLookup,
+      eligibleUsers,
       monthlyKpiDaysByUser,
       observedUserPreferences
     );
+    const commissionEligibilityByUser = new Map(
+      commissionEligibility.map((eligibility) => [eligibility.userId, eligibility])
+    );
+    const taskOverview = {
+      ...baseTaskOverview,
+      users: baseTaskOverview.users.map((user) => ({
+        ...user,
+        commissionRequirements: commissionEligibilityByUser.get(user.userId)?.requirements ?? []
+      }))
+    };
     const termBuckets = dashboardRanges.map((range) => {
       const teams = groupTermsByTeam(range, termCandidates);
       return {
@@ -1233,6 +1326,7 @@ export class GeneralSupervisionService {
       currentWeekEnd,
       currentMonthStart,
       currentMonthEnd,
+      kpiOverrides,
       taskOverview,
       termBuckets,
       kpiPeriods,

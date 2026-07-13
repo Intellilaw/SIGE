@@ -39,27 +39,27 @@ const MODULE_TITLE = "Administraci\u00f3n de contratos internos";
 const LABOR_FILE_CONTRACT_ID_PREFIX = "labor-file-document:";
 const BUNDLED_CONTRACT_TEMPLATES: DisplayInternalContractTemplate[] = [
   {
-    id: "bundled-work-contract-2026-05-18",
-    title: "Contrato de trabajo (18.05.2026)",
-    originalFileName: "Contrato de trabajo (18.05.2026).docx",
+    id: "bundled-work-contract-2026-07-08",
+    title: "Contrato indvidual de trabajo (RC) (08.07.2026)",
+    originalFileName: "Contrato indvidual de trabajo (RC) (08.07.2026).docx",
     fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    fileSizeBytes: 33393,
+    fileSizeBytes: 36511,
     notes: "Machote base de empresa.",
-    createdAt: "2026-05-18T00:00:00.000Z",
-    updatedAt: "2026-05-18T00:00:00.000Z",
-    downloadUrl: "/internal-contract-templates/contrato-de-trabajo-2026-05-18.docx",
+    createdAt: "2026-07-08T00:00:00.000Z",
+    updatedAt: "2026-07-08T00:00:00.000Z",
+    downloadUrl: "/internal-contract-templates/contrato-indvidual-trabajo-rc-2026-07-08.docx",
     isBundled: true
   },
   {
-    id: "bundled-psp-contract-2024-09-10",
-    title: "Contrato de PSP (RC) (10.09.2024)",
-    originalFileName: "Contrato de PSP (RC) (10.09.2024).docx",
+    id: "bundled-psp-contract-2026-07-08",
+    title: "Contrato de prestaci\u00f3n de servicios profesionales (RC) (08.07.2026)",
+    originalFileName: "Contrato de prestaci\u00f3n de servicios profesionales (RC) (08.07.2026).docx",
     fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    fileSizeBytes: 117650,
+    fileSizeBytes: 117836,
     notes: "Machote base de empresa.",
-    createdAt: "2024-09-10T00:00:00.000Z",
-    updatedAt: "2024-09-10T00:00:00.000Z",
-    downloadUrl: "/internal-contract-templates/contrato-psp-rc-2024-09-10.docx",
+    createdAt: "2026-07-08T00:00:00.000Z",
+    updatedAt: "2026-07-08T00:00:00.000Z",
+    downloadUrl: "/internal-contract-templates/contrato-prestacion-servicios-profesionales-rc-2026-07-08.docx",
     isBundled: true
   },
   {
@@ -222,6 +222,27 @@ function quoteTitleLabel(quote?: Quote) {
   return (quote?.title ?? quote?.subject ?? "").trim();
 }
 
+const REPLACED_BUNDLED_TEMPLATE_IDENTIFIERS = [
+  {
+    title: "Contrato de trabajo (18.05.2026)",
+    originalFileName: "Contrato de trabajo (18.05.2026).docx"
+  },
+  {
+    title: "Contrato de PSP (RC) (10.09.2024)",
+    originalFileName: "Contrato de PSP (RC) (10.09.2024).docx"
+  }
+];
+
+function isReplacedContractTemplate(template: Pick<InternalContractTemplate, "title" | "originalFileName">) {
+  const title = normalizeSearchValue(template.title);
+  const filename = normalizeSearchValue(template.originalFileName);
+
+  return REPLACED_BUNDLED_TEMPLATE_IDENTIFIERS.some((identifier) =>
+    title === normalizeSearchValue(identifier.title)
+    || filename === normalizeSearchValue(identifier.originalFileName)
+  );
+}
+
 function isClientContractSection(section: InternalContractSection) {
   return section === "PROFESSIONAL_SERVICES" || section === "LEGAL_POLICIES";
 }
@@ -360,11 +381,12 @@ export function InternalContractsPage() {
   }, [activeSection, visibleSections]);
 
   const displayTemplates = useMemo<DisplayInternalContractTemplate[]>(() => {
+    const activeTemplates = templates.filter((template) => !isReplacedContractTemplate(template));
     const bundledTemplates = BUNDLED_CONTRACT_TEMPLATES.filter((bundledTemplate) => {
       const bundledTitle = normalizeSearchValue(bundledTemplate.title);
       const bundledFilename = normalizeSearchValue(bundledTemplate.originalFileName);
 
-      return !templates.some((template) => {
+      return !activeTemplates.some((template) => {
         const title = normalizeSearchValue(template.title);
         const filename = normalizeSearchValue(template.originalFileName);
 
@@ -372,7 +394,7 @@ export function InternalContractsPage() {
       });
     });
 
-    return sortContractTemplates([...bundledTemplates, ...templates]);
+    return sortContractTemplates([...bundledTemplates, ...activeTemplates]);
   }, [templates]);
 
   const sectionCounts = useMemo(() => ({

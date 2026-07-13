@@ -8,6 +8,7 @@ import {
   getExecutionMatterMissingFields,
   LEGALFLOW_SALES_PRODUCTS,
   LEGALFLOW_SALES_START_DATE,
+  type KpiEmrtOverridePolicy,
   type KpiIncident,
   type KpiMetric,
   type KpiMetricStatus,
@@ -19,6 +20,7 @@ import {
 } from "@sige/contracts";
 
 import type { KpiAccessScope, KpisRepository } from "./types";
+import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
 
 const LITIGATION_MODULE_ID = "litigation";
 const BRIEF_TABLE_ALIASES = ["escritos-fondo", "escritos_fondo"];
@@ -239,6 +241,12 @@ interface KpiDailySnapshotRecord {
   helper: string | null;
   incidents: unknown;
   sourceData: unknown;
+}
+
+interface KpiEmrtOverrideRecord {
+  userId: string;
+  metricId: string;
+  overrideDate: Date;
 }
 
 interface PeriodContext {
@@ -467,7 +475,8 @@ function buildNonEvaluatedDailyBreakdown(period: PeriodContext) {
         actualLabel: label,
         targetLabel: "No evaluado",
         helper: `${label}: este dia no cuenta como KPI cumplido ni como KPI incumplido.`,
-        incidents: []
+        incidents: [],
+        workValue: 0
       } satisfies KpiMetric["dailyBreakdown"][number];
     });
 }
@@ -1149,11 +1158,45 @@ function buildProductionDailyBreakdown(input: {
         : `${dayValue} escritos del dia; ${accumulatedValue} acumulados`,
       targetLabel: getProductionDailyTargetLabel(input.targetCadence, target),
       helper,
-      incidents: []
+      incidents: [],
+      workValue: dayValue
     } satisfies KpiMetric["dailyBreakdown"][number];
   });
 
-  return withNonEvaluatedDays(input.period, dailyBreakdown);
+  const breakdownWithConfiguredExclusions = withNonEvaluatedDays(input.period, dailyBreakdown);
+  const knownDateKeys = new Set(breakdownWithConfiguredExclusions.map((day) => day.date));
+  const extraWorkDays = Array.from(recordsByDate.entries())
+    .filter(([dateKey]) => dateKey >= input.period.startKey && dateKey <= input.period.cutoffKey)
+    .filter(([dateKey]) => !knownDateKeys.has(dateKey))
+    .map(([dateKey, records]) => ({
+      date: dateKey,
+      status: "not-configured" as const,
+      value: 0,
+      target: 0,
+      unit: NON_EVALUATED_KPI_DAY_UNIT,
+      actualLabel: `${records.length} escritos registrados en dia no evaluado`,
+      targetLabel: "No evaluado",
+      helper: "El trabajo valido de este dia no tiene meta ordinaria y puede reparar pendientes anteriores del mismo KPI.",
+      incidents: [],
+      workValue: records.length
+    } satisfies KpiMetric["dailyBreakdown"][number]));
+
+  return [...breakdownWithConfiguredExclusions, ...extraWorkDays]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((day) => {
+    if (!isNonEvaluatedKpiDay(day)) {
+      return day;
+    }
+
+    const workValue = recordsByDate.get(day.date)?.length ?? 0;
+    return {
+      ...day,
+      workValue,
+      actualLabel: workValue > 0
+        ? `${workValue} escritos registrados en dia no evaluado`
+        : day.actualLabel
+    };
+    });
 }
 
 function getIncidentDateKey(incident: KpiIncident) {
@@ -1345,6 +1388,8 @@ function buildTermVerificationMetric(input: {
     sourceDescription: "Manager de tareas: tareas marcadas como termino y dropdown de verificacion.",
     sourceTables: ["manager_tareas_terminos"],
     incidents,
+    commissionStrategy: "incident",
+    emrtOverridePolicy: "not-allowed",
     dailyBreakdown
   } satisfies KpiMetric;
 }
@@ -1438,6 +1483,8 @@ function buildBriefBeBlRegistrationMetric(input: {
     sourceDescription: "Tabla de seguimiento: Escritos de fondo, pestanas 3 y 4.",
     sourceTables: ["escritos_fondo"],
     incidents,
+    commissionStrategy: "incident",
+    emrtOverridePolicy: "daily",
     dailyBreakdown
   } satisfies KpiMetric;
 }
@@ -1508,6 +1555,12 @@ function buildProductionMetric(input: {
     sourceDescription: input.sourceDescription,
     sourceTables: input.sourceTables,
     incidents: [],
+    commissionStrategy: input.targetCadence === "five-per-day" ? "daily-production" : "weekly-production",
+    commissionTargetPerBusinessDay: input.targetCadence === "six-per-week"
+      ? 6 / 5
+      : input.targetCadence === "five-per-day"
+        ? 5
+        : 1 / 2,
     dailyBreakdown: buildProductionDailyBreakdown({
       completedRecords,
       period: input.period,
@@ -1547,6 +1600,8 @@ function buildDeadlineMetric(input: {
     sourceDescription: input.sourceDescription,
     sourceTables: input.sourceTables,
     incidents,
+    commissionStrategy: "incident",
+    emrtOverridePolicy: "not-allowed",
     dailyBreakdown: buildDeadlineDailyBreakdown({
       incidents,
       period: input.period
@@ -1730,6 +1785,148 @@ function summarizeDailyStatus(dailyBreakdown: Array<KpiMetric["dailyBreakdown"][
   return "met";
 }
 
+function getEmrtOverridePolicy(metric: KpiMetric): KpiEmrtOverridePolicy {
+  if (metric.emrtOverridePolicy) {
+    return metric.emrtOverridePolicy;
+  }
+
+  switch (metric.commissionStrategy) {
+    case "weekly-production":
+      return "weekly-prorated";
+    case "daily-production":
+    case "exact-daily":
+    case "state-threshold":
+      return "daily";
+    case "incident":
+    default:
+      return "not-allowed";
+  }
+}
+
+function markDayExcludedByEmrt(day: KpiMetric["dailyBreakdown"][number]) {
+  const workValue = day.workValue ?? 0;
+  return {
+    ...day,
+    status: "not-configured" as const,
+    value: 0,
+    target: 0,
+    unit: NON_EVALUATED_KPI_DAY_UNIT,
+    actualLabel: workValue > 0
+      ? `Excluido por EMRT; ${formatDecimal(workValue)} unidades de trabajo registradas`
+      : "Excluido por EMRT",
+    targetLabel: "Sin meta ordinaria",
+    helper: "Override de EMRT: este dia no cuenta como KPI cumplido ni incumplido. El trabajo valido puede reparar pendientes anteriores del mismo KPI.",
+    incidents: [],
+    workValue,
+    emrtExcluded: true
+  } satisfies KpiMetric["dailyBreakdown"][number];
+}
+
+function applyWeeklyEmrtOverrides(
+  metric: KpiMetric,
+  dailyBreakdown: KpiMetric["dailyBreakdown"],
+  period: PeriodContext
+) {
+  const targetPerBusinessDay = metric.commissionTargetPerBusinessDay ?? 0;
+  let evaluatedDayCount = 0;
+  let accumulatedValue = 0;
+  const adjustedDays = dailyBreakdown.map((day) => {
+    if (isNonEvaluatedKpiDay(day)) {
+      return day;
+    }
+
+    evaluatedDayCount += 1;
+    const dayValue = day.workValue ?? 0;
+    accumulatedValue += dayValue;
+    const target = targetPerBusinessDay * evaluatedDayCount;
+    const missing = Math.max(0, target - accumulatedValue);
+    const status: KpiMetricStatus = accumulatedValue >= target
+      ? "met"
+      : day.date === period.todayKey && !period.periodComplete
+        ? "warning"
+        : "missed";
+
+    return {
+      ...day,
+      status,
+      value: accumulatedValue,
+      target,
+      actualLabel: `${formatDecimal(dayValue)} ${metric.unit} del dia; ${formatDecimal(accumulatedValue)} acumulados`,
+      targetLabel: `Meta semanal proporcional al corte: ${formatDecimal(target)} ${metric.unit}`,
+      helper: status === "met"
+        ? "Meta semanal proporcional cumplida con los dias evaluados."
+        : status === "warning"
+          ? `El dia sigue en curso; faltan ${formatDecimal(missing)} ${metric.unit}.`
+          : `Faltaron ${formatDecimal(missing)} ${metric.unit} para la meta semanal proporcional.`
+    } satisfies KpiMetric["dailyBreakdown"][number];
+  });
+  const evaluatedDays = adjustedDays.filter((day) => !isNonEvaluatedKpiDay(day));
+  const value = evaluatedDays.reduce((total, day) => total + (day.workValue ?? 0), 0);
+  const target = targetPerBusinessDay * evaluatedDays.length;
+
+  return {
+    ...metric,
+    status: summarizeDailyStatus(adjustedDays),
+    value,
+    target,
+    progressPct: target > 0 ? clampProgress((value / target) * 100) : 100,
+    actualLabel: `${formatDecimal(value)} ${metric.unit} en dias evaluados`,
+    targetLabel: `${formatDecimal(target)} ${metric.unit} esperados con meta semanal ajustada`,
+    dailyBreakdown: adjustedDays
+  } satisfies KpiMetric;
+}
+
+function applyKpiEmrtOverrides(metric: KpiMetric, excludedDates: Set<string>, period: PeriodContext) {
+  const emrtOverridePolicy = getEmrtOverridePolicy(metric);
+  const metricWithPolicy = {
+    ...metric,
+    emrtOverridePolicy
+  } satisfies KpiMetric;
+
+  if (emrtOverridePolicy === "not-allowed" || excludedDates.size === 0) {
+    return metricWithPolicy;
+  }
+
+  const dailyBreakdown = metric.dailyBreakdown.map((day) =>
+    excludedDates.has(day.date) ? markDayExcludedByEmrt(day) : day
+  );
+
+  if (emrtOverridePolicy === "weekly-prorated") {
+    return applyWeeklyEmrtOverrides(metricWithPolicy, dailyBreakdown, period);
+  }
+
+  const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
+  if (metric.commissionStrategy === "state-threshold") {
+    const currentDay = evaluatedDays.at(-1);
+    return {
+      ...metricWithPolicy,
+      status: summarizeDailyStatus(dailyBreakdown),
+      value: currentDay?.value ?? 0,
+      target: currentDay?.target ?? metric.target,
+      progressPct: currentDay
+        ? currentDay.value <= currentDay.target
+          ? 100
+          : clampProgress((currentDay.target / currentDay.value) * 100)
+        : 100,
+      actualLabel: currentDay?.actualLabel ?? "Sin dias evaluados",
+      dailyBreakdown
+    } satisfies KpiMetric;
+  }
+
+  const value = evaluatedDays.reduce((total, day) => total + (day.workValue ?? day.value), 0);
+  const target = evaluatedDays.reduce((total, day) => total + day.target, 0);
+  return {
+    ...metricWithPolicy,
+    status: summarizeDailyStatus(dailyBreakdown),
+    value,
+    target,
+    progressPct: target > 0 ? clampProgress((value / target) * 100) : 100,
+    actualLabel: `${formatDecimal(value)} ${metric.unit} en dias evaluados`,
+    targetLabel: `${formatDecimal(target)} ${metric.unit} esperados despues de overrides`,
+    dailyBreakdown
+  } satisfies KpiMetric;
+}
+
 function buildExecutionIncompleteRowsMetric(input: {
   matters: MatterRecord[];
   clients: ClientRecord[];
@@ -1803,6 +2000,7 @@ function buildExecutionIncompleteRowsMetric(input: {
     sourceDescription: "Modulo de Ejecucion: asuntos activos de Litigio y columna Faltantes.",
     sourceTables: ["execution_matters"],
     incidents,
+    commissionStrategy: "state-threshold",
     dailyBreakdown
   } satisfies KpiMetric;
 }
@@ -1851,7 +2049,8 @@ function buildSalesDailyReportMetric(input: {
       helper: report
         ? `Reporte guardado en el modulo de Ventas para ${product?.name ?? task.productId}.`
         : `No se encontro reporte guardado en Ventas para ${product?.name ?? task.productId}.`,
-      incidents: []
+      incidents: [],
+      workValue: value
     } satisfies KpiMetric["dailyBreakdown"][number];
   }));
 
@@ -1871,6 +2070,7 @@ function buildSalesDailyReportMetric(input: {
     sourceDescription: "Modulo de Ventas: reportes diarios de actividad.",
     sourceTables: ["sales_daily_reports"],
     incidents: [],
+    commissionStrategy: "exact-daily",
     dailyBreakdown
   } satisfies KpiMetric;
 }
@@ -2069,6 +2269,69 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
 export class PrismaKpisRepository implements KpisRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
+  public async getExecutionIncompleteRowsCurrentState(dateKey = getBusinessDateKey()) {
+    const [trackingRecords, terms, matters, clients] = await Promise.all([
+      this.prisma.taskTrackingRecord.findMany({
+        where: {
+          moduleId: LITIGATION_MODULE_ID,
+          deletedAt: null
+        },
+        orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
+      }),
+      this.prisma.taskTerm.findMany({
+        where: {
+          moduleId: LITIGATION_MODULE_ID,
+          deletedAt: null
+        },
+        orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
+      }),
+      this.prisma.matter.findMany({
+        select: {
+          id: true,
+          matterNumber: true,
+          clientNumber: true,
+          clientName: true,
+          quoteNumber: true,
+          subject: true,
+          responsibleTeam: true,
+          communicationChannel: true,
+          matterIdentifier: true,
+          executionLinkedModule: true,
+          milestone: true,
+          deletedAt: true
+        },
+        where: {
+          deletedAt: null,
+          OR: [
+            { responsibleTeam: "LITIGATION" },
+            { executionLinkedModule: LITIGATION_MODULE_ID }
+          ]
+        },
+        orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.client.findMany({
+        select: {
+          id: true,
+          clientNumber: true,
+          name: true
+        },
+        where: {
+          deletedAt: null
+        },
+        orderBy: [{ clientNumber: "asc" }]
+      })
+    ]);
+
+    return buildExecutionIncompleteRowsEvaluation({
+      matters: matters as MatterRecord[],
+      clients: clients as ClientRecord[],
+      trackingRecords: trackingRecords as TrackingRecord[],
+      terms: terms as TermRecord[],
+      dateKey,
+      isOpenBusinessDay: true
+    });
+  }
+
   public async captureExecutionIncompleteRowsSnapshot(dateKey = getBusinessDateKey()) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
       throw new Error(`Invalid KPI snapshot date: ${dateKey}`);
@@ -2236,7 +2499,8 @@ export class PrismaKpisRepository implements KpisRepository {
     const todayKey = getBusinessDateKey();
     const cutoffKey = getCutoffKey(startKey, endKey, todayKey);
 
-    const [users, userTeams, trackingRecords, terms, matters, clients, kpiDailySnapshots, salesDailyReports, holidays, vacationEvents, globalVacationDays] = await Promise.all([
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const [users, userTeams, trackingRecords, terms, matters, clients, kpiDailySnapshots, salesDailyReports, holidays, vacationEvents, globalVacationDays, kpiEmrtOverrides] = await Promise.all([
       this.prisma.user.findMany({
         where: { isActive: true },
         orderBy: [{ legacyTeam: "asc" }, { team: "asc" }, { displayName: "asc" }]
@@ -2347,6 +2611,21 @@ export class PrismaKpisRepository implements KpisRepository {
             lte: dateFromKey(endKey)
           }
         }
+      }),
+      this.prisma.kpiEmrtOverride.findMany({
+        select: {
+          userId: true,
+          metricId: true,
+          overrideDate: true
+        },
+        where: {
+          organizationId,
+          overrideDate: {
+            gte: dateFromKey(startKey),
+            lte: dateFromKey(endKey)
+          },
+          revokedAt: null
+        }
       })
     ]);
     const teamCatalog = userTeams as UserTeamRecord[];
@@ -2384,6 +2663,13 @@ export class PrismaKpisRepository implements KpisRepository {
       excludedDateLabels: holidayLabels,
       evaluatedDateKeys: getBusinessDateKeys(startKey, cutoffKey, holidayKeys)
     };
+    const overrideDatesByUserMetric = new Map<string, Set<string>>();
+    (kpiEmrtOverrides as KpiEmrtOverrideRecord[]).forEach((override) => {
+      const key = `${override.userId}:${override.metricId}`;
+      const dates = overrideDatesByUserMetric.get(key) ?? new Set<string>();
+      dates.add(toDateKey(override.overrideDate));
+      overrideDatesByUserMetric.set(key, dates);
+    });
 
     const userSummaries = (users as UserRecord[])
       .filter((user) => !isExcludedFromKpis(user))
@@ -2399,7 +2685,7 @@ export class PrismaKpisRepository implements KpisRepository {
           personalVacationKeys,
           globalVacationKeys
         });
-        const metrics = config
+        const builtMetrics = config
           ? config.buildMetrics({
               user,
               aliases,
@@ -2412,6 +2698,11 @@ export class PrismaKpisRepository implements KpisRepository {
               period: userPeriod
             })
           : [];
+        const metrics = builtMetrics.map((metric) => applyKpiEmrtOverrides(
+          metric,
+          overrideDatesByUserMetric.get(`${user.id}:${metric.id}`) ?? new Set<string>(),
+          userPeriod
+        ));
 
         return getUserTeamAssignments(user, teamLabelByKey)
           .filter((assignment) => assignment.teamKey === "UNASSIGNED" || activeTeamKeys.has(assignment.teamKey))

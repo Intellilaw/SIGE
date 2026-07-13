@@ -756,6 +756,25 @@ function findTemplate(templateId) {
     const normalizedTemplateId = templateId === "document-receipt" ? "rc-received-document-receipt" : templateId;
     return dailyDocumentTemplates.find((template) => template.id === normalizedTemplateId) ?? dailyDocumentTemplates[0];
 }
+export function buildCommissionMoneyReceipt(input) {
+    const document = findTemplate("money-receipt").build({
+        amount: input.amountMxn.toFixed(2),
+        concept: input.concept,
+        currency: "MXN",
+        date: dateInputValue(input.generatedAt ?? new Date()),
+        paymentType: "Pago total",
+        receivedBy: input.recipientName
+    });
+    return document.formLayout?.type === "money-receipt"
+        ? {
+            ...document,
+            formLayout: {
+                ...document.formLayout,
+                receiptHeading: "PAGO DE COMISIONES RECIBIDO"
+            }
+        }
+        : document;
+}
 function buildBaseDocument(template, values) {
     return template.build(values);
 }
@@ -892,6 +911,9 @@ function getMoneyReceiptForm(document) {
 function moneyReceiptSignatureName(form) {
     return (normalizeText(form.receivedBy) || "Nombre de quien recibe").toLocaleUpperCase("es-MX");
 }
+function moneyReceiptHeading(form) {
+    return normalizeText(form.receiptHeading) || "PAGO RECIBIDO POR RUSCONI CONSULTING";
+}
 function rcDeliveredFormText(form) {
     const documentLines = form.documentRows
         .filter((row) => normalizeText(row.description))
@@ -951,10 +973,10 @@ function moneyReceiptFormText(form) {
         `CONCEPTO: ${form.concept}`,
         `PAGO PARCIAL/PAGO TOTAL: ${form.paymentType}`,
         `MONTO: ${form.amount}`,
-        "PAGO RECIBIDO POR RUSCONI CONSULTING",
+        moneyReceiptHeading(form),
         `NOMBRE DE QUIEN RECIBE: ${form.receivedBy}`,
         `FECHA DE RECIBIDO: ${form.receivedDate}`,
-        `______________________________\n${moneyReceiptSignatureName(form)}`
+        `______________________________\n${moneyReceiptSignatureName(form)}\nFirma de conformidad`
     ];
 }
 function moneyReceiptFormHtml(form) {
@@ -966,7 +988,7 @@ function moneyReceiptFormHtml(form) {
     </div>
     <table class="money-receipt-table">
       <thead>
-        <tr><th colspan="2">PAGO RECIBIDO POR RUSCONI CONSULTING</th></tr>
+        <tr><th colspan="2">${escapeHtml(moneyReceiptHeading(form))}</th></tr>
         <tr>
           <th>NOMBRE DE QUIEN RECIBE</th>
           <th>FECHA DE RECIBIDO</th>
@@ -981,6 +1003,7 @@ function moneyReceiptFormHtml(form) {
     </table>
     <div class="money-receiver-signature">
       <strong>${escapeHtml(moneyReceiptSignatureName(form))}</strong>
+      <em>Firma de conformidad</em>
     </div>
   </section>`;
 }
@@ -1000,7 +1023,7 @@ function generatedDocumentToText(document) {
         .filter(Boolean)
         .join("\n\n");
 }
-function generatedDocumentToHtml(document) {
+export function generatedDocumentToHtml(document) {
     const form = getRcDeliveredForm(document);
     const moneyForm = getMoneyReceiptForm(document);
     const signatures = getDocumentSignatures(document);
@@ -1061,7 +1084,7 @@ function generatedDocumentToHtml(document) {
     .money-receipt-table th, .money-receipt-table td { border: 1px solid #111; color: #000; padding: 2px 8px; text-align: center; }
     .money-receipt-table th { background: #d9d9d9; font-size: 17px; font-weight: 700; line-height: 1.1; }
     .money-receipt-table td { font-size: 16px; font-weight: 700; line-height: 1.2; }
-    .money-receiver-signature { border-top: 1px solid #111; color: #000; font-family: "Times New Roman", serif; margin: -10px auto 0; padding-top: 8px; text-align: center; width: 58%; }
+    .money-receiver-signature { border-top: 1px solid #111; color: #000; font-family: "Times New Roman", serif; margin: 36px auto 0; padding-top: 8px; text-align: center; width: 58%; }
     .money-receiver-signature strong, .money-receiver-signature em { display: block; overflow-wrap: anywhere; }
     .money-receiver-signature strong { font-size: 15px; font-weight: 700; }
     .money-receiver-signature em { font-size: 13px; font-style: normal; font-weight: 700; margin-top: 4px; }
@@ -1086,8 +1109,8 @@ function generatedDocumentToHtml(document) {
 </body>
 </html>`;
 }
-function documentFileName(document, extension) {
-    return `${slugify(document.title)}.${extension}`;
+function documentFileName(document, extension, filenameBase) {
+    return `${slugify(filenameBase || document.title)}.${extension}`;
 }
 function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
@@ -1099,7 +1122,7 @@ function saveBlob(blob, filename) {
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
-async function downloadWordDocument(document) {
+export async function downloadWordDocument(document, filenameBase) {
     const { AlignmentType, Document: WordDocument, Footer, Header, HorizontalPositionRelativeFrom, ImageRun, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, TableBorders, VerticalPositionRelativeFrom, WidthType } = await import("docx");
     const form = getRcDeliveredForm(document);
     const moneyForm = getMoneyReceiptForm(document);
@@ -1296,7 +1319,7 @@ async function downloadWordDocument(document) {
                         new TableCell({
                             columnSpan: 2,
                             shading: tableHeaderShading,
-                            children: [moneyCellParagraph("PAGO RECIBIDO POR RUSCONI CONSULTING", true)]
+                            children: [moneyCellParagraph(moneyReceiptHeading(moneyForm), true)]
                         })
                     ]
                 }),
@@ -1322,15 +1345,19 @@ async function downloadWordDocument(document) {
                 })
             ]
         }));
-        children.push(new Paragraph({ spacing: { after: 560 }, text: "" }));
+        children.push(new Paragraph({ spacing: { after: 960 }, text: "" }));
         children.push(new Paragraph({
             alignment: AlignmentType.CENTER,
             children: [moneyTextRun("______________________________")]
         }));
         children.push(new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { before: 100 },
+            spacing: { before: 100, after: 60 },
             children: [moneyTextRun(moneyReceiptSignatureName(moneyForm), true)]
+        }));
+        children.push(new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: "Firma de conformidad", italics: true, size: 20, font: "Times New Roman", color: "52606D" })]
         }));
     }
     document.paragraphs.forEach((paragraph) => {
@@ -1481,13 +1508,13 @@ async function downloadWordDocument(document) {
         ]
     });
     const blob = await Packer.toBlob(wordDocument);
-    saveBlob(blob, documentFileName(document, "docx"));
+    saveBlob(blob, documentFileName(document, "docx", filenameBase));
 }
 function splitPdfText(pdf, text, maxWidth) {
     const lines = pdf.splitTextToSize(text, maxWidth);
     return Array.isArray(lines) ? lines.map(String) : [String(lines)];
 }
-async function downloadPdfDocument(document) {
+export async function downloadPdfDocument(document, filenameBase) {
     const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF({ format: "letter", unit: "pt" });
     const form = getRcDeliveredForm(document);
@@ -1669,7 +1696,7 @@ async function downloadPdfDocument(document) {
         pdf.setDrawColor(17, 17, 17);
         pdf.setFillColor(217, 217, 217);
         pdf.rect(tableX, y, tableWidth, tableRowHeight, "FD");
-        drawMoneyCell("PAGO RECIBIDO POR RUSCONI CONSULTING", tableX, y, tableWidth, tableRowHeight, true);
+        drawMoneyCell(moneyReceiptHeading(moneyForm), tableX, y, tableWidth, tableRowHeight, true);
         y += tableRowHeight;
         pdf.setFillColor(217, 217, 217);
         pdf.rect(tableX, y, halfWidth, tableRowHeight, "FD");
@@ -1682,8 +1709,8 @@ async function downloadPdfDocument(document) {
         drawMoneyCell(moneyForm.receivedBy, tableX, y, halfWidth, tableRowHeight, true);
         drawMoneyCell(moneyForm.receivedDate, tableX + halfWidth, y, halfWidth, tableRowHeight, true);
         y += tableRowHeight;
-        y += 48;
-        ensureSpace(86);
+        y += 70;
+        ensureSpace(96);
         const moneySignatureWidth = tableWidth * 0.58;
         const moneySignatureX = tableX + (tableWidth - moneySignatureWidth) / 2;
         const moneySignatureCenter = tableX + tableWidth / 2;
@@ -1693,7 +1720,12 @@ async function downloadPdfDocument(document) {
         pdf.setFont("times", "bold");
         pdf.setFontSize(11);
         pdf.text(receiverNameLines, moneySignatureCenter, y + 18, { align: "center", maxWidth: moneySignatureWidth - 12 });
-        y += 78;
+        pdf.setFont("times", "italic");
+        pdf.setFontSize(9);
+        pdf.setTextColor(82, 96, 109);
+        pdf.text("Firma de conformidad", moneySignatureCenter, y + 34, { align: "center" });
+        pdf.setTextColor(0, 0, 0);
+        y += 90;
     }
     document.paragraphs.forEach(addParagraph);
     if (document.details?.length) {
@@ -1759,16 +1791,16 @@ async function downloadPdfDocument(document) {
         }
         pdf.setTextColor(0, 0, 0);
     }
-    pdf.save(documentFileName(document, "pdf"));
+    pdf.save(documentFileName(document, "pdf", filenameBase));
 }
-function DocumentPreview({ document }) {
+export function DocumentPreview({ document }) {
     const form = getRcDeliveredForm(document);
     const moneyForm = getMoneyReceiptForm(document);
     const signatures = getDocumentSignatures(document);
     const signatureClassName = `daily-doc-signatures${document.signatureColumns === 2 ? " daily-doc-signatures-two-column" : ""}`;
     const paperClassName = `daily-doc-paper${hasRusconiLetterhead(document) ? " daily-doc-paper-letterhead" : ""}${form ? " daily-doc-paper-rc-receipt" : ""}${moneyForm ? " daily-doc-paper-money-receipt" : ""}`;
     const paragraphBlock = document.paragraphs.length ? (_jsx("div", { className: `daily-doc-paper-body${form || moneyForm ? " daily-doc-paper-body-supplemental" : ""}`, children: document.paragraphs.map((paragraph, index) => (_jsx("p", { className: isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined, children: paragraph }, `${paragraph}-${index}`))) })) : null;
-    return (_jsxs("article", { className: paperClassName, "aria-live": "polite", children: [_jsxs("header", { children: [_jsx("h3", { children: document.title }), document.subtitle ? (_jsx("span", { className: document.subtitleAlignment === "right" ? "daily-doc-subtitle-right" : undefined, children: document.subtitle })) : null] }), form ? (_jsxs("section", { className: "daily-doc-rc-delivered-form", children: [_jsxs("table", { className: "daily-doc-rc-docs-table", children: [_jsx("thead", { children: _jsx("tr", { children: _jsx("th", { colSpan: 3, children: form.descriptionHeading.split("\n").map((headingLine, index) => (_jsxs("span", { children: [index > 0 ? _jsx("br", {}) : null, headingLine] }, headingLine))) }) }) }), _jsx("tbody", { children: form.documentRows.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { className: "daily-doc-rc-doc-description", children: row.description || "\u00A0" }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "original" ? " is-checked" : ""}` }), receiptDocumentKindLabels.original] })) : ("\u00A0") }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "simple" ? " is-checked" : ""}` }), receiptDocumentKindLabels.simple] })) : ("\u00A0") })] }, `${row.description}-${index}`))) })] }), _jsx("table", { className: "daily-doc-rc-meta-table", children: _jsxs("tbody", { children: [_jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN ENTREGA" }), _jsx("th", { children: "FECHA" })] }), _jsxs("tr", { children: [_jsx("td", { children: form.deliveredBy }), _jsx("td", { children: form.date })] }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("td", { children: form.receivedBy })] })] }) }), _jsxs("div", { className: "daily-doc-rc-receiver-signature", children: [_jsx("strong", { children: form.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe los documentos" })] })] })) : moneyForm ? (_jsxs("section", { className: "daily-doc-money-receipt-form", children: [_jsxs("div", { className: "daily-doc-money-receipt-lines", children: [_jsxs("p", { children: [_jsx("strong", { children: "CONCEPTO:" }), "\u00A0", moneyForm.concept] }), _jsxs("p", { children: [_jsx("strong", { children: "PAGO PARCIAL/PAGO TOTAL:" }), "\u00A0", moneyForm.paymentType] }), _jsxs("p", { children: [_jsx("strong", { children: "MONTO:" }), "\u00A0", moneyForm.amount] })] }), _jsxs("table", { className: "daily-doc-money-receipt-table", children: [_jsxs("thead", { children: [_jsx("tr", { children: _jsx("th", { colSpan: 2, children: "PAGO RECIBIDO POR RUSCONI CONSULTING" }) }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("th", { children: "FECHA DE RECIBIDO" })] })] }), _jsx("tbody", { children: _jsxs("tr", { children: [_jsx("td", { children: moneyForm.receivedBy }), _jsx("td", { children: moneyForm.receivedDate })] }) })] }), _jsx("div", { className: "daily-doc-money-receiver-signature", children: _jsx("strong", { children: moneyReceiptSignatureName(moneyForm) }) })] })) : (paragraphBlock), form || moneyForm ? paragraphBlock : null, document.details?.length ? (_jsx("dl", { className: "daily-doc-details", children: document.details.map((detail) => (_jsxs("div", { children: [_jsx("dt", { children: detail.label }), _jsx("dd", { children: detail.value })] }, detail.label))) })) : null, signatures.length ? (_jsx("footer", { className: signatureClassName, children: signatures.map((signature, index) => (_jsxs("div", { children: [_jsx("span", {}), _jsx("strong", { children: signature.name }), signature.role ? _jsx("em", { children: signature.role }) : null] }, `${signature.name}-${signature.role ?? ""}-${index}`))) })) : null, shouldShowPageNumbers(document) ? _jsx("div", { className: "daily-doc-page-number", children: pageNumberLabel(1, 1) }) : null] }));
+    return (_jsxs("article", { className: paperClassName, "aria-live": "polite", children: [_jsxs("header", { children: [_jsx("h3", { children: document.title }), document.subtitle ? (_jsx("span", { className: document.subtitleAlignment === "right" ? "daily-doc-subtitle-right" : undefined, children: document.subtitle })) : null] }), form ? (_jsxs("section", { className: "daily-doc-rc-delivered-form", children: [_jsxs("table", { className: "daily-doc-rc-docs-table", children: [_jsx("thead", { children: _jsx("tr", { children: _jsx("th", { colSpan: 3, children: form.descriptionHeading.split("\n").map((headingLine, index) => (_jsxs("span", { children: [index > 0 ? _jsx("br", {}) : null, headingLine] }, headingLine))) }) }) }), _jsx("tbody", { children: form.documentRows.map((row, index) => (_jsxs("tr", { children: [_jsx("td", { className: "daily-doc-rc-doc-description", children: row.description || "\u00A0" }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "original" ? " is-checked" : ""}` }), receiptDocumentKindLabels.original] })) : ("\u00A0") }), _jsx("td", { className: "daily-doc-rc-doc-kind", children: row.description ? (_jsxs(_Fragment, { children: [_jsx("span", { className: `daily-doc-checkbox${row.kind === "simple" ? " is-checked" : ""}` }), receiptDocumentKindLabels.simple] })) : ("\u00A0") })] }, `${row.description}-${index}`))) })] }), _jsx("table", { className: "daily-doc-rc-meta-table", children: _jsxs("tbody", { children: [_jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN ENTREGA" }), _jsx("th", { children: "FECHA" })] }), _jsxs("tr", { children: [_jsx("td", { children: form.deliveredBy }), _jsx("td", { children: form.date })] }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("td", { children: form.receivedBy })] })] }) }), _jsxs("div", { className: "daily-doc-rc-receiver-signature", children: [_jsx("strong", { children: form.receivedBy || "Nombre de quien recibe" }), _jsx("em", { children: "Firma de quien recibe los documentos" })] })] })) : moneyForm ? (_jsxs("section", { className: "daily-doc-money-receipt-form", children: [_jsxs("div", { className: "daily-doc-money-receipt-lines", children: [_jsxs("p", { children: [_jsx("strong", { children: "CONCEPTO:" }), "\u00A0", moneyForm.concept] }), _jsxs("p", { children: [_jsx("strong", { children: "PAGO PARCIAL/PAGO TOTAL:" }), "\u00A0", moneyForm.paymentType] }), _jsxs("p", { children: [_jsx("strong", { children: "MONTO:" }), "\u00A0", moneyForm.amount] })] }), _jsxs("table", { className: "daily-doc-money-receipt-table", children: [_jsxs("thead", { children: [_jsx("tr", { children: _jsx("th", { colSpan: 2, children: moneyReceiptHeading(moneyForm) }) }), _jsxs("tr", { children: [_jsx("th", { children: "NOMBRE DE QUIEN RECIBE" }), _jsx("th", { children: "FECHA DE RECIBIDO" })] })] }), _jsx("tbody", { children: _jsxs("tr", { children: [_jsx("td", { children: moneyForm.receivedBy }), _jsx("td", { children: moneyForm.receivedDate })] }) })] }), _jsxs("div", { className: "daily-doc-money-receiver-signature", children: [_jsx("strong", { children: moneyReceiptSignatureName(moneyForm) }), _jsx("em", { children: "Firma de conformidad" })] })] })) : (paragraphBlock), form || moneyForm ? paragraphBlock : null, document.details?.length ? (_jsx("dl", { className: "daily-doc-details", children: document.details.map((detail) => (_jsxs("div", { children: [_jsx("dt", { children: detail.label }), _jsx("dd", { children: detail.value })] }, detail.label))) })) : null, signatures.length ? (_jsx("footer", { className: signatureClassName, children: signatures.map((signature, index) => (_jsxs("div", { children: [_jsx("span", {}), _jsx("strong", { children: signature.name }), signature.role ? _jsx("em", { children: signature.role }) : null] }, `${signature.name}-${signature.role ?? ""}-${index}`))) })) : null, shouldShowPageNumbers(document) ? _jsx("div", { className: "daily-doc-page-number", children: pageNumberLabel(1, 1) }) : null] }));
 }
 export function DailyDocumentsPage() {
     const { user } = useAuth();
@@ -2242,7 +2274,7 @@ export function DailyDocumentsPage() {
                                                                 }
                                                                 updateValue(field.name, event.target.value);
                                                             }, placeholder: field.placeholder, type: field.type ?? "text", value: values[field.name] ?? "" }))] }, field.name));
-                                            })] }), _jsxs("div", { className: "daily-doc-save-actions", children: [canWrite ? (_jsx("button", { className: "primary-button", disabled: savingAssignment, onClick: () => void saveAssignment(), type: "button", children: savingAssignment ? "Guardando..." : editingDocumentId ? "Guardar cambios" : "Asignar a cliente" })) : null, editingDocumentId ? (_jsx("button", { className: "secondary-button", disabled: savingAssignment, onClick: resetDraft, type: "button", children: "Cancelar edicion" })) : null] })] })] }), _jsxs("section", { className: "panel daily-doc-preview-panel", children: [_jsxs("div", { className: "panel-header daily-doc-preview-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Vista previa" }), copyStatus ? _jsx("span", { children: copyStatus }) : null] }), _jsxs("div", { className: "daily-doc-actions", children: [_jsx("button", { className: "secondary-button", onClick: () => void copyDocument(), type: "button", children: "Copiar" }), _jsx("button", { className: "secondary-button", onClick: printDocument, type: "button", children: "Imprimir" }), _jsx("button", { className: "secondary-button", onClick: () => void handleWordDownload(), type: "button", children: "Word" }), _jsx("button", { className: "primary-button", onClick: () => void handlePdfDownload(), type: "button", children: "PDF" })] })] }), _jsx(DocumentPreview, { document: generatedDocument })] })] })) : (_jsxs("section", { className: "panel daily-doc-assigned-panel", children: [_jsxs("div", { className: "panel-header daily-doc-assigned-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Documentos asignados" }), _jsxs("span", { children: [filteredAssignments.length, " de ", assignments.length] })] }), _jsxs("div", { className: "daily-doc-assigned-actions", children: [_jsx("button", { className: "secondary-button", onClick: () => void loadModuleData(), type: "button", children: "Refrescar" }), _jsx("button", { className: "primary-button", onClick: () => {
+                                            })] }), _jsxs("div", { className: "daily-doc-save-actions", children: [canWrite ? (_jsx("button", { className: "primary-button", disabled: savingAssignment, onClick: () => void saveAssignment(), type: "button", children: savingAssignment ? "Guardando..." : editingDocumentId ? "Guardar cambios" : "Asignar a cliente" })) : null, editingDocumentId ? (_jsx("button", { className: "secondary-button", disabled: savingAssignment, onClick: resetDraft, type: "button", children: "Cancelar edicion" })) : null] })] })] }), _jsxs("section", { className: "panel daily-doc-preview-panel", children: [_jsxs("div", { className: "panel-header daily-doc-preview-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Vista previa" }), copyStatus ? _jsx("span", { children: copyStatus }) : null] }), _jsxs("div", { className: "daily-doc-actions", children: [_jsx("button", { className: "secondary-button", onClick: () => void copyDocument(), type: "button", children: "Copiar" }), _jsx("button", { className: "secondary-button", onClick: printDocument, type: "button", children: "Imprimir" }), _jsx("button", { className: "secondary-button", onClick: () => void handleWordDownload(), type: "button", children: "Word" }), _jsx("button", { className: "primary-button", onClick: () => void handlePdfDownload(), type: "button", children: "PDF" })] })] }), _jsx("div", { className: "daily-doc-preview-viewport", children: _jsx(DocumentPreview, { document: generatedDocument }) })] })] })) : (_jsxs("section", { className: "panel daily-doc-assigned-panel", children: [_jsxs("div", { className: "panel-header daily-doc-assigned-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Documentos asignados" }), _jsxs("span", { children: [filteredAssignments.length, " de ", assignments.length] })] }), _jsxs("div", { className: "daily-doc-assigned-actions", children: [_jsx("button", { className: "secondary-button", onClick: () => void loadModuleData(), type: "button", children: "Refrescar" }), _jsx("button", { className: "primary-button", onClick: () => {
                                             resetDraft();
                                             setActiveTab("generate");
                                         }, type: "button", children: "Nuevo documento" })] })] }), _jsxs("label", { className: "form-field daily-doc-assigned-search", children: [_jsx("span", { children: "Buscar" }), _jsx("input", { onChange: (event) => setAssignedSearch(event.target.value), placeholder: "Buscar por cliente, numero o documento...", type: "search", value: assignedSearch })] }), loadingModuleData ? (_jsx("div", { className: "centered-inline-message", children: "Cargando documentos..." })) : filteredAssignments.length === 0 ? (_jsx("div", { className: "centered-inline-message", children: "No hay documentos asignados." })) : (_jsx("div", { className: "daily-doc-assigned-groups", children: groupedAssignments.map((group) => (_jsxs("section", { className: "daily-doc-client-group", children: [_jsxs("div", { className: "daily-doc-client-group-head", children: [_jsxs("div", { className: "daily-doc-client-group-title", children: [_jsx("strong", { children: group.clientNumber }), _jsx("span", { children: group.clientName })] }), _jsxs("span", { children: [group.assignments.length, " documento", group.assignments.length === 1 ? "" : "s"] })] }), _jsx("div", { className: "daily-doc-assigned-table-shell", children: _jsxs("table", { className: "data-table daily-doc-assigned-table daily-doc-assigned-group-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Documento" }), _jsx("th", { children: "Plantilla" }), _jsx("th", { children: "Actualizado" }), _jsx("th", { children: "Acciones" })] }) }), _jsx("tbody", { children: group.assignments.map((assignment) => (_jsxs("tr", { children: [_jsx("td", { children: assignment.title }), _jsx("td", { children: assignment.templateTitle }), _jsx("td", { children: new Date(assignment.updatedAt).toLocaleDateString("es-MX") }), _jsx("td", { children: _jsxs("div", { className: "table-actions", children: [canWrite ? (_jsx("button", { className: "secondary-button", onClick: () => editAssignment(assignment), type: "button", children: "Modificar" })) : null, _jsx("button", { className: "secondary-button", onClick: () => void downloadAssignmentWord(assignment), type: "button", children: "Word" }), _jsx("button", { className: "secondary-button", onClick: () => void downloadAssignmentPdf(assignment), type: "button", children: "PDF" }), canWrite ? (_jsx("button", { className: "danger-button", disabled: deletingDocumentId === assignment.id, onClick: () => void deleteAssignment(assignment), type: "button", children: deletingDocumentId === assignment.id ? "Borrando..." : "Borrar" })) : null] }) })] }, assignment.id))) })] }) })] }, group.clientId))) }))] }))] }));

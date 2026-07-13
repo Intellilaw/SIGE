@@ -524,6 +524,23 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     return records.filter(shouldExposeLaborFile).map((record) => mapLaborFile(record, globalVacationDays));
   }
 
+  public async listActiveUserIds() {
+    await this.syncMissingForUsers();
+    const records = await this.prisma.laborFile.findMany({
+      where: {
+        employmentStatus: "ACTIVE",
+        userId: { not: null }
+      },
+      select: { userId: true }
+    });
+
+    return Array.from(new Set(
+      records
+        .map((record) => record.userId)
+        .filter((userId): userId is string => Boolean(userId))
+    ));
+  }
+
   public async listForUser(userId: string) {
     await this.ensureForUser(userId);
     await this.refreshStatuses({ userId });
@@ -1391,6 +1408,17 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
         left.employeeName.localeCompare(right.employeeName)
       )
       .map((record) => this.mapLaborFile(record));
+  }
+
+  public async listActiveUserIds() {
+    await this.syncMissingForUsers();
+    const users = this.readLocalUsers();
+    return Array.from(new Set(
+      this.getState().files
+        .filter((record) => record.employmentStatus === "ACTIVE" && Boolean(record.userId))
+        .filter((record) => this.shouldExposeLocalLaborFile(record, users))
+        .map((record) => record.userId!)
+    ));
   }
 
   public async listForUser(userId: string) {
@@ -2264,6 +2292,13 @@ export class ResilientLaborFilesRepository implements LaborFilesRepository {
 
   public list() {
     return this.withFallback(() => this.primary.list(), () => this.fallback?.list() ?? Promise.resolve([]));
+  }
+
+  public listActiveUserIds() {
+    return this.withFallback(
+      () => this.primary.listActiveUserIds(),
+      () => this.fallback?.listActiveUserIds() ?? Promise.resolve([])
+    );
   }
 
   public listForUser(userId: string) {

@@ -762,6 +762,49 @@ export interface CommissionReceiver {
   createdAt: string;
 }
 
+export interface CommissionRecipientAssignment {
+  section: string;
+  recipientName: string;
+  userId?: string;
+}
+
+export type KpiCommissionObligationKind =
+  | "production-deficit"
+  | "incident"
+  | "state-threshold"
+  | "exact-daily";
+
+export interface KpiCommissionRequirementItem {
+  obligationId: string;
+  metricId: string;
+  metricLabel: string;
+  kind: KpiCommissionObligationKind;
+  originDate: string;
+  pendingAmount: number;
+  unit: string;
+  summary: string;
+  details: string[];
+}
+
+export interface KpiCommissionMetricRequirement {
+  metricId: string;
+  metricLabel: string;
+  blocked: boolean;
+  pendingAmount: number;
+  unit: string;
+  oldestOriginDate?: string;
+  requirements: KpiCommissionRequirementItem[];
+}
+
+export interface CommissionReleaseEligibility {
+  userId: string;
+  displayName: string;
+  applicableThrough: string;
+  blocked: boolean;
+  auditAlert: boolean;
+  requirements: KpiCommissionMetricRequirement[];
+}
+
 export const COMMISSION_SECTIONS = [
   "Dirección general",
   "Litigio (líder)",
@@ -939,6 +982,10 @@ export interface CommissionPaymentAcknowledgement {
   amountMxn: number;
   sourceHash: string;
   excluded: boolean;
+  paidByTransfer: boolean;
+  paidByTransferAt?: string;
+  paidByTransferUserId?: string;
+  paidByTransferName?: string;
   receivedByAraceli: boolean;
   receivedByAraceliAt?: string;
   receivedByAraceliUserId?: string;
@@ -947,6 +994,12 @@ export interface CommissionPaymentAcknowledgement {
   receivedByEmrtAt?: string;
   receivedByEmrtUserId?: string;
   receivedByEmrtName?: string;
+  signedReceiptFileName?: string;
+  signedReceiptMimeType?: string;
+  signedReceiptSizeBytes?: number;
+  signedReceiptUploadedAt?: string;
+  signedReceiptUserId?: string;
+  signedReceiptUserName?: string;
   reopenedAt?: string;
   reopenedByUserId?: string;
   reopenedByName?: string;
@@ -1006,6 +1059,7 @@ export interface CommissionSnapshot {
 
 export type KpiMetricKind = "production" | "deadline";
 export type KpiMetricStatus = "met" | "warning" | "missed" | "not-configured";
+export type KpiEmrtOverridePolicy = "daily" | "weekly-prorated" | "not-allowed";
 
 export interface KpiIncident {
   id: string;
@@ -1042,6 +1096,9 @@ export interface KpiMetric {
   sourceTables: string[];
   incidents: KpiIncident[];
   dailyBreakdown: KpiDailyMetric[];
+  commissionStrategy?: "daily-production" | "weekly-production" | "incident" | "state-threshold" | "exact-daily";
+  emrtOverridePolicy?: KpiEmrtOverridePolicy;
+  commissionTargetPerBusinessDay?: number;
 }
 
 export interface KpiDailyMetric {
@@ -1054,6 +1111,17 @@ export interface KpiDailyMetric {
   targetLabel: string;
   helper: string;
   incidents: KpiIncident[];
+  workValue?: number;
+  emrtExcluded?: boolean;
+}
+
+export interface KpiEmrtOverride {
+  id: string;
+  userId: string;
+  metricId: string;
+  date: string;
+  isExcluded: boolean;
+  updatedAt: string;
 }
 
 export interface KpiUserSummary {

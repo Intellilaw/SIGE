@@ -61,11 +61,12 @@ const paymentAcknowledgementUpdateSchema = z.object({
   year: z.number().int().min(2000).max(2100),
   month: z.number().int().min(1).max(12),
   section: z.string().min(1).max(120),
+  paidByTransfer: z.boolean().optional(),
   receivedByAraceli: z.boolean().optional(),
   receivedByEmrt: z.boolean().optional(),
   excluded: z.boolean().optional()
 }).superRefine((payload, context) => {
-  const fields = ["receivedByAraceli", "receivedByEmrt", "excluded"]
+  const fields = ["paidByTransfer", "receivedByAraceli", "receivedByEmrt", "excluded"]
     .filter((field) => Object.prototype.hasOwnProperty.call(payload, field));
   if (fields.length !== 1) {
     context.addIssue({
@@ -74,6 +75,23 @@ const paymentAcknowledgementUpdateSchema = z.object({
     });
   }
 });
+
+const signedReceiptUploadSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  section: z.string().min(1).max(120),
+  originalFileName: z.string().min(1).max(240),
+  fileBase64: z.string().min(1).max(14_000_000)
+});
+
+const signedReceiptQuerySchema = periodQuerySchema.extend({
+  section: z.string().min(1).max(120)
+});
+
+function decodeFileBase64(value: string) {
+  const payload = value.includes(",") ? value.slice(value.indexOf(",") + 1) : value;
+  return Buffer.from(payload, "base64");
+}
 
 function normalizeComparableText(value?: string | null) {
   return (value ?? "")
@@ -174,15 +192,21 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
     return getCurrentOrganizationIdOrDefault() === "org-rusconi" && hasSuperadminAccess && isEduardoRusconi;
   }
 
-  function isAraceliLozano(request: FastifyRequest) {
+  function isFinanceTeamMember(request: FastifyRequest) {
     const user = getSessionUser(request);
     const isFinance = user.team === "FINANCE"
       || user.secondaryTeam === "FINANCE"
       || [user.legacyTeam, user.secondaryLegacyTeam, user.specificRole, user.secondarySpecificRole]
         .some((value) => normalizeComparableText(value) === "finanzas");
+
+    return getCurrentOrganizationIdOrDefault() === "org-rusconi" && isFinance;
+  }
+
+  function isAraceliLozano(request: FastifyRequest) {
+    const user = getSessionUser(request);
     const identities = [user.username, user.displayName, user.email].map(normalizeComparableText);
 
-    return getCurrentOrganizationIdOrDefault() === "org-rusconi" && isFinance && identities.some((identity) =>
+    return isFinanceTeamMember(request) && identities.some((identity) =>
       identity === "araceli lozano"
       || identity === "araceli lozano escamilla"
       || identity.startsWith("araceli.lozano")
@@ -192,6 +216,10 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
 
   function isEmrtSuperadmin(request: FastifyRequest) {
     return canManageProjectorCommissions(request);
+  }
+
+  function canMarkPaidByTransfer(request: FastifyRequest) {
+    return isFinanceTeamMember(request) || isEmrtSuperadmin(request);
   }
 
   app.get("/commissions/overview", { preHandler: readGuards }, async (request) => {
@@ -222,6 +250,9 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch("/commissions/payment-acknowledgements", { preHandler: [requireAuth] }, async (request) => {
     const payload = paymentAcknowledgementUpdateSchema.parse(request.body ?? {});
+    if (payload.paidByTransfer !== undefined && !canMarkPaidByTransfer(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Solo Finanzas o EMRT pueden registrar pagos mediante transferencia.");
+    }
     if (payload.receivedByAraceli !== undefined && !isAraceliLozano(request)) {
       throw new app.errors.AppError(403, "FORBIDDEN", "Solo Araceli Lozano puede confirmar su recepcion de comisiones.");
     }
@@ -234,6 +265,45 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
       userId: user.id,
       displayName: user.displayName
     });
+  });
+
+  app.post("/commissions/payment-acknowledgements/signed-receipt", {
+    preHandler: [requireAuth],
+    bodyLimit: 16 * 1024 * 1024
+  }, async (request) => {
+    if (!canMarkPaidByTransfer(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Solo Finanzas o EMRT pueden cargar recibos firmados de comisiones.");
+    }
+
+    const payload = signedReceiptUploadSchema.parse(request.body ?? {});
+    const user = getSessionUser(request);
+    return service.uploadSignedReceipt({
+      year: payload.year,
+      month: payload.month,
+      section: payload.section,
+      originalFileName: payload.originalFileName,
+      fileContent: decodeFileBase64(payload.fileBase64)
+    }, {
+      userId: user.id,
+      displayName: user.displayName
+    });
+  });
+
+  app.get("/commissions/payment-acknowledgements/signed-receipt", { preHandler: [requireAuth] }, async (request, reply) => {
+    if (!canMarkPaidByTransfer(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Solo Finanzas o EMRT pueden consultar recibos firmados de comisiones.");
+    }
+
+    const query = signedReceiptQuerySchema.parse(request.query);
+    const receipt = await service.findSignedReceipt(query.year, query.month, query.section);
+    if (!receipt) {
+      throw new app.errors.AppError(404, "COMMISSION_SIGNED_RECEIPT_NOT_FOUND", "No hay un recibo firmado cargado para este receptor.");
+    }
+
+    reply.header("Content-Type", receipt.fileMimeType);
+    reply.header("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(receipt.originalFileName)}`);
+    reply.header("Cache-Control", "private, no-store");
+    return reply.send(receipt.fileContent);
   });
 
   app.get("/commissions/receivers", { preHandler: readGuards }, async () => service.listReceivers());

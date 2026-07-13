@@ -67,6 +67,7 @@ import { PrismaGeneralExpensesRepository } from "./repositories/general-expenses
 import { PrismaHolidaysRepository } from "./repositories/holidays.repository";
 import { PrismaInternalContractsRepository } from "./repositories/internal-contracts.repository";
 import { PrismaKpisRepository } from "./repositories/kpis.repository";
+import { KpiCommissionRequirementsService } from "./repositories/kpi-commission-requirements";
 import { PrismaLaborFilesRepository, ResilientLaborFilesRepository } from "./repositories/labor-files.repository";
 import { PrismaLeadsRepository } from "./repositories/leads.repository";
 import { PrismaMattersRepository } from "./repositories/matters.repository";
@@ -112,6 +113,7 @@ declare module "fastify" {
       budgetPlanning: PrismaBudgetPlanningRepository;
       clients: ClientsRepository;
       commissions: PrismaCommissionsRepository;
+      kpiCommissionRequirements: KpiCommissionRequirementsService;
       dailyDocuments: DailyDocumentsRepository;
       dashboard: PrismaDashboardRepository;
       finances: FinanceRepository;
@@ -205,6 +207,7 @@ export async function buildApp() {
     app.log
   );
   const kpisRepository = new PrismaKpisRepository(prisma);
+  const kpiCommissionRequirements = new KpiCommissionRequirementsService(prisma, kpisRepository);
   app.decorate("repositories", {
     auth: authRepository,
     accounting: new PrismaAccountingRepository(prisma),
@@ -214,7 +217,7 @@ export async function buildApp() {
       null,
       app.log
     ),
-    commissions: new PrismaCommissionsRepository(prisma),
+    commissions: new PrismaCommissionsRepository(prisma, kpiCommissionRequirements),
     dailyDocuments: new PrismaDailyDocumentsRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
     finances: new ResilientFinanceRepository(
@@ -227,6 +230,7 @@ export async function buildApp() {
     holidays: new PrismaHolidaysRepository(prisma),
     internalContracts: new PrismaInternalContractsRepository(prisma),
     kpis: kpisRepository,
+    kpiCommissionRequirements,
     laborFiles: new ResilientLaborFilesRepository(
       new PrismaLaborFilesRepository(prisma),
       null,

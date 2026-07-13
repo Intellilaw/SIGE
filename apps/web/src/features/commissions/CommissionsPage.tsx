@@ -6,6 +6,8 @@ import type {
   CommissionGroup1TeamBreakdown,
   CommissionPaymentAcknowledgement,
   CommissionPaymentFlowState,
+  CommissionRecipientAssignment,
+  CommissionReleaseEligibility,
   CommissionReceiver,
   CommissionSnapshot,
   CommissionSnapshotData,
@@ -16,9 +18,17 @@ import type {
 } from "@sige/contracts";
 import { COMMISSION_SECTIONS } from "@sige/contracts";
 
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { apiDelete, apiDownload, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteModule, hasPermission } from "../auth/permissions";
+import {
+  buildCommissionMoneyReceipt,
+  DocumentPreview,
+  downloadPdfDocument,
+  downloadWordDocument,
+  generatedDocumentToHtml,
+  type GeneratedDocument
+} from "../modules/DailyDocumentsPage";
 
 type ActiveTab = "calculation" | "receivers" | "snapshots";
 
@@ -33,9 +43,11 @@ interface CommissionsOverviewResponse {
   financeRecords: FinanceRecord[];
   generalExpenses: GeneralExpense[];
   receivers: CommissionReceiver[];
+  recipientAssignments: CommissionRecipientAssignment[];
   exclusions: CommissionExclusion[];
   projectorCommissions: ProjectorCommission[];
   paymentAcknowledgements: CommissionPaymentAcknowledgement[];
+  commissionReleaseEligibilities: CommissionReleaseEligibility[];
   periodLocked: boolean;
 }
 
@@ -168,6 +180,46 @@ interface CommissionTotalsRow {
   calculation: SectionCalculation;
 }
 
+interface CommissionReceiptDraft {
+  amountMxn: number;
+  document: GeneratedDocument;
+  filenameBase: string;
+  periodLabel: string;
+  recipientName: string;
+  section: string;
+}
+
+const MAX_SIGNED_RECEIPT_BYTES = 10 * 1024 * 1024;
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const separatorIndex = result.indexOf(",");
+      resolve(separatorIndex >= 0 ? result.slice(separatorIndex + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("No fue posible leer el recibo firmado."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isPdfFile(file: File) {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function normalizeText(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
@@ -208,14 +260,19 @@ function isRusconiTenant(user: ReturnType<typeof useAuth>["user"]) {
   );
 }
 
-function isAraceliLozanoUser(user: ReturnType<typeof useAuth>["user"]) {
-  const isFinance = user?.team === "FINANCE"
+function isFinanceTeamUser(user: ReturnType<typeof useAuth>["user"]) {
+  return Boolean(
+    user?.team === "FINANCE"
     || user?.secondaryTeam === "FINANCE"
     || [user?.legacyTeam, user?.secondaryLegacyTeam, user?.specificRole, user?.secondarySpecificRole]
-      .some((value) => normalizeText(value) === "finanzas");
+      .some((value) => normalizeText(value) === "finanzas")
+  );
+}
+
+function isAraceliLozanoUser(user: ReturnType<typeof useAuth>["user"]) {
   const identities = [user?.username, user?.displayName, user?.email].map(normalizeText);
 
-  return isRusconiTenant(user) && isFinance && identities.some((identity) =>
+  return isRusconiTenant(user) && isFinanceTeamUser(user) && identities.some((identity) =>
     identity === "araceli lozano"
     || identity === "araceli lozano escamilla"
     || identity.startsWith("araceli.lozano")
@@ -1253,14 +1310,24 @@ function CommissionTotalsTable(props: {
   month: number;
   excludedReceiverKeys: Set<string>;
   acknowledgementsBySection: Map<string, CommissionPaymentAcknowledgement>;
+  recipientAssignmentsBySection: Map<string, CommissionRecipientAssignment>;
+  releaseEligibilityByUserId: Map<string, CommissionReleaseEligibility>;
   periodLocked: boolean;
   canManageReceiverExclusions: boolean;
+  canMarkPaidByTransfer: boolean;
+  canGenerateReceipts: boolean;
+  canManageSignedReceipts: boolean;
   canConfirmAsAraceli: boolean;
   canConfirmAsEmrt: boolean;
   savingSections: Set<string>;
+  uploadingSignedReceiptSections: Set<string>;
   onToggleReceiverExclusion: (section: string, excluded: boolean) => void;
+  onTogglePaidByTransfer: (section: string, paid: boolean) => void;
   onToggleReceivedByAraceli: (section: string, received: boolean) => void;
   onToggleReceivedByEmrt: (section: string, received: boolean) => void;
+  onGenerateReceipt: (row: CommissionTotalsRow, recipientName: string) => void;
+  onUploadSignedReceipt: (section: string, file: File) => void;
+  onOpenSignedReceipt: (acknowledgement: CommissionPaymentAcknowledgement) => void;
 }) {
   const isReceiverExcluded = (section: string) => props.excludedReceiverKeys.has(
     buildCommissionTotalsReceiverExclusionKey({
@@ -1273,6 +1340,16 @@ function CommissionTotalsTable(props: {
     (sum, row) => sum + (isReceiverExcluded(row.section) ? 0 : row.calculation.totalCommissionsMxn),
     0
   );
+  const pendingCommissionsMxn = props.rows.reduce((sum, row) => {
+    if (isReceiverExcluded(row.section)) {
+      return sum;
+    }
+
+    const acknowledgement = props.acknowledgementsBySection.get(normalizeText(row.section));
+    return acknowledgement?.paidByTransfer || acknowledgement?.receivedByEmrt
+      ? sum
+      : sum + row.calculation.totalCommissionsMxn;
+  }, 0);
 
   return (
     <section className="panel">
@@ -1292,13 +1369,29 @@ function CommissionTotalsTable(props: {
             {props.rows.map((row) => {
               const excluded = isReceiverExcluded(row.section);
               const acknowledgement = props.acknowledgementsBySection.get(normalizeText(row.section));
+              const recipientAssignment = props.recipientAssignmentsBySection.get(normalizeText(row.section));
+              const recipientName = recipientAssignment?.recipientName;
+              const releaseEligibility = recipientAssignment?.userId
+                ? props.releaseEligibilityByUserId.get(recipientAssignment.userId)
+                : undefined;
+              const paymentBlocked = Boolean(releaseEligibility?.blocked);
               const amountMxn = row.calculation.totalCommissionsMxn;
               const eligible = !excluded && amountMxn > 0;
               const saving = props.savingSections.has(normalizeText(row.section));
-              const araceliLocked = Boolean(acknowledgement?.receivedByEmrt);
+              const uploadingSignedReceipt = props.uploadingSignedReceiptSections.has(normalizeText(row.section));
+              const paidByTransfer = Boolean(acknowledgement?.paidByTransfer);
+              const araceliLocked = paidByTransfer || Boolean(acknowledgement?.receivedByEmrt);
+              const hasSignedReceipt = Boolean(
+                acknowledgement?.signedReceiptUploadedAt && acknowledgement.signedReceiptFileName
+              );
+              const missingSignedReceipt = Boolean(acknowledgement?.receivedByEmrt && !hasSignedReceipt);
+              const rowClassName = [
+                excluded ? "commissions-row-excluded" : "",
+                missingSignedReceipt ? "commissions-row-missing-signed-receipt" : ""
+              ].filter(Boolean).join(" ") || undefined;
 
               return (
-                <tr className={excluded ? "commissions-row-excluded" : undefined} key={row.section}>
+                <tr className={rowClassName} key={row.section}>
                   <td>
                     <div className="commissions-total-receiver-cell">
                       {props.canManageReceiverExclusions ? (
@@ -1315,7 +1408,13 @@ function CommissionTotalsTable(props: {
                           />
                         </label>
                       ) : null}
-                      <span className={excluded ? "commissions-amount-excluded" : undefined}>{row.section}</span>
+                      <span className={`commissions-total-receiver-identity${excluded ? " commissions-amount-excluded" : ""}`}>
+                        <strong>{recipientName ?? row.section}</strong>
+                        {recipientName && normalizeText(recipientName) !== normalizeText(row.section) ? (
+                          <small>{row.section}</small>
+                        ) : null}
+                        {!recipientName ? <small>Titular activo no asignado</small> : null}
+                      </span>
                     </div>
                   </td>
                   <td className="commissions-total-strong">
@@ -1324,6 +1423,22 @@ function CommissionTotalsTable(props: {
                         {formatCurrency(amountMxn)}
                       </span>
                       <div className="commissions-payment-flow-controls">
+                        <label className={!eligible || paymentBlocked || !props.canMarkPaidByTransfer || props.periodLocked ? "is-disabled" : undefined}>
+                          <input
+                            type="checkbox"
+                            checked={paidByTransfer}
+                            disabled={
+                              !acknowledgement
+                              || !eligible
+                              || (paymentBlocked && !paidByTransfer)
+                              || !props.canMarkPaidByTransfer
+                              || props.periodLocked
+                              || saving
+                            }
+                            onChange={(event) => props.onTogglePaidByTransfer(row.section, event.target.checked)}
+                          />
+                          <span>Pagado mediante transferencia</span>
+                        </label>
                         <label className={!eligible || !props.canConfirmAsAraceli || araceliLocked ? "is-disabled" : undefined}>
                           <input
                             type="checkbox"
@@ -1339,29 +1454,124 @@ function CommissionTotalsTable(props: {
                           />
                           <span>Recibido por Araceli Lozano</span>
                         </label>
-                        <label className={!eligible || !props.canConfirmAsEmrt || !acknowledgement?.receivedByAraceli ? "is-disabled" : undefined}>
+                        <label className={!eligible || paymentBlocked || !props.canConfirmAsEmrt || !acknowledgement?.receivedByAraceli ? "is-disabled" : undefined}>
                           <input
                             type="checkbox"
                             checked={Boolean(acknowledgement?.receivedByEmrt)}
                             disabled={
                               !acknowledgement
                               || !eligible
+                              || (paymentBlocked && !acknowledgement.receivedByEmrt)
                               || !props.canConfirmAsEmrt
                               || !acknowledgement.receivedByAraceli
+                              || paidByTransfer
                               || saving
                             }
                             onChange={(event) => props.onToggleReceivedByEmrt(row.section, event.target.checked)}
                           />
-                          <span>Recibido por EMRT</span>
+                          <span>Pagado por EMRT</span>
                         </label>
                       </div>
+                      {releaseEligibility?.blocked ? (
+                        <section className="commissions-kpi-payment-block" role="alert">
+                          <strong>Pago retenido</strong>
+                          <span>
+                            Estas comisiones no pueden pagarse hasta reparar los pendientes aplicables a este mes.
+                          </span>
+                          <ul>
+                            {releaseEligibility.requirements.map((requirement) => (
+                              <li key={requirement.metricId}>
+                                <strong>{requirement.metricLabel}</strong>
+                                <span>
+                                  {requirement.pendingAmount} {requirement.unit}
+                                  {requirement.oldestOriginDate ? `; pendiente desde ${requirement.oldestOriginDate}` : ""}
+                                </span>
+                                <div className="commissions-kpi-payment-requirements">
+                                  {requirement.requirements.map((item) => (
+                                    <small key={item.obligationId}>
+                                      {item.summary} ({item.originDate})
+                                    </small>
+                                  ))}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                          {releaseEligibility.auditAlert ? (
+                            <span className="commissions-kpi-payment-audit">
+                              Alerta de auditoria: el pago ya estaba registrado cuando se detecto este incumplimiento retroactivo. No se revirtio.
+                            </span>
+                          ) : null}
+                        </section>
+                      ) : null}
+                      <button
+                        className="secondary-button commissions-generate-receipt-button"
+                        disabled={!eligible || !props.canGenerateReceipts || !recipientName}
+                        onClick={() => recipientName && props.onGenerateReceipt(row, recipientName)}
+                        title={!recipientName ? "Asigna un titular activo a este cargo para generar el recibo" : undefined}
+                        type="button"
+                      >
+                        Generar recibo
+                      </button>
+                      <div className="commissions-signed-receipt-controls">
+                        <label
+                          className={`secondary-button commissions-signed-receipt-upload${
+                            !eligible || !props.canManageSignedReceipts || uploadingSignedReceipt ? " is-disabled" : ""
+                          }`}
+                        >
+                          <input
+                            accept=".pdf,application/pdf"
+                            aria-label={`${hasSignedReceipt ? "Reemplazar" : "Cargar"} recibo firmado de ${recipientName ?? row.section}`}
+                            disabled={!acknowledgement || !eligible || !props.canManageSignedReceipts || uploadingSignedReceipt}
+                            onChange={(event) => {
+                              const file = event.currentTarget.files?.[0];
+                              event.currentTarget.value = "";
+                              if (file) {
+                                props.onUploadSignedReceipt(row.section, file);
+                              }
+                            }}
+                            type="file"
+                          />
+                          <span>
+                            {uploadingSignedReceipt
+                              ? "Cargando PDF..."
+                              : hasSignedReceipt
+                                ? "Reemplazar recibo firmado"
+                                : "Cargar recibo firmado"}
+                          </span>
+                        </label>
+                        {hasSignedReceipt && acknowledgement ? (
+                          <button
+                            className="secondary-button commissions-signed-receipt-open"
+                            onClick={() => props.onOpenSignedReceipt(acknowledgement)}
+                            type="button"
+                          >
+                            Ver recibo firmado
+                          </button>
+                        ) : null}
+                      </div>
+                      {hasSignedReceipt && acknowledgement ? (
+                        <div className="commissions-signed-receipt-meta">
+                          <span>{acknowledgement.signedReceiptFileName}</span>
+                          {acknowledgement.signedReceiptSizeBytes ? (
+                            <span>{formatFileSize(acknowledgement.signedReceiptSizeBytes)}</span>
+                          ) : null}
+                          {acknowledgement.signedReceiptUploadedAt ? (
+                            <span>Cargado: {formatDateTime(acknowledgement.signedReceiptUploadedAt)}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {missingSignedReceipt ? (
+                        <div className="commissions-signed-receipt-alert" role="alert">
+                          Falta cargar el recibo firmado en PDF.
+                        </div>
+                      ) : null}
                       {acknowledgement ? (
                         <div className="commissions-payment-flow-meta">
                           {acknowledgement.receivedByAraceliAt ? (
                             <span>Araceli: {formatDateTime(acknowledgement.receivedByAraceliAt)}</span>
                           ) : null}
                           {acknowledgement.receivedByEmrtAt ? (
-                            <span>EMRT: {formatDateTime(acknowledgement.receivedByEmrtAt)}</span>
+                            <span>Pagado por EMRT: {formatDateTime(acknowledgement.receivedByEmrtAt)}</span>
                           ) : null}
                           {acknowledgement.reopenedAt ? (
                             <span>
@@ -1385,10 +1595,113 @@ function CommissionTotalsTable(props: {
               <td>Total general</td>
               <td>{formatCurrency(totalCommissionsMxn)}</td>
             </tr>
+            <tr>
+              <td>Total pendiente de pago</td>
+              <td>{formatCurrency(pendingCommissionsMxn)}</td>
+            </tr>
           </tfoot>
         </table>
       </div>
     </section>
+  );
+}
+
+function CommissionReceiptModal(props: {
+  draft: CommissionReceiptDraft;
+  onClose: () => void;
+}) {
+  const [busyAction, setBusyAction] = useState<"word" | "pdf" | null>(null);
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [props.onClose]);
+
+  async function downloadWord() {
+    setBusyAction("word");
+    setStatus("Generando Word...");
+    try {
+      await downloadWordDocument(props.draft.document, props.draft.filenameBase);
+      setStatus("Word descargado.");
+    } catch {
+      setStatus("No se pudo generar el archivo Word.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function downloadPdf() {
+    setBusyAction("pdf");
+    setStatus("Generando PDF...");
+    try {
+      await downloadPdfDocument(props.draft.document, props.draft.filenameBase);
+      setStatus("PDF descargado.");
+    } catch {
+      setStatus("No se pudo generar el archivo PDF.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function printReceipt() {
+    const popup = window.open("", "_blank");
+    if (!popup) {
+      setStatus("No se pudo abrir la vista de impresion.");
+      return;
+    }
+
+    popup.document.write(generatedDocumentToHtml(props.draft.document));
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  }
+
+  return (
+    <div className="commissions-modal-backdrop" onClick={props.onClose}>
+      <div
+        aria-labelledby="commission-receipt-modal-title"
+        aria-modal="true"
+        className="commissions-modal commissions-receipt-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="commissions-modal-header">
+          <div>
+            <h2 id="commission-receipt-modal-title">Recibo de comisiones</h2>
+            <p className="muted">
+              {props.draft.recipientName} | {props.draft.section} | {props.draft.periodLabel} | {formatCurrency(props.draft.amountMxn)}
+            </p>
+          </div>
+          <div className="commissions-receipt-actions">
+            <button className="secondary-button" disabled={busyAction !== null} onClick={() => void downloadWord()} type="button">
+              {busyAction === "word" ? "Generando..." : "Word"}
+            </button>
+            <button className="secondary-button" disabled={busyAction !== null} onClick={() => void downloadPdf()} type="button">
+              {busyAction === "pdf" ? "Generando..." : "PDF"}
+            </button>
+            <button className="secondary-button" disabled={busyAction !== null} onClick={printReceipt} type="button">
+              Imprimir
+            </button>
+            <button className="secondary-button" onClick={props.onClose} type="button">
+              Cerrar
+            </button>
+          </div>
+        </div>
+        <div className="commissions-modal-body commissions-receipt-modal-body">
+          {status ? <p className="muted commissions-receipt-status">{status}</p> : null}
+          <div className="daily-doc-preview-viewport commissions-receipt-preview">
+            <DocumentPreview document={props.draft.document} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1545,16 +1858,19 @@ export function CommissionsPage() {
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [generalExpenses, setGeneralExpenses] = useState<GeneralExpense[]>([]);
   const [receivers, setReceivers] = useState<CommissionReceiver[]>([]);
+  const [recipientAssignments, setRecipientAssignments] = useState<CommissionRecipientAssignment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [snapshots, setSnapshots] = useState<CommissionSnapshot[]>([]);
   const [exclusions, setExclusions] = useState<CommissionExclusion[]>([]);
   const [projectorCommissions, setProjectorCommissions] = useState<ProjectorCommission[]>([]);
   const [paymentAcknowledgements, setPaymentAcknowledgements] = useState<CommissionPaymentAcknowledgement[]>([]);
+  const [commissionReleaseEligibilities, setCommissionReleaseEligibilities] = useState<CommissionReleaseEligibility[]>([]);
   const [periodLocked, setPeriodLocked] = useState(false);
   const [confirmedByEmrtCount, setConfirmedByEmrtCount] = useState(0);
   const [savingExclusionKeys, setSavingExclusionKeys] = useState<Set<string>>(new Set());
   const [savingProjectorCommissionIds, setSavingProjectorCommissionIds] = useState<Set<string>>(new Set());
   const [savingPaymentSections, setSavingPaymentSections] = useState<Set<string>>(new Set());
+  const [uploadingSignedReceiptSections, setUploadingSignedReceiptSections] = useState<Set<string>>(new Set());
   const [projectorAmountDrafts, setProjectorAmountDrafts] = useState<Record<string, string>>({});
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(true);
@@ -1566,6 +1882,7 @@ export function CommissionsPage() {
   const [editingReceiverId, setEditingReceiverId] = useState<string | null>(null);
   const [editingReceiverName, setEditingReceiverName] = useState("");
   const [viewingSnapshot, setViewingSnapshot] = useState<CommissionSnapshot | null>(null);
+  const [commissionReceiptDraft, setCommissionReceiptDraft] = useState<CommissionReceiptDraft | null>(null);
   const canWriteCommissions = canWriteModule(user, "commissions");
   const canReadAllCommissions = canWriteCommissions || hasPermission(user, "commissions:all:read");
   const canWriteClientRelationsCommissions = hasPermission(user, "commissions:client-relations:write");
@@ -1574,6 +1891,9 @@ export function CommissionsPage() {
   const canManageExclusions = canManageCommissionExclusions(user);
   const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
   const canManageProjectorEntries = canManageProjectorCommissions(user);
+  const canMarkPaymentsByTransfer = isRusconiTenant(user) && (
+    isFinanceTeamUser(user) || (hasSuperadminAccess(user) && isEduardoRusconiUser(user))
+  );
   const canConfirmPaymentsAsAraceli = isAraceliLozanoUser(user);
   const canConfirmPaymentsAsEmrt = isRusconiTenant(user) && hasSuperadminAccess(user) && isEduardoRusconiUser(user);
   const isLegalFlow = isLegalFlowTenant(user);
@@ -1660,9 +1980,11 @@ export function CommissionsPage() {
       setFinanceRecords(overview.financeRecords);
       setGeneralExpenses(overview.generalExpenses);
       setReceivers(overview.receivers);
+      setRecipientAssignments(overview.recipientAssignments ?? []);
       setExclusions(overview.exclusions ?? []);
       setProjectorCommissions(overview.projectorCommissions ?? []);
       setPaymentAcknowledgements(overview.paymentAcknowledgements ?? []);
+      setCommissionReleaseEligibilities(overview.commissionReleaseEligibilities ?? []);
       setPeriodLocked(Boolean(overview.periodLocked));
       setConfirmedByEmrtCount((overview.paymentAcknowledgements ?? []).filter((entry) => entry.receivedByEmrt).length);
       setClients(clientsResponse);
@@ -1741,6 +2063,14 @@ export function CommissionsPage() {
   const paymentAcknowledgementsBySection = useMemo(
     () => new Map(paymentAcknowledgements.map((entry) => [normalizeText(entry.section), entry])),
     [paymentAcknowledgements]
+  );
+  const recipientAssignmentsBySection = useMemo(
+    () => new Map(recipientAssignments.map((entry) => [normalizeText(entry.section), entry])),
+    [recipientAssignments]
+  );
+  const releaseEligibilityByUserId = useMemo(
+    () => new Map(commissionReleaseEligibilities.map((entry) => [entry.userId, entry])),
+    [commissionReleaseEligibilities]
   );
   const effectiveExcludedTotalsReceiverKeys = useMemo(
     () => new Set(
@@ -1835,7 +2165,7 @@ export function CommissionsPage() {
 
   async function updatePaymentAcknowledgement(
     section: string,
-    payload: { receivedByAraceli?: boolean; receivedByEmrt?: boolean; excluded?: boolean }
+    payload: { paidByTransfer?: boolean; receivedByAraceli?: boolean; receivedByEmrt?: boolean; excluded?: boolean }
   ) {
     const savingKey = normalizeText(section);
     setSavingPaymentSections((current) => new Set(current).add(savingKey));
@@ -1853,10 +2183,14 @@ export function CommissionsPage() {
       setConfirmedByEmrtCount(state.confirmedByEmrtCount);
       setFlash({
         tone: "success",
-        text: payload.receivedByEmrt === false
+        text: payload.paidByTransfer !== undefined
+          ? payload.paidByTransfer
+            ? "Pago mediante transferencia registrado. Las confirmaciones de recepcion quedaron deshabilitadas."
+            : "Pago mediante transferencia desmarcado. Las confirmaciones de recepcion volvieron a estar disponibles."
+          : payload.receivedByEmrt === false
           ? state.locked
-            ? "Confirmacion reabierta. El periodo sigue bloqueado por otras confirmaciones de EMRT."
-            : "Todas las confirmaciones de EMRT fueron reabiertas; Finanzas y Gastos generales quedaron habilitados."
+            ? "Pago por EMRT reabierto. El periodo sigue bloqueado por otros pagos de EMRT."
+            : "Todos los pagos por EMRT fueron reabiertos; Finanzas y Gastos generales quedaron habilitados."
           : "Flujo de pago de comisiones actualizado."
       });
     } catch (error) {
@@ -1880,6 +2214,99 @@ export function CommissionsPage() {
     void updatePaymentAcknowledgement(section, { excluded });
   }
 
+  function handleGenerateCommissionReceipt(row: CommissionTotalsRow, recipientName: string) {
+    if (!canMarkPaymentsByTransfer || row.calculation.totalCommissionsMxn <= 0) {
+      return;
+    }
+
+    const periodLabel = `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`;
+    const filenamePeriod = `${selectedYear}-${`${selectedMonth}`.padStart(2, "0")}`;
+    setCommissionReceiptDraft({
+      amountMxn: row.calculation.totalCommissionsMxn,
+      document: buildCommissionMoneyReceipt({
+        amountMxn: row.calculation.totalCommissionsMxn,
+        concept: `Comisiones correspondientes a ${MONTH_NAMES[selectedMonth - 1]} de ${selectedYear}`,
+        recipientName
+      }),
+      filenameBase: `recibo-comisiones-${recipientName}-${filenamePeriod}`,
+      periodLabel,
+      recipientName,
+      section: row.section
+    });
+  }
+
+  async function handleUploadSignedReceipt(section: string, file: File) {
+    if (!canMarkPaymentsByTransfer) {
+      return;
+    }
+
+    if (!isPdfFile(file)) {
+      setFlash({ tone: "error", text: "El recibo firmado debe ser un archivo PDF." });
+      return;
+    }
+
+    if (file.size <= 0 || file.size > MAX_SIGNED_RECEIPT_BYTES) {
+      setFlash({ tone: "error", text: "El recibo firmado debe pesar entre 1 byte y 10 MB." });
+      return;
+    }
+
+    const uploadingKey = normalizeText(section);
+    setUploadingSignedReceiptSections((current) => new Set(current).add(uploadingKey));
+    setFlash(null);
+
+    try {
+      const fileBase64 = await readFileAsBase64(file);
+      const state = await apiPost<CommissionPaymentFlowState>(
+        "/commissions/payment-acknowledgements/signed-receipt",
+        {
+          year: selectedYear,
+          month: selectedMonth,
+          section,
+          originalFileName: file.name,
+          fileBase64
+        }
+      );
+      setPaymentAcknowledgements(state.acknowledgements);
+      setPeriodLocked(state.locked);
+      setConfirmedByEmrtCount(state.confirmedByEmrtCount);
+      setFlash({ tone: "success", text: "Recibo firmado cargado correctamente." });
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setUploadingSignedReceiptSections((current) => {
+        const next = new Set(current);
+        next.delete(uploadingKey);
+        return next;
+      });
+    }
+  }
+
+  async function handleOpenSignedReceipt(acknowledgement: CommissionPaymentAcknowledgement) {
+    setFlash(null);
+
+    try {
+      const query = new URLSearchParams({
+        year: String(acknowledgement.year),
+        month: String(acknowledgement.month),
+        section: acknowledgement.section
+      });
+      const { blob } = await apiDownload(
+        `/commissions/payment-acknowledgements/signed-receipt?${query.toString()}`
+      );
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    }
+  }
+
   function handleTogglePaymentReceivedByAraceli(section: string, receivedByAraceli: boolean) {
     if (!canConfirmPaymentsAsAraceli) {
       return;
@@ -1887,12 +2314,19 @@ export function CommissionsPage() {
     void updatePaymentAcknowledgement(section, { receivedByAraceli });
   }
 
+  function handleTogglePaymentPaidByTransfer(section: string, paidByTransfer: boolean) {
+    if (!canMarkPaymentsByTransfer || periodLocked) {
+      return;
+    }
+    void updatePaymentAcknowledgement(section, { paidByTransfer });
+  }
+
   function handleTogglePaymentReceivedByEmrt(section: string, receivedByEmrt: boolean) {
     if (!canConfirmPaymentsAsEmrt) {
       return;
     }
     if (!receivedByEmrt && !window.confirm(
-      "Reabrir esta confirmacion? El periodo solo se habilitara cuando no quede ninguna confirmacion de EMRT."
+      "Reabrir este pago por EMRT? El periodo solo se habilitara cuando no quede ningun pago de EMRT."
     )) {
       return;
     }
@@ -2408,14 +2842,24 @@ export function CommissionsPage() {
                   month={selectedMonth}
                   excludedReceiverKeys={effectiveExcludedTotalsReceiverKeys}
                   acknowledgementsBySection={paymentAcknowledgementsBySection}
+                  recipientAssignmentsBySection={recipientAssignmentsBySection}
+                  releaseEligibilityByUserId={releaseEligibilityByUserId}
                   periodLocked={periodLocked}
                   canManageReceiverExclusions={canManageTotalsReceiverExclusions}
+                  canMarkPaidByTransfer={canMarkPaymentsByTransfer}
+                  canGenerateReceipts={canMarkPaymentsByTransfer}
+                  canManageSignedReceipts={canMarkPaymentsByTransfer}
                   canConfirmAsAraceli={canConfirmPaymentsAsAraceli}
                   canConfirmAsEmrt={canConfirmPaymentsAsEmrt}
                   savingSections={savingPaymentSections}
+                  uploadingSignedReceiptSections={uploadingSignedReceiptSections}
                   onToggleReceiverExclusion={handleToggleCommissionTotalsReceiverExclusion}
+                  onTogglePaidByTransfer={handleTogglePaymentPaidByTransfer}
                   onToggleReceivedByAraceli={handleTogglePaymentReceivedByAraceli}
                   onToggleReceivedByEmrt={handleTogglePaymentReceivedByEmrt}
+                  onGenerateReceipt={handleGenerateCommissionReceipt}
+                  onUploadSignedReceipt={handleUploadSignedReceipt}
+                  onOpenSignedReceipt={handleOpenSignedReceipt}
                 />
               ) : isProjectorActiveSection ? (
                 <ProjectorCommissionTable
@@ -2708,6 +3152,9 @@ export function CommissionsPage() {
       ) : null}
 
       {viewingSnapshot ? <SnapshotDetailModal snapshot={viewingSnapshot} onClose={() => setViewingSnapshot(null)} /> : null}
+      {commissionReceiptDraft ? (
+        <CommissionReceiptModal draft={commissionReceiptDraft} onClose={() => setCommissionReceiptDraft(null)} />
+      ) : null}
     </section>
   );
 }

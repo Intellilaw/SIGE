@@ -21,10 +21,12 @@ import type {
   BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
   Client,
+  CommissionRecipientAssignment,
   CommissionReceiver,
   CommissionExclusion,
   CommissionPaymentAcknowledgement,
   CommissionPaymentFlowState,
+  CommissionReleaseEligibility,
   CommissionSnapshot,
   ProjectorCommission,
   CreateManagedUserInput,
@@ -288,6 +290,7 @@ export interface LaborVacationAcceptanceUploadRecord {
 
 export interface LaborFilesRepository {
   list(): Promise<LaborFile[]>;
+  listActiveUserIds(): Promise<string[]>;
   listForUser(userId: string): Promise<LaborFile[]>;
   findById(laborFileId: string): Promise<LaborFile | null>;
   findDocument(documentId: string): Promise<LaborFileDocumentRecord | null>;
@@ -701,9 +704,11 @@ export interface CommissionsOverviewRecord {
   financeRecords: FinanceRecord[];
   generalExpenses: GeneralExpense[];
   receivers: CommissionReceiver[];
+  recipientAssignments: CommissionRecipientAssignment[];
   exclusions: CommissionExclusion[];
   projectorCommissions: ProjectorCommission[];
   paymentAcknowledgements: CommissionPaymentAcknowledgement[];
+  commissionReleaseEligibilities: CommissionReleaseEligibility[];
   periodLocked: boolean;
 }
 
@@ -747,9 +752,24 @@ export interface CommissionPaymentAcknowledgementUpdateRecord {
   year: number;
   month: number;
   section: string;
+  paidByTransfer?: boolean;
   receivedByAraceli?: boolean;
   receivedByEmrt?: boolean;
   excluded?: boolean;
+}
+
+export interface CommissionSignedReceiptUploadRecord {
+  year: number;
+  month: number;
+  section: string;
+  originalFileName: string;
+  fileContent: Buffer;
+}
+
+export interface CommissionSignedReceiptFileRecord {
+  originalFileName: string;
+  fileMimeType: string;
+  fileContent: Buffer;
 }
 
 export interface CommissionsRepository {
@@ -773,6 +793,11 @@ export interface CommissionsRepository {
     payload: CommissionPaymentAcknowledgementUpdateRecord,
     actor: CommissionPaymentActor
   ): Promise<CommissionPaymentFlowState>;
+  uploadSignedReceipt(
+    payload: CommissionSignedReceiptUploadRecord,
+    actor: CommissionPaymentActor
+  ): Promise<CommissionPaymentFlowState>;
+  findSignedReceipt(year: number, month: number, section: string): Promise<CommissionSignedReceiptFileRecord | null>;
 }
 
 export interface KpiAccessScope extends Pick<
@@ -996,6 +1021,16 @@ export interface GeneralSupervisionObservationActor {
   shortName?: string;
 }
 
+export interface KpiEmrtOverrideSetting {
+  id: string;
+  organizationId: string;
+  userId: string;
+  metricId: string;
+  date: string;
+  isExcluded: boolean;
+  updatedAt: string;
+}
+
 export interface GeneralSupervisionPreferencesRepository {
   listObservedUsers(): Promise<GeneralSupervisionObservationSetting[]>;
   setObservedUser(
@@ -1003,4 +1038,12 @@ export interface GeneralSupervisionPreferencesRepository {
     isObserved: boolean,
     actor: GeneralSupervisionObservationActor
   ): Promise<GeneralSupervisionObservationSetting>;
+  listKpiOverrides(startDate: string, endDate: string): Promise<KpiEmrtOverrideSetting[]>;
+  setKpiOverride(
+    userId: string,
+    metricId: string,
+    date: string,
+    isExcluded: boolean,
+    actor: GeneralSupervisionObservationActor
+  ): Promise<KpiEmrtOverrideSetting>;
 }

@@ -16,6 +16,13 @@ const updateObservedUserBodySchema = updateObservedUserSchema.extend({
   userId: z.string().min(1)
 });
 
+const updateKpiOverrideBodySchema = z.object({
+  userId: z.string().min(1),
+  metricId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  isExcluded: z.boolean()
+});
+
 function normalizeIdentity(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
@@ -83,7 +90,9 @@ export const generalSupervisionRoutes: FastifyPluginAsync = async (app) => {
     tasks: app.repositories.tasks,
     matters: app.repositories.matters,
     users: app.repositories.users,
+    laborFiles: app.repositories.laborFiles,
     kpis: app.repositories.kpis,
+    kpiCommissionRequirements: app.repositories.kpiCommissionRequirements,
     holidays: app.repositories.holidays,
     supervisionPreferences: app.repositories.generalSupervisionPreferences
   });
@@ -134,5 +143,29 @@ export const generalSupervisionRoutes: FastifyPluginAsync = async (app) => {
       userId: params.userId,
       isObserved: payload.isObserved
     });
+  });
+
+  app.patch("/general-supervision/kpi-overrides", { preHandler: [requireAuth] }, async (request) => {
+    const actor = await requireSupervisor(request);
+    const payload = updateKpiOverrideBodySchema.parse(request.body ?? {});
+    const targetUser = await resolveObservedUser(app, payload.userId);
+
+    if (!targetUser?.isActive) {
+      throw new app.errors.AppError(404, "KPI_OVERRIDE_USER_NOT_FOUND", "No se encontro un usuario activo para este override.");
+    }
+
+    return service.setKpiOverride(
+      targetUser.id,
+      payload.metricId,
+      payload.date,
+      payload.isExcluded,
+      {
+        userId: actor.id,
+        displayName: actor.displayName,
+        username: actor.username,
+        email: actor.email,
+        shortName: actor.shortName
+      }
+    );
   });
 };
