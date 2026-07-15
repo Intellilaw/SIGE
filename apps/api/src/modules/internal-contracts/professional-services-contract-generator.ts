@@ -31,7 +31,7 @@ const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordproces
 const PDF_MIME_TYPE = "application/pdf";
 const PSP_CONTRACT_TEMPLATE_FILES = {
   ES: "Contrato de prestación de servicios profesionales (RC) (08.07.2026).docx",
-  EN: "Professional services agreement (RC) (10.09.2024).docx"
+  EN: "PSP CONTRACT (13.07.26).docx"
 } as const;
 const IVA_RATE = 0.16;
 const RC_COMPANY_NAME = "Rusconi Legal and Tax Technology S.A. de C.V.";

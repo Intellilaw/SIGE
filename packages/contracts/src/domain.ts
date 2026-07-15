@@ -503,6 +503,13 @@ export const HOLIDAY_AUTHORITIES = [
   { shortName: "FGR", name: "Fiscal\u00eda General de la Rep\u00fablica" },
   { shortName: "TFCyA", name: "Tribunal Federal de Conciliaci\u00f3n y Arbitraje" },
   { shortName: "JLCyA", name: "Junta Local de Conciliaci\u00f3n y Arbitraje" },
+  { shortName: "IMPI", name: "Instituto Mexicano de la Propiedad Industrial" },
+  {
+    shortName: "RPPCDMX",
+    name: "Registro P\u00fablico de la Propiedad y de Comercio de la Ciudad de M\u00e9xico"
+  },
+  { shortName: "PJPuebla", name: "Poder Judicial del Estado de Puebla" },
+  { shortName: "PROFECO", name: "Procuradur\u00eda Federal del Consumidor" },
   { shortName: "SAT", name: "Sistema de Administraci\u00f3n Tributaria" },
   { shortName: "APF", name: "Administraci\u00f3n P\u00fablica Federal" },
   { shortName: "APCDMX", name: "Administraci\u00f3n P\u00fablica de la Ciudad de M\u00e9xico" },
@@ -524,6 +531,10 @@ export const EXECUTION_HOLIDAY_CALENDAR_AUTHORITIES = [
   "FGR",
   "TFCyA",
   "JLCyA",
+  "IMPI",
+  "RPPCDMX",
+  "PJPuebla",
+  "PROFECO",
   "SAT",
   "APF",
   "APCDMX"

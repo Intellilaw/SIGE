@@ -13,6 +13,10 @@ const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME = {
     FGR: "FGR",
     TFCyA: "TFCyA",
     JLCyA: "JLCyA",
+    IMPI: "IMPI",
+    RPPCDMX: "RPPCDMX",
+    PJPuebla: "PJPuebla",
+    PROFECO: "PROFECO",
     SAT: "SAT",
     APF: "APF",
     APCDMX: "APCDMX"

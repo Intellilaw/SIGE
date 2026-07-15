@@ -102,6 +102,10 @@ const HOLIDAY_AUTHORITY_QUERY_SHORT_NAME: Record<string, string> = {
   FGR: "FGR",
   TFCyA: "TFCyA",
   JLCyA: "JLCyA",
+  IMPI: "IMPI",
+  RPPCDMX: "RPPCDMX",
+  PJPuebla: "PJPuebla",
+  PROFECO: "PROFECO",
   SAT: "SAT",
   APF: "APF",
   APCDMX: "APCDMX"
@@ -745,19 +749,19 @@ function addMissingField(missing: string[], field: string) {
   }
 }
 
-function isComplianceFiscalHiddenMissingField(field: string) {
+function isNonLitigationHiddenMissingField(field: string) {
   const normalized = normalizeComparableText(field);
   return normalized === "caducidad" || (normalized.includes("comando") && normalized.includes("promoci"));
 }
 
-function omitComplianceFiscalHiddenMissingFields<T extends { missing: string[] }>(validation: T, shouldOmit: boolean): T {
+function omitNonLitigationHiddenMissingFields<T extends { missing: string[] }>(validation: T, shouldOmit: boolean): T {
   if (!shouldOmit) {
     return validation;
   }
 
   return {
     ...validation,
-    missing: validation.missing.filter((field) => !isComplianceFiscalHiddenMissingField(field))
+    missing: validation.missing.filter((field) => !isNonLitigationHiddenMissingField(field))
   };
 }
 
@@ -951,9 +955,10 @@ export function ExecutionTeamWorkspace({
     [module]
   );
   const canAccess = Boolean(module);
-  const hideComplianceFiscalCaducidadAndPromotion = module?.team === "TAX_COMPLIANCE" || module?.moduleId === "tax-compliance";
-  const activeExecutionTableColumnCount = hideComplianceFiscalCaducidadAndPromotion ? 21 : 23;
-  const recycleExecutionTableColumnCount = hideComplianceFiscalCaducidadAndPromotion ? 14 : 16;
+  const isLitigationExecutionModule = module?.team === "LITIGATION" || module?.moduleId === "litigation";
+  const hideCaducidadAndPromotion = !isLitigationExecutionModule;
+  const activeExecutionTableColumnCount = hideCaducidadAndPromotion ? 21 : 23;
+  const recycleExecutionTableColumnCount = hideCaducidadAndPromotion ? 14 : 16;
 
   useEffect(() => {
     let active = true;
@@ -1190,7 +1195,7 @@ export function ExecutionTeamWorkspace({
       loading
       || !module
       || !legacyConfig
-      || hideComplianceFiscalCaducidadAndPromotion
+      || hideCaducidadAndPromotion
       || generatingRiMatterIds.size > 0
       || generatingCaducidadRiMatterIds.size > 0
     ) {
@@ -1230,7 +1235,7 @@ export function ExecutionTeamWorkspace({
     dirtyMatterIds,
     generatingCaducidadRiMatterIds,
     generatingRiMatterIds,
-    hideComplianceFiscalCaducidadAndPromotion,
+    hideCaducidadAndPromotion,
     legacyConfig,
     loading,
     module
@@ -1449,6 +1454,10 @@ export function ExecutionTeamWorkspace({
   }
 
   async function handleGenerateRiExpiration(matterId: string) {
+    if (hideCaducidadAndPromotion) {
+      return;
+    }
+
     setGeneratingCaducidadRiMatterIds((current) => new Set(current).add(matterId));
     setErrorMessage(null);
 
@@ -1739,7 +1748,7 @@ export function ExecutionTeamWorkspace({
                       <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
                     </span>
                   </th>
-                  {hideComplianceFiscalCaducidadAndPromotion ? null : (
+                  {hideCaducidadAndPromotion ? null : (
                     <>
                       <th>
                         <span className="ri-table-column-label">
@@ -1776,9 +1785,9 @@ export function ExecutionTeamWorkspace({
                       const submatters = matter.executionSubmatters ?? [];
                       const hasSubmatters = submatters.length > 0;
                       const matterTasks = getMatterTasks(matter, activeTaskMap);
-                      const validation = omitComplianceFiscalHiddenMissingFields(
+                      const validation = omitNonLitigationHiddenMissingFields(
                         evaluateMatterRow(matter, clientNumber, matterTasks, holidayDateKeysByAuthority),
-                        hideComplianceFiscalCaducidadAndPromotion
+                        hideCaducidadAndPromotion
                       );
                       const caducidadRiOutput = normalizeText(matter.expirationRiOutput);
                       const isGeneratingCaducidadRi = generatingCaducidadRiMatterIds.has(matter.id);
@@ -1973,7 +1982,7 @@ export function ExecutionTeamWorkspace({
                               ) : null}
                             </div>
                           </td>
-                          {hideComplianceFiscalCaducidadAndPromotion ? null : (
+                          {hideCaducidadAndPromotion ? null : (
                             <>
                               <td>
                                 <div className="execution-caducidad-cell">
@@ -2051,14 +2060,14 @@ export function ExecutionTeamWorkspace({
                         </tr>
                         {submatters.map((submatter, submatterIndex) => {
                           const submatterTasks = getSubmatterTasks(matter, submatter, activeTaskMap);
-                          const submatterValidation = omitComplianceFiscalHiddenMissingFields(
+                          const submatterValidation = omitNonLitigationHiddenMissingFields(
                             evaluateSubmatterRow(
                               submatter,
                               matter.milestone,
                               submatterTasks,
                               holidayDateKeysByAuthority
                             ),
-                            hideComplianceFiscalCaducidadAndPromotion
+                            hideCaducidadAndPromotion
                           );
                           const submatterCaducidadRiOutput = normalizeText(submatter.expirationRiOutput);
                           const submatterRowClassName = [
@@ -2280,7 +2289,7 @@ export function ExecutionTeamWorkspace({
                                   />
                                 </div>
                               </td>
-                              {hideComplianceFiscalCaducidadAndPromotion ? null : (
+                              {hideCaducidadAndPromotion ? null : (
                                 <>
                                   <td>
                                     <div className="execution-caducidad-cell">
@@ -2415,7 +2424,7 @@ export function ExecutionTeamWorkspace({
                       <RusconiIntelligenceBadge connectionId="RI-001" label="Ejecucion / Input de RI" />
                     </span>
                   </th>
-                  {hideComplianceFiscalCaducidadAndPromotion ? null : (
+                  {hideCaducidadAndPromotion ? null : (
                     <>
                       <th>
                         <span className="ri-table-column-label">
@@ -2485,7 +2494,7 @@ export function ExecutionTeamWorkspace({
                           )}
                         </td>
                         <td>{matter.executionPrompt || "-"}</td>
-                        {hideComplianceFiscalCaducidadAndPromotion ? null : (
+                        {hideCaducidadAndPromotion ? null : (
                           <>
                             <td>{getCaducidadColumnValue(matter) || "-"}</td>
                             <td>{matter.promotionCommand || "-"}</td>

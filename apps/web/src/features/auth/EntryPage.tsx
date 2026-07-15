@@ -40,27 +40,39 @@ export function EntryPage() {
 
           <div className="entry-actions">
             <div className="entry-option">
-              <div className="entry-option-logo-shell">
+              <Link
+                to={getAccessPath(intellilawOrganization.slug)}
+                className="entry-option-logo-shell"
+                aria-label={`Acceder a ${intellilawOrganization.name}`}
+              >
                 <img className="entry-option-logo" src={intellilawLogo} alt={intellilawOrganization.name} />
-              </div>
+              </Link>
               <Link to={getAccessPath(intellilawOrganization.slug)} className="entry-button entry-button-primary">
                 {getOrganizationAccessLabel(intellilawOrganization)}
               </Link>
             </div>
 
             <div className="entry-option">
-              <div className="entry-option-logo-shell">
+              <Link
+                to={getAccessPath(legalFlowOrganization.slug)}
+                className="entry-option-logo-shell"
+                aria-label={`Acceder a ${legalFlowOrganization.name}`}
+              >
                 <img className="entry-option-logo" src={legalFlowLogo} alt={legalFlowOrganization.name} />
-              </div>
+              </Link>
               <Link to={getAccessPath(legalFlowOrganization.slug)} className="entry-button entry-button-primary">
                 {getOrganizationAccessLabel(legalFlowOrganization)}
               </Link>
             </div>
 
             <div className="entry-option">
-              <div className="entry-option-logo-shell">
+              <Link
+                to={getAccessPath(rusconiOrganization.slug)}
+                className="entry-option-logo-shell"
+                aria-label={`Acceder a ${rusconiOrganization.name}`}
+              >
                 <img className="rusconi-logo entry-option-logo" src={rusconiLogo} alt={rusconiOrganization.name} />
-              </div>
+              </Link>
               <Link to={getAccessPath(rusconiOrganization.slug)} className="entry-button entry-button-primary">
                 {getOrganizationAccessLabel(rusconiOrganization)}
               </Link>

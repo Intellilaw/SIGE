@@ -516,6 +516,14 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
       throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
     }
 
+    if (currentMatter.responsibleTeam !== "LITIGATION") {
+      throw new app.errors.AppError(
+        400,
+        "RI_EXPIRATION_ONLY_FOR_LITIGATION",
+        "La Caducidad RI-004 solo esta disponible para asuntos de Litigio."
+      );
+    }
+
     const tasks = await listRiTaskContext(app, currentMatter);
     const expirationResult = await generateMatterRiExpiration({
       matter: currentMatter,

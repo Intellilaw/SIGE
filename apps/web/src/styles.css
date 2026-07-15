@@ -191,6 +191,18 @@ textarea {
   box-shadow: 0 12px 24px rgba(31, 41, 51, 0.1);
   display: grid;
   place-items: center;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.entry-option-logo-shell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(31, 41, 51, 0.14);
+}
+
+.entry-option-logo-shell:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 4px;
 }
 
 .entry-option-mark-muted {

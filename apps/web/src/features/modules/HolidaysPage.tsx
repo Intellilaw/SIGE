@@ -66,6 +66,10 @@ const EXECUTION_TO_HOLIDAY_AUTHORITY_SHORT_NAME: Record<ExecutionHolidayCalendar
   FGR: "FGR",
   TFCyA: "TFCyA",
   JLCyA: "JLCyA",
+  IMPI: "IMPI",
+  RPPCDMX: "RPPCDMX",
+  PJPuebla: "PJPuebla",
+  PROFECO: "PROFECO",
   SAT: "SAT",
   APF: "APF",
   APCDMX: "APCDMX"

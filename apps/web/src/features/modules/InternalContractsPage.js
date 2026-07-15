@@ -30,6 +30,18 @@ const BUNDLED_CONTRACT_TEMPLATES = [
         isBundled: true
     },
     {
+        id: "bundled-professional-services-contract-2026-07-13",
+        title: "Professional services contract (RC) (13.07.26)",
+        originalFileName: "Professional services contract (RC) (13.07.26).docx",
+        fileMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        fileSizeBytes: 110686,
+        notes: "Machote base de empresa.",
+        createdAt: "2026-07-13T00:00:00.000Z",
+        updatedAt: "2026-07-13T00:00:00.000Z",
+        downloadUrl: "/internal-contract-templates/professional-services-contract-rc-2026-07-13.docx",
+        isBundled: true
+    },
+    {
         id: "bundled-commercial-commission-contract-2026-05-22",
         title: "Contrato de comisi\u00f3n mercantil (22.05.2026)",
         originalFileName: "Contrato de comisi\u00f3n mercantil (22.05.2026).docx",
