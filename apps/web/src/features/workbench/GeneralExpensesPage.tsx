@@ -1773,6 +1773,12 @@ export function GeneralExpensesPage() {
                       ? "Marcar cuando estos días ya fueron pagados."
                       : `Se habilita el ${advanceVacationPaymentDate}.`;
                   const { sum: distributionSum } = getDistributionPct(entry);
+                  const finalPaymentApprovalDisabled = !canApprove || (
+                    !entry.finalPaymentApprovedByEmrt && distributionSum !== 100
+                  );
+                  const finalPaymentApprovalTitle = distributionSum === 100 || entry.finalPaymentApprovedByEmrt
+                    ? undefined
+                    : "La distribucion entre equipos debe sumar 100% antes de autorizar el pago.";
 
                   return (
                     <tr key={entry.id}>
@@ -1991,25 +1997,28 @@ export function GeneralExpensesPage() {
                         disabled={!canStampPayroll || entry.finalPaymentApprovedByEmrt}
                       />
                     </td>
-                    <td className="general-expense-checkbox-cell">
-                      <input
-                        type="checkbox"
-                        checked={entry.finalPaymentApprovedByEmrt}
-                        onChange={(event) => {
-                          const finalPaymentApprovedByEmrt = event.target.checked;
-                          void persistPayrollPatch(
-                            entry.id,
-                            { finalPaymentApprovedByEmrt },
-                            finalPaymentApprovedByEmrt
-                              ? { finalPaymentApprovedByEmrt }
-                              : { finalPaymentApprovedByEmrt, generalExpense: false }
-                          );
-                        }}
-                        disabled={!canApprove || (!entry.finalPaymentApprovedByEmrt && distributionSum !== 100)}
-                        title={distributionSum === 100 || entry.finalPaymentApprovedByEmrt
-                          ? undefined
-                          : "La distribución entre equipos debe sumar 100% antes de autorizar el pago."}
-                      />
+                    <td className="general-expense-checkbox-cell general-expense-checkbox-hit-cell">
+                      <label
+                        className={`general-expense-checkbox-hit-area ${finalPaymentApprovalDisabled ? "is-disabled" : ""}`}
+                        title={finalPaymentApprovalTitle}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={entry.finalPaymentApprovedByEmrt}
+                          onChange={(event) => {
+                            const finalPaymentApprovedByEmrt = event.target.checked;
+                            void persistPayrollPatch(
+                              entry.id,
+                              { finalPaymentApprovedByEmrt },
+                              finalPaymentApprovedByEmrt
+                                ? { finalPaymentApprovedByEmrt }
+                                : { finalPaymentApprovedByEmrt, generalExpense: false }
+                            );
+                          }}
+                          disabled={finalPaymentApprovalDisabled}
+                          aria-label="Pago autorizado por EMRT"
+                        />
+                      </label>
                     </td>
                     <td className="general-expense-checkbox-cell">
                       <input
@@ -2258,6 +2267,7 @@ export function GeneralExpensesPage() {
                           const pctDisabled = protectedFieldDisabled || expense.generalExpense || expense.expenseWithoutTeam;
                           const vatCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
                           const withholdingsCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
+                          const emrtApprovalDisabled = !canApprove || preEmrtLocked || sourceManaged;
                           const rowIncomplete = isRowIncomplete(expense);
                           const draftAmount = drafts[expense.id]?.amountMxn ?? formatEditableMoney(Number(expense.amountMxn || 0));
 
@@ -2455,17 +2465,22 @@ export function GeneralExpensesPage() {
                                   disabled={protectedFieldDisabled}
                                 />
                               </td>
-                              <td className="general-expense-checkbox-cell">
-                                <input
-                                  type="checkbox"
-                                  checked={expense.approvedByEmrt}
-                                  onChange={(event) => {
-                                    const patch = getApprovedByEmrtPatch(event.target.checked);
-                                    void persistExpensePatch(expense.id, { approvedByEmrt: event.target.checked }, patch);
-                                  }}
-                                  disabled={!canApprove || preEmrtLocked || sourceManaged}
+                              <td className="general-expense-checkbox-cell general-expense-checkbox-hit-cell">
+                                <label
+                                  className={`general-expense-checkbox-hit-area ${emrtApprovalDisabled ? "is-disabled" : ""}`}
                                   title={sourceManaged ? `La autorización de este gasto se controla desde ${sourceModuleLabel}.` : undefined}
-                                />
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={expense.approvedByEmrt}
+                                    onChange={(event) => {
+                                      const patch = getApprovedByEmrtPatch(event.target.checked);
+                                      void persistExpensePatch(expense.id, { approvedByEmrt: event.target.checked }, patch);
+                                    }}
+                                    disabled={emrtApprovalDisabled}
+                                    aria-label="Aprobado por EMRT"
+                                  />
+                                </label>
                               </td>
                               <td>
                                 {expense.paymentMethod === "Efectivo" && expense.approvedByEmrt ? (

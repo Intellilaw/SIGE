@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   BudgetAreaProfitabilityOverview,
   BudgetAreaProfitabilityPoint,
-  BudgetAreaProfitabilitySeries,
   KnownTeam
 } from "@sige/contracts";
 
@@ -16,9 +15,17 @@ interface AreaProfitabilityChartProps {
 
 interface ActiveChartPoint {
   point: BudgetAreaProfitabilityPoint;
-  series: BudgetAreaProfitabilitySeries;
+  series: ProfitabilityChartSeries;
   x: number;
   y: number;
+}
+
+interface ProfitabilityChartSeries {
+  id: string;
+  label: string;
+  color: string;
+  isCompany: boolean;
+  points: BudgetAreaProfitabilityPoint[];
 }
 
 const SERIES_COLORS: Partial<Record<KnownTeam, string>> = {
@@ -28,6 +35,7 @@ const SERIES_COLORS: Partial<Record<KnownTeam, string>> = {
   FINANCIAL_LAW: "#dc2626",
   TAX_COMPLIANCE: "#7c3aed"
 };
+const COMPANY_SERIES_COLOR = "#172a46";
 
 const MONTH_SHORT_NAMES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const CHART_WIDTH = 1120;
@@ -80,20 +88,61 @@ function getSeriesColor(team: KnownTeam) {
   return SERIES_COLORS[team] ?? "#475569";
 }
 
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 export function AreaProfitabilityChart({ data, loading, selectedTeam }: AreaProfitabilityChartProps) {
   const [activePoint, setActivePoint] = useState<ActiveChartPoint | null>(null);
-  const visibleSeries = useMemo(
-    () => (data?.series ?? []).filter((series) => selectedTeam === "ALL" || series.team === selectedTeam),
-    [data, selectedTeam]
-  );
+  const chartSeries = useMemo(() => {
+    const teamSeries: ProfitabilityChartSeries[] = (data?.series ?? [])
+      .filter((series) => selectedTeam === "ALL" || series.team === selectedTeam)
+      .map((series) => ({
+        id: series.team,
+        label: series.teamLabel,
+        color: getSeriesColor(series.team),
+        isCompany: false,
+        points: series.points
+      }));
+    const sourcePoints = data?.series[0]?.points ?? [];
+    const companyPoints = sourcePoints.map((sourcePoint, index) => {
+      const totals = (data?.series ?? []).reduce(
+        (sum, series) => ({
+          incomeMxn: sum.incomeMxn + Number(series.points[index]?.incomeMxn ?? 0),
+          expenseMxn: sum.expenseMxn + Number(series.points[index]?.expenseMxn ?? 0),
+          profitMxn: sum.profitMxn + Number(series.points[index]?.profitMxn ?? 0)
+        }),
+        { incomeMxn: 0, expenseMxn: 0, profitMxn: 0 }
+      );
+      return {
+        year: sourcePoint.year,
+        month: sourcePoint.month,
+        incomeMxn: roundMoney(totals.incomeMxn),
+        expenseMxn: roundMoney(totals.expenseMxn),
+        profitMxn: roundMoney(totals.profitMxn)
+      };
+    });
+
+    if (companyPoints.length > 0) {
+      teamSeries.push({
+        id: "COMPANY_TOTAL",
+        label: "Rentabilidad total empresa",
+        color: COMPANY_SERIES_COLOR,
+        isCompany: true,
+        points: companyPoints
+      });
+    }
+
+    return teamSeries;
+  }, [data, selectedTeam]);
 
   useEffect(() => {
     setActivePoint(null);
   }, [data, selectedTeam]);
 
   const chart = useMemo(() => {
-    const months = visibleSeries[0]?.points ?? [];
-    const values = visibleSeries.flatMap((series) => series.points.map((point) => point.profitMxn));
+    const months = chartSeries[0]?.points ?? [];
+    const values = chartSeries.flatMap((series) => series.points.map((point) => point.profitMxn));
     let minimum = Math.min(0, ...values);
     let maximum = Math.max(0, ...values);
 
@@ -129,7 +178,7 @@ export function AreaProfitabilityChart({ data, loading, selectedTeam }: AreaProf
       zeroY: getY(0),
       monthLabelIndexes
     };
-  }, [visibleSeries]);
+  }, [chartSeries]);
 
   if (loading) {
     return <div className="budget-profitability-empty">Cargando rentabilidad por equipo...</div>;
@@ -150,11 +199,18 @@ export function AreaProfitabilityChart({ data, loading, selectedTeam }: AreaProf
 
   return (
     <div className="budget-profitability-chart-block">
-      <div className="budget-profitability-legend" aria-label="Equipos mostrados">
-        {visibleSeries.map((series) => (
-          <span className="budget-profitability-legend-item" key={series.team}>
-            <i style={{ backgroundColor: getSeriesColor(series.team) }} aria-hidden="true" />
-            {series.teamLabel}
+      <div className="budget-profitability-legend" aria-label="Series mostradas">
+        {chartSeries.map((series) => (
+          <span
+            className={`budget-profitability-legend-item ${series.isCompany ? "is-company-label" : ""}`}
+            key={series.id}
+          >
+            <i
+              className={series.isCompany ? "is-company" : ""}
+              style={{ backgroundColor: series.color }}
+              aria-hidden="true"
+            />
+            {series.label}
           </span>
         ))}
         <span className="budget-profitability-legend-item">
@@ -174,7 +230,7 @@ export function AreaProfitabilityChart({ data, loading, selectedTeam }: AreaProf
           >
             <title id="area-profitability-chart-title">Utilidad mensual por equipo</title>
             <desc id="area-profitability-chart-description">
-              Lineas de utilidad o perdida mensual. La linea horizontal en cero indica el punto de equilibrio.
+              Lineas de utilidad o perdida mensual por equipo y una linea gruesa con el total de la empresa. La linea horizontal en cero indica el punto de equilibrio.
             </desc>
 
             <rect
@@ -252,39 +308,38 @@ export function AreaProfitabilityChart({ data, loading, selectedTeam }: AreaProf
               $0 equilibrio
             </text>
 
-            {visibleSeries.map((series) => {
-              const color = getSeriesColor(series.team);
+            {chartSeries.map((series) => {
               const path = series.points
                 .map((point, index) => `${index === 0 ? "M" : "L"} ${chart.getX(index)} ${chart.getY(point.profitMxn)}`)
                 .join(" ");
 
               return (
-                <g key={series.team}>
+                <g key={series.id}>
                   <path
-                    className="budget-profitability-series-line"
+                    className={`budget-profitability-series-line ${series.isCompany ? "is-company" : ""}`}
                     d={path}
                     fill="none"
-                    stroke={color}
+                    stroke={series.color}
                     vectorEffect="non-scaling-stroke"
                   />
                   {series.points.map((point, index) => {
                     const x = chart.getX(index);
                     const y = chart.getY(point.profitMxn);
-                    const isActive = activePoint?.series.team === series.team
+                    const isActive = activePoint?.series.id === series.id
                       && activePoint.point.year === point.year
                       && activePoint.point.month === point.month;
-                    const accessibleLabel = `${series.teamLabel}, ${getFullMonthLabel(point)}: utilidad ${formatCurrency(point.profitMxn)}, ingresos ${formatCurrency(point.incomeMxn)}, gastos ${formatCurrency(point.expenseMxn)}`;
+                    const accessibleLabel = `${series.label}, ${getFullMonthLabel(point)}: utilidad ${formatCurrency(point.profitMxn)}, ingresos ${formatCurrency(point.incomeMxn)}, gastos ${formatCurrency(point.expenseMxn)}`;
 
                     return (
                       <circle
-                        className="budget-profitability-point"
-                        key={`${series.team}-${point.year}-${point.month}`}
+                        className={`budget-profitability-point ${series.isCompany ? "is-company" : ""}`}
+                        key={`${series.id}-${point.year}-${point.month}`}
                         cx={x}
                         cy={y}
-                        r={isActive ? 7 : 5}
-                        fill={color}
+                        r={series.isCompany ? (isActive ? 9 : 7) : (isActive ? 7 : 5)}
+                        fill={series.color}
                         stroke="#ffffff"
-                        strokeWidth={2}
+                        strokeWidth={series.isCompany ? 3 : 2}
                         vectorEffect="non-scaling-stroke"
                         tabIndex={0}
                         role="img"
@@ -303,9 +358,9 @@ export function AreaProfitabilityChart({ data, loading, selectedTeam }: AreaProf
             {activePoint ? (
               <g className="budget-profitability-tooltip" pointerEvents="none">
                 <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx={6} />
-                <circle cx={tooltipX + 17} cy={tooltipY + 20} r={5} fill={getSeriesColor(activePoint.series.team)} />
+                <circle cx={tooltipX + 17} cy={tooltipY + 20} r={5} fill={activePoint.series.color} />
                 <text className="budget-profitability-tooltip-title" x={tooltipX + 30} y={tooltipY + 24}>
-                  {activePoint.series.teamLabel}
+                  {activePoint.series.label}
                 </text>
                 <text className="budget-profitability-tooltip-period" x={tooltipX + 14} y={tooltipY + 45}>
                   {getFullMonthLabel(activePoint.point)}

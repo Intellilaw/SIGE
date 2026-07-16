@@ -3873,6 +3873,35 @@ textarea {
   transform: scale(1.1);
 }
 
+.general-expense-checkbox-hit-cell {
+  min-width: 78px;
+  padding: 0 !important;
+  position: relative;
+}
+
+.general-expense-checkbox-hit-area {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  min-height: 52px;
+  position: absolute;
+  transition: background-color 120ms ease;
+}
+
+.general-expense-checkbox-hit-area:not(.is-disabled):hover {
+  background: rgba(29, 78, 216, 0.08);
+}
+
+.general-expense-checkbox-hit-area:focus-within {
+  box-shadow: inset 0 0 0 2px rgba(29, 78, 216, 0.55);
+}
+
+.general-expense-checkbox-hit-area.is-disabled {
+  cursor: not-allowed;
+}
+
 .general-expense-limit-cell {
   text-align: right;
   font-weight: 800;
@@ -10401,6 +10430,17 @@ div.sales-product-card-main {
   width: 18px;
 }
 
+.budget-profitability-legend-item.is-company-label {
+  color: #172a46;
+  font-weight: 800;
+}
+
+.budget-profitability-legend-item i.is-company {
+  border-radius: 999px;
+  height: 5px;
+  width: 26px;
+}
+
 .budget-profitability-chart-scroll {
   min-width: 0;
   overflow-x: auto;
@@ -10458,6 +10498,10 @@ div.sales-product-card-main {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.5;
+}
+
+.budget-profitability-series-line.is-company {
+  stroke-width: 5;
 }
 
 .budget-profitability-point {
