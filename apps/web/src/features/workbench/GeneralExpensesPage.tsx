@@ -483,14 +483,17 @@ function distributeExpense(expense: GeneralExpense) {
     totalPaid: 0
   };
 
-  if (!expense.paid || !expense.paidAt) {
+  const paidToRecipient = Boolean(expense.paid && expense.paidAt);
+  const approvedPayrollExpense = Boolean(expense.payrollEntryId && expense.approvedByEmrt);
+
+  if (!paidToRecipient && !approvedPayrollExpense) {
     return result;
   }
 
   const amount = Number(expense.amountMxn || 0);
   if (expense.expenseWithoutTeam) {
     result.withoutTeam = amount;
-    result.totalPaid = amount;
+    result.totalPaid = paidToRecipient ? amount : 0;
     return result;
   }
 
@@ -501,7 +504,7 @@ function distributeExpense(expense: GeneralExpense) {
     result.settlements = split;
     result.financialLaw = split;
     result.taxCompliance = split;
-    result.totalPaid = amount;
+    result.totalPaid = paidToRecipient ? amount : 0;
     return result;
   }
 
@@ -548,7 +551,7 @@ function distributeExpense(expense: GeneralExpense) {
     }
   }
 
-  result.totalPaid = amount;
+  result.totalPaid = paidToRecipient ? amount : 0;
   return result;
 }
 
@@ -2381,7 +2384,9 @@ export function GeneralExpensesPage() {
                                 {expense.expenseWithoutTeam ? "" : `${sum}%`}
                               </td>
                               <td>
-                                {sourceManaged ? (
+                                {payrollManaged ? (
+                                  <div className="general-expense-readonly-cell">{expense.paymentMethod}</div>
+                                ) : sourceManaged ? (
                                   <div className="general-expense-readonly-cell is-disabled">-</div>
                                 ) : (
                                   <select
@@ -2405,7 +2410,9 @@ export function GeneralExpensesPage() {
                                 )}
                               </td>
                               <td>
-                                {sourceManaged ? (
+                                {payrollManaged ? (
+                                  <div className="general-expense-readonly-cell">{expense.bank ?? "-"}</div>
+                                ) : sourceManaged ? (
                                   <div className="general-expense-readonly-cell is-disabled">-</div>
                                 ) : (
                                   <select
@@ -2487,7 +2494,8 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.paid}
                                   onChange={(event) => void persistExpensePatch(expense.id, { paid: event.target.checked })}
-                                  disabled={!canPay}
+                                  disabled={!canPay || payrollManaged}
+                                  title={payrollManaged ? "El pago de la Nomina se registra automaticamente." : undefined}
                                 />
                               </td>
                               <td>
@@ -2496,7 +2504,8 @@ export function GeneralExpensesPage() {
                                   type="date"
                                   value={toDateInput(expense.paidAt)}
                                   onChange={(event) => void persistExpensePatch(expense.id, { paidAt: event.target.value || null })}
-                                  disabled={!canWrite}
+                                  disabled={!canWrite || payrollManaged}
+                                  title={payrollManaged ? "Fecha calculada segun la quincena y los dias inhabiles generales." : undefined}
                                 />
                               </td>
                               <td className="general-expense-money-cell">{distribution.withoutTeam > 0 ? formatCurrency(distribution.withoutTeam) : "-"}</td>

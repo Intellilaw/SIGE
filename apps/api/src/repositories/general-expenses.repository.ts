@@ -33,6 +33,7 @@ import type {
 const DEFAULT_TEAM: GeneralExpense["team"] = "Sin equipo";
 const DEFAULT_PAYMENT_METHOD: GeneralExpense["paymentMethod"] = "Transferencia";
 const DEFAULT_BANK: NonNullable<GeneralExpense["bank"]> = "Banamex";
+const PAYROLL_GENERATED_BANK: NonNullable<GeneralExpense["bank"]> = "HSBC";
 const DEFAULT_HAS_VAT = true;
 const DEFAULT_HAS_WITHHOLDINGS = false;
 const DEFAULT_MONTH_RANGE = { min: 1, max: 12 };
@@ -82,6 +83,7 @@ const SOURCE_MANAGED_EXPENSE_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
   "paidByEmrtAt",
   "emrtReimbursementPending"
 ];
+const PAYROLL_MANAGED_PAYMENT_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = ["paid", "paidAt"];
 const PCT_KEYS: Array<keyof Pick<
   GeneralExpenseUpdateRecord,
   "pctLitigation" | "pctCorporateLabor" | "pctSettlements" | "pctFinancialLaw" | "pctTaxCompliance"
@@ -504,11 +506,45 @@ function getPayrollExpenseDistribution(entry: GeneralExpensePayrollEntry) {
   };
 }
 
-function getPayrollGeneratedExpenseData(entry: GeneralExpensePayrollEntry) {
+function getPayrollScheduledPaymentDateKey(
+  entry: { year: number; month: number; half: number },
+  globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
+) {
+  const targetDate = entry.half === 1
+    ? `${entry.year}-${padDatePart(entry.month)}-25`
+    : (() => {
+      const nextMonth = getNextMonth(entry.year, entry.month);
+      return `${nextMonth.year}-${padDatePart(nextMonth.month)}-10`;
+    })();
+  const globalVacationDateKeys = new Set(
+    globalVacationDayRecords.flatMap(getGlobalVacationDayDateKeys)
+  );
+
+  let candidate = targetDate;
+  for (let attempts = 0; attempts < 370; attempts += 1) {
+    const weekday = dateKeyToUtcDate(candidate).getUTCDay();
+    if (weekday !== 0 && weekday !== 6 && !globalVacationDateKeys.has(candidate)) {
+      return candidate;
+    }
+    candidate = addDateKey(candidate, -1);
+  }
+
+  throw new AppError(
+    500,
+    "GENERAL_EXPENSE_PAYROLL_PAYMENT_DATE_NOT_FOUND",
+    "No fue posible encontrar un dia habil para registrar el pago de la Nomina."
+  );
+}
+
+function getPayrollGeneratedExpenseData(
+  entry: GeneralExpensePayrollEntry,
+  globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
+) {
   const distribution = getPayrollExpenseDistribution(entry);
   const halfLabel = entry.half === 1 ? "Primera quincena" : "Segunda quincena";
   const monthLabel = PAYROLL_MONTH_NAMES[entry.month - 1] ?? `Mes ${entry.month}`;
   const employeeName = entry.employeeName.trim() || "Colaborador sin nombre";
+  const paidAt = parseDateOnly(getPayrollScheduledPaymentDateKey(entry, globalVacationDayRecords));
 
   return {
     year: entry.year,
@@ -525,13 +561,15 @@ function getPayrollGeneratedExpenseData(entry: GeneralExpensePayrollEntry) {
     pctFinancialLaw: new Prisma.Decimal(distribution.pctFinancialLaw),
     pctTaxCompliance: new Prisma.Decimal(distribution.pctTaxCompliance),
     paymentMethod: DEFAULT_PAYMENT_METHOD,
-    bank: null,
+    bank: PAYROLL_GENERATED_BANK,
     hasVat: false,
     hasWithholdings: false,
     recurring: false,
     approvedByEmrt: true,
     paidByEmrtAt: null,
     emrtReimbursementPending: false,
+    paid: true,
+    paidAt,
     payrollNetDepositMxn: new Prisma.Decimal(roundPayrollNumber(entry.netDepositMxn))
   };
 }
@@ -942,7 +980,10 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     return applyPayrollMonthlyBonusCalculations(mapped);
   }
 
-  private async mapPayrollEntryWithMonthlyBonuses(record: StoredGeneralExpensePayrollEntry) {
+  private async mapPayrollEntryWithMonthlyBonuses(
+    record: StoredGeneralExpensePayrollEntry,
+    preloadedGlobalVacationDayRecords?: PayrollGlobalVacationDayRecord[]
+  ) {
     const organizationId = this.getOrganizationId();
     const [records, globalVacationDayRecords] = await Promise.all([
       this.prisma.generalExpensePayrollEntry.findMany({
@@ -950,7 +991,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         include: PAYROLL_ENTRY_INCLUDE,
         orderBy: [{ half: "asc" }, { createdAt: "asc" }]
       }),
-      this.listPayrollGlobalVacationDayRecords()
+      preloadedGlobalVacationDayRecords ?? this.listPayrollGlobalVacationDayRecords()
     ]);
     const mapped = await this.mapPayrollEntriesWithMonthlyBonuses(records, globalVacationDayRecords);
     return mapped.find((entry) => entry.id === record.id) ?? applyPayrollMonthlyBonusCalculations([
@@ -960,10 +1001,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
   private async upsertPayrollGeneratedExpense(
     tx: Prisma.TransactionClient,
-    entry: GeneralExpensePayrollEntry
+    entry: GeneralExpensePayrollEntry,
+    globalVacationDayRecords: PayrollGlobalVacationDayRecord[]
   ) {
     const organizationId = this.getOrganizationId();
-    const data = getPayrollGeneratedExpenseData(entry);
+    const data = getPayrollGeneratedExpenseData(entry, globalVacationDayRecords);
 
     return tx.generalExpense.upsert({
       where: { payrollEntryId: entry.id },
@@ -976,19 +1018,77 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     });
   }
 
-  private async reconcileApprovedPayrollExpenses(year: number, month: number, onlyMissing = false) {
+  private async reconcileApprovedPayrollExpenses(year: number, month: number, onlyOutdated = false) {
     const organizationId = this.getOrganizationId();
-    if (onlyMissing) {
-      const missingApprovedExpenseCount = await this.prisma.generalExpensePayrollEntry.count({
-        where: {
-          organizationId,
-          year,
-          month,
-          finalPaymentApprovedByEmrt: true,
-          registeredExpense: { is: null }
-        }
-      });
-      if (missingApprovedExpenseCount === 0) {
+    let payrollEntryIdsToReconcile: Set<string> | null = null;
+    let preloadedGlobalVacationDayRecords: PayrollGlobalVacationDayRecord[] | null = null;
+
+    if (onlyOutdated) {
+      const [approvedPayrollExpenses, globalVacationDayRecords] = await Promise.all([
+        this.prisma.generalExpensePayrollEntry.findMany({
+          where: {
+            organizationId,
+            year,
+            month,
+            finalPaymentApprovedByEmrt: true
+          },
+          select: {
+            id: true,
+            year: true,
+            month: true,
+            half: true,
+            generalExpense: true,
+            pctLitigation: true,
+            pctCorporateLabor: true,
+            pctSettlements: true,
+            pctFinancialLaw: true,
+            pctTaxCompliance: true,
+            registeredExpense: {
+              select: {
+                team: true,
+                generalExpense: true,
+                expenseWithoutTeam: true,
+                pctLitigation: true,
+                pctCorporateLabor: true,
+                pctSettlements: true,
+                pctFinancialLaw: true,
+                pctTaxCompliance: true,
+                paymentMethod: true,
+                bank: true,
+                paid: true,
+                paidAt: true
+              }
+            }
+          }
+        }),
+        this.listPayrollGlobalVacationDayRecords()
+      ]);
+      preloadedGlobalVacationDayRecords = globalVacationDayRecords;
+
+      payrollEntryIdsToReconcile = new Set(
+        approvedPayrollExpenses
+          .filter((entry) => {
+            const expectedPaymentDate = getPayrollScheduledPaymentDateKey(entry, globalVacationDayRecords);
+            return (
+              !entry.registeredExpense ||
+              entry.registeredExpense.team !== DEFAULT_TEAM ||
+              entry.registeredExpense.generalExpense !== entry.generalExpense ||
+              entry.registeredExpense.expenseWithoutTeam ||
+              Number(entry.registeredExpense.pctLitigation) !== Number(entry.pctLitigation) ||
+              Number(entry.registeredExpense.pctCorporateLabor) !== Number(entry.pctCorporateLabor) ||
+              Number(entry.registeredExpense.pctSettlements) !== Number(entry.pctSettlements) ||
+              Number(entry.registeredExpense.pctFinancialLaw) !== Number(entry.pctFinancialLaw) ||
+              Number(entry.registeredExpense.pctTaxCompliance) !== Number(entry.pctTaxCompliance) ||
+              entry.registeredExpense.paymentMethod !== DEFAULT_PAYMENT_METHOD ||
+              entry.registeredExpense.bank !== PAYROLL_GENERATED_BANK ||
+              !entry.registeredExpense.paid ||
+              toDateInput(entry.registeredExpense.paidAt) !== expectedPaymentDate
+            );
+          })
+          .map(({ id }) => id)
+      );
+
+      if (payrollEntryIdsToReconcile.size === 0) {
         return;
       }
     }
@@ -999,13 +1099,13 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         include: PAYROLL_ENTRY_INCLUDE,
         orderBy: [{ half: "asc" }, { createdAt: "asc" }]
       }),
-      this.listPayrollGlobalVacationDayRecords()
+      preloadedGlobalVacationDayRecords ?? this.listPayrollGlobalVacationDayRecords()
     ]);
-    const registeredPayrollEntryIds = new Set(
-      records.filter((record) => Boolean(record.registeredExpense)).map((record) => record.id)
-    );
     const approvedEntries = (await this.mapPayrollEntriesWithMonthlyBonuses(records, globalVacationDayRecords))
-      .filter((entry) => entry.finalPaymentApprovedByEmrt && (!onlyMissing || !registeredPayrollEntryIds.has(entry.id)));
+      .filter((entry) => (
+        entry.finalPaymentApprovedByEmrt &&
+        (!payrollEntryIdsToReconcile || payrollEntryIdsToReconcile.has(entry.id))
+      ));
 
     if (approvedEntries.length === 0) {
       return;
@@ -1036,7 +1136,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
           });
         }
 
-        await this.upsertPayrollGeneratedExpense(tx, entry);
+        await this.upsertPayrollGeneratedExpense(tx, entry, globalVacationDayRecords);
       }
     });
   }
@@ -1423,8 +1523,11 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     this.assertPayrollFieldAccess(current, payload, actor);
 
     const organizationId = this.getOrganizationId();
+    const approvalGlobalVacationDayRecords = payload.finalPaymentApprovedByEmrt === true
+      ? await this.listPayrollGlobalVacationDayRecords()
+      : null;
     const payrollSnapshot = payload.finalPaymentApprovedByEmrt === true
-      ? await this.mapPayrollEntryWithMonthlyBonuses(current)
+      ? await this.mapPayrollEntryWithMonthlyBonuses(current, approvalGlobalVacationDayRecords ?? undefined)
       : null;
     const { data, laborFileUpdate } = await this.buildPayrollUpdatePayload(current, payload);
     const record = await this.prisma.$transaction(async (tx) => {
@@ -1441,8 +1544,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         include: PAYROLL_ENTRY_INCLUDE
       });
 
-      if (payload.finalPaymentApprovedByEmrt === true && payrollSnapshot) {
-        await this.upsertPayrollGeneratedExpense(tx, payrollSnapshot);
+      if (payload.finalPaymentApprovedByEmrt === true && payrollSnapshot && approvalGlobalVacationDayRecords) {
+        await this.upsertPayrollGeneratedExpense(tx, payrollSnapshot, approvalGlobalVacationDayRecords);
       }
 
       if (payload.finalPaymentApprovedByEmrt === false) {
@@ -1760,6 +1863,17 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       );
     }
 
+    if (
+      current.payrollEntryId &&
+      PAYROLL_MANAGED_PAYMENT_FIELDS.some((field) => hasOwn(payload, field))
+    ) {
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_PAYROLL_PAYMENT_MANAGED",
+        "El estado y la fecha de pago de la Nomina se calculan automaticamente desde la quincena."
+      );
+    }
+
     if (current.approvedByEmrt && LOCKED_AFTER_APPROVAL_FIELDS.some((field) => hasOwn(payload, field))) {
       throw new AppError(400, "GENERAL_EXPENSE_APPROVED_LOCKED", "This expense is locked because it was already approved by EMRT.");
     }
@@ -1981,12 +2095,12 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     if (
       payload.finalPaymentApprovedByEmrt === false &&
       current.registeredExpense &&
-      (current.registeredExpense.reviewedByJnls || current.registeredExpense.paid || current.registeredExpense.paidAt)
+      current.registeredExpense.reviewedByJnls
     ) {
       throw new AppError(
         400,
         "GENERAL_EXPENSE_PAYROLL_REGISTERED_EXPENSE_PROCESSED",
-        "No se puede desaprobar la Nómina porque su gasto ya fue revisado o pagado en Registro. Revierte primero esos estados."
+        "No se puede desaprobar la Nomina porque su gasto ya fue revisado por JNLS en Registro. Revierte primero ese estado."
       );
     }
 

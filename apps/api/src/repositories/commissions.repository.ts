@@ -227,7 +227,13 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
         where: {
           year,
           month,
-          paid: true
+          OR: [
+            { paid: true },
+            {
+              payrollEntryId: { not: null },
+              approvedByEmrt: true
+            }
+          ]
         },
         orderBy: [{ paidAt: "asc" }, { team: "asc" }, { detail: "asc" }, { createdAt: "asc" }]
       }),
