@@ -1018,9 +1018,26 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     });
   }
 
+  private async deleteUnapprovedPayrollGeneratedExpenses(year: number, month: number) {
+    const organizationId = this.getOrganizationId();
+    await this.prisma.generalExpense.deleteMany({
+      where: {
+        organizationId,
+        year,
+        month,
+        payrollEntryId: { not: null },
+        payrollEntry: {
+          is: { finalPaymentApprovedByEmrt: false }
+        }
+      }
+    });
+  }
+
   public async list(year: number, month: number) {
     assertMonth(month);
     const organizationId = this.getOrganizationId();
+
+    await this.deleteUnapprovedPayrollGeneratedExpenses(year, month);
 
     const records = await this.prisma.generalExpense.findMany({
       where: { organizationId, year, month },
