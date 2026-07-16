@@ -61,6 +61,52 @@ const PROJECTOR_SECTION_BY_ROLE = new Map([
 ]);
 
 const NAMED_COMMISSION_RECIPIENTS = ["Emilio Petith", "Joaquín Pani", "Edgar Ortuño"];
+const PROJECTOR_COMMISSION_EXPENSE_RECIPIENTS = ["PROJECTOR", "LITIGATION_LEADER"] as const;
+
+type ProjectorCommissionExpenseRecipient = (typeof PROJECTOR_COMMISSION_EXPENSE_RECIPIENTS)[number];
+type ProjectorCommissionExpenseSource = {
+  id: string;
+  organizationId: string;
+  year: number;
+  month: number;
+  responsibleCode: string;
+  clientName: string;
+  subject: string;
+  amountMxn: Prisma.Decimal;
+};
+
+function getProjectorCommissionExpenseData(
+  commission: ProjectorCommissionExpenseSource,
+  recipient: ProjectorCommissionExpenseRecipient
+) {
+  const clientName = commission.clientName.trim() || "Cliente sin nombre";
+  const subject = commission.subject.trim() || "Asunto sin nombre";
+  const recipientLabel = recipient === "PROJECTOR" ? commission.responsibleCode : "Litigio (líder)";
+
+  return {
+    year: commission.year,
+    month: commission.month,
+    detail: `Comisión por escrito de fondo - ${recipientLabel} - ${clientName} - ${subject}`,
+    amountMxn: commission.amountMxn,
+    countsTowardLimit: false,
+    team: "Litigio",
+    generalExpense: false,
+    expenseWithoutTeam: false,
+    pctLitigation: new Prisma.Decimal(100),
+    pctCorporateLabor: new Prisma.Decimal(0),
+    pctSettlements: new Prisma.Decimal(0),
+    pctFinancialLaw: new Prisma.Decimal(0),
+    pctTaxCompliance: new Prisma.Decimal(0),
+    paymentMethod: "Transferencia",
+    bank: null,
+    hasVat: false,
+    hasWithholdings: false,
+    recurring: false,
+    approvedByEmrt: true,
+    paidByEmrtAt: null,
+    emrtReimbursementPending: false
+  };
+}
 
 function commissionSectionForRole(role?: string | null) {
   const normalizedRole = normalizeRoleKey(role);
@@ -112,8 +158,65 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
     private readonly commissionRequirements: KpiCommissionRequirementsService
   ) {}
 
+  private async upsertProjectorCommissionExpenses(
+    tx: Prisma.TransactionClient,
+    commission: ProjectorCommissionExpenseSource,
+    recipients: readonly ProjectorCommissionExpenseRecipient[] = PROJECTOR_COMMISSION_EXPENSE_RECIPIENTS
+  ) {
+    for (const recipient of recipients) {
+      const data = getProjectorCommissionExpenseData(commission, recipient);
+      await tx.generalExpense.upsert({
+        where: {
+          projectorCommissionId_projectorCommissionRecipient: {
+            projectorCommissionId: commission.id,
+            projectorCommissionRecipient: recipient
+          }
+        },
+        create: {
+          organizationId: commission.organizationId,
+          projectorCommissionId: commission.id,
+          projectorCommissionRecipient: recipient,
+          ...data
+        },
+        update: data
+      });
+    }
+  }
+
+  private async reconcileAuthorizedProjectorCommissionExpenses(year: number, month: number) {
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const commissions = await this.prisma.projectorCommission.findMany({
+      where: { organizationId, year, month, authorized: true },
+      include: {
+        generalExpenses: {
+          select: { projectorCommissionRecipient: true }
+        }
+      }
+    });
+    const missing = commissions.flatMap((commission) => {
+      const existingRecipients = new Set(
+        commission.generalExpenses.map((expense) => expense.projectorCommissionRecipient)
+      );
+      const missingRecipients = PROJECTOR_COMMISSION_EXPENSE_RECIPIENTS.filter(
+        (recipient) => !existingRecipients.has(recipient)
+      );
+      return missingRecipients.length > 0 ? [{ commission, missingRecipients }] : [];
+    });
+
+    if (missing.length === 0) {
+      return;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of missing) {
+        await this.upsertProjectorCommissionExpenses(tx, item.commission, item.missingRecipients);
+      }
+    });
+  }
+
   public async getOverview(year: number, month: number) {
     await this.ensureDefaultReceivers();
+    await this.reconcileAuthorizedProjectorCommissionExpenses(year, month);
 
     const [financeRecords, generalExpenses, receivers, exclusions, projectorCommissions, paymentFlow, activeUsers] = await Promise.all([
       this.prisma.financeRecord.findMany({
@@ -334,7 +437,16 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
 
   public async updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord) {
     const current = await this.prisma.projectorCommission.findUnique({
-      where: { id: entryId }
+      where: { id: entryId },
+      include: {
+        generalExpenses: {
+          select: {
+            reviewedByJnls: true,
+            paid: true,
+            paidAt: true
+          }
+        }
+      }
     });
 
     if (!current) {
@@ -344,17 +456,46 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
     await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
 
     const authorizationChanged = payload.authorized !== undefined && payload.authorized !== current.authorized;
-    const record = await this.prisma.projectorCommission.update({
-      where: { id: entryId },
-      data: {
-        ...(payload.amountMxn === undefined ? {} : { amountMxn: new Prisma.Decimal(payload.amountMxn) }),
-        ...(payload.authorized === undefined ? {} : { authorized: payload.authorized }),
-        ...(authorizationChanged ? {
-          authorizedAt: payload.authorized ? new Date() : null,
-          authorizedByUserId: payload.authorized ? payload.authorizedByUserId : null,
-          authorizedByName: payload.authorized ? payload.authorizedByName : null
-        } : {})
+    const amountChanged = payload.amountMxn !== undefined && moneyChanged(payload.amountMxn, current.amountMxn);
+    const nextAuthorized = payload.authorized ?? current.authorized;
+    const hasProcessedExpense = current.generalExpenses.some(
+      (expense) => expense.reviewedByJnls || expense.paid || expense.paidAt
+    );
+
+    if (hasProcessedExpense && (amountChanged || (authorizationChanged && !nextAuthorized))) {
+      throw new AppError(
+        400,
+        "PROJECTOR_COMMISSION_GENERAL_EXPENSE_PROCESSED",
+        "No se puede modificar o desaprobar esta comisión porque uno de sus gastos ya fue revisado o pagado. Revierte primero esos estados en Registro."
+      );
+    }
+
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.projectorCommission.update({
+        where: { id: entryId },
+        data: {
+          ...(payload.amountMxn === undefined ? {} : { amountMxn: new Prisma.Decimal(payload.amountMxn) }),
+          ...(payload.authorized === undefined ? {} : { authorized: payload.authorized }),
+          ...(authorizationChanged ? {
+            authorizedAt: payload.authorized ? new Date() : null,
+            authorizedByUserId: payload.authorized ? payload.authorizedByUserId : null,
+            authorizedByName: payload.authorized ? payload.authorizedByName : null
+          } : {})
+        }
+      });
+
+      if (nextAuthorized) {
+        await this.upsertProjectorCommissionExpenses(tx, updated);
+      } else {
+        await tx.generalExpense.deleteMany({
+          where: {
+            projectorCommissionId: entryId,
+            organizationId: current.organizationId
+          }
+        });
       }
+
+      return updated;
     });
 
     return mapProjectorCommission(record);

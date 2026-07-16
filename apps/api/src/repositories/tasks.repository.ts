@@ -307,6 +307,7 @@ export class PrismaTasksRepository implements TasksRepository {
           }),
       this.prisma.user.findMany({
         where: {
+          organizationId,
           isActive: true,
           OR: [
             { team: { not: null } },

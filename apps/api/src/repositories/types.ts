@@ -17,6 +17,7 @@ import type {
   AccountingSettings,
   AccountingSettingsInput,
   AccountingXmlExportResult,
+  BudgetAreaProfitabilityOverview,
   BudgetPlan,
   BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
@@ -530,6 +531,12 @@ export interface GeneralExpensePayrollUpdateRecord {
   absenceDays?: number;
   overtimeHours?: number;
   overtimeDetail?: string;
+  generalExpense?: boolean;
+  pctLitigation?: number;
+  pctCorporateLabor?: number;
+  pctSettlements?: number;
+  pctFinancialLaw?: number;
+  pctTaxCompliance?: number;
   isrWithholdingMxn?: number;
   imssWithholdingMxn?: number;
   employmentSubsidyMxn?: number;
@@ -611,8 +618,16 @@ export interface BudgetPlanningOverviewRecord {
   generalExpenses: GeneralExpense[];
 }
 
+export interface BudgetAreaProfitabilityRangeRecord {
+  fromYear: number;
+  fromMonth: number;
+  toYear: number;
+  toMonth: number;
+}
+
 export interface BudgetPlanningRepository {
   getOverview(year: number, month: number): Promise<BudgetPlanningOverviewRecord>;
+  getAreaProfitability(range?: BudgetAreaProfitabilityRangeRecord): Promise<BudgetAreaProfitabilityOverview>;
   updatePlan(year: number, month: number, payload: BudgetPlanUpdateRecord): Promise<BudgetPlanningOverviewRecord>;
   listSnapshotsBefore(year: number, month: number): Promise<BudgetPlanSnapshot[]>;
   copyExpenseBreakdownToNextMonth(year: number, month: number): Promise<{

@@ -13,18 +13,21 @@ import { useAuth } from "../auth/AuthContext";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 
 type ActiveTab = "registro" | "payroll" | "emrt";
-type ExpenseDraftField =
-  | "detail"
-  | "amountMxn"
+type DistributionDraftField =
   | "pctLitigation"
   | "pctCorporateLabor"
   | "pctSettlements"
   | "pctFinancialLaw"
   | "pctTaxCompliance";
+type ExpenseDraftField =
+  | "detail"
+  | "amountMxn"
+  | DistributionDraftField;
 
 type ExpenseDraftMap = Record<string, Partial<Record<ExpenseDraftField, string>>>;
 
 type PayrollDraftField =
+  | DistributionDraftField
   | "absenceDays"
   | "overtimeHours"
   | "overtimeDetail"
@@ -78,6 +81,12 @@ type PayrollPatchPayload = {
   absenceDays?: number;
   overtimeHours?: number;
   overtimeDetail?: string;
+  generalExpense?: boolean;
+  pctLitigation?: number;
+  pctCorporateLabor?: number;
+  pctSettlements?: number;
+  pctFinancialLaw?: number;
+  pctTaxCompliance?: number;
   isrWithholdingMxn?: number;
   imssWithholdingMxn?: number;
   employmentSubsidyMxn?: number;
@@ -255,6 +264,10 @@ function isPayrollMoneyField(field: PayrollDraftField): field is (typeof PAYROLL
   return (PAYROLL_MONEY_FIELDS as readonly PayrollDraftField[]).includes(field);
 }
 
+function isPayrollPercentageField(field: PayrollDraftField): field is DistributionDraftField {
+  return DISTRIBUTION_FIELDS.some((item) => item.key === field);
+}
+
 function getPayrollDailySalaryRiValidation(
   entry: GeneralExpensePayrollEntry,
   employeeOption?: GeneralExpensePayrollEmployeeOption
@@ -409,6 +422,24 @@ function getIvaAmount(expense: GeneralExpense) {
 }
 
 function getWithholdingAmounts(expense: GeneralExpense) {
+  if (expense.payrollEntryId) {
+    const payrollNetDepositMxn = Number(expense.payrollNetDepositMxn || 0);
+    return {
+      vatWithholding: null,
+      isrWithholding: null,
+      netPayment: Number.isFinite(payrollNetDepositMxn) ? payrollNetDepositMxn : 0
+    };
+  }
+
+  if (expense.projectorCommissionId) {
+    const commissionAmountMxn = Number(expense.amountMxn || 0);
+    return {
+      vatWithholding: null,
+      isrWithholding: null,
+      netPayment: Number.isFinite(commissionAmountMxn) ? commissionAmountMxn : 0
+    };
+  }
+
   const rawAmount = Number(expense.amountMxn || 0);
   const amount = Number.isFinite(rawAmount) ? Math.max(0, rawAmount) : 0;
   const ivaAmount = getIvaAmount(expense) ?? 0;
@@ -424,7 +455,7 @@ function getWithholdingAmounts(expense: GeneralExpense) {
   };
 }
 
-function getDistributionPct(expense: GeneralExpense) {
+function getDistributionPct(expense: Record<DistributionDraftField, number>) {
   const pctLitigation = Number(expense.pctLitigation || 0);
   const pctCorporateLabor = Number(expense.pctCorporateLabor || 0);
   const pctSettlements = Number(expense.pctSettlements || 0);
@@ -528,8 +559,10 @@ function isRowIncomplete(expense: GeneralExpense) {
     const { sum } = getDistributionPct(expense);
     if (sum !== 100) return true;
   }
-  if (!expense.paymentMethod) return true;
-  if (expense.paymentMethod === "Transferencia" && !expense.bank) return true;
+  if (!expense.payrollEntryId && !expense.projectorCommissionId) {
+    if (!expense.paymentMethod) return true;
+    if (expense.paymentMethod === "Transferencia" && !expense.bank) return true;
+  }
   if (!expense.approvedByEmrt) return true;
   if (!expense.reviewedByJnls) return true;
   if (!expense.paid) return true;
@@ -622,6 +655,18 @@ function getPayrollAbsenceDiscountMxn(entry: Pick<GeneralExpensePayrollEntry, "d
 
 function getPayrollBonusMxn(netSalaryMxn: number) {
   return Math.round(Math.max(0, (Number.isFinite(netSalaryMxn) ? netSalaryMxn : 0) * PAYROLL_BONUS_RATE) * 100) / 100;
+}
+
+function getPayrollGrossCompensationMxn(entry: GeneralExpensePayrollEntry) {
+  const total = (
+    Number(entry.netSalaryMxn || 0) +
+    Number(entry.vacationPremiumMxn || 0) +
+    Number(entry.punctualityBonusMxn || 0) +
+    Number(entry.attendanceBonusMxn || 0) +
+    Number(entry.overtimeTotalMxn || 0)
+  );
+
+  return Math.round(total * 100) / 100;
 }
 
 function getPayrollEmployeeBonusKey(entry: GeneralExpensePayrollEntry) {
@@ -1168,6 +1213,9 @@ export function GeneralExpensesPage() {
       }
 
       setPayrollEntries((items) => replacePayrollEntry(items, updated));
+      if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
+        await loadRecords();
+      }
     } catch (error) {
       if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
         return;
@@ -1175,6 +1223,9 @@ export function GeneralExpensesPage() {
 
       setErrorMessage(toErrorMessage(error));
       await loadPayrollEntries();
+      if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
+        await loadRecords();
+      }
     }
   }
 
@@ -1191,7 +1242,9 @@ export function GeneralExpensesPage() {
       return;
     }
 
-    const numericValue = Math.max(0, isPayrollMoneyField(field) ? parseMoneyInput(rawValue) : Number(rawValue || 0));
+    const numericValue = isPayrollPercentageField(field)
+      ? clampPercentage(Number(rawValue || 0))
+      : Math.max(0, isPayrollMoneyField(field) ? parseMoneyInput(rawValue) : Number(rawValue || 0));
 
     await persistPayrollPatch(
       entryId,
@@ -1493,12 +1546,7 @@ export function GeneralExpensesPage() {
     2: payrollEntries.filter((entry) => entry.half === 2)
   }), [payrollEntries]);
 
-  const payrollNetDepositTotalMxn = useMemo(
-    () => payrollEntries.reduce((total, entry) => total + Number(entry.netDepositMxn || 0), 0),
-    [payrollEntries]
-  );
-
-  const registeredExpensesTotalMxn = totals.totalAmount + payrollNetDepositTotalMxn;
+  const registeredExpensesTotalMxn = totals.totalAmount;
 
   const payrollEmployeeOptionsById = useMemo(() => new Map<string, GeneralExpensePayrollEmployeeOption>(
     payrollEmployeeOptions.map((option): [string, GeneralExpensePayrollEmployeeOption] => [option.laborFileId, option])
@@ -1537,6 +1585,22 @@ export function GeneralExpensesPage() {
       isPartTime ? { isPartTime } : { isPartTime, overtimeDetail: "" },
       isPartTime ? { isPartTime } : { isPartTime, overtimeDetail: "" }
     );
+  }
+
+  function handlePayrollGeneralExpenseChange(entry: GeneralExpensePayrollEntry, generalExpense: boolean) {
+    const localPatch: PayrollLocalPatchPayload = generalExpense
+      ? {
+        generalExpense,
+        pctLitigation: 20,
+        pctCorporateLabor: 20,
+        pctSettlements: 20,
+        pctFinancialLaw: 20,
+        pctTaxCompliance: 20
+      }
+      : { generalExpense };
+
+    DISTRIBUTION_FIELDS.forEach((field) => clearPayrollDraft(entry.id, field.key));
+    void persistPayrollPatch(entry.id, { generalExpense }, localPatch);
   }
 
   function renderPayrollBonusCell(
@@ -1639,7 +1703,7 @@ export function GeneralExpensesPage() {
                   <th>Salario diario</th>
                   <th>Salario bruto</th>
                   <th>Faltas</th>
-                  <th>Salario neto</th>
+                  <th>Salario menos faltas</th>
                   <th>Días disfrutados por adelantado</th>
                   <th>Fecha en la que se pagará la prima vacacional</th>
                   <th>Pagar esta quincena</th>
@@ -1653,6 +1717,12 @@ export function GeneralExpensesPage() {
                   <th>Número de horas extras</th>
                   <th>Total horas extras</th>
                   <th>Detalle de horas extras</th>
+                  <th>Remuneración total bruta</th>
+                  <th>Gasto general</th>
+                  {DISTRIBUTION_FIELDS.map((field) => (
+                    <th key={`payroll-${field.key}`}>{field.label}</th>
+                  ))}
+                  <th>SUM %</th>
                   <th>Retenciones ISR</th>
                   <th>Retenciones IMSS</th>
                   <th>Subsidio al empleo</th>
@@ -1667,13 +1737,13 @@ export function GeneralExpensesPage() {
               <tbody>
                 {loadingPayroll ? (
                   <tr>
-                    <td colSpan={28} className="centered-inline-message">
+                    <td colSpan={36} className="centered-inline-message">
                       Cargando nómina...
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={28} className="centered-inline-message">
+                    <td colSpan={36} className="centered-inline-message">
                       Sin registros de nómina en esta quincena.
                     </td>
                   </tr>
@@ -1693,6 +1763,7 @@ export function GeneralExpensesPage() {
                     : entry.advanceVacationDaysPaymentEligible
                       ? "Marcar cuando estos días ya fueron pagados."
                       : `Se habilita el ${advanceVacationPaymentDate}.`;
+                  const { sum: distributionSum } = getDistributionPct(entry);
 
                   return (
                     <tr key={entry.id}>
@@ -1856,6 +1927,44 @@ export function GeneralExpensesPage() {
                         />
                       ) : null}
                     </td>
+                    <td>
+                      <div
+                        className="general-expense-readonly-cell is-payroll-gross-compensation"
+                        title="Salario menos faltas, prima vacacional, bonos aplicables y horas extras, antes de retenciones."
+                      >
+                        {formatCurrency(getPayrollGrossCompensationMxn(entry))}
+                      </div>
+                    </td>
+                    <td className="general-expense-checkbox-cell">
+                      <input
+                        type="checkbox"
+                        checked={entry.generalExpense}
+                        onChange={(event) => handlePayrollGeneralExpenseChange(entry, event.target.checked)}
+                        disabled={!canWrite || entry.finalPaymentApprovedByEmrt}
+                        title="Distribuye la remuneración total bruta en partes iguales entre los cinco equipos."
+                      />
+                    </td>
+                    {DISTRIBUTION_FIELDS.map((field) => (
+                      <td key={`${entry.id}-${field.key}`}>
+                        <div className="general-expense-percent-field">
+                          <input
+                            className="general-expense-input general-expense-percent-input"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={payrollDrafts[entry.id]?.[field.key] ?? formatEditableNumber(Number(entry[field.key] || 0))}
+                            onChange={(event) => setPayrollDraft(entry.id, field.key, event.target.value)}
+                            onBlur={() => void flushPayrollDraftField(entry.id, field.key)}
+                            disabled={!canWrite || entry.finalPaymentApprovedByEmrt || entry.generalExpense}
+                          />
+                          <span>%</span>
+                        </div>
+                      </td>
+                    ))}
+                    <td className={`general-expense-percent-sum ${distributionSum === 100 ? "is-valid" : "is-invalid"}`}>
+                      {distributionSum}%
+                    </td>
                     <td>{renderPayrollMoneyInput(entry, "isrWithholdingMxn")}</td>
                     <td>{renderPayrollMoneyInput(entry, "imssWithholdingMxn")}</td>
                     <td>{renderPayrollMoneyInput(entry, "employmentSubsidyMxn")}</td>
@@ -1878,7 +1987,10 @@ export function GeneralExpensesPage() {
                         type="checkbox"
                         checked={entry.finalPaymentApprovedByEmrt}
                         onChange={(event) => void persistPayrollPatch(entry.id, { finalPaymentApprovedByEmrt: event.target.checked })}
-                        disabled={!canApprove}
+                        disabled={!canApprove || (!entry.finalPaymentApprovedByEmrt && distributionSum !== 100)}
+                        title={distributionSum === 100 || entry.finalPaymentApprovedByEmrt
+                          ? undefined
+                          : "La distribución entre equipos debe sumar 100% antes de autorizar el pago."}
                       />
                     </td>
                     <td className="general-expense-checkbox-cell">
@@ -1904,7 +2016,7 @@ export function GeneralExpensesPage() {
                   );
                     })}
                     <tr className="general-expense-payroll-total-row">
-                      <td colSpan={21}>Total pago neto de la quincena</td>
+                      <td colSpan={31}>Total pago neto de la quincena</td>
                       <td>
                         <div className="general-expense-readonly-cell is-payroll-total">
                           {formatCurrency(netDepositTotalMxn)}
@@ -1944,7 +2056,10 @@ export function GeneralExpensesPage() {
           <button
             type="button"
             className={`lead-tab ${activeTab === "registro" ? "is-active" : ""}`}
-            onClick={() => setActiveTab("registro")}
+            onClick={() => {
+              setActiveTab("registro");
+              void loadRecords();
+            }}
           >
             1. Registro
           </button>
@@ -2058,7 +2173,7 @@ export function GeneralExpensesPage() {
                     <tr>
                       <th>No.</th>
                       <th className="general-expense-detail-column">Detalle de Gasto</th>
-                      <th>Monto</th>
+                      <th className="general-expense-amount-column">Monto</th>
                       <th>IVA</th>
                       <th className="general-expense-withholding-column">Ret. IVA</th>
                       <th className="general-expense-withholding-column">Ret ISR</th>
@@ -2117,7 +2232,11 @@ export function GeneralExpensesPage() {
                           const { vatWithholding, isrWithholding, netPayment } = getWithholdingAmounts(expense);
                           const { sum } = getDistributionPct(expense);
                           const preEmrtLocked = isExpensePreEmrtLocked(expense);
-                          const protectedFieldDisabled = !canWrite || expense.approvedByEmrt || preEmrtLocked;
+                          const payrollManaged = Boolean(expense.payrollEntryId);
+                          const projectorCommissionManaged = Boolean(expense.projectorCommissionId);
+                          const sourceManaged = payrollManaged || projectorCommissionManaged;
+                          const sourceModuleLabel = payrollManaged ? "Nómina" : "Comisiones";
+                          const protectedFieldDisabled = !canWrite || expense.approvedByEmrt || preEmrtLocked || sourceManaged;
                           const pctDisabled = protectedFieldDisabled || expense.generalExpense || expense.expenseWithoutTeam;
                           const vatCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
                           const withholdingsCheckboxDisabled = protectedFieldDisabled || expense.paymentMethod !== "Transferencia";
@@ -2137,7 +2256,8 @@ export function GeneralExpensesPage() {
                               }}
                               className={[
                                 rowIncomplete ? "general-expense-row-danger" : "",
-                                preEmrtLocked ? "general-expense-row-acknowledged" : ""
+                                preEmrtLocked ? "general-expense-row-acknowledged" : "",
+                                sourceManaged ? "general-expense-row-source-managed" : ""
                               ].filter(Boolean).join(" ") || undefined}
                             >
                               <td className="general-expense-row-index">{index + 1}</td>
@@ -2151,7 +2271,7 @@ export function GeneralExpensesPage() {
                                   disabled={protectedFieldDisabled}
                                 />
                               </td>
-                              <td>
+                              <td className="general-expense-amount-column">
                                 <div className="general-expense-currency-input">
                                   <span aria-hidden="true">$</span>
                                   <input
@@ -2201,7 +2321,14 @@ export function GeneralExpensesPage() {
                                 </div>
                               </td>
                               <td className="general-expense-net-payment-column">
-                                <div className="general-expense-readonly-cell is-net-payment">
+                                <div
+                                  className="general-expense-readonly-cell is-net-payment"
+                                  title={payrollManaged
+                                    ? "Depósito neto calculado en Nómina."
+                                    : projectorCommissionManaged
+                                      ? "Pago neto de la comisión aprobada."
+                                      : undefined}
+                                >
                                   {formatCurrency(netPayment)}
                                 </div>
                               </td>
@@ -2254,41 +2381,49 @@ export function GeneralExpensesPage() {
                                 {expense.expenseWithoutTeam ? "" : `${sum}%`}
                               </td>
                               <td>
-                                <select
-                                  className="general-expense-input"
-                                  value={expense.paymentMethod}
-                                  onChange={(event) => {
-                                    const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
-                                    const payload = nextMethod === "Efectivo"
-                                      ? { paymentMethod: nextMethod, bank: null, hasVat: false, hasWithholdings: false }
-                                      : { paymentMethod: nextMethod };
-                                    void persistExpensePatch(expense.id, payload);
-                                  }}
-                                  disabled={protectedFieldDisabled}
-                                >
-                                  {PAYMENT_METHOD_OPTIONS.map((method) => (
-                                    <option key={method} value={method}>
-                                      {method}
-                                    </option>
-                                  ))}
-                                </select>
+                                {sourceManaged ? (
+                                  <div className="general-expense-readonly-cell is-disabled">-</div>
+                                ) : (
+                                  <select
+                                    className="general-expense-input"
+                                    value={expense.paymentMethod}
+                                    onChange={(event) => {
+                                      const nextMethod = event.target.value as GeneralExpense["paymentMethod"];
+                                      const payload = nextMethod === "Efectivo"
+                                        ? { paymentMethod: nextMethod, bank: null, hasVat: false, hasWithholdings: false }
+                                        : { paymentMethod: nextMethod };
+                                      void persistExpensePatch(expense.id, payload);
+                                    }}
+                                    disabled={protectedFieldDisabled}
+                                  >
+                                    {PAYMENT_METHOD_OPTIONS.map((method) => (
+                                      <option key={method} value={method}>
+                                        {method}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
                               </td>
                               <td>
-                                <select
-                                  className="general-expense-input"
-                                  value={expense.bank ?? ""}
-                                  onChange={(event) => void persistExpensePatch(expense.id, {
-                                    bank: (event.target.value || null) as GeneralExpense["bank"] | null
-                                  })}
-                                  disabled={protectedFieldDisabled || expense.paymentMethod !== "Transferencia"}
-                                >
-                                  <option value="">Seleccionar...</option>
-                                  {BANK_OPTIONS.map((bank) => (
-                                    <option key={bank} value={bank}>
-                                      {bank}
-                                    </option>
-                                  ))}
-                                </select>
+                                {sourceManaged ? (
+                                  <div className="general-expense-readonly-cell is-disabled">-</div>
+                                ) : (
+                                  <select
+                                    className="general-expense-input"
+                                    value={expense.bank ?? ""}
+                                    onChange={(event) => void persistExpensePatch(expense.id, {
+                                      bank: (event.target.value || null) as GeneralExpense["bank"] | null
+                                    })}
+                                    disabled={protectedFieldDisabled || expense.paymentMethod !== "Transferencia"}
+                                  >
+                                    <option value="">Seleccionar...</option>
+                                    {BANK_OPTIONS.map((bank) => (
+                                      <option key={bank} value={bank}>
+                                        {bank}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
                               </td>
                               <td className="general-expense-checkbox-cell">
                                 <input
@@ -2306,7 +2441,8 @@ export function GeneralExpensesPage() {
                                     const patch = getApprovedByEmrtPatch(event.target.checked);
                                     void persistExpensePatch(expense.id, { approvedByEmrt: event.target.checked }, patch);
                                   }}
-                                  disabled={!canApprove || preEmrtLocked}
+                                  disabled={!canApprove || preEmrtLocked || sourceManaged}
+                                  title={sourceManaged ? `La autorización de este gasto se controla desde ${sourceModuleLabel}.` : undefined}
                                 />
                               </td>
                               <td>
@@ -2335,7 +2471,7 @@ export function GeneralExpensesPage() {
                                   type="checkbox"
                                   checked={expense.paymentMethod === "Transferencia" && expense.emrtReimbursementPending}
                                   onChange={(event) => void persistExpensePatch(expense.id, { emrtReimbursementPending: event.target.checked })}
-                                  disabled={!canEditEmrtReimbursement || expense.paymentMethod !== "Transferencia"}
+                                  disabled={!canEditEmrtReimbursement || expense.paymentMethod !== "Transferencia" || sourceManaged}
                                 />
                               </td>
                               <td className="general-expense-checkbox-cell">
@@ -2375,7 +2511,8 @@ export function GeneralExpensesPage() {
                                   type="button"
                                   className="danger-button general-expense-delete-button"
                                   onClick={() => void handleDelete(expense)}
-                                  disabled={!canWrite || expense.approvedByEmrt || preEmrtLocked}
+                                  disabled={!canWrite || expense.approvedByEmrt || preEmrtLocked || sourceManaged}
+                                  title={sourceManaged ? `Este gasto solo puede eliminarse desaprobando su fila en ${sourceModuleLabel}.` : undefined}
                                 >
                                   Borrar
                                 </button>

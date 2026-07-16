@@ -1803,6 +1803,10 @@ export function mapGeneralExpense(record: {
   reviewedByJnls: boolean;
   paid: boolean;
   paidAt: Date | null;
+  payrollEntryId: string | null;
+  payrollNetDepositMxn: Prisma.Decimal | null;
+  projectorCommissionId: string | null;
+  projectorCommissionRecipient: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): GeneralExpense {
@@ -1832,6 +1836,10 @@ export function mapGeneralExpense(record: {
     reviewedByJnls: record.reviewedByJnls,
     paid: record.paid,
     paidAt: record.paidAt?.toISOString(),
+    payrollEntryId: record.payrollEntryId ?? undefined,
+    payrollNetDepositMxn: record.payrollNetDepositMxn === null ? undefined : Number(record.payrollNetDepositMxn),
+    projectorCommissionId: record.projectorCommissionId ?? undefined,
+    projectorCommissionRecipient: (record.projectorCommissionRecipient ?? undefined) as GeneralExpense["projectorCommissionRecipient"],
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };
@@ -1940,6 +1948,12 @@ export function mapGeneralExpensePayrollEntry(record: {
   absenceDays: Prisma.Decimal;
   overtimeHours: Prisma.Decimal;
   overtimeDetail: string;
+  generalExpense: boolean;
+  pctLitigation: Prisma.Decimal;
+  pctCorporateLabor: Prisma.Decimal;
+  pctSettlements: Prisma.Decimal;
+  pctFinancialLaw: Prisma.Decimal;
+  pctTaxCompliance: Prisma.Decimal;
   isrWithholdingMxn: Prisma.Decimal;
   imssWithholdingMxn: Prisma.Decimal;
   employmentSubsidyMxn: Prisma.Decimal;
@@ -2005,6 +2019,12 @@ export function mapGeneralExpensePayrollEntry(record: {
     overtimeHours,
     overtimeTotalMxn,
     overtimeDetail: record.overtimeDetail,
+    generalExpense: record.generalExpense,
+    pctLitigation: Number(record.pctLitigation),
+    pctCorporateLabor: Number(record.pctCorporateLabor),
+    pctSettlements: Number(record.pctSettlements),
+    pctFinancialLaw: Number(record.pctFinancialLaw),
+    pctTaxCompliance: Number(record.pctTaxCompliance),
     isrWithholdingMxn,
     imssWithholdingMxn,
     employmentSubsidyMxn,

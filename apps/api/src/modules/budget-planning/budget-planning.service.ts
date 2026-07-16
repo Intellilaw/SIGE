@@ -1,10 +1,18 @@
-import type { BudgetPlanningRepository, BudgetPlanUpdateRecord } from "../../repositories/types";
+import type {
+  BudgetAreaProfitabilityRangeRecord,
+  BudgetPlanningRepository,
+  BudgetPlanUpdateRecord
+} from "../../repositories/types";
 
 export class BudgetPlanningService {
   public constructor(private readonly repository: BudgetPlanningRepository) {}
 
   public getOverview(year: number, month: number) {
     return this.repository.getOverview(year, month);
+  }
+
+  public getAreaProfitability(range?: BudgetAreaProfitabilityRangeRecord) {
+    return this.repository.getAreaProfitability(range);
   }
 
   public updatePlan(year: number, month: number, payload: BudgetPlanUpdateRecord) {

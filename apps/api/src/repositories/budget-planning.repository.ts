@@ -9,9 +9,34 @@ import {
   mapFinanceRecord,
   mapGeneralExpense
 } from "./mappers";
-import type { BudgetPlanExpenseBreakdownUpdateItem, BudgetPlanUpdateRecord, BudgetPlanningRepository } from "./types";
+import type {
+  BudgetAreaProfitabilityRangeRecord,
+  BudgetPlanExpenseBreakdownUpdateItem,
+  BudgetPlanUpdateRecord,
+  BudgetPlanningRepository
+} from "./types";
 
 const DEFAULT_MONTH_RANGE = { min: 1, max: 12 };
+const AREA_PROFITABILITY_TEAMS = [
+  { team: "LITIGATION", teamLabel: "Litigio", percentageField: "pctLitigation" },
+  { team: "CORPORATE_LABOR", teamLabel: "Corporativo", percentageField: "pctCorporateLabor" },
+  { team: "SETTLEMENTS", teamLabel: "Convenios", percentageField: "pctSettlements" },
+  { team: "FINANCIAL_LAW", teamLabel: "Compliance Financiero", percentageField: "pctFinancialLaw" },
+  { team: "TAX_COMPLIANCE", teamLabel: "Compliance Fiscal", percentageField: "pctTaxCompliance" }
+] as const;
+
+interface MonthPeriod {
+  year: number;
+  month: number;
+}
+
+interface TeamDistributionRecord {
+  pctLitigation: Prisma.Decimal | number;
+  pctCorporateLabor: Prisma.Decimal | number;
+  pctSettlements: Prisma.Decimal | number;
+  pctFinancialLaw: Prisma.Decimal | number;
+  pctTaxCompliance: Prisma.Decimal | number;
+}
 
 function assertMonth(month: number) {
   if (month < DEFAULT_MONTH_RANGE.min || month > DEFAULT_MONTH_RANGE.max) {
@@ -128,6 +153,82 @@ function getNextMonth(year: number, month: number) {
   return { year, month: month + 1 };
 }
 
+function getPeriodIndex(period: MonthPeriod) {
+  return period.year * 12 + period.month - 1;
+}
+
+function getPeriodFromIndex(index: number): MonthPeriod {
+  return {
+    year: Math.floor(index / 12),
+    month: index % 12 + 1
+  };
+}
+
+function getPeriodsBetween(from: MonthPeriod, to: MonthPeriod) {
+  const periods: MonthPeriod[] = [];
+  for (let index = getPeriodIndex(from); index <= getPeriodIndex(to); index += 1) {
+    periods.push(getPeriodFromIndex(index));
+  }
+  return periods;
+}
+
+function getRangeFilter(from: MonthPeriod, to: MonthPeriod) {
+  return {
+    AND: [
+      {
+        OR: [
+          { year: { gt: from.year } },
+          { year: from.year, month: { gte: from.month } }
+        ]
+      },
+      {
+        OR: [
+          { year: { lt: to.year } },
+          { year: to.year, month: { lte: to.month } }
+        ]
+      }
+    ]
+  };
+}
+
+function normalizePercentage(value: Prisma.Decimal | number) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? Math.min(100, Math.max(0, numeric)) : 0;
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function getAreaProfitabilitySelectedRange(
+  range: BudgetAreaProfitabilityRangeRecord | undefined,
+  availablePeriods: MonthPeriod[]
+) {
+  if (range) {
+    const from = { year: range.fromYear, month: range.fromMonth };
+    const to = { year: range.toYear, month: range.toMonth };
+    if (getPeriodIndex(from) > getPeriodIndex(to)) {
+      throw new AppError(400, "INVALID_PERIOD_RANGE", "El periodo inicial no puede ser posterior al periodo final.");
+    }
+    return { from, to };
+  }
+
+  if (availablePeriods.length > 0) {
+    const fromAvailable = availablePeriods[0];
+    const to = availablePeriods[availablePeriods.length - 1];
+    const from = getPeriodFromIndex(Math.max(getPeriodIndex(fromAvailable), getPeriodIndex(to) - 11));
+    return { from, to };
+  }
+
+  const now = new Date();
+  const to = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  return { from: getPeriodFromIndex(getPeriodIndex(to) - 11), to };
+}
+
+function getTeamPercentage(record: TeamDistributionRecord, percentageField: typeof AREA_PROFITABILITY_TEAMS[number]["percentageField"]) {
+  return normalizePercentage(record[percentageField]);
+}
+
 function isBeforeMonth(inputYear: number, inputMonth: number, targetYear: number, targetMonth: number) {
   return inputYear < targetYear || (inputYear === targetYear && inputMonth < targetMonth);
 }
@@ -178,6 +279,134 @@ export class PrismaBudgetPlanningRepository implements BudgetPlanningRepository 
       expectedExpenseBreakdown: expectedExpenseBreakdown.map(mapBudgetPlanExpenseBreakdownItem),
       financeRecords: financeRecords.map(mapFinanceRecord),
       generalExpenses: generalExpenses.map(mapGeneralExpense)
+    };
+  }
+
+  public async getAreaProfitability(range?: BudgetAreaProfitabilityRangeRecord) {
+    const [financePeriods, expensePeriods] = await Promise.all([
+      this.prisma.financeRecord.findMany({
+        select: { year: true, month: true },
+        distinct: ["year", "month"]
+      }),
+      this.prisma.generalExpense.findMany({
+        select: { year: true, month: true },
+        distinct: ["year", "month"]
+      })
+    ]);
+
+    const availablePeriodLookup = new Map<string, MonthPeriod>();
+    [...financePeriods, ...expensePeriods].forEach((period) => {
+      availablePeriodLookup.set(getMonthKey(period.year, period.month), period);
+    });
+    const availablePeriods = [...availablePeriodLookup.values()].sort(
+      (left, right) => getPeriodIndex(left) - getPeriodIndex(right)
+    );
+    const selectedRange = getAreaProfitabilitySelectedRange(range, availablePeriods);
+    const periodFilter = getRangeFilter(selectedRange.from, selectedRange.to);
+    const [financeRecords, generalExpenses] = await Promise.all([
+      this.prisma.financeRecord.findMany({
+        where: periodFilter,
+        select: {
+          year: true,
+          month: true,
+          paidThisMonthMxn: true,
+          payment2Mxn: true,
+          payment3Mxn: true,
+          paymentDate1: true,
+          paymentDate2: true,
+          paymentDate3: true,
+          paymentMethod: true,
+          paymentMethod2: true,
+          paymentMethod3: true,
+          paymentReceived: true,
+          paymentReceived2: true,
+          paymentReceived3: true,
+          pctLitigation: true,
+          pctCorporateLabor: true,
+          pctSettlements: true,
+          pctFinancialLaw: true,
+          pctTaxCompliance: true
+        }
+      }),
+      this.prisma.generalExpense.findMany({
+        where: periodFilter,
+        select: {
+          year: true,
+          month: true,
+          amountMxn: true,
+          expenseWithoutTeam: true,
+          pctLitigation: true,
+          pctCorporateLabor: true,
+          pctSettlements: true,
+          pctFinancialLaw: true,
+          pctTaxCompliance: true
+        }
+      })
+    ]);
+
+    const periods = getPeriodsBetween(selectedRange.from, selectedRange.to);
+    const totalsByPeriodAndTeam = new Map<string, Map<typeof AREA_PROFITABILITY_TEAMS[number]["team"], {
+      incomeMxn: number;
+      expenseMxn: number;
+    }>>();
+
+    periods.forEach((period) => {
+      totalsByPeriodAndTeam.set(
+        getMonthKey(period.year, period.month),
+        new Map(AREA_PROFITABILITY_TEAMS.map(({ team }) => [team, { incomeMxn: 0, expenseMxn: 0 }]))
+      );
+    });
+
+    financeRecords.forEach((record) => {
+      const incomeMxn = calculateReceivedIncomeMxn(record);
+      const teamTotals = totalsByPeriodAndTeam.get(getMonthKey(record.year, record.month));
+      if (!teamTotals || incomeMxn === 0) {
+        return;
+      }
+
+      AREA_PROFITABILITY_TEAMS.forEach(({ team, percentageField }) => {
+        const totals = teamTotals.get(team)!;
+        totals.incomeMxn += incomeMxn * getTeamPercentage(record, percentageField) / 100;
+      });
+    });
+
+    generalExpenses.forEach((expense) => {
+      if (expense.expenseWithoutTeam) {
+        return;
+      }
+
+      const expenseMxn = Number(expense.amountMxn || 0);
+      const teamTotals = totalsByPeriodAndTeam.get(getMonthKey(expense.year, expense.month));
+      if (!teamTotals || expenseMxn === 0) {
+        return;
+      }
+
+      AREA_PROFITABILITY_TEAMS.forEach(({ team, percentageField }) => {
+        const totals = teamTotals.get(team)!;
+        totals.expenseMxn += expenseMxn * getTeamPercentage(expense, percentageField) / 100;
+      });
+    });
+
+    return {
+      selectedRange,
+      availableRange: availablePeriods.length > 0
+        ? { from: availablePeriods[0], to: availablePeriods[availablePeriods.length - 1] }
+        : undefined,
+      series: AREA_PROFITABILITY_TEAMS.map(({ team, teamLabel }) => ({
+        team,
+        teamLabel,
+        points: periods.map((period) => {
+          const totals = totalsByPeriodAndTeam.get(getMonthKey(period.year, period.month))!.get(team)!;
+          const incomeMxn = roundMoney(totals.incomeMxn);
+          const expenseMxn = roundMoney(totals.expenseMxn);
+          return {
+            ...period,
+            incomeMxn,
+            expenseMxn,
+            profitMxn: roundMoney(incomeMxn - expenseMxn)
+          };
+        })
+      }))
     };
   }
 

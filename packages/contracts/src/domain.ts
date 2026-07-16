@@ -1204,6 +1204,10 @@ export interface GeneralExpense {
   reviewedByJnls: boolean;
   paid: boolean;
   paidAt?: string;
+  payrollEntryId?: string;
+  payrollNetDepositMxn?: number;
+  projectorCommissionId?: string;
+  projectorCommissionRecipient?: "PROJECTOR" | "LITIGATION_LEADER";
   createdAt: string;
   updatedAt: string;
 }
@@ -1279,6 +1283,12 @@ export interface GeneralExpensePayrollEntry {
   overtimeHours: number;
   overtimeTotalMxn: number;
   overtimeDetail: string;
+  generalExpense: boolean;
+  pctLitigation: number;
+  pctCorporateLabor: number;
+  pctSettlements: number;
+  pctFinancialLaw: number;
+  pctTaxCompliance: number;
   isrWithholdingMxn: number;
   imssWithholdingMxn: number;
   employmentSubsidyMxn: number;
@@ -1335,6 +1345,35 @@ export interface BudgetPlanSnapshot {
   generalExpenseCount: number;
   notes?: string;
   createdAt: string;
+}
+
+export interface BudgetAreaProfitabilityPeriod {
+  year: number;
+  month: number;
+}
+
+export interface BudgetAreaProfitabilityPoint extends BudgetAreaProfitabilityPeriod {
+  incomeMxn: number;
+  expenseMxn: number;
+  profitMxn: number;
+}
+
+export interface BudgetAreaProfitabilitySeries {
+  team: KnownTeam;
+  teamLabel: string;
+  points: BudgetAreaProfitabilityPoint[];
+}
+
+export interface BudgetAreaProfitabilityOverview {
+  selectedRange: {
+    from: BudgetAreaProfitabilityPeriod;
+    to: BudgetAreaProfitabilityPeriod;
+  };
+  availableRange?: {
+    from: BudgetAreaProfitabilityPeriod;
+    to: BudgetAreaProfitabilityPeriod;
+  };
+  series: BudgetAreaProfitabilitySeries[];
 }
 
 export type AccountingAccountType = "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "COST" | "EXPENSE";

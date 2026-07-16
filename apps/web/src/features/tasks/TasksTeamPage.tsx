@@ -73,7 +73,15 @@ const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: str
   { id: "posteriores", label: "Tareas posteriores", colorClass: "is-future" }
 ];
 const LITIGATION_MODULE_ID = "litigation";
+const CORPORATE_LABOR_MODULE_ID = "corporate-labor";
+const TAX_COMPLIANCE_MODULE_ID = "tax-compliance";
 const FINANCE_TASK_MODULE_ID = "finance";
+const TEAM_WIDE_DASHBOARD_MODULE_IDS = new Set([CORPORATE_LABOR_MODULE_ID, TAX_COMPLIANCE_MODULE_ID]);
+const EXECUTION_INCOMPLETE_DASHBOARD_MODULE_IDS = new Set([
+  LITIGATION_MODULE_ID,
+  CORPORATE_LABOR_MODULE_ID,
+  TAX_COMPLIANCE_MODULE_ID
+]);
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";
 const LITIGATION_COLLABORATOR_MEMBER_ID = "LAMR";
 const LITIGATION_WRITINGS_TABLE_SLUG = "escritos-fondo";
@@ -180,6 +188,14 @@ function matchesVerificationColumn(column: VerificationColumn, member: TaskDashb
   const memberAliases = member.aliases.map((alias) => normalizeComparableText(alias));
 
   return getVerificationColumnAliases(column).some((alias) => memberAliases.includes(alias));
+}
+
+function usesTeamWideDashboard(moduleId?: string) {
+  return Boolean(moduleId && TEAM_WIDE_DASHBOARD_MODULE_IDS.has(moduleId));
+}
+
+function usesExecutionIncompleteDashboard(moduleId?: string) {
+  return Boolean(moduleId && EXECUTION_INCOMPLETE_DASHBOARD_MODULE_IDS.has(moduleId));
 }
 
 function isVerificationValueComplete(value?: string | null) {
@@ -672,7 +688,7 @@ export function TasksTeamPage() {
       try {
         const shouldLoadLegacyRows = Boolean(legacyConfig);
         const shouldLoadFinanceRows = currentModule.moduleId === FINANCE_TASK_MODULE_ID;
-        const shouldLoadExecutionMissingRows = shouldLoadLegacyRows && currentModule.moduleId === LITIGATION_MODULE_ID;
+        const shouldLoadExecutionMissingRows = shouldLoadLegacyRows && usesExecutionIncompleteDashboard(currentModule.moduleId);
         const shouldLoadClients = shouldLoadExecutionMissingRows || shouldLoadFinanceRows;
         const trackingRecordsPromise = shouldLoadLegacyRows
           ? apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`)
@@ -719,7 +735,7 @@ export function TasksTeamPage() {
         setExecutionMatters(
           shouldLoadExecutionMissingRows
             ? sortActiveExecutionMatters(
-              loadedExecutionMatters.filter((matter) => matter.responsibleTeam === currentModule.team),
+              loadedExecutionMatters.filter((matter) => matter.responsibleTeam === currentModule.team && !matter.concluded),
               loadedExecutionClients
             )
             : []
@@ -805,7 +821,7 @@ export function TasksTeamPage() {
   );
 
   useEffect(() => {
-    if (module?.moduleId !== LITIGATION_MODULE_ID || !executionHolidayFetchSignature) {
+    if (!usesExecutionIncompleteDashboard(module?.moduleId) || !executionHolidayFetchSignature) {
       setExecutionHolidayDateKeysByAuthority({});
       return;
     }
@@ -833,13 +849,15 @@ export function TasksTeamPage() {
   }, [executionHolidayFetchPlan, executionHolidayFetchSignature, module?.moduleId]);
 
   function buildTrackingRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
+    const teamWideDashboard = usesTeamWideDashboard(module?.moduleId);
+
     return trackingRecords
       .filter((record) => !record.deletedAt)
       .map((record) => ({ record, table: resolveRecordTable(tableLookup, record) }))
       .filter(({ table }) => Boolean(table))
       .filter(({ record, table }) => !(isLitigationWritingTable(table) && isCompletedTrackingRecord(table, record)))
       .filter(({ record, table }) =>
-        matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? [])
+        teamWideDashboard || matchesTrackingDashboardOwner(table, record, member, dashboardConfig?.sharedResponsibleAliases ?? [])
       )
       .filter(({ record, table }) =>
         belongsToTimeframe({
@@ -884,12 +902,53 @@ export function TasksTeamPage() {
       });
   }
 
+  function buildTermRows(timeframe: DashboardTimeframe): DashboardRow[] {
+    if (!usesTeamWideDashboard(module?.moduleId)) {
+      return [];
+    }
+
+    const today = getLocalDateInput();
+
+    return terms
+      .filter((term) => !term.deletedAt)
+      .filter((term) => {
+        const completed = term.status === "concluida";
+        const termDate = toDateInput(term.termDate) || toDateInput(term.dueDate);
+        const displayDate = completed ? toDateInput(term.updatedAt) || termDate : termDate;
+        return belongsToTimeframe({ state: completed ? "closed" : "open", date: displayDate }, timeframe);
+      })
+      .map((term) => {
+        const table = tableLookup.get(normalizeComparableText(term.sourceTable));
+        const completed = term.status === "concluida";
+        const termDate = toDateInput(term.termDate) || toDateInput(term.dueDate);
+        const displayDate = completed ? toDateInput(term.updatedAt) || termDate : termDate;
+        const taskLabel = normalizeText(term.pendingTaskLabel) || normalizeText(term.eventName) || "Termino sin nombre";
+        const highlighted = !completed && (!displayDate || displayDate <= today || !isVerificationComplete(term));
+
+        return {
+          taskId: `term-${term.id}`,
+          clientNumber: term.clientNumber || "-",
+          clientName: term.clientName || "-",
+          subject: term.subject || "-",
+          specificProcess: term.specificProcess || "-",
+          taskLabel,
+          typeLabel: completed ? "Termino completado" : highlighted ? "Termino vencido / incompleto" : "Termino",
+          displayDate,
+          originLabel: table?.title ?? "Terminos",
+          originPath: `/app/tasks/${slug}/${term.recurring ? "terminos-recurrentes" : "terminos"}`,
+          actionLabel: "Ir a terminos",
+          highlighted
+        };
+      });
+  }
+
   function buildTermVerificationRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
     if (timeframe !== "hoy") {
       return [];
     }
 
     const today = getLocalDateInput();
+    const teamWideDashboard = usesTeamWideDashboard(module?.moduleId);
 
     return terms
       .filter((term) => !term.deletedAt)
@@ -910,7 +969,7 @@ export function TasksTeamPage() {
 
         const taskLabel = normalizeText(term.pendingTaskLabel) || normalizeText(term.eventName) || "Termino sin nombre";
         return (legacyConfig?.verificationColumns ?? [])
-          .filter((column) => matchesVerificationColumn(column, member))
+          .filter((column) => teamWideDashboard || matchesVerificationColumn(column, member))
           .filter((column) => !isVerificationValueComplete(term.verification[column.key]))
           .map((column) => ({
             taskId: `term-verification-${term.id}-${column.key}`,
@@ -931,10 +990,11 @@ export function TasksTeamPage() {
 
   function buildExecutionMissingRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
     if (
-      module?.moduleId !== LITIGATION_MODULE_ID ||
+      !module ||
       !legacyConfig ||
       timeframe !== "hoy" ||
-      member.id !== LITIGATION_COLLABORATOR_MEMBER_ID
+      !usesExecutionIncompleteDashboard(module.moduleId) ||
+      (module.moduleId === LITIGATION_MODULE_ID && member.id !== LITIGATION_COLLABORATOR_MEMBER_ID)
     ) {
       return [];
     }
@@ -951,10 +1011,7 @@ export function TasksTeamPage() {
         executionHolidayDateKeysByAuthority
       );
 
-      if (validation.missing.length === 0) {
-        return [];
-      }
-
+      const hasMissing = validation.missing.length > 0;
       const rowNumber = index + 1;
       const managerParams = new URLSearchParams({ tab: "active" });
       const clientName = normalizeText(matter.clientName);
@@ -973,15 +1030,15 @@ export function TasksTeamPage() {
         clientName: matter.clientName || "-",
         subject: matter.subject || "-",
         specificProcess: matter.specificProcess || "-",
-        taskLabel: `Arreglar fila ${rowNumber}`,
-        typeLabel: "Faltantes en ejecución",
+        taskLabel: hasMissing ? `Arreglar fila ${rowNumber}` : `Completar fila ${rowNumber}`,
+        typeLabel: hasMissing ? "Faltantes en ejecución" : "Fila de ejecución pendiente",
         displayDate: today,
-        originLabel: "Ejecución / Litigio",
+        originLabel: `Ejecución / ${module.shortLabel}`,
         originPath: `/app/tasks/${legacyConfig.slug}/distribuidor?${managerParams.toString()}`,
         actionLabel: "Ir al Manager",
-        secondaryActionLabel: "Ir a la fila con faltantes",
+        secondaryActionLabel: hasMissing ? "Ir a la fila con faltantes" : "Ir a la fila",
         secondaryActionPath: `/app/execution/${legacyConfig.slug}?${executionParams.toString()}`,
-        highlighted: true
+        highlighted: hasMissing
       }];
     });
   }
@@ -1060,6 +1117,7 @@ export function TasksTeamPage() {
       ...buildFinanceRows(timeframe),
       ...buildAdditionalTaskRows(member, timeframe),
       ...buildTrackingRows(member, timeframe),
+      ...buildTermRows(timeframe),
       ...buildTermVerificationRows(member, timeframe),
       ...buildExecutionMissingRows(member, timeframe)
     ].sort((left, right) => left.displayDate.localeCompare(right.displayDate));

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteModule } from "../auth/permissions";
+import { AreaProfitabilityChart } from "./AreaProfitabilityChart";
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
 const MONTH_NAMES = [
     "Enero",
@@ -17,6 +18,13 @@ const MONTH_NAMES = [
     "Octubre",
     "Noviembre",
     "Diciembre"
+];
+const AREA_PROFITABILITY_TEAM_OPTIONS = [
+    { value: "LITIGATION", label: "Litigio" },
+    { value: "CORPORATE_LABOR", label: "Corporativo" },
+    { value: "SETTLEMENTS", label: "Convenios" },
+    { value: "FINANCIAL_LAW", label: "Compliance Financiero" },
+    { value: "TAX_COMPLIANCE", label: "Compliance Fiscal" }
 ];
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
@@ -59,6 +67,16 @@ function normalizeExpenseBreakdownDraft(rows) {
 function getMonthName(month) {
     return MONTH_NAMES[month - 1] ?? `Mes ${month}`;
 }
+function getPeriodIndex(year, month) {
+    return year * 12 + month - 1;
+}
+function shiftPeriod(year, month, offset) {
+    const index = getPeriodIndex(year, month) + offset;
+    return {
+        year: Math.floor(index / 12),
+        month: index % 12 + 1
+    };
+}
 function getIncomeTotal(record) {
     const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || (record.paymentMethod === "E" && record.paymentReceived))
         ? Number(record.paidThisMonthMxn || 0)
@@ -83,9 +101,17 @@ function getProgressPercent(actual, expected) {
 export function BudgetPlanningPage() {
     const { user } = useAuth();
     const now = new Date();
+    const initialProfitabilityFrom = shiftPeriod(now.getFullYear(), now.getMonth() + 1, -11);
     const [selectedYear, setSelectedYear] = useState(now.getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
     const [activeTab, setActiveTab] = useState("current");
+    const [profitabilityFromYear, setProfitabilityFromYear] = useState(initialProfitabilityFrom.year);
+    const [profitabilityFromMonth, setProfitabilityFromMonth] = useState(initialProfitabilityFrom.month);
+    const [profitabilityToYear, setProfitabilityToYear] = useState(now.getFullYear());
+    const [profitabilityToMonth, setProfitabilityToMonth] = useState(now.getMonth() + 1);
+    const [selectedProfitabilityTeam, setSelectedProfitabilityTeam] = useState("ALL");
+    const [profitabilityOverview, setProfitabilityOverview] = useState(null);
+    const [profitabilityInitialized, setProfitabilityInitialized] = useState(false);
     const [plan, setPlan] = useState(null);
     const [expectedExpenseBreakdown, setExpectedExpenseBreakdown] = useState([]);
     const [draftExpenseBreakdown, setDraftExpenseBreakdown] = useState([]);
@@ -97,6 +123,7 @@ export function BudgetPlanningPage() {
     const [draftNotes, setDraftNotes] = useState("");
     const [loading, setLoading] = useState(true);
     const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+    const [loadingProfitability, setLoadingProfitability] = useState(false);
     const [errorMessage, setErrorMessage] = useState(null);
     const canWrite = canWriteModule(user, "budget-planning");
     function applyOverview(overview) {
@@ -135,13 +162,48 @@ export function BudgetPlanningPage() {
             setLoadingSnapshots(false);
         }
     }
+    async function loadAreaProfitability(useDefaultRange = false) {
+        if (!useDefaultRange
+            && getPeriodIndex(profitabilityFromYear, profitabilityFromMonth) > getPeriodIndex(profitabilityToYear, profitabilityToMonth)) {
+            setErrorMessage("El periodo inicial no puede ser posterior al periodo final.");
+            return;
+        }
+        setLoadingProfitability(true);
+        setErrorMessage(null);
+        try {
+            const query = useDefaultRange
+                ? ""
+                : `?fromYear=${profitabilityFromYear}&fromMonth=${profitabilityFromMonth}&toYear=${profitabilityToYear}&toMonth=${profitabilityToMonth}`;
+            const response = await apiGet(`/budget-planning/area-profitability${query}`);
+            setProfitabilityOverview(response);
+            setProfitabilityInitialized(true);
+            if (useDefaultRange) {
+                setProfitabilityFromYear(response.selectedRange.from.year);
+                setProfitabilityFromMonth(response.selectedRange.from.month);
+                setProfitabilityToYear(response.selectedRange.to.year);
+                setProfitabilityToMonth(response.selectedRange.to.month);
+            }
+        }
+        catch (error) {
+            setErrorMessage(toErrorMessage(error));
+        }
+        finally {
+            setLoadingProfitability(false);
+        }
+    }
     useEffect(() => {
         if (activeTab === "snapshots") {
             void loadSnapshots();
             return;
         }
+        if (activeTab === "area-profitability") {
+            if (!profitabilityInitialized) {
+                void loadAreaProfitability(true);
+            }
+            return;
+        }
         void loadOverview();
-    }, [activeTab, selectedMonth, selectedYear]);
+    }, [activeTab, profitabilityInitialized, selectedMonth, selectedYear]);
     async function persistPlanPatch(patch) {
         if (!canWrite) {
             return false;
@@ -230,9 +292,28 @@ export function BudgetPlanningPage() {
         };
     }, [financeRecords, generalExpenses, plan]);
     const draftExpenseBreakdownTotal = useMemo(() => normalizeExpenseBreakdownDraft(draftExpenseBreakdown).reduce((sum, row) => sum + row.amountMxn, 0), [draftExpenseBreakdown]);
+    const profitabilityYearOptions = useMemo(() => {
+        const availableFromYear = profitabilityOverview?.availableRange?.from.year ?? profitabilityFromYear;
+        const availableToYear = profitabilityOverview?.availableRange?.to.year ?? profitabilityToYear;
+        const firstYear = Math.min(availableFromYear, profitabilityFromYear, profitabilityToYear);
+        const lastYear = Math.max(availableToYear, profitabilityFromYear, profitabilityToYear, now.getFullYear());
+        return Array.from({ length: lastYear - firstYear + 1 }, (_, index) => firstYear + index);
+    }, [profitabilityFromYear, profitabilityOverview, profitabilityToYear]);
     const expectedResultTone = totals.expectedResultMxn >= 0 ? "is-positive" : "is-negative";
     const actualResultTone = totals.actualResultMxn >= 0 ? "is-positive" : "is-negative";
-    return (_jsxs("section", { className: "page-stack budget-planning-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "\u{1F4CB}" }), _jsx("div", { children: _jsxs("h2", { children: ["Planeaci", "\u00f3", "n presupuestal"] }) })] }), _jsx("p", { className: "muted", children: "Vista mensual para comparar ingresos y gastos esperados contra lo reportado en Finanzas y Gastos generales." })] }), errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsx("section", { className: "panel", children: _jsxs("div", { className: "finance-toolbar", children: [_jsxs("div", { className: "finance-toolbar-group", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: YEAR_OPTIONS.map((year) => _jsx("option", { value: year, children: year }, year)) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] })] }), _jsx("button", { className: "secondary-button", type: "button", onClick: () => activeTab === "snapshots" ? void loadSnapshots() : void loadOverview(), children: "Actualizar" })] }) }), _jsx("section", { className: "panel finance-tabs-panel", children: _jsxs("div", { className: "finance-tabs", children: [_jsx("button", { className: `finance-tab ${activeTab === "current" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("current"), children: "Mes en curso" }), _jsxs("button", { className: `finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("snapshots"), children: ["Estampas hist", "\u00f3", "ricas"] })] }) }), activeTab === "current" ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "budget-control-grid", children: [_jsxs("article", { className: "budget-comparison-card", children: [_jsxs("div", { className: "budget-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Ingresos sin IVA" }), _jsx("span", { children: "Finanzas" })] }), _jsxs("strong", { children: [Math.round(totals.incomeProgress), "%"] })] }), _jsxs("div", { className: "budget-pair-grid budget-income-grid", children: [_jsxs("div", { className: "budget-reported-field budget-readonly-field", children: [_jsx("span", { children: "Esperados total" }), _jsx("strong", { children: formatCurrency(totals.expectedIncomeMxn) })] }), _jsxs("div", { className: "budget-reported-field", children: [_jsx("span", { children: "Reportados" }), _jsx("strong", { children: formatCurrency(totals.actualIncomeMxn) })] }), _jsxs("div", { className: "budget-reported-field budget-readonly-field", children: [_jsx("span", { children: "Alta prob." }), _jsx("strong", { children: formatCurrency(totals.expectedHighProbabilityIncomeMxn) })] }), _jsxs("div", { className: "budget-reported-field budget-readonly-field", children: [_jsx("span", { children: "Baja prob." }), _jsx("strong", { children: formatCurrency(totals.expectedLowProbabilityIncomeMxn) })] })] }), _jsx("div", { className: "budget-progress-track", children: _jsx("div", { className: "budget-progress-fill income", style: { width: `${totals.incomeProgress}%` } }) })] }), _jsxs("article", { className: "budget-comparison-card", children: [_jsxs("div", { className: "budget-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Egresos sin IVA" }), _jsx("span", { children: "Gastos generales" })] }), _jsxs("strong", { children: [Math.round(totals.expenseProgress), "%"] })] }), _jsxs("div", { className: "budget-pair-grid", children: [_jsxs("div", { className: "budget-reported-field budget-expected-expense-field", children: [_jsx("span", { children: "Esperados" }), _jsx("strong", { children: formatCurrency(totals.expectedExpenseMxn) }), _jsx("button", { className: "secondary-button budget-breakdown-button", type: "button", onClick: openExpenseBreakdown, children: "Entrar a desglose" })] }), _jsxs("div", { className: "budget-reported-field", children: [_jsx("span", { children: "Reportados" }), _jsx("strong", { children: formatCurrency(totals.actualExpenseMxn) })] })] }), _jsx("div", { className: "budget-progress-track", children: _jsx("div", { className: "budget-progress-fill expense", style: { width: `${totals.expenseProgress}%` } }) })] }), _jsxs("article", { className: "budget-result-comparison-card", children: [_jsx("div", { className: "budget-card-head", children: _jsxs("div", { children: [_jsx("h3", { children: "Resultado financiero" }), _jsx("span", { children: "Esperado vs real" })] }) }), _jsxs("div", { className: "budget-result-pair", children: [_jsxs("div", { className: `budget-result-value ${expectedResultTone}`, children: [_jsx("span", { children: "Esperado alta" }), _jsx("strong", { children: formatCurrency(totals.expectedResultMxn) })] }), _jsxs("div", { className: `budget-result-value ${actualResultTone}`, children: [_jsx("span", { children: "Real" }), _jsx("strong", { children: formatCurrency(totals.actualResultMxn) })] })] }), _jsxs("small", { children: ["Diferencia: ", formatCurrency(totals.actualResultMxn - totals.expectedResultMxn)] })] })] }), _jsxs("section", { className: "panel budget-notes-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Notas de ", getMonthName(selectedMonth), " ", selectedYear] }), _jsx("span", { children: loading ? "Cargando..." : "En tiempo real" })] }), _jsxs("label", { className: "form-field budget-notes-field", children: [_jsx("span", { children: "Notas del mes" }), _jsx("textarea", { value: draftNotes, disabled: !canWrite, onChange: (event) => setDraftNotes(event.target.value), onBlur: () => void persistPlanPatch({ notes: draftNotes }), rows: 3 })] })] })] })) : (_jsxs("section", { className: "panel budget-snapshots-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Estampas anteriores a ", getMonthName(selectedMonth), " ", selectedYear] }), _jsx("span", { children: loadingSnapshots ? "Cargando..." : `${snapshots.length} estampas` })] }), _jsx("div", { className: "budget-snapshot-grid", children: loadingSnapshots ? (_jsx("p", { className: "muted", children: "Cargando estampas historicas..." })) : snapshots.length === 0 ? (_jsx("p", { className: "muted", children: "Aun no hay meses anteriores con planeacion o movimientos para estampar." })) : (snapshots.map((snapshot) => {
+    return (_jsxs("section", { className: "page-stack budget-planning-page", children: [_jsxs("header", { className: "hero module-hero", children: [_jsxs("div", { className: "module-hero-head", children: [_jsx("span", { className: "module-hero-icon", "aria-hidden": "true", children: "\u{1F4CB}" }), _jsx("div", { children: _jsxs("h2", { children: ["Planeaci", "\u00f3", "n presupuestal"] }) })] }), _jsx("p", { className: "muted", children: "Vista mensual para comparar ingresos y gastos esperados contra lo reportado en Finanzas y Gastos generales." })] }), errorMessage ? _jsx("div", { className: "message-banner message-error", children: errorMessage }) : null, _jsx("section", { className: "panel", children: _jsxs("div", { className: "finance-toolbar", children: [activeTab === "area-profitability" ? (_jsxs("div", { className: "finance-toolbar-group budget-profitability-filters", children: [_jsxs("label", { className: "form-field", children: [_jsxs("span", { children: ["Desde - A", "ñ", "o"] }), _jsx("select", { value: profitabilityFromYear, onChange: (event) => setProfitabilityFromYear(Number(event.target.value)), children: profitabilityYearOptions.map((year) => _jsx("option", { value: year, children: year }, year)) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Desde - Mes" }), _jsx("select", { value: profitabilityFromMonth, onChange: (event) => setProfitabilityFromMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] }), _jsxs("label", { className: "form-field", children: [_jsxs("span", { children: ["Hasta - A", "ñ", "o"] }), _jsx("select", { value: profitabilityToYear, onChange: (event) => setProfitabilityToYear(Number(event.target.value)), children: profitabilityYearOptions.map((year) => _jsx("option", { value: year, children: year }, year)) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Hasta - Mes" }), _jsx("select", { value: profitabilityToMonth, onChange: (event) => setProfitabilityToMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] }), _jsxs("label", { className: "form-field budget-profitability-team-filter", children: [_jsx("span", { children: "Equipo" }), _jsxs("select", { value: selectedProfitabilityTeam, onChange: (event) => setSelectedProfitabilityTeam(event.target.value), children: [_jsx("option", { value: "ALL", children: "Todos los equipos" }), AREA_PROFITABILITY_TEAM_OPTIONS.map((option) => (_jsx("option", { value: option.value, children: option.label }, option.value)))] })] })] })) : (_jsxs("div", { className: "finance-toolbar-group", children: [_jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Ano" }), _jsx("select", { value: selectedYear, onChange: (event) => setSelectedYear(Number(event.target.value)), children: YEAR_OPTIONS.map((year) => _jsx("option", { value: year, children: year }, year)) })] }), _jsxs("label", { className: "form-field", children: [_jsx("span", { children: "Mes" }), _jsx("select", { value: selectedMonth, onChange: (event) => setSelectedMonth(Number(event.target.value)), children: Array.from({ length: 12 }, (_, index) => index + 1).map((month) => _jsx("option", { value: month, children: getMonthName(month) }, month)) })] })] })), _jsx("button", { className: "secondary-button", type: "button", onClick: () => {
+                                if (activeTab === "snapshots") {
+                                    void loadSnapshots();
+                                }
+                                else if (activeTab === "area-profitability") {
+                                    void loadAreaProfitability();
+                                }
+                                else {
+                                    void loadOverview();
+                                }
+                            }, children: activeTab === "area-profitability" ? "Actualizar grafica" : "Actualizar" })] }) }), _jsx("section", { className: "panel finance-tabs-panel", children: _jsxs("div", { className: "finance-tabs", children: [_jsx("button", { className: `finance-tab ${activeTab === "current" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("current"), children: "Mes en curso" }), _jsxs("button", { className: `finance-tab ${activeTab === "area-profitability" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("area-profitability"), children: ["Rentabilidad por ", "á", "rea"] }), _jsxs("button", { className: `finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`, type: "button", onClick: () => setActiveTab("snapshots"), children: ["Estampas hist", "\u00f3", "ricas"] })] }) }), activeTab === "current" ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "budget-control-grid", children: [_jsxs("article", { className: "budget-comparison-card", children: [_jsxs("div", { className: "budget-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Ingresos sin IVA" }), _jsx("span", { children: "Finanzas" })] }), _jsxs("strong", { children: [Math.round(totals.incomeProgress), "%"] })] }), _jsxs("div", { className: "budget-pair-grid budget-income-grid", children: [_jsxs("div", { className: "budget-reported-field budget-readonly-field", children: [_jsx("span", { children: "Esperados total" }), _jsx("strong", { children: formatCurrency(totals.expectedIncomeMxn) })] }), _jsxs("div", { className: "budget-reported-field", children: [_jsx("span", { children: "Reportados" }), _jsx("strong", { children: formatCurrency(totals.actualIncomeMxn) })] }), _jsxs("div", { className: "budget-reported-field budget-readonly-field", children: [_jsx("span", { children: "Alta prob." }), _jsx("strong", { children: formatCurrency(totals.expectedHighProbabilityIncomeMxn) })] }), _jsxs("div", { className: "budget-reported-field budget-readonly-field", children: [_jsx("span", { children: "Baja prob." }), _jsx("strong", { children: formatCurrency(totals.expectedLowProbabilityIncomeMxn) })] })] }), _jsx("div", { className: "budget-progress-track", children: _jsx("div", { className: "budget-progress-fill income", style: { width: `${totals.incomeProgress}%` } }) })] }), _jsxs("article", { className: "budget-comparison-card", children: [_jsxs("div", { className: "budget-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Egresos sin IVA" }), _jsx("span", { children: "Gastos generales" })] }), _jsxs("strong", { children: [Math.round(totals.expenseProgress), "%"] })] }), _jsxs("div", { className: "budget-pair-grid", children: [_jsxs("div", { className: "budget-reported-field budget-expected-expense-field", children: [_jsx("span", { children: "Esperados" }), _jsx("strong", { children: formatCurrency(totals.expectedExpenseMxn) }), _jsx("button", { className: "secondary-button budget-breakdown-button", type: "button", onClick: openExpenseBreakdown, children: "Entrar a desglose" })] }), _jsxs("div", { className: "budget-reported-field", children: [_jsx("span", { children: "Reportados" }), _jsx("strong", { children: formatCurrency(totals.actualExpenseMxn) })] })] }), _jsx("div", { className: "budget-progress-track", children: _jsx("div", { className: "budget-progress-fill expense", style: { width: `${totals.expenseProgress}%` } }) })] }), _jsxs("article", { className: "budget-result-comparison-card", children: [_jsx("div", { className: "budget-card-head", children: _jsxs("div", { children: [_jsx("h3", { children: "Resultado financiero" }), _jsx("span", { children: "Esperado vs real" })] }) }), _jsxs("div", { className: "budget-result-pair", children: [_jsxs("div", { className: `budget-result-value ${expectedResultTone}`, children: [_jsx("span", { children: "Esperado alta" }), _jsx("strong", { children: formatCurrency(totals.expectedResultMxn) })] }), _jsxs("div", { className: `budget-result-value ${actualResultTone}`, children: [_jsx("span", { children: "Real" }), _jsx("strong", { children: formatCurrency(totals.actualResultMxn) })] })] }), _jsxs("small", { children: ["Diferencia: ", formatCurrency(totals.actualResultMxn - totals.expectedResultMxn)] })] })] }), _jsxs("section", { className: "panel budget-notes-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Notas de ", getMonthName(selectedMonth), " ", selectedYear] }), _jsx("span", { children: loading ? "Cargando..." : "En tiempo real" })] }), _jsxs("label", { className: "form-field budget-notes-field", children: [_jsx("span", { children: "Notas del mes" }), _jsx("textarea", { value: draftNotes, disabled: !canWrite, onChange: (event) => setDraftNotes(event.target.value), onBlur: () => void persistPlanPatch({ notes: draftNotes }), rows: 3 })] })] })] })) : activeTab === "area-profitability" ? (_jsxs("section", { className: "panel budget-profitability-panel", children: [_jsxs("div", { className: "panel-header budget-profitability-head", children: [_jsxs("div", { children: [_jsxs("h2", { children: ["Utilidad real por ", "á", "rea"] }), _jsx("span", { children: "Ingresos cobrados menos gastos reportados" })] }), _jsx("span", { children: loadingProfitability
+                                    ? "Cargando..."
+                                    : `${getMonthName(profitabilityFromMonth)} ${profitabilityFromYear} - ${getMonthName(profitabilityToMonth)} ${profitabilityToYear}` })] }), _jsx(AreaProfitabilityChart, { data: profitabilityOverview, loading: loadingProfitability, selectedTeam: selectedProfitabilityTeam })] })) : (_jsxs("section", { className: "panel budget-snapshots-panel", children: [_jsxs("div", { className: "panel-header", children: [_jsxs("h2", { children: ["Estampas anteriores a ", getMonthName(selectedMonth), " ", selectedYear] }), _jsx("span", { children: loadingSnapshots ? "Cargando..." : `${snapshots.length} estampas` })] }), _jsx("div", { className: "budget-snapshot-grid", children: loadingSnapshots ? (_jsx("p", { className: "muted", children: "Cargando estampas historicas..." })) : snapshots.length === 0 ? (_jsx("p", { className: "muted", children: "Aun no hay meses anteriores con planeacion o movimientos para estampar." })) : (snapshots.map((snapshot) => {
                             const snapshotExpectedTone = snapshot.expectedResultMxn >= 0 ? "is-positive" : "is-negative";
                             const snapshotActualTone = snapshot.actualResultMxn >= 0 ? "is-positive" : "is-negative";
                             return (_jsxs("article", { className: "budget-snapshot-card", children: [_jsx("div", { className: "budget-card-head", children: _jsxs("div", { children: [_jsxs("h3", { children: [getMonthName(snapshot.month), " ", snapshot.year] }), _jsxs("span", { children: ["Estampa congelada el ", new Date(snapshot.createdAt).toLocaleDateString("es-MX")] })] }) }), _jsxs("div", { className: "budget-snapshot-metrics", children: [_jsxs("div", { children: [_jsx("span", { children: "Ingresos esperados" }), _jsx("strong", { children: formatCurrency(snapshot.expectedIncomeMxn) })] }), _jsxs("div", { children: [_jsx("span", { children: "Ingresos reportados" }), _jsx("strong", { children: formatCurrency(snapshot.actualIncomeMxn) })] }), _jsxs("div", { children: [_jsx("span", { children: "Egresos esperados" }), _jsx("strong", { children: formatCurrency(snapshot.expectedExpenseMxn) })] }), _jsxs("div", { children: [_jsx("span", { children: "Egresos reportados" }), _jsx("strong", { children: formatCurrency(snapshot.actualExpenseMxn) })] })] }), _jsxs("div", { className: "budget-result-pair", children: [_jsxs("div", { className: `budget-result-value ${snapshotExpectedTone}`, children: [_jsx("span", { children: "Resultado esperado" }), _jsx("strong", { children: formatCurrency(snapshot.expectedResultMxn) })] }), _jsxs("div", { className: `budget-result-value ${snapshotActualTone}`, children: [_jsx("span", { children: "Resultado real" }), _jsx("strong", { children: formatCurrency(snapshot.actualResultMxn) })] })] }), _jsxs("small", { children: [snapshot.financeRecordCount, " ingresos y ", snapshot.generalExpenseCount, " egresos reportados"] }), snapshot.notes ? _jsx("p", { className: "muted", children: snapshot.notes }) : null] }, snapshot.id));

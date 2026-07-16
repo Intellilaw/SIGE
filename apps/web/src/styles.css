@@ -3542,6 +3542,9 @@ textarea {
 }
 
 .general-expense-table {
+  --general-expense-index-column-width: 64px;
+  --general-expense-detail-column-width: 376px;
+  --general-expense-amount-column-width: 160px;
   min-width: 3050px;
 }
 
@@ -3568,8 +3571,8 @@ textarea {
 .general-expense-table .general-expense-row-index {
   position: sticky;
   left: 0;
-  min-width: 64px;
-  width: 64px;
+  min-width: var(--general-expense-index-column-width);
+  width: var(--general-expense-index-column-width);
 }
 
 .general-expense-table thead th:first-child {
@@ -3582,12 +3585,15 @@ textarea {
   background: rgba(255, 255, 255, 0.96);
 }
 
+.general-expense-table tr.general-expense-row-source-managed td {
+  background-color: rgba(238, 244, 251, 0.72);
+}
+
 .general-expense-table .general-expense-detail-column {
   position: sticky;
-  left: 64px;
-  min-width: 376px;
-  width: 376px;
-  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
+  left: var(--general-expense-index-column-width);
+  min-width: var(--general-expense-detail-column-width);
+  width: var(--general-expense-detail-column-width);
 }
 
 .general-expense-table thead .general-expense-detail-column {
@@ -3596,6 +3602,24 @@ textarea {
 }
 
 .general-expense-detail-column {
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.general-expense-table .general-expense-amount-column {
+  position: sticky;
+  left: calc(var(--general-expense-index-column-width) + var(--general-expense-detail-column-width));
+  min-width: var(--general-expense-amount-column-width);
+  width: var(--general-expense-amount-column-width);
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
+}
+
+.general-expense-table thead .general-expense-amount-column {
+  z-index: 3;
+  background: #eef4fb;
+}
+
+.general-expense-amount-column {
   z-index: 1;
   background: rgba(255, 255, 255, 0.96);
 }
@@ -3610,7 +3634,7 @@ textarea {
 }
 
 .general-expense-payroll-table {
-  min-width: 4550px;
+  min-width: 5450px;
 }
 
 .general-expense-input {
@@ -3696,6 +3720,11 @@ textarea {
 
 .general-expense-readonly-cell.is-payroll-net-salary {
   color: #1d4ed8;
+  font-weight: 800;
+}
+
+.general-expense-readonly-cell.is-payroll-gross-compensation {
+  color: #7c3f00;
   font-weight: 800;
 }
 
@@ -10301,6 +10330,188 @@ div.sales-product-card-main {
   resize: vertical;
 }
 
+.budget-profitability-filters {
+  flex: 1 1 920px;
+}
+
+.budget-profitability-filters .form-field {
+  min-width: 132px;
+}
+
+.budget-profitability-filters .budget-profitability-team-filter {
+  min-width: 210px;
+}
+
+.budget-profitability-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.budget-profitability-head {
+  align-items: flex-start;
+}
+
+.budget-profitability-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.budget-profitability-head h2 {
+  margin: 0;
+}
+
+.budget-profitability-head span {
+  color: #52657a;
+  font-size: 0.88rem;
+}
+
+.budget-profitability-chart-block {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.budget-profitability-legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.budget-profitability-legend-item {
+  align-items: center;
+  color: #334e68;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 7px;
+}
+
+.budget-profitability-legend-item i {
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
+
+.budget-profitability-legend-item i.is-break-even {
+  background: #263442;
+  border-radius: 0;
+  height: 2px;
+  width: 18px;
+}
+
+.budget-profitability-chart-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.budget-profitability-chart-canvas {
+  min-width: 780px;
+}
+
+.budget-profitability-chart {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.budget-profitability-positive-zone {
+  fill: rgba(31, 157, 114, 0.07);
+}
+
+.budget-profitability-negative-zone {
+  fill: rgba(200, 63, 63, 0.07);
+}
+
+.budget-profitability-grid-line {
+  stroke: rgba(71, 85, 105, 0.16);
+  stroke-width: 1;
+}
+
+.budget-profitability-zero-line {
+  stroke: #263442;
+  stroke-width: 2;
+}
+
+.budget-profitability-axis-line,
+.budget-profitability-month-tick {
+  stroke: #7b8794;
+  stroke-width: 1;
+}
+
+.budget-profitability-axis-label,
+.budget-profitability-month-label,
+.budget-profitability-zero-label {
+  fill: #52657a;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.budget-profitability-zero-label {
+  fill: #263442;
+  font-weight: 700;
+}
+
+.budget-profitability-series-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.budget-profitability-point {
+  cursor: pointer;
+  transition: r 120ms ease;
+}
+
+.budget-profitability-point:focus {
+  outline: none;
+  stroke: #102a43;
+  stroke-width: 3;
+}
+
+.budget-profitability-tooltip rect {
+  fill: #ffffff;
+  stroke: rgba(31, 41, 51, 0.18);
+  stroke-width: 1;
+}
+
+.budget-profitability-tooltip text {
+  fill: #334e68;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.budget-profitability-tooltip .budget-profitability-tooltip-title {
+  fill: #102a43;
+  font-weight: 700;
+}
+
+.budget-profitability-tooltip .budget-profitability-tooltip-period {
+  fill: #627d98;
+  font-size: 12px;
+}
+
+.budget-profitability-tooltip text.is-positive {
+  fill: #15735a;
+  font-weight: 700;
+}
+
+.budget-profitability-tooltip text.is-negative {
+  fill: #b4232b;
+  font-weight: 700;
+}
+
+.budget-profitability-empty {
+  align-items: center;
+  color: #627d98;
+  display: flex;
+  justify-content: center;
+  min-height: 320px;
+  text-align: center;
+}
+
 .budget-expense-breakdown-modal {
   gap: 16px;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -10437,6 +10648,12 @@ div.sales-product-card-main {
   .budget-snapshot-grid,
   .budget-snapshot-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .budget-profitability-head {
+    align-items: flex-start;
+    display: grid;
+    gap: 6px;
   }
 }
 

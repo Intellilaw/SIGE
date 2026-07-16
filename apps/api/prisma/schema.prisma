@@ -594,11 +594,18 @@ model GeneralExpense {
   reviewedByJnls           Boolean      @default(false)
   paid                     Boolean      @default(false)
   paidAt                   DateTime?    @db.Date
+  payrollEntryId           String?      @unique
+  payrollNetDepositMxn     Decimal?
+  projectorCommissionId    String?
+  projectorCommissionRecipient String?
   createdAt                DateTime     @default(now())
   updatedAt                DateTime     @updatedAt
   organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  payrollEntry             GeneralExpensePayrollEntry? @relation(fields: [payrollEntryId], references: [id], onDelete: Cascade)
+  projectorCommission      ProjectorCommission? @relation(fields: [projectorCommissionId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, year, month, createdAt])
+  @@unique([projectorCommissionId, projectorCommissionRecipient])
 }
 
 model GeneralExpenseEmrtAcknowledgement {
@@ -643,6 +650,12 @@ model GeneralExpensePayrollEntry {
   overtimeHours              Decimal      @default(0)
   overtimeDetail             String       @default("")
   overtimeApprovedByEmrt     Boolean      @default(false)
+  generalExpense             Boolean      @default(false)
+  pctLitigation              Decimal      @default(0)
+  pctCorporateLabor          Decimal      @default(0)
+  pctSettlements             Decimal      @default(0)
+  pctFinancialLaw            Decimal      @default(0)
+  pctTaxCompliance           Decimal      @default(0)
   isrWithholdingMxn          Decimal      @default(0)
   imssWithholdingMxn         Decimal      @default(0)
   employmentSubsidyMxn       Decimal      @default(0)
@@ -654,6 +667,7 @@ model GeneralExpensePayrollEntry {
   updatedAt                  DateTime     @updatedAt
   laborFile                  LaborFile?   @relation(fields: [laborFileId], references: [id], onDelete: SetNull)
   organization               Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  registeredExpense          GeneralExpense?
 
   @@index([organizationId, year, month, half, createdAt])
   @@index([organizationId, laborFileId])
@@ -760,6 +774,7 @@ model ProjectorCommission {
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  generalExpenses      GeneralExpense[]
 
   @@unique([organizationId, taskTrackingRecordId])
   @@index([organizationId, year, month, section])

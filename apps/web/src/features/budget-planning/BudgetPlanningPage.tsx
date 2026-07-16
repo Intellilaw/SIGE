@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  BudgetAreaProfitabilityOverview,
   BudgetPlan,
   BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
   FinanceRecord,
-  GeneralExpense
+  GeneralExpense,
+  KnownTeam
 } from "@sige/contracts";
 
 import { apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteModule } from "../auth/permissions";
+import { AreaProfitabilityChart, type AreaProfitabilityTeamFilter } from "./AreaProfitabilityChart";
 
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
 const MONTH_NAMES = [
@@ -25,6 +28,13 @@ const MONTH_NAMES = [
   "Octubre",
   "Noviembre",
   "Diciembre"
+];
+const AREA_PROFITABILITY_TEAM_OPTIONS: Array<{ value: KnownTeam; label: string }> = [
+  { value: "LITIGATION", label: "Litigio" },
+  { value: "CORPORATE_LABOR", label: "Corporativo" },
+  { value: "SETTLEMENTS", label: "Convenios" },
+  { value: "FINANCIAL_LAW", label: "Compliance Financiero" },
+  { value: "TAX_COMPLIANCE", label: "Compliance Fiscal" }
 ];
 
 interface BudgetPlanningOverview {
@@ -49,7 +59,7 @@ interface CopyExpenseBreakdownResult {
 type BudgetPlanPatch = Partial<Pick<BudgetPlan, "notes">> & {
   expectedExpenseBreakdown?: Array<{ concept: string; amountMxn: number }>;
 };
-type BudgetPlanningTab = "current" | "snapshots";
+type BudgetPlanningTab = "current" | "area-profitability" | "snapshots";
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -101,6 +111,18 @@ function getMonthName(month: number) {
   return MONTH_NAMES[month - 1] ?? `Mes ${month}`;
 }
 
+function getPeriodIndex(year: number, month: number) {
+  return year * 12 + month - 1;
+}
+
+function shiftPeriod(year: number, month: number, offset: number) {
+  const index = getPeriodIndex(year, month) + offset;
+  return {
+    year: Math.floor(index / 12),
+    month: index % 12 + 1
+  };
+}
+
 function getIncomeTotal(record: FinanceRecord) {
   const primaryPaymentMxn = record.paymentDate1 && (record.paymentMethod === "T" || (record.paymentMethod === "E" && record.paymentReceived))
     ? Number(record.paidThisMonthMxn || 0)
@@ -129,9 +151,17 @@ function getProgressPercent(actual: number, expected: number) {
 export function BudgetPlanningPage() {
   const { user } = useAuth();
   const now = new Date();
+  const initialProfitabilityFrom = shiftPeriod(now.getFullYear(), now.getMonth() + 1, -11);
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [activeTab, setActiveTab] = useState<BudgetPlanningTab>("current");
+  const [profitabilityFromYear, setProfitabilityFromYear] = useState(initialProfitabilityFrom.year);
+  const [profitabilityFromMonth, setProfitabilityFromMonth] = useState(initialProfitabilityFrom.month);
+  const [profitabilityToYear, setProfitabilityToYear] = useState(now.getFullYear());
+  const [profitabilityToMonth, setProfitabilityToMonth] = useState(now.getMonth() + 1);
+  const [selectedProfitabilityTeam, setSelectedProfitabilityTeam] = useState<AreaProfitabilityTeamFilter>("ALL");
+  const [profitabilityOverview, setProfitabilityOverview] = useState<BudgetAreaProfitabilityOverview | null>(null);
+  const [profitabilityInitialized, setProfitabilityInitialized] = useState(false);
   const [plan, setPlan] = useState<BudgetPlan | null>(null);
   const [expectedExpenseBreakdown, setExpectedExpenseBreakdown] = useState<BudgetPlanExpenseBreakdownItem[]>([]);
   const [draftExpenseBreakdown, setDraftExpenseBreakdown] = useState<BudgetExpenseBreakdownDraftRow[]>([]);
@@ -143,6 +173,7 @@ export function BudgetPlanningPage() {
   const [draftNotes, setDraftNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+  const [loadingProfitability, setLoadingProfitability] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const canWrite = canWriteModule(user, "budget-planning");
 
@@ -183,14 +214,54 @@ export function BudgetPlanningPage() {
     }
   }
 
+  async function loadAreaProfitability(useDefaultRange = false) {
+    if (
+      !useDefaultRange
+      && getPeriodIndex(profitabilityFromYear, profitabilityFromMonth) > getPeriodIndex(profitabilityToYear, profitabilityToMonth)
+    ) {
+      setErrorMessage("El periodo inicial no puede ser posterior al periodo final.");
+      return;
+    }
+
+    setLoadingProfitability(true);
+    setErrorMessage(null);
+
+    try {
+      const query = useDefaultRange
+        ? ""
+        : `?fromYear=${profitabilityFromYear}&fromMonth=${profitabilityFromMonth}&toYear=${profitabilityToYear}&toMonth=${profitabilityToMonth}`;
+      const response = await apiGet<BudgetAreaProfitabilityOverview>(`/budget-planning/area-profitability${query}`);
+      setProfitabilityOverview(response);
+      setProfitabilityInitialized(true);
+
+      if (useDefaultRange) {
+        setProfitabilityFromYear(response.selectedRange.from.year);
+        setProfitabilityFromMonth(response.selectedRange.from.month);
+        setProfitabilityToYear(response.selectedRange.to.year);
+        setProfitabilityToMonth(response.selectedRange.to.month);
+      }
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setLoadingProfitability(false);
+    }
+  }
+
   useEffect(() => {
     if (activeTab === "snapshots") {
       void loadSnapshots();
       return;
     }
 
+    if (activeTab === "area-profitability") {
+      if (!profitabilityInitialized) {
+        void loadAreaProfitability(true);
+      }
+      return;
+    }
+
     void loadOverview();
-  }, [activeTab, selectedMonth, selectedYear]);
+  }, [activeTab, profitabilityInitialized, selectedMonth, selectedYear]);
 
   async function persistPlanPatch(patch: BudgetPlanPatch) {
     if (!canWrite) {
@@ -302,6 +373,14 @@ export function BudgetPlanningPage() {
     [draftExpenseBreakdown]
   );
 
+  const profitabilityYearOptions = useMemo(() => {
+    const availableFromYear = profitabilityOverview?.availableRange?.from.year ?? profitabilityFromYear;
+    const availableToYear = profitabilityOverview?.availableRange?.to.year ?? profitabilityToYear;
+    const firstYear = Math.min(availableFromYear, profitabilityFromYear, profitabilityToYear);
+    const lastYear = Math.max(availableToYear, profitabilityFromYear, profitabilityToYear, now.getFullYear());
+    return Array.from({ length: lastYear - firstYear + 1 }, (_, index) => firstYear + index);
+  }, [profitabilityFromYear, profitabilityOverview, profitabilityToYear]);
+
   const expectedResultTone = totals.expectedResultMxn >= 0 ? "is-positive" : "is-negative";
   const actualResultTone = totals.actualResultMxn >= 0 ? "is-positive" : "is-negative";
 
@@ -321,22 +400,75 @@ export function BudgetPlanningPage() {
 
       <section className="panel">
         <div className="finance-toolbar">
-          <div className="finance-toolbar-group">
-            <label className="form-field">
-              <span>Ano</span>
-              <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
-                {YEAR_OPTIONS.map((year) => <option key={year} value={year}>{year}</option>)}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Mes</span>
-              <select value={selectedMonth} onChange={(event) => setSelectedMonth(Number(event.target.value))}>
-                {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{getMonthName(month)}</option>)}
-              </select>
-            </label>
-          </div>
-          <button className="secondary-button" type="button" onClick={() => activeTab === "snapshots" ? void loadSnapshots() : void loadOverview()}>
-            Actualizar
+          {activeTab === "area-profitability" ? (
+            <div className="finance-toolbar-group budget-profitability-filters">
+              <label className="form-field">
+                <span>Desde - A{"ñ"}o</span>
+                <select value={profitabilityFromYear} onChange={(event) => setProfitabilityFromYear(Number(event.target.value))}>
+                  {profitabilityYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Desde - Mes</span>
+                <select value={profitabilityFromMonth} onChange={(event) => setProfitabilityFromMonth(Number(event.target.value))}>
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{getMonthName(month)}</option>)}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Hasta - A{"ñ"}o</span>
+                <select value={profitabilityToYear} onChange={(event) => setProfitabilityToYear(Number(event.target.value))}>
+                  {profitabilityYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Hasta - Mes</span>
+                <select value={profitabilityToMonth} onChange={(event) => setProfitabilityToMonth(Number(event.target.value))}>
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{getMonthName(month)}</option>)}
+                </select>
+              </label>
+              <label className="form-field budget-profitability-team-filter">
+                <span>Equipo</span>
+                <select
+                  value={selectedProfitabilityTeam}
+                  onChange={(event) => setSelectedProfitabilityTeam(event.target.value as AreaProfitabilityTeamFilter)}
+                >
+                  <option value="ALL">Todos los equipos</option>
+                  {AREA_PROFITABILITY_TEAM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : (
+            <div className="finance-toolbar-group">
+              <label className="form-field">
+                <span>Ano</span>
+                <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+                  {YEAR_OPTIONS.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Mes</span>
+                <select value={selectedMonth} onChange={(event) => setSelectedMonth(Number(event.target.value))}>
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{getMonthName(month)}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              if (activeTab === "snapshots") {
+                void loadSnapshots();
+              } else if (activeTab === "area-profitability") {
+                void loadAreaProfitability();
+              } else {
+                void loadOverview();
+              }
+            }}
+          >
+            {activeTab === "area-profitability" ? "Actualizar grafica" : "Actualizar"}
           </button>
         </div>
       </section>
@@ -345,6 +477,9 @@ export function BudgetPlanningPage() {
         <div className="finance-tabs">
           <button className={`finance-tab ${activeTab === "current" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("current")}>
             Mes en curso
+          </button>
+          <button className={`finance-tab ${activeTab === "area-profitability" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("area-profitability")}>
+            Rentabilidad por {"á"}rea
           </button>
           <button className={`finance-tab ${activeTab === "snapshots" ? "is-active" : ""}`} type="button" onClick={() => setActiveTab("snapshots")}>
             Estampas hist{"\u00f3"}ricas
@@ -450,6 +585,25 @@ export function BudgetPlanningPage() {
             </label>
           </section>
         </>
+      ) : activeTab === "area-profitability" ? (
+        <section className="panel budget-profitability-panel">
+          <div className="panel-header budget-profitability-head">
+            <div>
+              <h2>Utilidad real por {"á"}rea</h2>
+              <span>Ingresos cobrados menos gastos reportados</span>
+            </div>
+            <span>
+              {loadingProfitability
+                ? "Cargando..."
+                : `${getMonthName(profitabilityFromMonth)} ${profitabilityFromYear} - ${getMonthName(profitabilityToMonth)} ${profitabilityToYear}`}
+            </span>
+          </div>
+          <AreaProfitabilityChart
+            data={profitabilityOverview}
+            loading={loadingProfitability}
+            selectedTeam={selectedProfitabilityTeam}
+          />
+        </section>
       ) : (
         <section className="panel budget-snapshots-panel">
           <div className="panel-header">

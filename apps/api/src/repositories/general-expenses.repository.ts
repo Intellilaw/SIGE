@@ -61,6 +61,27 @@ const LOCKED_AFTER_ALE_RECEIPT_FIELDS: Array<keyof GeneralExpenseUpdateRecord> =
   "approvedByEmrt",
   "paidByEmrtAt"
 ];
+const SOURCE_MANAGED_EXPENSE_FIELDS: Array<keyof GeneralExpenseUpdateRecord> = [
+  "detail",
+  "amountMxn",
+  "countsTowardLimit",
+  "team",
+  "generalExpense",
+  "expenseWithoutTeam",
+  "pctLitigation",
+  "pctCorporateLabor",
+  "pctSettlements",
+  "pctFinancialLaw",
+  "pctTaxCompliance",
+  "paymentMethod",
+  "bank",
+  "hasVat",
+  "hasWithholdings",
+  "recurring",
+  "approvedByEmrt",
+  "paidByEmrtAt",
+  "emrtReimbursementPending"
+];
 const PCT_KEYS: Array<keyof Pick<
   GeneralExpenseUpdateRecord,
   "pctLitigation" | "pctCorporateLabor" | "pctSettlements" | "pctFinancialLaw" | "pctTaxCompliance"
@@ -116,6 +137,14 @@ const PAYROLL_ENTRY_INCLUDE = {
           updatedAt: true
         }
       }
+    }
+  },
+  registeredExpense: {
+    select: {
+      id: true,
+      reviewedByJnls: true,
+      paid: true,
+      paidAt: true
     }
   }
 } satisfies Prisma.GeneralExpensePayrollEntryInclude;
@@ -418,6 +447,93 @@ function getPayrollNetDepositMxn(
     entry.employmentSubsidyMxn -
     payrollWithholdingsMxn
   );
+}
+
+const PAYROLL_MONTH_NAMES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre"
+];
+
+function getPayrollGrossCompensationMxn(entry: GeneralExpensePayrollEntry) {
+  return roundPayrollNumber(
+    entry.netSalaryMxn +
+    entry.punctualityBonusMxn +
+    entry.attendanceBonusMxn +
+    entry.vacationPremiumMxn +
+    entry.overtimeTotalMxn
+  );
+}
+
+function getPayrollExpenseDistribution(entry: GeneralExpensePayrollEntry) {
+  const sum = (
+    entry.pctLitigation +
+    entry.pctCorporateLabor +
+    entry.pctSettlements +
+    entry.pctFinancialLaw +
+    entry.pctTaxCompliance
+  );
+
+  if (entry.generalExpense || Math.abs(sum - 100) > 0.0001) {
+    return {
+      generalExpense: true,
+      pctLitigation: 20,
+      pctCorporateLabor: 20,
+      pctSettlements: 20,
+      pctFinancialLaw: 20,
+      pctTaxCompliance: 20
+    };
+  }
+
+  return {
+    generalExpense: false,
+    pctLitigation: entry.pctLitigation,
+    pctCorporateLabor: entry.pctCorporateLabor,
+    pctSettlements: entry.pctSettlements,
+    pctFinancialLaw: entry.pctFinancialLaw,
+    pctTaxCompliance: entry.pctTaxCompliance
+  };
+}
+
+function getPayrollGeneratedExpenseData(entry: GeneralExpensePayrollEntry) {
+  const distribution = getPayrollExpenseDistribution(entry);
+  const halfLabel = entry.half === 1 ? "Primera quincena" : "Segunda quincena";
+  const monthLabel = PAYROLL_MONTH_NAMES[entry.month - 1] ?? `Mes ${entry.month}`;
+  const employeeName = entry.employeeName.trim() || "Colaborador sin nombre";
+
+  return {
+    year: entry.year,
+    month: entry.month,
+    detail: `Nómina - ${employeeName} - ${halfLabel} - ${monthLabel} ${entry.year}`,
+    amountMxn: normalizeMoney(getPayrollGrossCompensationMxn(entry)),
+    countsTowardLimit: false,
+    team: DEFAULT_TEAM,
+    generalExpense: distribution.generalExpense,
+    expenseWithoutTeam: false,
+    pctLitigation: new Prisma.Decimal(distribution.pctLitigation),
+    pctCorporateLabor: new Prisma.Decimal(distribution.pctCorporateLabor),
+    pctSettlements: new Prisma.Decimal(distribution.pctSettlements),
+    pctFinancialLaw: new Prisma.Decimal(distribution.pctFinancialLaw),
+    pctTaxCompliance: new Prisma.Decimal(distribution.pctTaxCompliance),
+    paymentMethod: DEFAULT_PAYMENT_METHOD,
+    bank: null,
+    hasVat: false,
+    hasWithholdings: false,
+    recurring: false,
+    approvedByEmrt: true,
+    paidByEmrtAt: null,
+    emrtReimbursementPending: false,
+    payrollNetDepositMxn: new Prisma.Decimal(roundPayrollNumber(entry.netDepositMxn))
+  };
 }
 
 function applyPayrollMonthlyBonusCalculations(entries: GeneralExpensePayrollEntry[]) {
@@ -842,9 +958,94 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     ])[0];
   }
 
+  private async upsertPayrollGeneratedExpense(
+    tx: Prisma.TransactionClient,
+    entry: GeneralExpensePayrollEntry
+  ) {
+    const organizationId = this.getOrganizationId();
+    const data = getPayrollGeneratedExpenseData(entry);
+
+    return tx.generalExpense.upsert({
+      where: { payrollEntryId: entry.id },
+      create: {
+        organizationId,
+        payrollEntryId: entry.id,
+        ...data
+      },
+      update: data
+    });
+  }
+
+  private async reconcileApprovedPayrollExpenses(year: number, month: number, onlyMissing = false) {
+    const organizationId = this.getOrganizationId();
+    if (onlyMissing) {
+      const missingApprovedExpenseCount = await this.prisma.generalExpensePayrollEntry.count({
+        where: {
+          organizationId,
+          year,
+          month,
+          finalPaymentApprovedByEmrt: true,
+          registeredExpense: { is: null }
+        }
+      });
+      if (missingApprovedExpenseCount === 0) {
+        return;
+      }
+    }
+
+    const [records, globalVacationDayRecords] = await Promise.all([
+      this.prisma.generalExpensePayrollEntry.findMany({
+        where: { organizationId, year, month },
+        include: PAYROLL_ENTRY_INCLUDE,
+        orderBy: [{ half: "asc" }, { createdAt: "asc" }]
+      }),
+      this.listPayrollGlobalVacationDayRecords()
+    ]);
+    const registeredPayrollEntryIds = new Set(
+      records.filter((record) => Boolean(record.registeredExpense)).map((record) => record.id)
+    );
+    const approvedEntries = (await this.mapPayrollEntriesWithMonthlyBonuses(records, globalVacationDayRecords))
+      .filter((entry) => entry.finalPaymentApprovedByEmrt && (!onlyMissing || !registeredPayrollEntryIds.has(entry.id)));
+
+    if (approvedEntries.length === 0) {
+      return;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const entry of approvedEntries) {
+        const distribution = getPayrollExpenseDistribution(entry);
+        const requiresEqualDistributionNormalization = distribution.generalExpense && (
+          !entry.generalExpense ||
+          Math.abs(entry.pctLitigation - 20) > 0.0001 ||
+          Math.abs(entry.pctCorporateLabor - 20) > 0.0001 ||
+          Math.abs(entry.pctSettlements - 20) > 0.0001 ||
+          Math.abs(entry.pctFinancialLaw - 20) > 0.0001 ||
+          Math.abs(entry.pctTaxCompliance - 20) > 0.0001
+        );
+        if (requiresEqualDistributionNormalization) {
+          await tx.generalExpensePayrollEntry.update({
+            where: { id: entry.id, organizationId },
+            data: {
+              generalExpense: true,
+              pctLitigation: new Prisma.Decimal(20),
+              pctCorporateLabor: new Prisma.Decimal(20),
+              pctSettlements: new Prisma.Decimal(20),
+              pctFinancialLaw: new Prisma.Decimal(20),
+              pctTaxCompliance: new Prisma.Decimal(20)
+            }
+          });
+        }
+
+        await this.upsertPayrollGeneratedExpense(tx, entry);
+      }
+    });
+  }
+
   public async list(year: number, month: number) {
     assertMonth(month);
     const organizationId = this.getOrganizationId();
+
+    await this.reconcileApprovedPayrollExpenses(year, month, true);
 
     const records = await this.prisma.generalExpense.findMany({
       where: { organizationId, year, month },
@@ -1137,6 +1338,12 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
           absenceDays: new Prisma.Decimal(0),
           overtimeHours: new Prisma.Decimal(0),
           overtimeDetail: "",
+          generalExpense: row.generalExpense,
+          pctLitigation: row.pctLitigation,
+          pctCorporateLabor: row.pctCorporateLabor,
+          pctSettlements: row.pctSettlements,
+          pctFinancialLaw: row.pctFinancialLaw,
+          pctTaxCompliance: row.pctTaxCompliance,
           isrWithholdingMxn: row.isrWithholdingMxn,
           imssWithholdingMxn: row.imssWithholdingMxn,
           employmentSubsidyMxn: row.employmentSubsidyMxn,
@@ -1186,6 +1393,12 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         absenceDays: new Prisma.Decimal(0),
         overtimeHours: new Prisma.Decimal(0),
         overtimeDetail: "",
+        generalExpense: false,
+        pctLitigation: new Prisma.Decimal(0),
+        pctCorporateLabor: new Prisma.Decimal(0),
+        pctSettlements: new Prisma.Decimal(0),
+        pctFinancialLaw: new Prisma.Decimal(0),
+        pctTaxCompliance: new Prisma.Decimal(0),
         isrWithholdingMxn: new Prisma.Decimal(0),
         imssWithholdingMxn: new Prisma.Decimal(0),
         employmentSubsidyMxn: new Prisma.Decimal(0),
@@ -1210,6 +1423,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     this.assertPayrollFieldAccess(current, payload, actor);
 
     const organizationId = this.getOrganizationId();
+    const payrollSnapshot = payload.finalPaymentApprovedByEmrt === true
+      ? await this.mapPayrollEntryWithMonthlyBonuses(current)
+      : null;
     const { data, laborFileUpdate } = await this.buildPayrollUpdatePayload(current, payload);
     const record = await this.prisma.$transaction(async (tx) => {
       if (laborFileUpdate && current.laborFileId) {
@@ -1219,12 +1435,26 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         });
       }
 
-      return tx.generalExpensePayrollEntry.update({
+      const updated = await tx.generalExpensePayrollEntry.update({
         where: { id: payrollEntryId, organizationId },
         data,
         include: PAYROLL_ENTRY_INCLUDE
       });
+
+      if (payload.finalPaymentApprovedByEmrt === true && payrollSnapshot) {
+        await this.upsertPayrollGeneratedExpense(tx, payrollSnapshot);
+      }
+
+      if (payload.finalPaymentApprovedByEmrt === false) {
+        await tx.generalExpense.deleteMany({
+          where: { payrollEntryId, organizationId }
+        });
+      }
+
+      return updated;
     });
+
+    await this.reconcileApprovedPayrollExpenses(current.year, current.month);
 
     return this.mapPayrollEntryWithMonthlyBonuses(record);
   }
@@ -1518,6 +1748,18 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
   private async assertFieldAccess(current: StoredGeneralExpense, payload: GeneralExpenseUpdateRecord, actor: GeneralExpenseActor) {
     await this.assertEmrtAcknowledgementLocks(current, payload);
 
+    if (
+      (current.payrollEntryId || current.projectorCommissionId) &&
+      SOURCE_MANAGED_EXPENSE_FIELDS.some((field) => hasOwn(payload, field))
+    ) {
+      const sourceLabel = current.payrollEntryId ? "Nómina" : "Comisiones";
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_SOURCE_MANAGED",
+        `Este gasto proviene de ${sourceLabel}. El monto y su distribución solo pueden modificarse desde su módulo de origen.`
+      );
+    }
+
     if (current.approvedByEmrt && LOCKED_AFTER_APPROVAL_FIELDS.some((field) => hasOwn(payload, field))) {
       throw new AppError(400, "GENERAL_EXPENSE_APPROVED_LOCKED", "This expense is locked because it was already approved by EMRT.");
     }
@@ -1716,6 +1958,14 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     const payloadKeys = Object.keys(payload);
     const isFinalApprovalOnlyPatch = payloadKeys.length === 1 && hasOwn(payload, "finalPaymentApprovedByEmrt");
 
+    if (hasOwn(payload, "finalPaymentApprovedByEmrt") && !isFinalApprovalOnlyPatch) {
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_PATCH_CONFLICT",
+        "La autorización final de Nómina debe actualizarse por separado."
+      );
+    }
+
     if (current.finalPaymentApprovedByEmrt && payloadKeys.length > 0 && !isFinalApprovalOnlyPatch) {
       throw new AppError(400, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_LOCKED", "La fila ya fue autorizada por EMRT y no admite cambios.");
     }
@@ -1728,9 +1978,44 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       throw new AppError(403, "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_APPROVE_FORBIDDEN", "Only superadmin can approve the final payroll payment.");
     }
 
+    if (
+      payload.finalPaymentApprovedByEmrt === false &&
+      current.registeredExpense &&
+      (current.registeredExpense.reviewedByJnls || current.registeredExpense.paid || current.registeredExpense.paidAt)
+    ) {
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_PAYROLL_REGISTERED_EXPENSE_PROCESSED",
+        "No se puede desaprobar la Nómina porque su gasto ya fue revisado o pagado en Registro. Revierte primero esos estados."
+      );
+    }
+
     if (hasOwn(payload, "reviewedByJnls")) {
       if (!canReviewJnls(actor)) {
         throw new AppError(403, "GENERAL_EXPENSE_PAYROLL_REVIEW_FORBIDDEN", "Only the audit team can update the JNLS approval flag.");
+      }
+    }
+
+    if (payload.finalPaymentApprovedByEmrt === true) {
+      const nextGeneralExpense = hasOwn(payload, "generalExpense")
+        ? Boolean(payload.generalExpense)
+        : current.generalExpense;
+      const distributionSum = nextGeneralExpense
+        ? 100
+        : (
+          (hasOwn(payload, "pctLitigation") ? clampPercentage(payload.pctLitigation) : Number(current.pctLitigation)) +
+          (hasOwn(payload, "pctCorporateLabor") ? clampPercentage(payload.pctCorporateLabor) : Number(current.pctCorporateLabor)) +
+          (hasOwn(payload, "pctSettlements") ? clampPercentage(payload.pctSettlements) : Number(current.pctSettlements)) +
+          (hasOwn(payload, "pctFinancialLaw") ? clampPercentage(payload.pctFinancialLaw) : Number(current.pctFinancialLaw)) +
+          (hasOwn(payload, "pctTaxCompliance") ? clampPercentage(payload.pctTaxCompliance) : Number(current.pctTaxCompliance))
+        );
+
+      if (Math.abs(distributionSum - 100) > 0.0001) {
+        throw new AppError(
+          400,
+          "GENERAL_EXPENSE_PAYROLL_DISTRIBUTION_INCOMPLETE",
+          "La distribución de la nómina entre equipos debe sumar 100% antes de autorizar el pago."
+        );
       }
     }
   }
@@ -1788,6 +2073,43 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "overtimeDetail")) {
       data.overtimeDetail = nextIsPartTime ? payload.overtimeDetail ?? "" : "";
+    }
+
+    if (hasOwn(payload, "generalExpense")) {
+      data.generalExpense = Boolean(payload.generalExpense);
+      if (payload.generalExpense) {
+        data.pctLitigation = new Prisma.Decimal(20);
+        data.pctCorporateLabor = new Prisma.Decimal(20);
+        data.pctSettlements = new Prisma.Decimal(20);
+        data.pctFinancialLaw = new Prisma.Decimal(20);
+        data.pctTaxCompliance = new Prisma.Decimal(20);
+      }
+    }
+
+    const nextGeneralExpense = hasOwn(payload, "generalExpense")
+      ? Boolean(payload.generalExpense)
+      : current.generalExpense;
+
+    if (!nextGeneralExpense) {
+      if (hasOwn(payload, "pctLitigation")) {
+        data.pctLitigation = new Prisma.Decimal(clampPercentage(payload.pctLitigation));
+      }
+
+      if (hasOwn(payload, "pctCorporateLabor")) {
+        data.pctCorporateLabor = new Prisma.Decimal(clampPercentage(payload.pctCorporateLabor));
+      }
+
+      if (hasOwn(payload, "pctSettlements")) {
+        data.pctSettlements = new Prisma.Decimal(clampPercentage(payload.pctSettlements));
+      }
+
+      if (hasOwn(payload, "pctFinancialLaw")) {
+        data.pctFinancialLaw = new Prisma.Decimal(clampPercentage(payload.pctFinancialLaw));
+      }
+
+      if (hasOwn(payload, "pctTaxCompliance")) {
+        data.pctTaxCompliance = new Prisma.Decimal(clampPercentage(payload.pctTaxCompliance));
+      }
     }
 
     if (hasOwn(payload, "isrWithholdingMxn")) {
