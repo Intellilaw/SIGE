@@ -18,6 +18,9 @@ function resolveApiBaseUrl(configuredBaseUrl) {
 }
 const API_BASE_URL = resolveApiBaseUrl(configuredApiBaseUrl);
 const REQUEST_TIMEOUT_MS = 75_000;
+const TRANSIENT_RETRY_STATUS_CODES = new Set([502, 503, 504]);
+const TRANSIENT_RETRY_ATTEMPTS = 2;
+const TRANSIENT_RETRY_DELAY_MS = 700;
 const ACCESS_TOKEN_STORAGE_KEY = "sige.accessToken";
 const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";
 const SESSION_HINT_STORAGE_KEY = "sige.hasSession";
@@ -123,17 +126,44 @@ async function fetchWithTimeout(input, init = {}) {
         window.clearTimeout(timeout);
     }
 }
+function isSafeRetryMethod(method) {
+    const normalizedMethod = (method ?? "GET").toUpperCase();
+    return normalizedMethod === "GET" || normalizedMethod === "HEAD";
+}
+function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+async function executeWithTransientRetry(execute, init) {
+    const canRetry = isSafeRetryMethod(init.method);
+    let lastError;
+    for (let attempt = 0; attempt <= TRANSIENT_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            const response = await execute();
+            if (!canRetry || !TRANSIENT_RETRY_STATUS_CODES.has(response.status) || attempt === TRANSIENT_RETRY_ATTEMPTS) {
+                return response;
+            }
+        }
+        catch (error) {
+            lastError = error;
+            if (!canRetry || attempt === TRANSIENT_RETRY_ATTEMPTS) {
+                throw error;
+            }
+        }
+        await wait(TRANSIENT_RETRY_DELAY_MS * (attempt + 1));
+    }
+    throw lastError instanceof Error ? lastError : new Error("La solicitud fallo temporalmente. Intenta de nuevo.");
+}
 async function request(path, init, fallback) {
     const execute = () => fetchWithTimeout(`${API_BASE_URL}${path}`, {
         ...init,
         credentials: "include",
         headers: withAuthHeaders(init.headers)
     });
-    let response = await execute();
+    let response = await executeWithTransientRetry(execute, init);
     if (response.status === 401 && shouldRetryWithRefresh(path)) {
         const refreshed = await refreshAccessToken();
         if (refreshed) {
-            response = await execute();
+            response = await executeWithTransientRetry(execute, init);
         }
     }
     if (!response.ok) {
