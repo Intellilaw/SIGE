@@ -1989,7 +1989,16 @@ export function GeneralExpensesPage() {
                       <input
                         type="checkbox"
                         checked={entry.finalPaymentApprovedByEmrt}
-                        onChange={(event) => void persistPayrollPatch(entry.id, { finalPaymentApprovedByEmrt: event.target.checked })}
+                        onChange={(event) => {
+                          const finalPaymentApprovedByEmrt = event.target.checked;
+                          void persistPayrollPatch(
+                            entry.id,
+                            { finalPaymentApprovedByEmrt },
+                            finalPaymentApprovedByEmrt
+                              ? { finalPaymentApprovedByEmrt }
+                              : { finalPaymentApprovedByEmrt, generalExpense: false }
+                          );
+                        }}
                         disabled={!canApprove || (!entry.finalPaymentApprovedByEmrt && distributionSum !== 100)}
                         title={distributionSum === 100 || entry.finalPaymentApprovedByEmrt
                           ? undefined

@@ -2303,6 +2303,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
     if (hasOwn(payload, "finalPaymentApprovedByEmrt")) {
       data.finalPaymentApprovedByEmrt = Boolean(payload.finalPaymentApprovedByEmrt);
+      if (payload.finalPaymentApprovedByEmrt === false) {
+        data.generalExpense = false;
+      }
     }
 
     if (hasOwn(payload, "reviewedByJnls")) {
