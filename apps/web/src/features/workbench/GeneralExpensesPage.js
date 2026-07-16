@@ -549,6 +549,7 @@ export function GeneralExpensesPage() {
     const now = new Date();
     const expensePatchSequenceRef = useRef({});
     const payrollPatchSequenceRef = useRef({});
+    const payrollPatchQueueRef = useRef(Promise.resolve());
     const emrtAcknowledgementPatchSequenceRef = useRef({});
     const expenseRowRefs = useRef(new Map());
     const [activeTab, setActiveTab] = useState("registro");
@@ -887,26 +888,30 @@ export function GeneralExpensesPage() {
         updatePayrollEntryLocal(entryId, localPatch);
         const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
         payrollPatchSequenceRef.current[entryId] = requestSequence;
-        try {
-            const updated = await apiPatch(`/general-expenses/payroll/${entryId}`, payload);
-            if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
-                return;
+        const queuedPatch = payrollPatchQueueRef.current.then(async () => {
+            try {
+                const updated = await apiPatch(`/general-expenses/payroll/${entryId}`, payload);
+                if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+                    return;
+                }
+                setPayrollEntries((items) => replacePayrollEntry(items, updated));
+                if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
+                    await loadRecords();
+                }
             }
-            setPayrollEntries((items) => replacePayrollEntry(items, updated));
-            if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
-                await loadRecords();
+            catch (error) {
+                if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+                    return;
+                }
+                setErrorMessage(toErrorMessage(error));
+                await loadPayrollEntries();
+                if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
+                    await loadRecords();
+                }
             }
-        }
-        catch (error) {
-            if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
-                return;
-            }
-            setErrorMessage(toErrorMessage(error));
-            await loadPayrollEntries();
-            if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
-                await loadRecords();
-            }
-        }
+        });
+        payrollPatchQueueRef.current = queuedPatch.catch(() => undefined);
+        await queuedPatch;
     }
     async function flushPayrollDraftField(entryId, field) {
         const rawValue = payrollDrafts[entryId]?.[field];

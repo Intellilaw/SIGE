@@ -1018,134 +1018,9 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     });
   }
 
-  private async reconcileApprovedPayrollExpenses(year: number, month: number, onlyOutdated = false) {
-    const organizationId = this.getOrganizationId();
-    let payrollEntryIdsToReconcile: Set<string> | null = null;
-    let preloadedGlobalVacationDayRecords: PayrollGlobalVacationDayRecord[] | null = null;
-
-    if (onlyOutdated) {
-      const [approvedPayrollExpenses, globalVacationDayRecords] = await Promise.all([
-        this.prisma.generalExpensePayrollEntry.findMany({
-          where: {
-            organizationId,
-            year,
-            month,
-            finalPaymentApprovedByEmrt: true
-          },
-          select: {
-            id: true,
-            year: true,
-            month: true,
-            half: true,
-            generalExpense: true,
-            pctLitigation: true,
-            pctCorporateLabor: true,
-            pctSettlements: true,
-            pctFinancialLaw: true,
-            pctTaxCompliance: true,
-            registeredExpense: {
-              select: {
-                team: true,
-                generalExpense: true,
-                expenseWithoutTeam: true,
-                pctLitigation: true,
-                pctCorporateLabor: true,
-                pctSettlements: true,
-                pctFinancialLaw: true,
-                pctTaxCompliance: true,
-                paymentMethod: true,
-                bank: true,
-                paid: true,
-                paidAt: true
-              }
-            }
-          }
-        }),
-        this.listPayrollGlobalVacationDayRecords()
-      ]);
-      preloadedGlobalVacationDayRecords = globalVacationDayRecords;
-
-      payrollEntryIdsToReconcile = new Set(
-        approvedPayrollExpenses
-          .filter((entry) => {
-            const expectedPaymentDate = getPayrollScheduledPaymentDateKey(entry, globalVacationDayRecords);
-            return (
-              !entry.registeredExpense ||
-              entry.registeredExpense.team !== DEFAULT_TEAM ||
-              entry.registeredExpense.generalExpense !== entry.generalExpense ||
-              entry.registeredExpense.expenseWithoutTeam ||
-              Number(entry.registeredExpense.pctLitigation) !== Number(entry.pctLitigation) ||
-              Number(entry.registeredExpense.pctCorporateLabor) !== Number(entry.pctCorporateLabor) ||
-              Number(entry.registeredExpense.pctSettlements) !== Number(entry.pctSettlements) ||
-              Number(entry.registeredExpense.pctFinancialLaw) !== Number(entry.pctFinancialLaw) ||
-              Number(entry.registeredExpense.pctTaxCompliance) !== Number(entry.pctTaxCompliance) ||
-              entry.registeredExpense.paymentMethod !== DEFAULT_PAYMENT_METHOD ||
-              entry.registeredExpense.bank !== PAYROLL_GENERATED_BANK ||
-              !entry.registeredExpense.paid ||
-              toDateInput(entry.registeredExpense.paidAt) !== expectedPaymentDate
-            );
-          })
-          .map(({ id }) => id)
-      );
-
-      if (payrollEntryIdsToReconcile.size === 0) {
-        return;
-      }
-    }
-
-    const [records, globalVacationDayRecords] = await Promise.all([
-      this.prisma.generalExpensePayrollEntry.findMany({
-        where: { organizationId, year, month },
-        include: PAYROLL_ENTRY_INCLUDE,
-        orderBy: [{ half: "asc" }, { createdAt: "asc" }]
-      }),
-      preloadedGlobalVacationDayRecords ?? this.listPayrollGlobalVacationDayRecords()
-    ]);
-    const approvedEntries = (await this.mapPayrollEntriesWithMonthlyBonuses(records, globalVacationDayRecords))
-      .filter((entry) => (
-        entry.finalPaymentApprovedByEmrt &&
-        (!payrollEntryIdsToReconcile || payrollEntryIdsToReconcile.has(entry.id))
-      ));
-
-    if (approvedEntries.length === 0) {
-      return;
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      for (const entry of approvedEntries) {
-        const distribution = getPayrollExpenseDistribution(entry);
-        const requiresEqualDistributionNormalization = distribution.generalExpense && (
-          !entry.generalExpense ||
-          Math.abs(entry.pctLitigation - 20) > 0.0001 ||
-          Math.abs(entry.pctCorporateLabor - 20) > 0.0001 ||
-          Math.abs(entry.pctSettlements - 20) > 0.0001 ||
-          Math.abs(entry.pctFinancialLaw - 20) > 0.0001 ||
-          Math.abs(entry.pctTaxCompliance - 20) > 0.0001
-        );
-        if (requiresEqualDistributionNormalization) {
-          await tx.generalExpensePayrollEntry.update({
-            where: { id: entry.id, organizationId },
-            data: {
-              generalExpense: true,
-              pctLitigation: new Prisma.Decimal(20),
-              pctCorporateLabor: new Prisma.Decimal(20),
-              pctSettlements: new Prisma.Decimal(20),
-              pctFinancialLaw: new Prisma.Decimal(20),
-              pctTaxCompliance: new Prisma.Decimal(20)
-            }
-          });
-        }
-
-        await this.upsertPayrollGeneratedExpense(tx, entry, globalVacationDayRecords);
-      }
-    });
-  }
-
   public async list(year: number, month: number) {
     assertMonth(month);
     const organizationId = this.getOrganizationId();
-
-    await this.reconcileApprovedPayrollExpenses(year, month, true);
 
     const records = await this.prisma.generalExpense.findMany({
       where: { organizationId, year, month },
@@ -1556,8 +1431,6 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
 
       return updated;
     });
-
-    await this.reconcileApprovedPayrollExpenses(current.year, current.month);
 
     return this.mapPayrollEntryWithMonthlyBonuses(record);
   }
