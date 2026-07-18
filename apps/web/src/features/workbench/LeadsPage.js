@@ -87,7 +87,17 @@ function sortQuotes(items) {
     return [...items].sort((left, right) => right.quoteNumber.localeCompare(left.quoteNumber, "es-MX", { numeric: true }));
 }
 function sortActive(items) {
-    return [...items].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return [...items].sort((left, right) => {
+        const leftDate = normalizeText(left.nextInteraction);
+        const rightDate = normalizeText(right.nextInteraction);
+        if (!leftDate && !rightDate)
+            return 0;
+        if (!leftDate)
+            return -1;
+        if (!rightDate)
+            return 1;
+        return leftDate.localeCompare(rightDate);
+    });
 }
 function sortHistory(items) {
     return [...items].sort((left, right) => (right.sentToMattersAt ?? "").localeCompare(left.sentToMattersAt ?? ""));
