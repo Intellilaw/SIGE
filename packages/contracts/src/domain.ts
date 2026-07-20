@@ -303,6 +303,37 @@ export interface LaborVacationEvent {
   updatedAt: string;
 }
 
+export interface LaborVacationTeamConflict {
+  laborFileId: string;
+  employeeName: string;
+  eventId: string;
+  dates: string[];
+  eventDates: string[];
+  acceptanceOriginalFileName?: string;
+}
+
+export interface LaborVacationConflictAuthorization {
+  id: string;
+  laborFileId: string;
+  vacationDates: string[];
+  conflicts: LaborVacationTeamConflict[];
+  authorizedByUserId?: string;
+  authorizedByName: string;
+  authorizedByEmail: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaborVacationConflictCheckResult {
+  hasConflicts: boolean;
+  canGenerate: boolean;
+  teamName: string;
+  requestedDates: string[];
+  conflicts: LaborVacationTeamConflict[];
+  authorization?: LaborVacationConflictAuthorization;
+}
+
 export interface LaborGlobalVacationDay {
   id: string;
   date: string;

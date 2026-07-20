@@ -1,13 +1,15 @@
 import type {
   LaborFileDocumentUploadRecord,
   LaborFilesRepository,
-  LaborVacationAcceptanceUploadRecord
+  LaborVacationAcceptanceUploadRecord,
+  LaborVacationConflictAuthorizationWriteRecord
 } from "../../repositories/types";
 import type {
   LaborFileUpdateInput,
   LaborGlobalVacationDayInput,
   LaborPreviousYearPendingVacationInput,
-  LaborVacationEventInput
+  LaborVacationEventInput,
+  LaborVacationTeamConflict
 } from "@sige/contracts";
 
 export class LaborFilesService {
@@ -63,6 +65,14 @@ export class LaborFilesService {
 
   public createVacationEvent(laborFileId: string, payload: LaborVacationEventInput) {
     return this.repository.createVacationEvent(laborFileId, payload);
+  }
+
+  public findVacationConflictAuthorization(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]) {
+    return this.repository.findVacationConflictAuthorization(laborFileId, vacationDates, conflicts);
+  }
+
+  public createVacationConflictAuthorization(laborFileId: string, payload: LaborVacationConflictAuthorizationWriteRecord) {
+    return this.repository.createVacationConflictAuthorization(laborFileId, payload);
   }
 
   public setPreviousYearPendingVacationDays(laborFileId: string, payload: LaborPreviousYearPendingVacationInput & {

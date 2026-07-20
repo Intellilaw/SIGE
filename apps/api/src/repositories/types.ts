@@ -54,8 +54,10 @@ import type {
   LaborGlobalVacationDay,
   LaborGlobalVacationDayInput,
   LaborPreviousYearPendingVacationInput,
+  LaborVacationConflictAuthorization,
   LaborVacationEvent,
   LaborVacationEventInput,
+  LaborVacationTeamConflict,
   KpiOverview,
   Lead,
   ManagedTeam,
@@ -289,6 +291,15 @@ export interface LaborVacationAcceptanceUploadRecord {
   fileContent: Buffer;
 }
 
+export interface LaborVacationConflictAuthorizationWriteRecord {
+  vacationDates: string[];
+  conflicts: LaborVacationTeamConflict[];
+  authorizedByUserId?: string | null;
+  authorizedByName: string;
+  authorizedByEmail: string;
+  note?: string | null;
+}
+
 export interface LaborFilesRepository {
   list(): Promise<LaborFile[]>;
   listActiveUserIds(): Promise<string[]>;
@@ -304,6 +315,8 @@ export interface LaborFilesRepository {
   uploadDocument(laborFileId: string, payload: LaborFileDocumentUploadRecord): Promise<LaborFileDocument>;
   deleteDocument(documentId: string): Promise<void>;
   createVacationEvent(laborFileId: string, payload: LaborVacationEventInput): Promise<LaborVacationEvent>;
+  findVacationConflictAuthorization(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]): Promise<LaborVacationConflictAuthorization | null>;
+  createVacationConflictAuthorization(laborFileId: string, payload: LaborVacationConflictAuthorizationWriteRecord): Promise<LaborVacationConflictAuthorization>;
   setPreviousYearPendingVacationDays(laborFileId: string, payload: LaborPreviousYearPendingVacationInput & {
     previousYearStartDate: string;
     previousYearEndDate: string;

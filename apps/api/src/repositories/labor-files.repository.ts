@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,8 +14,10 @@ import {
   type LaborGlobalVacationDay,
   type LaborGlobalVacationDayInput,
   type LaborPreviousYearPendingVacationInput,
+  type LaborVacationConflictAuthorization,
   type LaborVacationEvent,
-  type LaborVacationEventInput
+  type LaborVacationEventInput,
+  type LaborVacationTeamConflict
 } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
@@ -28,7 +30,12 @@ import {
   isLaborSalaryDocumentType
 } from "../modules/labor-files/labor-salary-intelligence";
 import { mapLaborFile, mapLaborFileDocument, mapLaborGlobalVacationDay, mapLaborVacationEvent } from "./mappers";
-import type { LaborFileDocumentUploadRecord, LaborFilesRepository, LaborVacationAcceptanceUploadRecord } from "./types";
+import type {
+  LaborFileDocumentUploadRecord,
+  LaborFilesRepository,
+  LaborVacationAcceptanceUploadRecord,
+  LaborVacationConflictAuthorizationWriteRecord
+} from "./types";
 
 type LaborFileUserSnapshot = {
   id: string;
@@ -69,6 +76,11 @@ interface LocalLaborVacationEventState extends Omit<LaborVacationEvent, "descrip
   acceptanceFileBase64?: string | null;
 }
 
+interface LocalLaborVacationConflictAuthorizationState extends Omit<LaborVacationConflictAuthorization, "note"> {
+  requestKey: string;
+  note?: string | null;
+}
+
 interface LocalLaborFileState extends Omit<LaborFile, "documents" | "vacationEvents" | "globalVacationDays" | "vacationSummary" | "employeeEmail" | "employeeShortName" | "personalPhone" | "personalEmail" | "emergencyContactName" | "emergencyContactPhone" | "emergencyContactAddress" | "team" | "legacyTeam" | "specificRole" | "employmentEndedAt" | "notes"> {
   employeeEmail?: string | null;
   employeeShortName?: string | null;
@@ -89,6 +101,7 @@ interface LocalLaborFileState extends Omit<LaborFile, "documents" | "vacationEve
 interface LocalLaborState {
   files: LocalLaborFileState[];
   globalVacationDays: LaborGlobalVacationDay[];
+  vacationConflictAuthorizations: LocalLaborVacationConflictAuthorizationState[];
 }
 
 type PreviousYearPendingVacationWrite = LaborPreviousYearPendingVacationInput & {
@@ -128,6 +141,115 @@ const GLOBAL_VACATION_DAY_SELECT = {
   createdAt: true,
   updatedAt: true
 };
+
+const VACATION_CONFLICT_AUTHORIZATION_SELECT = {
+  id: true,
+  laborFileId: true,
+  vacationDates: true,
+  conflicts: true,
+  authorizedByUserId: true,
+  authorizedByName: true,
+  authorizedByEmail: true,
+  note: true,
+  createdAt: true,
+  updatedAt: true
+};
+
+function normalizeVacationConflictAuthorizationDates(dates: string[]) {
+  return Array.from(new Set(
+    dates
+      .map((date) => normalizeDateKey(date))
+      .filter((date): date is string => Boolean(date))
+  )).sort();
+}
+
+function normalizeVacationTeamConflicts(conflicts: LaborVacationTeamConflict[]) {
+  return conflicts
+    .map((conflict) => {
+      const acceptanceOriginalFileName = normalizeText(conflict.acceptanceOriginalFileName);
+      return {
+        laborFileId: normalizeText(conflict.laborFileId),
+        employeeName: normalizeText(conflict.employeeName),
+        eventId: normalizeText(conflict.eventId),
+        dates: normalizeVacationConflictAuthorizationDates(conflict.dates),
+        eventDates: normalizeVacationConflictAuthorizationDates(conflict.eventDates),
+        ...(acceptanceOriginalFileName ? { acceptanceOriginalFileName } : {})
+      };
+    })
+    .filter((conflict) => conflict.laborFileId && conflict.employeeName && conflict.eventId && conflict.dates.length > 0)
+    .sort((left, right) =>
+      left.eventId.localeCompare(right.eventId) ||
+      left.employeeName.localeCompare(right.employeeName) ||
+      left.dates.join(",").localeCompare(right.dates.join(","))
+    );
+}
+
+function getVacationConflictAuthorizationRequestKey(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]) {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      laborFileId,
+      vacationDates: normalizeVacationConflictAuthorizationDates(vacationDates),
+      conflicts: normalizeVacationTeamConflicts(conflicts)
+    }))
+    .digest("hex");
+}
+
+function parseStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((entry) => normalizeText(String(entry))).filter(Boolean)
+    : [];
+}
+
+function parseStringValue(value: unknown) {
+  return typeof value === "string" ? normalizeText(value) : "";
+}
+
+function parseVacationTeamConflicts(value: unknown): LaborVacationTeamConflict[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return normalizeVacationTeamConflicts(value.map((entry) => {
+    const record = typeof entry === "object" && entry !== null
+      ? entry as Record<string, unknown>
+      : {};
+
+    return {
+      laborFileId: parseStringValue(record.laborFileId),
+      employeeName: parseStringValue(record.employeeName),
+      eventId: parseStringValue(record.eventId),
+      dates: parseStringArray(record.dates),
+      eventDates: parseStringArray(record.eventDates),
+      acceptanceOriginalFileName: parseStringValue(record.acceptanceOriginalFileName) || undefined
+    };
+  }));
+}
+
+function mapVacationConflictAuthorization(record: {
+  id: string;
+  laborFileId: string;
+  vacationDates: Prisma.JsonValue;
+  conflicts: Prisma.JsonValue;
+  authorizedByUserId: string | null;
+  authorizedByName: string;
+  authorizedByEmail: string;
+  note: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): LaborVacationConflictAuthorization {
+  return {
+    id: record.id,
+    laborFileId: record.laborFileId,
+    vacationDates: normalizeVacationConflictAuthorizationDates(parseStringArray(record.vacationDates)),
+    conflicts: parseVacationTeamConflicts(record.conflicts),
+    authorizedByUserId: record.authorizedByUserId ?? undefined,
+    authorizedByName: record.authorizedByName,
+    authorizedByEmail: record.authorizedByEmail,
+    note: record.note ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
 
 const KNOWN_DOCUMENT_TYPES = new Set(LABOR_FILE_DOCUMENT_DEFINITIONS.map((definition) => definition.type));
 const PDF_ONLY_TYPES = new Set(
@@ -916,6 +1038,64 @@ export class PrismaLaborFilesRepository implements LaborFilesRepository {
     return mapLaborVacationEvent(record);
   }
 
+  public async findVacationConflictAuthorization(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]) {
+    await this.findOrThrow(laborFileId);
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const requestKey = getVacationConflictAuthorizationRequestKey(laborFileId, vacationDates, conflicts);
+    const record = await this.prisma.laborVacationConflictAuthorization.findUnique({
+      where: {
+        organizationId_laborFileId_requestKey: {
+          organizationId,
+          laborFileId,
+          requestKey
+        }
+      },
+      select: VACATION_CONFLICT_AUTHORIZATION_SELECT
+    });
+
+    return record ? mapVacationConflictAuthorization(record) : null;
+  }
+
+  public async createVacationConflictAuthorization(laborFileId: string, payload: LaborVacationConflictAuthorizationWriteRecord) {
+    await this.findOrThrow(laborFileId);
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const vacationDates = normalizeVacationConflictAuthorizationDates(payload.vacationDates);
+    const conflicts = normalizeVacationTeamConflicts(payload.conflicts);
+    const requestKey = getVacationConflictAuthorizationRequestKey(laborFileId, vacationDates, conflicts);
+    const note = normalizeText(payload.note);
+    const record = await this.prisma.laborVacationConflictAuthorization.upsert({
+      where: {
+        organizationId_laborFileId_requestKey: {
+          organizationId,
+          laborFileId,
+          requestKey
+        }
+      },
+      update: {
+        conflicts,
+        vacationDates,
+        authorizedByUserId: normalizeText(payload.authorizedByUserId) || null,
+        authorizedByName: normalizeText(payload.authorizedByName),
+        authorizedByEmail: normalizeText(payload.authorizedByEmail),
+        note: note || null
+      },
+      create: {
+        organizationId,
+        laborFileId,
+        requestKey,
+        vacationDates,
+        conflicts,
+        authorizedByUserId: normalizeText(payload.authorizedByUserId) || null,
+        authorizedByName: normalizeText(payload.authorizedByName),
+        authorizedByEmail: normalizeText(payload.authorizedByEmail),
+        note: note || null
+      },
+      select: VACATION_CONFLICT_AUTHORIZATION_SELECT
+    });
+
+    return mapVacationConflictAuthorization(record);
+  }
+
   public async setPreviousYearPendingVacationDays(laborFileId: string, payload: PreviousYearPendingVacationWrite) {
     await this.findOrThrow(laborFileId);
 
@@ -1586,6 +1766,9 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
       }
 
       state.files = state.files.filter((candidate) => candidate.id !== laborFileId);
+      state.vacationConflictAuthorizations = state.vacationConflictAuthorizations.filter((authorization) =>
+        authorization.laborFileId !== laborFileId
+      );
     });
 
     if (!found) {
@@ -1747,6 +1930,60 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     });
 
     return this.mapVacationEvent(created!);
+  }
+
+  public async findVacationConflictAuthorization(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]) {
+    this.findOrThrow(laborFileId);
+    const requestKey = getVacationConflictAuthorizationRequestKey(laborFileId, vacationDates, conflicts);
+    const record = this.getState().vacationConflictAuthorizations.find((authorization) =>
+      authorization.laborFileId === laborFileId && authorization.requestKey === requestKey
+    );
+
+    return record ? this.mapVacationConflictAuthorization(record) : null;
+  }
+
+  public async createVacationConflictAuthorization(laborFileId: string, payload: LaborVacationConflictAuthorizationWriteRecord) {
+    this.findOrThrow(laborFileId);
+    const vacationDates = normalizeVacationConflictAuthorizationDates(payload.vacationDates);
+    const conflicts = normalizeVacationTeamConflicts(payload.conflicts);
+    const requestKey = getVacationConflictAuthorizationRequestKey(laborFileId, vacationDates, conflicts);
+    const note = normalizeText(payload.note) || null;
+    let saved: LocalLaborVacationConflictAuthorizationState | null = null;
+
+    this.updateState((state) => {
+      const existing = state.vacationConflictAuthorizations.find((authorization) =>
+        authorization.laborFileId === laborFileId && authorization.requestKey === requestKey
+      );
+      const now = new Date().toISOString();
+      if (existing) {
+        existing.vacationDates = vacationDates;
+        existing.conflicts = conflicts;
+        existing.authorizedByUserId = normalizeText(payload.authorizedByUserId) || undefined;
+        existing.authorizedByName = normalizeText(payload.authorizedByName);
+        existing.authorizedByEmail = normalizeText(payload.authorizedByEmail);
+        existing.note = note;
+        existing.updatedAt = now;
+        saved = existing;
+        return;
+      }
+
+      saved = {
+        id: randomUUID(),
+        laborFileId,
+        requestKey,
+        vacationDates,
+        conflicts,
+        authorizedByUserId: normalizeText(payload.authorizedByUserId) || undefined,
+        authorizedByName: normalizeText(payload.authorizedByName),
+        authorizedByEmail: normalizeText(payload.authorizedByEmail),
+        note,
+        createdAt: now,
+        updatedAt: now
+      };
+      state.vacationConflictAuthorizations.push(saved);
+    });
+
+    return this.mapVacationConflictAuthorization(saved!);
   }
 
   public async setPreviousYearPendingVacationDays(laborFileId: string, payload: PreviousYearPendingVacationWrite) {
@@ -2021,7 +2258,8 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     if (!existsSync(LocalLaborFilesRepository.statePath)) {
       return {
         files: [],
-        globalVacationDays: []
+        globalVacationDays: [],
+        vacationConflictAuthorizations: []
       };
     }
 
@@ -2034,6 +2272,14 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
             vacationDates: Array.isArray(day.vacationDates)
               ? day.vacationDates
               : getLocalGlobalVacationDateKeys({ date: day.date, days: day.days })
+          }))
+        : [],
+      vacationConflictAuthorizations: Array.isArray(parsed.vacationConflictAuthorizations)
+        ? parsed.vacationConflictAuthorizations.map((authorization) => ({
+            ...authorization,
+            vacationDates: normalizeVacationConflictAuthorizationDates(authorization.vacationDates ?? []),
+            conflicts: parseVacationTeamConflicts(authorization.conflicts),
+            note: authorization.note ?? null
           }))
         : []
     };
@@ -2261,6 +2507,21 @@ export class LocalLaborFilesRepository implements LaborFilesRepository {
     return mapLaborVacationEvent(this.mapVacationEventRecord(event));
   }
 
+  private mapVacationConflictAuthorization(record: LocalLaborVacationConflictAuthorizationState): LaborVacationConflictAuthorization {
+    return {
+      id: record.id,
+      laborFileId: record.laborFileId,
+      vacationDates: normalizeVacationConflictAuthorizationDates(record.vacationDates),
+      conflicts: normalizeVacationTeamConflicts(record.conflicts),
+      authorizedByUserId: record.authorizedByUserId,
+      authorizedByName: record.authorizedByName,
+      authorizedByEmail: record.authorizedByEmail,
+      note: record.note ?? undefined,
+      createdAt: localDate(record.createdAt).toISOString(),
+      updatedAt: localDate(record.updatedAt).toISOString()
+    };
+  }
+
   private mapVacationEventRecord(event: LocalLaborVacationEventState): Parameters<typeof mapLaborVacationEvent>[0] {
     return {
       id: event.id,
@@ -2367,6 +2628,20 @@ export class ResilientLaborFilesRepository implements LaborFilesRepository {
     return this.withFallback(
       () => this.primary.createVacationEvent(laborFileId, payload),
       () => this.fallback!.createVacationEvent(laborFileId, payload)
+    );
+  }
+
+  public findVacationConflictAuthorization(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]) {
+    return this.withFallback(
+      () => this.primary.findVacationConflictAuthorization(laborFileId, vacationDates, conflicts),
+      () => this.fallback?.findVacationConflictAuthorization(laborFileId, vacationDates, conflicts) ?? Promise.resolve(null)
+    );
+  }
+
+  public createVacationConflictAuthorization(laborFileId: string, payload: LaborVacationConflictAuthorizationWriteRecord) {
+    return this.withFallback(
+      () => this.primary.createVacationConflictAuthorization(laborFileId, payload),
+      () => this.fallback!.createVacationConflictAuthorization(laborFileId, payload)
     );
   }
 

@@ -99,6 +99,8 @@ type PayrollPatchPayload = {
   reviewedByJnls?: boolean;
 };
 
+type PayrollDistributionPatchPayload = Required<Pick<PayrollPatchPayload, DistributionDraftField>>;
+
 type PayrollLocalPatchPayload = PayrollPatchPayload & Partial<Pick<
   GeneralExpensePayrollEntry,
   | "employeeName"
@@ -148,6 +150,7 @@ const PAYROLL_MONEY_FIELDS = [
 ] as const;
 const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
 const PAYROLL_BONUS_RATE = 0.1;
+const PAYROLL_DISTRIBUTION_AUTOSAVE_DELAY_MS = 250;
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -796,6 +799,7 @@ export function GeneralExpensesPage() {
   const expensePatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const payrollDistributionAutosaveTimersRef = useRef<Record<string, number>>({});
   const emrtAcknowledgementPatchSequenceRef = useRef<Record<string, number>>({});
   const expenseRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const [activeTab, setActiveTab] = useState<ActiveTab>("registro");
@@ -985,6 +989,12 @@ export function GeneralExpensesPage() {
     void loadPayrollEmployeeOptions();
   }, [canRead]);
 
+  useEffect(() => () => {
+    Object.values(payrollDistributionAutosaveTimersRef.current).forEach((timerId) => {
+      window.clearTimeout(timerId);
+    });
+  }, []);
+
   useEffect(() => {
     if (activeTab !== "registro" || !pendingScrollExpenseId) {
       return;
@@ -1077,6 +1087,38 @@ export function GeneralExpensesPage() {
         [entryId]: nextFields
       };
     });
+  }
+
+  function cancelPayrollDistributionAutosave(entryId: string) {
+    const timerId = payrollDistributionAutosaveTimersRef.current[entryId];
+    if (timerId === undefined) {
+      return;
+    }
+
+    window.clearTimeout(timerId);
+    delete payrollDistributionAutosaveTimersRef.current[entryId];
+  }
+
+  function getPayrollDistributionPatch(
+    entry: GeneralExpensePayrollEntry,
+    overrides: Partial<Record<DistributionDraftField, string>> = {}
+  ): PayrollDistributionPatchPayload {
+    const entryDrafts = payrollDrafts[entry.id] ?? {};
+    const getValue = (field: DistributionDraftField) => clampPercentage(Number(
+      overrides[field] ?? entryDrafts[field] ?? entry[field] ?? 0
+    ));
+
+    return {
+      pctLitigation: getValue("pctLitigation"),
+      pctCorporateLabor: getValue("pctCorporateLabor"),
+      pctSettlements: getValue("pctSettlements"),
+      pctFinancialLaw: getValue("pctFinancialLaw"),
+      pctTaxCompliance: getValue("pctTaxCompliance")
+    };
+  }
+
+  function clearPayrollDistributionDrafts(entryId: string) {
+    DISTRIBUTION_FIELDS.forEach((field) => clearPayrollDraft(entryId, field.key));
   }
 
   function updateExpenseLocal(expenseId: string, patch: GeneralExpensePatchPayload) {
@@ -1260,6 +1302,32 @@ export function GeneralExpensesPage() {
       { [field]: numericValue } as PayrollPatchPayload,
       { [field]: numericValue } as PayrollPatchPayload
     );
+  }
+
+  async function flushPayrollDistribution(
+    entry: GeneralExpensePayrollEntry,
+    overrides: Partial<Record<DistributionDraftField, string>> = {}
+  ) {
+    cancelPayrollDistributionAutosave(entry.id);
+    const patch = getPayrollDistributionPatch(entry, overrides);
+    clearPayrollDistributionDrafts(entry.id);
+    await persistPayrollPatch(entry.id, patch, patch);
+  }
+
+  function schedulePayrollDistributionAutosave(
+    entry: GeneralExpensePayrollEntry,
+    field: DistributionDraftField,
+    rawValue: string
+  ) {
+    setPayrollDraft(entry.id, field, rawValue);
+    cancelPayrollDistributionAutosave(entry.id);
+    const patch = getPayrollDistributionPatch(entry, { [field]: rawValue });
+
+    payrollDistributionAutosaveTimersRef.current[entry.id] = window.setTimeout(() => {
+      delete payrollDistributionAutosaveTimersRef.current[entry.id];
+      clearPayrollDistributionDrafts(entry.id);
+      void persistPayrollPatch(entry.id, patch, patch);
+    }, PAYROLL_DISTRIBUTION_AUTOSAVE_DELAY_MS);
   }
 
   async function handleAddRow() {
@@ -1608,7 +1676,8 @@ export function GeneralExpensesPage() {
       }
       : { generalExpense };
 
-    DISTRIBUTION_FIELDS.forEach((field) => clearPayrollDraft(entry.id, field.key));
+    cancelPayrollDistributionAutosave(entry.id);
+    clearPayrollDistributionDrafts(entry.id);
     void persistPayrollPatch(entry.id, { generalExpense }, localPatch);
   }
 
@@ -1707,7 +1776,7 @@ export function GeneralExpensesPage() {
             <table className="lead-table general-expense-payroll-table">
               <thead>
                 <tr>
-                  <th>Nombre del colaborador</th>
+                  <th className="general-expense-payroll-employee-column">Nombre del colaborador</th>
                   <th>Medio tiempo</th>
                   <th>Salario diario</th>
                   <th>Salario bruto</th>
@@ -1782,7 +1851,7 @@ export function GeneralExpensesPage() {
 
                   return (
                     <tr key={entry.id}>
-                    <td>
+                    <td className="general-expense-payroll-employee-column">
                       <select
                         className="general-expense-input general-expense-payroll-employee-input"
                         value={entry.laborFileId ?? ""}
@@ -1969,8 +2038,8 @@ export function GeneralExpensesPage() {
                             max="100"
                             step="0.01"
                             value={payrollDrafts[entry.id]?.[field.key] ?? formatEditableNumber(Number(entry[field.key] || 0))}
-                            onChange={(event) => setPayrollDraft(entry.id, field.key, event.target.value)}
-                            onBlur={() => void flushPayrollDraftField(entry.id, field.key)}
+                            onChange={(event) => schedulePayrollDistributionAutosave(entry, field.key, event.target.value)}
+                            onBlur={(event) => void flushPayrollDistribution(entry, { [field.key]: event.currentTarget.value })}
                             disabled={!canWrite || entry.finalPaymentApprovedByEmrt || entry.generalExpense}
                           />
                           <span>%</span>

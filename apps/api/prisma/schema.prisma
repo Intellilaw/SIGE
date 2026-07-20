@@ -58,6 +58,7 @@ model Organization {
   laborFiles                             LaborFile[]
   laborFileDocuments                     LaborFileDocument[]
   laborVacationEvents                    LaborVacationEvent[]
+  laborVacationConflictAuthorizations    LaborVacationConflictAuthorization[]
   laborGlobalVacationDays                LaborGlobalVacationDay[]
   userTeams                              UserTeam[]
   systemModuleSettings                   SystemModuleSetting[]
@@ -210,6 +211,7 @@ model LaborFile {
   organization                      Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   documents                         LaborFileDocument[]
   vacationEvents                    LaborVacationEvent[]
+  vacationConflictAuthorizations    LaborVacationConflictAuthorization[]
   generalExpensePayrollEntries      GeneralExpensePayrollEntry[]
 
   @@index([organizationId, status, employmentStatus])
@@ -261,6 +263,26 @@ model LaborVacationEvent {
   @@index([organizationId, laborFileId, eventType])
   @@index([organizationId, globalVacationDayId])
   @@index([organizationId, startDate, endDate])
+}
+
+model LaborVacationConflictAuthorization {
+  id                 String       @id @default(uuid())
+  organizationId     String       @default("org-rusconi")
+  laborFileId        String
+  requestKey         String
+  vacationDates      Json
+  conflicts          Json
+  authorizedByUserId String?
+  authorizedByName   String
+  authorizedByEmail  String
+  note               String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  laborFile          LaborFile    @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, laborFileId, requestKey])
+  @@index([organizationId, laborFileId, createdAt])
 }
 
 model LaborGlobalVacationDay {

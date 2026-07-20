@@ -1,5 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import { deriveEffectivePermissions, type LaborFile, type LaborGlobalVacationBatchResult, type LaborVacationEvent } from "@sige/contracts";
+import {
+  deriveEffectivePermissions,
+  type LaborFile,
+  type LaborGlobalVacationBatchResult,
+  type LaborVacationConflictCheckResult,
+  type LaborVacationEvent,
+  type LaborVacationTeamConflict
+} from "@sige/contracts";
 import JSZip from "jszip";
 import { z } from "zod";
 
@@ -86,6 +93,14 @@ const signedVacationFormatSchema = z.object({
   fileMimeType: z.string().nullable().optional(),
   fileBase64: z.string().min(1),
   overrideTeamVacationConflict: z.boolean().optional().default(false)
+});
+
+const vacationConflictCheckSchema = z.object({
+  vacationDates: z.array(z.string().min(10).max(30)).default([])
+});
+
+const vacationConflictAuthorizationSchema = vacationConflictCheckSchema.extend({
+  note: z.string().nullable().optional()
 });
 
 const previousYearPendingVacationSchema = z.object({
@@ -242,6 +257,10 @@ function getVacationEventDateKeys(event: LaborVacationEvent) {
     : enumerateDateKeys(event.startDate, event.endDate);
 }
 
+function getVacationRequestDateKeys(vacationDates: string[]) {
+  return Array.from(new Set(vacationDates.map(normalizeDateKey).filter(Boolean))).sort();
+}
+
 function isVacationFormatEvent(event: LaborVacationEvent) {
   return event.eventType === "VACATION" || event.eventType === "GLOBAL_VACATION";
 }
@@ -293,7 +312,7 @@ function findTeamVacationConflicts(input: {
   laborFile: LaborFile;
   dateKeys: string[];
   excludeEventId?: string;
-}) {
+}): LaborVacationTeamConflict[] {
   const teamKey = getTeamKey(input.laborFile);
   if (!teamKey || input.dateKeys.length === 0) {
     return [];
@@ -307,51 +326,60 @@ function findTeamVacationConflicts(input: {
 
     return candidate.vacationEvents
       .filter((event) => event.eventType === "VACATION" && event.id !== input.excludeEventId)
-      .map((event) => ({
-        employeeName: candidate.employeeName,
-        dates: getVacationEventDateKeys(event).filter((date) => requestedDateKeys.has(date))
-      }))
+      .map((event) => {
+        const eventDates = getVacationEventDateKeys(event);
+        return {
+          laborFileId: candidate.id,
+          employeeName: candidate.employeeName,
+          eventId: event.id,
+          dates: eventDates.filter((date) => requestedDateKeys.has(date)),
+          eventDates,
+          acceptanceOriginalFileName: event.acceptanceOriginalFileName
+        };
+      })
       .filter((conflict) => conflict.dates.length > 0);
   });
 }
 
-function assertCanBypassTeamVacationConflicts(user: SessionUser, override: boolean) {
-  if (override && !isEduardoRusconi(user)) {
-    throw new AppError(403, "LABOR_VACATION_CONFLICT_OVERRIDE_FORBIDDEN", "Solo Eduardo Rusconi puede marcar el override de conflicto de vacaciones del equipo.");
-  }
-}
-
-function assertNoTeamVacationConflicts(input: {
-  laborFiles: LaborFile[];
-  laborFile: LaborFile;
-  dateKeys: string[];
-  user: SessionUser;
-  override: boolean;
-  excludeEventId?: string;
-}) {
-  assertCanBypassTeamVacationConflicts(input.user, input.override);
-
-  const conflicts = findTeamVacationConflicts(input);
-  if (conflicts.length === 0 || input.override) {
-    return;
-  }
-
-  const teamName = input.laborFile.legacyTeam ?? input.laborFile.team ?? "equipo";
-  const conflictDetails = conflicts
+function formatTeamVacationConflictDetails(conflicts: LaborVacationTeamConflict[]) {
+  return conflicts
     .map((conflict) => `${conflict.employeeName}: ${conflict.dates.join(", ")}`)
     .join("; ");
-
-  throw new AppError(
-    409,
-    "LABOR_VACATION_TEAM_DATE_CONFLICT",
-    `Regla de vacaciones por equipo: no se puede generar ni autorizar el formato porque otra persona del mismo equipo (${teamName}) pidió vacaciones en las mismas fechas. Conflictos: ${conflictDetails}. Solo Eduardo Rusconi puede marcar el override.`
-  );
 }
 
 export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
   const service = new app.services.LaborFilesService(app.repositories.laborFiles);
   const readGuards = [requireAuth, requireAnyPermissions(["labor-file:read", "labor-file:write"])];
   const writeGuards = [requireAuth, requireAnyPermissions(["labor-file:write"])];
+
+  async function buildVacationConflictCheckResult(laborFileId: string, vacationDates: string[]): Promise<LaborVacationConflictCheckResult> {
+    const requestedDates = getVacationRequestDateKeys(vacationDates);
+    const laborFile = await service.findById(laborFileId);
+
+    if (!laborFile) {
+      throw new AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
+    }
+
+    const laborFiles = await service.list();
+    const currentLaborFile = laborFiles.find((candidate) => candidate.id === laborFile.id) ?? laborFile;
+    const conflicts = findTeamVacationConflicts({
+      laborFiles,
+      laborFile: currentLaborFile,
+      dateKeys: requestedDates
+    });
+    const authorization = conflicts.length > 0
+      ? await service.findVacationConflictAuthorization(laborFile.id, requestedDates, conflicts)
+      : null;
+
+    return {
+      hasConflicts: conflicts.length > 0,
+      canGenerate: conflicts.length === 0 || Boolean(authorization),
+      teamName: currentLaborFile.legacyTeam ?? currentLaborFile.team ?? "equipo",
+      requestedDates,
+      conflicts,
+      authorization: authorization ?? undefined
+    };
+  }
 
   app.get("/labor-files", { preHandler: readGuards }, async (request) => {
     const user = getSessionUser(request);
@@ -568,25 +596,71 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
+  app.post("/labor-files/:laborFileId/vacation-format/conflicts/check", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    const payload = vacationConflictCheckSchema.parse(request.body ?? {});
+    return buildVacationConflictCheckResult(params.laborFileId, payload.vacationDates);
+  });
+
+  app.post("/labor-files/:laborFileId/vacation-format/conflicts/authorize", { preHandler: writeGuards }, async (request) => {
+    const params = laborFileIdParamsSchema.parse(request.params);
+    const payload = vacationConflictAuthorizationSchema.parse(request.body ?? {});
+    const user = getSessionUser(request);
+
+    if (!isEduardoRusconi(user)) {
+      throw new AppError(
+        403,
+        "LABOR_VACATION_CONFLICT_AUTHORIZATION_FORBIDDEN",
+        "Solo Eduardo Rusconi puede autorizar un formato de vacaciones con conflicto de fechas del equipo."
+      );
+    }
+
+    const check = await buildVacationConflictCheckResult(params.laborFileId, payload.vacationDates);
+    if (!check.hasConflicts) {
+      return check;
+    }
+
+    const authorization = await service.createVacationConflictAuthorization(params.laborFileId, {
+      vacationDates: check.requestedDates,
+      conflicts: check.conflicts,
+      authorizedByUserId: user.id,
+      authorizedByName: user.displayName || user.username || user.email,
+      authorizedByEmail: user.email,
+      note: payload.note || null
+    });
+
+    return {
+      ...check,
+      canGenerate: true,
+      authorization
+    };
+  });
+
   app.post("/labor-files/:laborFileId/vacation-format/generate", { preHandler: writeGuards }, async (request) => {
     const params = laborFileIdParamsSchema.parse(request.params);
     const payload = laborVacationFormatGenerationSchema.parse(request.body ?? {});
-    const user = getSessionUser(request);
     const laborFile = await service.findById(params.laborFileId);
 
     if (!laborFile) {
       throw new app.errors.AppError(404, "LABOR_FILE_NOT_FOUND", "El expediente laboral no existe.");
     }
 
+    const requestedDates = getVacationRequestDateKeys(payload.vacationDates);
+    if (requestedDates.length === 0) {
+      throw new AppError(400, "LABOR_VACATION_DATE_REQUIRED", "Captura al menos un dÃ­a de vacaciones.");
+    }
+
+    const conflictCheck = await buildVacationConflictCheckResult(params.laborFileId, requestedDates);
+    if (conflictCheck.hasConflicts && !conflictCheck.authorization) {
+      const conflictDetails = formatTeamVacationConflictDetails(conflictCheck.conflicts);
+      throw new AppError(
+        409,
+        "LABOR_VACATION_TEAM_DATE_CONFLICT_REQUIRES_EMRT_AUTHORIZATION",
+        `Regla de vacaciones por equipo: no se puede generar el formato porque otra persona del mismo equipo (${conflictCheck.teamName}) pidiÃ³ vacaciones en las mismas fechas. Conflictos: ${conflictDetails}. Debe autorizarlo Eduardo Rusconi antes de generar el Word.`
+      );
+    }
+
     const generatedFormat = await renderLaborVacationFormatDocx(laborFile, payload);
-    const laborFiles = await service.list();
-    assertNoTeamVacationConflicts({
-      laborFiles,
-      laborFile,
-      dateKeys: generatedFormat.fields.vacationDates,
-      user,
-      override: Boolean(payload.overrideTeamVacationConflict)
-    });
 
     return service.createVacationEvent(params.laborFileId, {
       eventType: "VACATION",
@@ -680,7 +754,6 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
   app.post("/labor-files/vacation-events/:eventId/signed-format", { bodyLimit: 25 * 1024 * 1024, preHandler: writeGuards }, async (request) => {
     const params = vacationEventIdParamsSchema.parse(request.params);
     const payload = signedVacationFormatSchema.parse(request.body ?? {});
-    const user = getSessionUser(request);
     const laborFiles = await service.list();
     const laborFile = laborFiles.find((candidate) =>
       candidate.vacationEvents.some((event) => event.id === params.eventId)
@@ -693,17 +766,6 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
 
     if (vacationEvent.eventType !== "VACATION" && vacationEvent.eventType !== "GLOBAL_VACATION") {
       throw new app.errors.AppError(400, "LABOR_VACATION_SIGNED_FORMAT_INVALID_EVENT", "Solo las vacaciones pueden autorizarse con PDF firmado.");
-    }
-
-    if (vacationEvent.eventType === "VACATION") {
-      assertNoTeamVacationConflicts({
-        laborFiles,
-        laborFile,
-        dateKeys: getVacationEventDateKeys(vacationEvent),
-        user,
-        override: Boolean(payload.overrideTeamVacationConflict),
-        excludeEventId: vacationEvent.id
-      });
     }
 
     return service.updateVacationAcceptance(params.eventId, {

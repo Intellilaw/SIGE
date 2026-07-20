@@ -1911,10 +1911,10 @@ export function FinancesPage() {
     const renderMonthlyHeader = () => (
       <thead>
         <tr>
-          <th><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllRecords} /></th>
-          <th className="finance-row-index">No.</th>
-          <th>No. Cliente</th>
-          <th>Cliente</th>
+          <th className="finance-sticky-select"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllRecords} /></th>
+          <th className="finance-row-index finance-sticky-row-number">No.</th>
+          <th className="finance-sticky-client-number">No. Cliente</th>
+          <th className="finance-sticky-client">Cliente</th>
           <th>No. Cotizacion</th>
           <th>Tipo</th>
           <th>Periodo</th>
@@ -2093,10 +2093,10 @@ export function FinancesPage() {
 
               return (
                 <tr className={rowClassName} key={record.id} title={reason}>
-                  <td className="finance-cell-checkbox"><input type="checkbox" checked={isSelected} onChange={() => toggleRecordSelection(record.id)} /></td>
-                  <td className="finance-row-index">{index + 1}</td>
-                  <td><input className="finance-input finance-input-readonly" value={effectiveClientNumber} readOnly /></td>
-                  <td><input className="finance-input finance-input-readonly" value={record.clientName} readOnly /></td>
+                  <td className="finance-cell-checkbox finance-sticky-select"><input type="checkbox" checked={isSelected} onChange={() => toggleRecordSelection(record.id)} /></td>
+                  <td className="finance-row-index finance-sticky-row-number">{index + 1}</td>
+                  <td className="finance-sticky-client-number"><input className="finance-input finance-input-readonly" value={effectiveClientNumber} readOnly /></td>
+                  <td className="finance-sticky-client"><input className="finance-input finance-input-readonly" value={record.clientName} readOnly /></td>
                   <td><input className="finance-input finance-input-readonly" value={record.quoteNumber ?? ""} readOnly /></td>
                   <td><span className={`finance-type-pill ${record.matterType === "RETAINER" ? "is-retainer" : ""}`}>{getMatterTypeLabel(record.matterType)}</span></td>
                   <td>

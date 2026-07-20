@@ -3637,6 +3637,24 @@ textarea {
   min-width: 5450px;
 }
 
+.general-expense-payroll-table .general-expense-payroll-employee-column {
+  position: sticky;
+  left: 0;
+  min-width: 246px;
+  width: 246px;
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.1);
+}
+
+.general-expense-payroll-table thead .general-expense-payroll-employee-column {
+  z-index: 4;
+  background: #eef4fb;
+}
+
+.general-expense-payroll-table tbody .general-expense-payroll-employee-column {
+  z-index: 1;
+  background: #ffffff;
+}
+
 .general-expense-input {
   width: 100%;
   min-width: 110px;
@@ -6508,32 +6526,69 @@ div.sales-product-card-main {
 }
 
 .finance-table-monthly .finance-row-index {
-  position: sticky;
-  left: 0;
   min-width: 64px;
   width: 64px;
   text-align: center;
-  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.08);
 }
 
-.finance-table-monthly thead .finance-row-index {
-  z-index: 3;
+.finance-table-monthly .finance-sticky-select,
+.finance-table-monthly .finance-sticky-row-number,
+.finance-table-monthly .finance-sticky-client-number,
+.finance-table-monthly .finance-sticky-client {
+  position: sticky;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.finance-table-monthly .finance-sticky-select {
+  left: 0;
+  min-width: 56px;
+  width: 56px;
+  text-align: center;
+}
+
+.finance-table-monthly .finance-sticky-row-number {
+  left: 56px;
+}
+
+.finance-table-monthly .finance-sticky-client-number {
+  left: 120px;
+  min-width: 120px;
+  width: 120px;
+}
+
+.finance-table-monthly .finance-sticky-client {
+  left: 240px;
+  min-width: 240px;
+  width: 240px;
+  box-shadow: 8px 0 14px rgba(31, 41, 51, 0.12);
+}
+
+.finance-table-monthly thead .finance-sticky-select,
+.finance-table-monthly thead .finance-sticky-row-number,
+.finance-table-monthly thead .finance-sticky-client-number,
+.finance-table-monthly thead .finance-sticky-client {
+  z-index: 4;
   background: #1f3c88;
 }
 
 .finance-table-monthly tbody .finance-row-index,
 .finance-table-monthly tfoot .finance-row-index {
-  z-index: 1;
-  background: rgba(255, 255, 255, 0.96);
   color: #344054;
   font-weight: 700;
 }
 
-.finance-table-monthly .finance-row-danger .finance-row-index {
+.finance-table-monthly .finance-row-danger .finance-sticky-select,
+.finance-table-monthly .finance-row-danger .finance-sticky-row-number,
+.finance-table-monthly .finance-row-danger .finance-sticky-client-number,
+.finance-table-monthly .finance-row-danger .finance-sticky-client {
   background: #fff1f2;
 }
 
-.finance-table-monthly .finance-row-selected .finance-row-index {
+.finance-table-monthly .finance-row-selected .finance-sticky-select,
+.finance-table-monthly .finance-row-selected .finance-sticky-row-number,
+.finance-table-monthly .finance-row-selected .finance-sticky-client-number,
+.finance-table-monthly .finance-row-selected .finance-sticky-client {
   background: #eff6ff;
 }
 
@@ -11606,6 +11661,16 @@ div.sales-product-card-main {
   padding: 14px;
 }
 
+.labor-file-vacation-conflict-rule.has-conflict {
+  background: #fff7ed;
+  border-color: rgba(180, 35, 24, 0.25);
+}
+
+.labor-file-vacation-conflict-rule.is-authorized {
+  background: #f0fdfa;
+  border-color: rgba(15, 118, 110, 0.22);
+}
+
 .labor-file-vacation-conflict-rule > div {
   display: grid;
   gap: 4px;
@@ -11625,6 +11690,43 @@ div.sales-product-card-main {
 
 .labor-file-vacation-conflict-rule small {
   grid-column: 1 / -1;
+}
+
+.labor-file-vacation-conflict-details,
+.labor-file-vacation-conflict-actions {
+  grid-column: 1 / -1;
+}
+
+.labor-file-vacation-conflict-details {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.labor-file-vacation-conflict-item {
+  border-top: 1px solid rgba(31, 41, 51, 0.08);
+  display: grid;
+  gap: 3px;
+  padding-top: 8px;
+}
+
+.labor-file-vacation-conflict-item:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.labor-file-vacation-conflict-actions {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.labor-file-vacation-conflict-actions .form-field {
+  margin: 0;
 }
 
 .labor-file-vacation-format-section {

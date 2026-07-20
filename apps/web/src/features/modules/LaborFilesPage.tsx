@@ -10,6 +10,7 @@ import {
   type LaborGlobalVacationDay,
   type LaborGlobalVacationDayInput,
   type LaborPreviousYearPendingVacationInput,
+  type LaborVacationConflictCheckResult,
   type LaborVacationEvent,
   type LaborVacationFormatFieldValues
 } from "@sige/contracts";
@@ -927,6 +928,10 @@ export function LaborFilesPage() {
   const [vacationFormatRange, setVacationFormatRange] = useState({ startDate: "", endDate: "" });
   const [vacationFormatSingleDate, setVacationFormatSingleDate] = useState("");
   const [generatingVacationFormat, setGeneratingVacationFormat] = useState(false);
+  const [vacationConflictCheck, setVacationConflictCheck] = useState<LaborVacationConflictCheckResult | null>(null);
+  const [checkingVacationConflicts, setCheckingVacationConflicts] = useState(false);
+  const [authorizingVacationConflict, setAuthorizingVacationConflict] = useState(false);
+  const [vacationConflictAuthorizationNote, setVacationConflictAuthorizationNote] = useState("");
   const [previousYearPendingForm, setPreviousYearPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
   const [yearBeforeLastPendingForm, setYearBeforeLastPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
   const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
@@ -999,6 +1004,7 @@ export function LaborFilesPage() {
     ?? laborFiles[0];
   const canMoveSelectedLaborFile = Boolean(canWrite && selectedLaborFile);
   const canDeleteSelectedLaborFile = Boolean(canDeleteArchivedLaborFiles && selectedLaborFile?.employmentStatus === "ARCHIVED");
+  const vacationFormatDateSignature = vacationFormatForm.vacationDates.join("|");
 
   async function loadLaborFiles(preferredId?: string) {
     setLoading(true);
@@ -1040,6 +1046,8 @@ export function LaborFilesPage() {
       setVacationFormatFormOpen(false);
       setVacationFormatRange({ startDate: "", endDate: "" });
       setVacationFormatSingleDate("");
+      setVacationConflictCheck(null);
+      setVacationConflictAuthorizationNote("");
       setPreviousYearPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
       setYearBeforeLastPendingForm(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
       return;
@@ -1063,10 +1071,48 @@ export function LaborFilesPage() {
     setVacationFormatFormOpen(false);
     setVacationFormatRange({ startDate: "", endDate: "" });
     setVacationFormatSingleDate("");
+    setVacationConflictCheck(null);
+    setVacationConflictAuthorizationNote("");
     setPreviousYearPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile, "LAST_YEAR"));
     setYearBeforeLastPendingForm(buildPreviousYearPendingFormDefaults(selectedLaborFile, "YEAR_BEFORE_LAST"));
     setFlash(null);
   }, [selectedLaborFile?.id]);
+
+  useEffect(() => {
+    if (!selectedLaborFile || !canWrite || !vacationFormatFormOpen || vacationFormatForm.vacationDates.length === 0) {
+      setVacationConflictCheck(null);
+      setVacationConflictAuthorizationNote("");
+      setCheckingVacationConflicts(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCheckingVacationConflicts(true);
+    setVacationConflictAuthorizationNote("");
+    void apiPost<LaborVacationConflictCheckResult>(
+      `/labor-files/${selectedLaborFile.id}/vacation-format/conflicts/check`,
+      { vacationDates: vacationFormatForm.vacationDates }
+    )
+      .then((result) => {
+        if (!cancelled) {
+          setVacationConflictCheck(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVacationConflictCheck(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCheckingVacationConflicts(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canWrite, selectedLaborFile?.id, vacationFormatDateSignature, vacationFormatFormOpen]);
 
   const metrics = useMemo(() => ({
     total: activeLaborFiles.length,
@@ -1408,6 +1454,55 @@ export function LaborFilesPage() {
     );
   }
 
+  async function refreshVacationConflictCheck(dates: string[] = vacationFormatForm.vacationDates) {
+    if (!selectedLaborFile || !canWrite || dates.length === 0) {
+      setVacationConflictCheck(null);
+      return null;
+    }
+
+    setCheckingVacationConflicts(true);
+    try {
+      const result = await apiPost<LaborVacationConflictCheckResult>(
+        `/labor-files/${selectedLaborFile.id}/vacation-format/conflicts/check`,
+        { vacationDates: dates }
+      );
+      setVacationConflictCheck(result);
+      return result;
+    } finally {
+      setCheckingVacationConflicts(false);
+    }
+  }
+
+  async function handleVacationConflictAuthorize() {
+    if (!selectedLaborFile || !canWrite || !canOverrideVacationConflicts || vacationFormatForm.vacationDates.length === 0) {
+      return;
+    }
+
+    setAuthorizingVacationConflict(true);
+    setFlash(null);
+
+    try {
+      const result = await apiPost<LaborVacationConflictCheckResult>(
+        `/labor-files/${selectedLaborFile.id}/vacation-format/conflicts/authorize`,
+        {
+          vacationDates: vacationFormatForm.vacationDates,
+          note: vacationConflictAuthorizationNote
+        }
+      );
+      setVacationConflictCheck(result);
+      setFlash({
+        tone: "success",
+        text: result.hasConflicts
+          ? "Conflicto autorizado para estas fechas. Ya puedes generar el formato."
+          : "No hay conflictos para estas fechas."
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setAuthorizingVacationConflict(false);
+    }
+  }
+
   async function handleVacationFormatGenerate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedLaborFile || !canWrite) {
@@ -1423,17 +1518,27 @@ export function LaborFilesPage() {
     setFlash(null);
 
     try {
+      const conflictCheck = await refreshVacationConflictCheck();
+      if (conflictCheck?.hasConflicts && !conflictCheck.authorization) {
+        setFlash({
+          tone: "error",
+          text: "Hay conflicto con vacaciones del mismo equipo. Eduardo Rusconi debe autorizar estas fechas antes de generar el Word."
+        });
+        return;
+      }
+
       const accounting = getVacationFormatAccounting(selectedLaborFile, vacationFormatForm.vacationDates.length);
       await apiPost<LaborVacationEvent>(`/labor-files/${selectedLaborFile.id}/vacation-format/generate`, {
         ...vacationFormatForm,
         vacationDays: vacationFormatForm.vacationDates.length,
-        ...accounting,
-        overrideTeamVacationConflict: canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict)
+        ...accounting
       });
       setFlash({ tone: "success", text: "Formato de vacaciones generado, guardado y contabilizado." });
       setVacationFormatForm(buildVacationFormatFormDefaults(selectedLaborFile));
       setVacationFormatRange({ startDate: "", endDate: "" });
       setVacationFormatSingleDate("");
+      setVacationConflictCheck(null);
+      setVacationConflictAuthorizationNote("");
       await loadLaborFiles(selectedLaborFile.id);
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
@@ -1529,8 +1634,7 @@ export function LaborFilesPage() {
       await apiPost<LaborVacationEvent>(`/labor-files/vacation-events/${event.id}/signed-format`, {
         originalFileName: file.name,
         fileMimeType: file.type || "application/pdf",
-        fileBase64: await fileToBase64(file),
-        overrideTeamVacationConflict: canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict)
+        fileBase64: await fileToBase64(file)
       });
       setFlash({ tone: "success", text: "PDF firmado cargado. Vacaciones autorizadas." });
       await loadLaborFiles(selectedLaborFile.id);
@@ -1725,6 +1829,8 @@ export function LaborFilesPage() {
     .filter((event) => event.eventType === "VACATION" && event.acceptanceOriginalFileName)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const vacationFormatSelectedDays = vacationFormatForm.vacationDates.length;
+  const vacationConflictHasBlockingConflicts = Boolean(vacationConflictCheck?.hasConflicts && !vacationConflictCheck.authorization);
+  const vacationConflictAuthorization = vacationConflictCheck?.authorization;
   const vacationFormatProjectedPending = selectedLaborFile
     ? Math.max(0, selectedLaborFile.vacationSummary.remainingDays - vacationFormatSelectedDays)
     : vacationFormatForm.pendingDays;
@@ -2536,29 +2642,75 @@ export function LaborFilesPage() {
                       </div>
                     </div>
 
-                    <div className="labor-file-vacation-conflict-rule">
+                    <div className={`labor-file-vacation-conflict-rule ${vacationConflictHasBlockingConflicts ? "has-conflict" : vacationConflictAuthorization ? "is-authorized" : ""}`}>
                       <div>
                         <strong>Regla de equipo</strong>
                         <span>
-                          No se puede generar ni autorizar un formato si otra persona del mismo equipo pidió vacaciones en las mismas fechas.
+                          No se puede generar el Word si otra persona del mismo equipo pidio vacaciones en las mismas fechas, salvo autorizacion especifica de Eduardo Rusconi.
                         </span>
                       </div>
-                      <label className="checkbox-row">
-                        <input
-                          checked={canOverrideVacationConflicts && Boolean(vacationFormatForm.overrideTeamVacationConflict)}
-                          disabled={!canOverrideVacationConflicts || generatingVacationFormat}
-                          type="checkbox"
-                          onChange={(event) =>
-                            updateVacationFormatFormField("overrideTeamVacationConflict", event.target.checked)
-                          }
-                        />
-                        <span>Override Eduardo Rusconi</span>
-                      </label>
-                      <small>
-                        {canOverrideVacationConflicts
-                          ? "Este override permite continuar aun cuando existan cruces de fechas en el equipo."
-                          : "Solo Eduardo Rusconi puede marcar este override."}
-                      </small>
+                      <span className={`status-pill ${vacationConflictAuthorization ? "status-live" : vacationConflictHasBlockingConflicts ? "status-warning" : "status-neutral"}`}>
+                        {checkingVacationConflicts
+                          ? "Revisando"
+                          : vacationConflictAuthorization
+                            ? "Autorizado"
+                            : vacationConflictHasBlockingConflicts
+                              ? "Requiere EMRT"
+                              : "Sin bloqueo"}
+                      </span>
+
+                      {vacationFormatForm.vacationDates.length === 0 ? (
+                        <small>Selecciona fechas para revisar si existen cruces con el equipo.</small>
+                      ) : vacationConflictCheck?.hasConflicts ? (
+                        <div className="labor-file-vacation-conflict-details">
+                          <strong>Conflictos detectados</strong>
+                          {vacationConflictCheck.conflicts.map((conflict) => (
+                            <div className="labor-file-vacation-conflict-item" key={conflict.eventId}>
+                              <span>{conflict.employeeName}</span>
+                              <small>
+                                Fechas cruzadas: {conflict.dates.map(formatDate).join(", ")}
+                                {conflict.acceptanceOriginalFileName ? ` - Formato: ${conflict.acceptanceOriginalFileName}` : ""}
+                              </small>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <small>
+                          {checkingVacationConflicts
+                            ? "Revisando cruces de fechas del equipo."
+                            : "No hay conflicto detectado para las fechas seleccionadas."}
+                        </small>
+                      )}
+
+                      {vacationConflictAuthorization ? (
+                        <small>
+                          Autorizado por {vacationConflictAuthorization.authorizedByName} el {formatDateTime(vacationConflictAuthorization.createdAt)}.
+                        </small>
+                      ) : vacationConflictHasBlockingConflicts ? (
+                        <div className="labor-file-vacation-conflict-actions">
+                          {canOverrideVacationConflicts ? (
+                            <>
+                              <label className="form-field">
+                                <span>Nota de autorizacion</span>
+                                <input
+                                  value={vacationConflictAuthorizationNote}
+                                  onChange={(event) => setVacationConflictAuthorizationNote(event.target.value)}
+                                />
+                              </label>
+                              <button
+                                className="secondary-button"
+                                disabled={authorizingVacationConflict || checkingVacationConflicts}
+                                onClick={() => void handleVacationConflictAuthorize()}
+                                type="button"
+                              >
+                                {authorizingVacationConflict ? "Autorizando..." : "Autorizar este conflicto"}
+                              </button>
+                            </>
+                          ) : (
+                            <small>Eduardo Rusconi debe autorizar este conflicto antes de generar el Word.</small>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
 
                     {vacationFormatFormOpen ? (
@@ -2731,7 +2883,11 @@ export function LaborFilesPage() {
                         </div>
 
                         <div className="form-actions">
-                          <button className="primary-button" disabled={generatingVacationFormat} type="submit">
+                          <button
+                            className="primary-button"
+                            disabled={generatingVacationFormat || checkingVacationConflicts || vacationConflictHasBlockingConflicts}
+                            type="submit"
+                          >
                             {generatingVacationFormat ? "Generando..." : "Generar, guardar y contabilizar"}
                           </button>
                           {latestVacationFormatEvent ? (
