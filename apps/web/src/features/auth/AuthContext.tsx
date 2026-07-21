@@ -7,6 +7,7 @@ import {
   apiPost,
   clearAuthTokens,
   hasPersistedAuthSession,
+  isAuthenticationError,
   persistAuthTokens
 } from "../../api/http-client";
 import type { AuthStorageChangeDetail } from "../../api/http-client";
@@ -56,7 +57,8 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-const AUTH_PROFILE_TIMEOUT_MS = 8_000;
+const AUTH_PROFILE_TIMEOUT_MS = 20_000;
+const AUTH_PROFILE_RETRY_DELAY_MS = 3_000;
 
 function persistSession(response: LoginResponse) {
   persistAuthTokens();
@@ -79,22 +81,55 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!hasPersistedAuthSession()) {
-      setLoading(false);
-      return;
-    }
+    let cancelled = false;
+    let retryTimerId: number | undefined;
+    const sessionWasExpected = hasPersistedAuthSession();
 
-    withTimeout(
-      apiGet<SessionUser>("/auth/me"),
-      AUTH_PROFILE_TIMEOUT_MS,
-      "No se pudo validar la sesion actual."
-    )
-      .then((profile) => setUser(profile))
-      .catch(() => {
-        clearAuthTokens();
-        setUser(null);
-      })
-      .finally(() => setLoading(false));
+    const validateSession = async () => {
+      try {
+        const profile = await withTimeout(
+          apiGet<SessionUser>("/auth/me"),
+          AUTH_PROFILE_TIMEOUT_MS,
+          "No se pudo validar la sesion actual."
+        );
+        if (cancelled) {
+          return;
+        }
+
+        persistAuthTokens();
+        setUser(profile);
+        setLoading(false);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        if (isAuthenticationError(error)) {
+          clearAuthTokens();
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        if (!sessionWasExpected) {
+          setLoading(false);
+          return;
+        }
+
+        retryTimerId = window.setTimeout(() => {
+          void validateSession();
+        }, AUTH_PROFILE_RETRY_DELAY_MS);
+      }
+    };
+
+    void validateSession();
+
+    return () => {
+      cancelled = true;
+      if (retryTimerId !== undefined) {
+        window.clearTimeout(retryTimerId);
+      }
+    };
   }, []);
 
   useEffect(() => {

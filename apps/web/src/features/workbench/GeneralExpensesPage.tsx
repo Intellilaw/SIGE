@@ -8,7 +8,7 @@ import {
   type LegacyAccessRole
 } from "@sige/contracts";
 
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 
@@ -153,6 +153,8 @@ const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
 const PAYROLL_BONUS_RATE = 0.1;
 const PAYROLL_DISTRIBUTION_AUTOSAVE_DELAY_MS = 250;
 const PAYROLL_PATCH_MAX_CONCURRENCY = 4;
+const PAYROLL_APPROVAL_RETRY_ATTEMPTS = 2;
+const PAYROLL_APPROVAL_RETRY_DELAY_MS = 500;
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -160,6 +162,14 @@ function toErrorMessage(error: unknown) {
   }
 
   return "Ocurrio un error inesperado.";
+}
+
+function waitForPayrollApprovalRetry(attempt: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, PAYROLL_APPROVAL_RETRY_DELAY_MS * attempt));
+}
+
+function isRetryablePayrollApprovalError(error: unknown) {
+  return !(error instanceof ApiError) || error.status === 502 || error.status === 503 || error.status === 504;
 }
 
 function normalizeComparableText(value?: string | null) {
@@ -801,7 +811,7 @@ export function GeneralExpensesPage() {
   const expensePatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchEntryQueuesRef = useRef<Record<string, Promise<void>>>({});
-  const payrollFinalApprovalQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const payrollFinalApprovalPendingCountRef = useRef(0);
   const payrollFinalApprovalReconciliationRef = useRef(false);
   const payrollPatchActiveCountRef = useRef(0);
   const payrollPatchWaitersRef = useRef<Array<() => void>>([]);
@@ -826,6 +836,7 @@ export function GeneralExpensesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState<string | null>(null);
   const [pendingScrollExpenseId, setPendingScrollExpenseId] = useState<string | null>(null);
+  const [savingPayrollApprovalIds, setSavingPayrollApprovalIds] = useState<Set<string>>(new Set());
 
   const effectivePermissions = useMemo(() => user ? deriveEffectivePermissions({
     legacyRole: user.legacyRole as LegacyAccessRole,
@@ -1012,6 +1023,20 @@ export function GeneralExpensesPage() {
       window.clearTimeout(timerId);
     });
   }, []);
+
+  useEffect(() => {
+    if (savingPayrollApprovalIds.size === 0) {
+      return;
+    }
+
+    const preventPendingApprovalLoss = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", preventPendingApprovalLoss);
+    return () => window.removeEventListener("beforeunload", preventPendingApprovalLoss);
+  }, [savingPayrollApprovalIds.size]);
 
   useEffect(() => {
     if (activeTab !== "registro" || !pendingScrollExpenseId) {
@@ -1266,44 +1291,81 @@ export function GeneralExpensesPage() {
       return;
     }
 
-    updatePayrollEntryLocal(entryId, localPatch);
-    const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
-    payrollPatchSequenceRef.current[entryId] = requestSequence;
+    if (isFinalApprovalOnlyPatch) {
+      payrollFinalApprovalPendingCountRef.current += 1;
+      setSavingPayrollApprovalIds((current) => new Set(current).add(entryId));
+    }
 
-    const finalApprovalQueueDrained = await enqueuePayrollPatch(entryId, async () => {
-      try {
-        const updated = await apiPatch<GeneralExpensePayrollEntry>(`/general-expenses/payroll/${entryId}`, payload);
-        if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
-          return;
-        }
+    try {
+      updatePayrollEntryLocal(entryId, localPatch);
+      const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
+      payrollPatchSequenceRef.current[entryId] = requestSequence;
 
-        setPayrollEntries((items) => replacePayrollEntry(items, updated));
-      } catch (error) {
-        if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
-          return;
-        }
+      await enqueuePayrollPatch(entryId, async () => {
+        try {
+          const updated = isFinalApprovalOnlyPatch
+            ? await persistPayrollFinalApproval(entryId, payload)
+            : await apiPatch<GeneralExpensePayrollEntry>(`/general-expenses/payroll/${entryId}`, payload);
+          if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+            return;
+          }
 
-        if (currentEntry) {
-          setPayrollEntries((items) => replacePayrollEntry(items, currentEntry));
+          setPayrollEntries((items) => replacePayrollEntry(items, updated));
+        } catch (error) {
+          if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+            return;
+          }
+
+          if (currentEntry) {
+            setPayrollEntries((items) => replacePayrollEntry(items, currentEntry));
+          }
+          setErrorMessage(toErrorMessage(error));
+          if (isFinalApprovalOnlyPatch) {
+            payrollFinalApprovalReconciliationRef.current = true;
+          } else {
+            await loadPayrollEntries({ showLoading: false, clearDrafts: false });
+          }
         }
-        setErrorMessage(toErrorMessage(error));
-        if (isFinalApprovalOnlyPatch) {
-          payrollFinalApprovalReconciliationRef.current = true;
-        } else {
-          await loadPayrollEntries({ showLoading: false, clearDrafts: false });
+      });
+    } finally {
+      if (isFinalApprovalOnlyPatch) {
+        setSavingPayrollApprovalIds((current) => {
+          const next = new Set(current);
+          next.delete(entryId);
+          return next;
+        });
+        payrollFinalApprovalPendingCountRef.current = Math.max(
+          0,
+          payrollFinalApprovalPendingCountRef.current - 1
+        );
+
+        if (payrollFinalApprovalPendingCountRef.current === 0) {
+          if (payrollFinalApprovalReconciliationRef.current) {
+            payrollFinalApprovalReconciliationRef.current = false;
+            await loadPayrollEntries({ showLoading: false, clearDrafts: false });
+          }
+          await loadRecords();
         }
       }
-    }, isFinalApprovalOnlyPatch);
+    }
+  }
 
-    if (!isFinalApprovalOnlyPatch || !finalApprovalQueueDrained) {
-      return;
+  async function persistPayrollFinalApproval(entryId: string, payload: PayrollPatchPayload) {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= PAYROLL_APPROVAL_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        return await apiPatch<GeneralExpensePayrollEntry>(`/general-expenses/payroll/${entryId}`, payload);
+      } catch (error) {
+        lastError = error;
+        if (attempt === PAYROLL_APPROVAL_RETRY_ATTEMPTS || !isRetryablePayrollApprovalError(error)) {
+          throw error;
+        }
+        await waitForPayrollApprovalRetry(attempt + 1);
+      }
     }
 
-    if (payrollFinalApprovalReconciliationRef.current) {
-      payrollFinalApprovalReconciliationRef.current = false;
-      await loadPayrollEntries({ showLoading: false, clearDrafts: false });
-    }
-    await loadRecords();
+    throw lastError instanceof Error ? lastError : new Error("No fue posible guardar la autorizacion de nomina.");
   }
 
   async function acquirePayrollPatchSlot() {
@@ -1329,16 +1391,10 @@ export function GeneralExpensesPage() {
 
   async function enqueuePayrollPatch(
     entryId: string,
-    execute: () => Promise<void>,
-    serializeFinalApproval = false
+    execute: () => Promise<void>
   ) {
     const previousEntry = payrollPatchEntryQueuesRef.current[entryId] ?? Promise.resolve();
-    const dependencies = [previousEntry.catch(() => undefined)];
-    if (serializeFinalApproval) {
-      dependencies.push(payrollFinalApprovalQueueRef.current.catch(() => undefined));
-    }
-
-    const queued = Promise.all(dependencies).then(async () => {
+    const queued = previousEntry.catch(() => undefined).then(async () => {
       await acquirePayrollPatchSlot();
       try {
         await execute();
@@ -1348,16 +1404,11 @@ export function GeneralExpensesPage() {
     });
     const settled = queued.catch(() => undefined);
     payrollPatchEntryQueuesRef.current[entryId] = settled;
-    if (serializeFinalApproval) {
-      payrollFinalApprovalQueueRef.current = settled;
-    }
 
     await queued;
     if (payrollPatchEntryQueuesRef.current[entryId] === settled) {
       delete payrollPatchEntryQueuesRef.current[entryId];
     }
-
-    return serializeFinalApproval && payrollFinalApprovalQueueRef.current === settled;
   }
 
   async function persistPayrollDistribution(entryId: string, patch: PayrollDistributionPatchPayload) {
@@ -1961,12 +2012,15 @@ export function GeneralExpensesPage() {
                       ? "Marcar cuando estos días ya fueron pagados."
                       : `Se habilita el ${advanceVacationPaymentDate}.`;
                   const { sum: distributionSum } = getDistributionPct(entry);
-                  const finalPaymentApprovalDisabled = !canApprove || (
+                  const savingFinalPaymentApproval = savingPayrollApprovalIds.has(entry.id);
+                  const finalPaymentApprovalDisabled = savingFinalPaymentApproval || !canApprove || (
                     !entry.finalPaymentApprovedByEmrt && distributionSum !== 100
                   );
-                  const finalPaymentApprovalTitle = distributionSum === 100 || entry.finalPaymentApprovedByEmrt
-                    ? undefined
-                    : "La distribucion entre equipos debe sumar 100% antes de autorizar el pago.";
+                  const finalPaymentApprovalTitle = savingFinalPaymentApproval
+                    ? "Guardando autorización..."
+                    : distributionSum === 100 || entry.finalPaymentApprovedByEmrt
+                      ? undefined
+                      : "La distribucion entre equipos debe sumar 100% antes de autorizar el pago.";
 
                   return (
                     <tr key={entry.id}>

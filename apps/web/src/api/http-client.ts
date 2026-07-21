@@ -40,7 +40,24 @@ export interface AuthStorageChangeDetail {
   reason: "cleared" | "persisted";
 }
 
-let refreshRequest: Promise<boolean> | null = null;
+type RefreshAccessTokenResult = "refreshed" | "invalid" | "unavailable";
+
+let refreshRequest: Promise<RefreshAccessTokenResult> | null = null;
+
+export class ApiError extends Error {
+  public constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isAuthenticationError(error: unknown) {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
 
 function notifyAuthStorageChanged(reason: AuthStorageChangeDetail["reason"]) {
   window.dispatchEvent(new CustomEvent<AuthStorageChangeDetail>(AUTH_STORAGE_EVENT, { detail: { reason } }));
@@ -85,15 +102,15 @@ function shouldRetryWithRefresh(path: string) {
 
 async function toError(response: Response, fallback: string) {
   try {
-    const payload = await response.json() as { message?: string };
+    const payload = await response.json() as { code?: string; message?: string };
     if (payload.message) {
-      return new Error(payload.message);
+      return new ApiError(payload.message, response.status, payload.code);
     }
   } catch {
     // Ignore invalid JSON error bodies and use the fallback instead.
   }
 
-  return new Error(fallback);
+  return new ApiError(fallback, response.status);
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -109,26 +126,36 @@ async function readJson<T>(response: Response): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-async function refreshAccessToken() {
+async function refreshAccessToken(): Promise<RefreshAccessTokenResult> {
   if (!refreshRequest) {
     refreshRequest = (async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        const executeRefresh = () => fetch(`${API_BASE_URL}/auth/refresh`, {
           method: "POST",
           credentials: "include",
           body: "{}"
         });
+        let response = await executeRefresh();
 
-        if (!response.ok) {
-          clearAuthTokens();
-          return false;
+        // Another browser tab may have rotated the shared cookie milliseconds earlier.
+        if (response.status === 401) {
+          await wait(200);
+          response = await executeRefresh();
         }
 
-        persistAuthTokens();
-        return true;
+        if (response.ok) {
+          persistAuthTokens();
+          return "refreshed" as const;
+        }
+
+        if (response.status === 401 || response.status === 403) {
+          clearAuthTokens();
+          return "invalid" as const;
+        }
+
+        return "unavailable" as const;
       } catch {
-        clearAuthTokens();
-        return false;
+        return "unavailable" as const;
       } finally {
         refreshRequest = null;
       }
@@ -200,15 +227,24 @@ async function request(path: string, init: RequestInit, fallback: string): Promi
 
   let response = await executeWithTransientRetry(execute, init);
   if (response.status === 401 && shouldRetryWithRefresh(path)) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
+    const refreshResult = await refreshAccessToken();
+    if (refreshResult === "refreshed") {
       response = await executeWithTransientRetry(execute, init);
+    } else if (refreshResult === "invalid") {
+      throw new ApiError("La sesion expiro. Inicia sesion nuevamente.", 401, "SESSION_EXPIRED");
+    } else {
+      throw new ApiError(
+        "No fue posible renovar la sesion por un problema temporal. Intenta nuevamente.",
+        503,
+        "SESSION_REFRESH_UNAVAILABLE"
+      );
     }
   }
 
   if (!response.ok) {
     if (response.status === 401 && shouldRetryWithRefresh(path)) {
-      throw new Error("La sesion expiro. Inicia sesion nuevamente.");
+      clearAuthTokens();
+      throw new ApiError("La sesion expiro. Inicia sesion nuevamente.", 401, "SESSION_EXPIRED");
     }
 
     throw await toError(response, fallback);

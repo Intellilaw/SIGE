@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveEffectivePermissions } from "@sige/contracts";
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 import { RusconiIntelligenceBadge } from "../rusconi-intelligence/RusconiIntelligenceBadge";
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
@@ -45,11 +45,19 @@ const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
 const PAYROLL_BONUS_RATE = 0.1;
 const PAYROLL_DISTRIBUTION_AUTOSAVE_DELAY_MS = 250;
 const PAYROLL_PATCH_MAX_CONCURRENCY = 4;
+const PAYROLL_APPROVAL_RETRY_ATTEMPTS = 2;
+const PAYROLL_APPROVAL_RETRY_DELAY_MS = 500;
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
         return error.message;
     }
     return "Ocurrio un error inesperado.";
+}
+function waitForPayrollApprovalRetry(attempt) {
+    return new Promise((resolve) => window.setTimeout(resolve, PAYROLL_APPROVAL_RETRY_DELAY_MS * attempt));
+}
+function isRetryablePayrollApprovalError(error) {
+    return !(error instanceof ApiError) || error.status === 502 || error.status === 503 || error.status === 504;
 }
 function normalizeComparableText(value) {
     return (value ?? "")
@@ -552,7 +560,7 @@ export function GeneralExpensesPage() {
     const expensePatchSequenceRef = useRef({});
     const payrollPatchSequenceRef = useRef({});
     const payrollPatchEntryQueuesRef = useRef({});
-    const payrollFinalApprovalQueueRef = useRef(Promise.resolve());
+    const payrollFinalApprovalPendingCountRef = useRef(0);
     const payrollFinalApprovalReconciliationRef = useRef(false);
     const payrollPatchActiveCountRef = useRef(0);
     const payrollPatchWaitersRef = useRef([]);
@@ -577,6 +585,7 @@ export function GeneralExpensesPage() {
     const [errorMessage, setErrorMessage] = useState(null);
     const [deletingPayrollEntryId, setDeletingPayrollEntryId] = useState(null);
     const [pendingScrollExpenseId, setPendingScrollExpenseId] = useState(null);
+    const [savingPayrollApprovalIds, setSavingPayrollApprovalIds] = useState(new Set());
     const effectivePermissions = useMemo(() => user ? deriveEffectivePermissions({
         legacyRole: user.legacyRole,
         team: user.team,
@@ -739,6 +748,17 @@ export function GeneralExpensesPage() {
             window.clearTimeout(timerId);
         });
     }, []);
+    useEffect(() => {
+        if (savingPayrollApprovalIds.size === 0) {
+            return;
+        }
+        const preventPendingApprovalLoss = (event) => {
+            event.preventDefault();
+            event.returnValue = "";
+        };
+        window.addEventListener("beforeunload", preventPendingApprovalLoss);
+        return () => window.removeEventListener("beforeunload", preventPendingApprovalLoss);
+    }, [savingPayrollApprovalIds.size]);
     useEffect(() => {
         if (activeTab !== "registro" || !pendingScrollExpenseId) {
             return;
@@ -925,41 +945,74 @@ export function GeneralExpensesPage() {
         if (!canWrite && !canApplyFinalApprovalPatch && !canApplyStampPatch && !canApplyJnlsPatch) {
             return;
         }
-        updatePayrollEntryLocal(entryId, localPatch);
-        const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
-        payrollPatchSequenceRef.current[entryId] = requestSequence;
-        const finalApprovalQueueDrained = await enqueuePayrollPatch(entryId, async () => {
-            try {
-                const updated = await apiPatch(`/general-expenses/payroll/${entryId}`, payload);
-                if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
-                    return;
+        if (isFinalApprovalOnlyPatch) {
+            payrollFinalApprovalPendingCountRef.current += 1;
+            setSavingPayrollApprovalIds((current) => new Set(current).add(entryId));
+        }
+        try {
+            updatePayrollEntryLocal(entryId, localPatch);
+            const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
+            payrollPatchSequenceRef.current[entryId] = requestSequence;
+            await enqueuePayrollPatch(entryId, async () => {
+                try {
+                    const updated = isFinalApprovalOnlyPatch
+                        ? await persistPayrollFinalApproval(entryId, payload)
+                        : await apiPatch(`/general-expenses/payroll/${entryId}`, payload);
+                    if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+                        return;
+                    }
+                    setPayrollEntries((items) => replacePayrollEntry(items, updated));
                 }
-                setPayrollEntries((items) => replacePayrollEntry(items, updated));
+                catch (error) {
+                    if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+                        return;
+                    }
+                    if (currentEntry) {
+                        setPayrollEntries((items) => replacePayrollEntry(items, currentEntry));
+                    }
+                    setErrorMessage(toErrorMessage(error));
+                    if (isFinalApprovalOnlyPatch) {
+                        payrollFinalApprovalReconciliationRef.current = true;
+                    }
+                    else {
+                        await loadPayrollEntries({ showLoading: false, clearDrafts: false });
+                    }
+                }
+            });
+        }
+        finally {
+            if (isFinalApprovalOnlyPatch) {
+                setSavingPayrollApprovalIds((current) => {
+                    const next = new Set(current);
+                    next.delete(entryId);
+                    return next;
+                });
+                payrollFinalApprovalPendingCountRef.current = Math.max(0, payrollFinalApprovalPendingCountRef.current - 1);
+                if (payrollFinalApprovalPendingCountRef.current === 0) {
+                    if (payrollFinalApprovalReconciliationRef.current) {
+                        payrollFinalApprovalReconciliationRef.current = false;
+                        await loadPayrollEntries({ showLoading: false, clearDrafts: false });
+                    }
+                    await loadRecords();
+                }
+            }
+        }
+    }
+    async function persistPayrollFinalApproval(entryId, payload) {
+        let lastError;
+        for (let attempt = 0; attempt <= PAYROLL_APPROVAL_RETRY_ATTEMPTS; attempt += 1) {
+            try {
+                return await apiPatch(`/general-expenses/payroll/${entryId}`, payload);
             }
             catch (error) {
-                if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
-                    return;
+                lastError = error;
+                if (attempt === PAYROLL_APPROVAL_RETRY_ATTEMPTS || !isRetryablePayrollApprovalError(error)) {
+                    throw error;
                 }
-                if (currentEntry) {
-                    setPayrollEntries((items) => replacePayrollEntry(items, currentEntry));
-                }
-                setErrorMessage(toErrorMessage(error));
-                if (isFinalApprovalOnlyPatch) {
-                    payrollFinalApprovalReconciliationRef.current = true;
-                }
-                else {
-                    await loadPayrollEntries({ showLoading: false, clearDrafts: false });
-                }
+                await waitForPayrollApprovalRetry(attempt + 1);
             }
-        }, isFinalApprovalOnlyPatch);
-        if (!isFinalApprovalOnlyPatch || !finalApprovalQueueDrained) {
-            return;
         }
-        if (payrollFinalApprovalReconciliationRef.current) {
-            payrollFinalApprovalReconciliationRef.current = false;
-            await loadPayrollEntries({ showLoading: false, clearDrafts: false });
-        }
-        await loadRecords();
+        throw lastError instanceof Error ? lastError : new Error("No fue posible guardar la autorizacion de nomina.");
     }
     async function acquirePayrollPatchSlot() {
         if (payrollPatchActiveCountRef.current < PAYROLL_PATCH_MAX_CONCURRENCY) {
@@ -978,13 +1031,9 @@ export function GeneralExpensesPage() {
         }
         payrollPatchActiveCountRef.current = Math.max(0, payrollPatchActiveCountRef.current - 1);
     }
-    async function enqueuePayrollPatch(entryId, execute, serializeFinalApproval = false) {
+    async function enqueuePayrollPatch(entryId, execute) {
         const previousEntry = payrollPatchEntryQueuesRef.current[entryId] ?? Promise.resolve();
-        const dependencies = [previousEntry.catch(() => undefined)];
-        if (serializeFinalApproval) {
-            dependencies.push(payrollFinalApprovalQueueRef.current.catch(() => undefined));
-        }
-        const queued = Promise.all(dependencies).then(async () => {
+        const queued = previousEntry.catch(() => undefined).then(async () => {
             await acquirePayrollPatchSlot();
             try {
                 await execute();
@@ -995,14 +1044,10 @@ export function GeneralExpensesPage() {
         });
         const settled = queued.catch(() => undefined);
         payrollPatchEntryQueuesRef.current[entryId] = settled;
-        if (serializeFinalApproval) {
-            payrollFinalApprovalQueueRef.current = settled;
-        }
         await queued;
         if (payrollPatchEntryQueuesRef.current[entryId] === settled) {
             delete payrollPatchEntryQueuesRef.current[entryId];
         }
-        return serializeFinalApproval && payrollFinalApprovalQueueRef.current === settled;
     }
     async function persistPayrollDistribution(entryId, patch) {
         const currentEntry = payrollEntries.find((entry) => entry.id === entryId);
@@ -1390,10 +1435,13 @@ export function GeneralExpensesPage() {
                                                         ? "Marcar cuando estos días ya fueron pagados."
                                                         : `Se habilita el ${advanceVacationPaymentDate}.`;
                                                 const { sum: distributionSum } = getDistributionPct(entry);
-                                                const finalPaymentApprovalDisabled = !canApprove || (!entry.finalPaymentApprovedByEmrt && distributionSum !== 100);
-                                                const finalPaymentApprovalTitle = distributionSum === 100 || entry.finalPaymentApprovedByEmrt
-                                                    ? undefined
-                                                    : "La distribucion entre equipos debe sumar 100% antes de autorizar el pago.";
+                                                const savingFinalPaymentApproval = savingPayrollApprovalIds.has(entry.id);
+                                                const finalPaymentApprovalDisabled = savingFinalPaymentApproval || !canApprove || (!entry.finalPaymentApprovedByEmrt && distributionSum !== 100);
+                                                const finalPaymentApprovalTitle = savingFinalPaymentApproval
+                                                    ? "Guardando autorización..."
+                                                    : distributionSum === 100 || entry.finalPaymentApprovedByEmrt
+                                                        ? undefined
+                                                        : "La distribucion entre equipos debe sumar 100% antes de autorizar el pago.";
                                                 return (_jsxs("tr", { children: [_jsx("td", { className: "general-expense-payroll-employee-column", children: _jsxs("select", { className: "general-expense-input general-expense-payroll-employee-input", value: entry.laborFileId ?? "", onChange: (event) => handlePayrollEmployeeChange(entry, event.target.value), disabled: !canWrite || loadingPayrollEmployees || entry.finalPaymentApprovedByEmrt, children: [_jsx("option", { value: "", children: entry.laborFileId || !entry.employeeName ? "Seleccionar empleado" : `${entry.employeeName} (sin expediente)` }), entry.laborFileId && !payrollEmployeeOptionsById.has(entry.laborFileId) ? (_jsx("option", { value: entry.laborFileId, children: entry.employeeName || "Empleado seleccionado" })) : null, payrollEmployeeOptions.map((option) => (_jsx("option", { value: option.laborFileId, children: option.employeeName }, option.laborFileId)))] }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.isPartTime, onChange: (event) => handlePayrollPartTimeChange(entry, event.target.checked), disabled: !canWrite || entry.finalPaymentApprovedByEmrt, title: "Marcar si el empleado es de medio tiempo." }) }), _jsx("td", { children: _jsxs("div", { className: `general-expense-readonly-cell general-expense-payroll-ri-salary is-${dailySalaryValidation.status}`, children: [_jsxs("span", { className: "general-expense-payroll-ri-salary-main", children: [_jsx(RusconiIntelligenceBadge, { connectionId: PAYROLL_DAILY_SALARY_RI_CONNECTION_ID, label: "Gastos generales / Nomina / Salario diario" }), _jsx("span", { children: formatCurrency(entry.dailySalaryMxn) })] }), _jsx("span", { "aria-label": dailySalaryValidation.label, className: `general-expense-payroll-ri-icon is-${dailySalaryValidation.status}`, role: "img", title: dailySalaryValidation.detail })] }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell", children: formatCurrency(entry.grossSalaryMxn) }) }), _jsx("td", { children: renderPayrollNumberInput(entry, "absenceDays") }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell is-payroll-net-salary", title: `Salario bruto menos faltas: ${formatCurrency(entry.grossSalaryMxn)} - ${formatCurrency(entry.absenceDiscountMxn)}`, children: formatCurrency(entry.netSalaryMxn) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell general-expense-payroll-days-cell general-expense-payroll-advance-cell", title: "D\u00EDas disfrutados antes del aniversario laboral que generan prima vacacional en esta fecha de corte.", children: formatPayrollDays(entry.advanceVacationDays) }) }), _jsx("td", { children: _jsx("div", { className: "general-expense-readonly-cell general-expense-payroll-date-cell", title: "Fecha de corte en la que se adquiere el derecho para pagar la prima vacacional de estos d\u00EDas.", children: advanceVacationPaymentDate }) }), _jsx("td", { className: "general-expense-checkbox-cell", children: _jsx("input", { type: "checkbox", checked: entry.advanceVacationDaysPaid, onChange: (event) => void persistPayrollPatch(entry.id, { advanceVacationDaysPaid: event.target.checked }, {
                                                                     advanceVacationDaysPaid: event.target.checked,
                                                                     advanceVacationDays: event.target.checked ? 0 : entry.advanceVacationDays

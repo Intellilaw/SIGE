@@ -26,6 +26,19 @@ const REFRESH_TOKEN_STORAGE_KEY = "sige.refreshToken";
 const SESSION_HINT_STORAGE_KEY = "sige.hasSession";
 export const AUTH_STORAGE_EVENT = "sige-auth-storage-changed";
 let refreshRequest = null;
+export class ApiError extends Error {
+    status;
+    code;
+    constructor(message, status, code) {
+        super(message);
+        this.status = status;
+        this.code = code;
+        this.name = "ApiError";
+    }
+}
+export function isAuthenticationError(error) {
+    return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
 function notifyAuthStorageChanged(reason) {
     window.dispatchEvent(new CustomEvent(AUTH_STORAGE_EVENT, { detail: { reason } }));
 }
@@ -62,13 +75,13 @@ async function toError(response, fallback) {
     try {
         const payload = await response.json();
         if (payload.message) {
-            return new Error(payload.message);
+            return new ApiError(payload.message, response.status, payload.code);
         }
     }
     catch {
         // Ignore invalid JSON error bodies and use the fallback instead.
     }
-    return new Error(fallback);
+    return new ApiError(fallback, response.status);
 }
 async function readJson(response) {
     if (response.status === 204 || response.status === 205) {
@@ -84,21 +97,29 @@ async function refreshAccessToken() {
     if (!refreshRequest) {
         refreshRequest = (async () => {
             try {
-                const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+                const executeRefresh = () => fetch(`${API_BASE_URL}/auth/refresh`, {
                     method: "POST",
                     credentials: "include",
                     body: "{}"
                 });
-                if (!response.ok) {
-                    clearAuthTokens();
-                    return false;
+                let response = await executeRefresh();
+                // Another browser tab may have rotated the shared cookie milliseconds earlier.
+                if (response.status === 401) {
+                    await wait(200);
+                    response = await executeRefresh();
                 }
-                persistAuthTokens();
-                return true;
+                if (response.ok) {
+                    persistAuthTokens();
+                    return "refreshed";
+                }
+                if (response.status === 401 || response.status === 403) {
+                    clearAuthTokens();
+                    return "invalid";
+                }
+                return "unavailable";
             }
             catch {
-                clearAuthTokens();
-                return false;
+                return "unavailable";
             }
             finally {
                 refreshRequest = null;
@@ -161,14 +182,21 @@ async function request(path, init, fallback) {
     });
     let response = await executeWithTransientRetry(execute, init);
     if (response.status === 401 && shouldRetryWithRefresh(path)) {
-        const refreshed = await refreshAccessToken();
-        if (refreshed) {
+        const refreshResult = await refreshAccessToken();
+        if (refreshResult === "refreshed") {
             response = await executeWithTransientRetry(execute, init);
+        }
+        else if (refreshResult === "invalid") {
+            throw new ApiError("La sesion expiro. Inicia sesion nuevamente.", 401, "SESSION_EXPIRED");
+        }
+        else {
+            throw new ApiError("No fue posible renovar la sesion por un problema temporal. Intenta nuevamente.", 503, "SESSION_REFRESH_UNAVAILABLE");
         }
     }
     if (!response.ok) {
         if (response.status === 401 && shouldRetryWithRefresh(path)) {
-            throw new Error("La sesion expiro. Inicia sesion nuevamente.");
+            clearAuthTokens();
+            throw new ApiError("La sesion expiro. Inicia sesion nuevamente.", 401, "SESSION_EXPIRED");
         }
         throw await toError(response, fallback);
     }

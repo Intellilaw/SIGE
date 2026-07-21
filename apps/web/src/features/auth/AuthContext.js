@@ -1,8 +1,9 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, hasPersistedAuthSession, persistAuthTokens } from "../../api/http-client";
+import { AUTH_STORAGE_EVENT, apiGet, apiPost, clearAuthTokens, hasPersistedAuthSession, isAuthenticationError, persistAuthTokens } from "../../api/http-client";
 const AuthContext = createContext(null);
-const AUTH_PROFILE_TIMEOUT_MS = 8_000;
+const AUTH_PROFILE_TIMEOUT_MS = 20_000;
+const AUTH_PROFILE_RETRY_DELAY_MS = 3_000;
 function persistSession(response) {
     persistAuthTokens();
 }
@@ -19,17 +20,45 @@ export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     useEffect(() => {
-        if (!hasPersistedAuthSession()) {
-            setLoading(false);
-            return;
-        }
-        withTimeout(apiGet("/auth/me"), AUTH_PROFILE_TIMEOUT_MS, "No se pudo validar la sesion actual.")
-            .then((profile) => setUser(profile))
-            .catch(() => {
-            clearAuthTokens();
-            setUser(null);
-        })
-            .finally(() => setLoading(false));
+        let cancelled = false;
+        let retryTimerId;
+        const sessionWasExpected = hasPersistedAuthSession();
+        const validateSession = async () => {
+            try {
+                const profile = await withTimeout(apiGet("/auth/me"), AUTH_PROFILE_TIMEOUT_MS, "No se pudo validar la sesion actual.");
+                if (cancelled) {
+                    return;
+                }
+                persistAuthTokens();
+                setUser(profile);
+                setLoading(false);
+            }
+            catch (error) {
+                if (cancelled) {
+                    return;
+                }
+                if (isAuthenticationError(error)) {
+                    clearAuthTokens();
+                    setUser(null);
+                    setLoading(false);
+                    return;
+                }
+                if (!sessionWasExpected) {
+                    setLoading(false);
+                    return;
+                }
+                retryTimerId = window.setTimeout(() => {
+                    void validateSession();
+                }, AUTH_PROFILE_RETRY_DELAY_MS);
+            }
+        };
+        void validateSession();
+        return () => {
+            cancelled = true;
+            if (retryTimerId !== undefined) {
+                window.clearTimeout(retryTimerId);
+            }
+        };
     }, []);
     useEffect(() => {
         const handleAuthStorageChange = (event) => {

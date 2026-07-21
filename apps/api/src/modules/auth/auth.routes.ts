@@ -84,7 +84,6 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const record = await app.repositories.auth.findRefreshToken(tokenHash);
 
     if (!record) {
-      clearAuthCookies(reply, app.config);
       throw new app.errors.AppError(401, "INVALID_REFRESH_TOKEN", "Refresh token is invalid or expired.");
     }
 

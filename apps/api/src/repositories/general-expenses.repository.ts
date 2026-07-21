@@ -10,7 +10,6 @@ import type {
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
-import { getLaborDailySalaryRiStatus } from "../modules/labor-files/labor-salary-intelligence";
 import { assertCommissionPeriodUnlocked } from "./commission-period-lock";
 import {
   buildVacationSummary,
@@ -101,9 +100,10 @@ const PAYROLL_LABOR_SALARY_DOCUMENT_SELECT = {
   id: true,
   documentType: true,
   originalFileName: true,
-  fileMimeType: true,
   uploadedAt: true,
-  fileContent: true
+  riExtractedDailySalaryMxn: true,
+  riExtractedMonthlyGrossSalaryMxn: true,
+  riSalaryExtractionDetail: true
 } satisfies Prisma.LaborFileDocumentSelect;
 const PAYROLL_ENTRY_INCLUDE = {
   laborFile: {
@@ -153,6 +153,13 @@ const PAYROLL_ENTRY_INCLUDE = {
 } satisfies Prisma.GeneralExpensePayrollEntryInclude;
 type StoredGeneralExpensePayrollEntry = Prisma.GeneralExpensePayrollEntryGetPayload<{ include: typeof PAYROLL_ENTRY_INCLUDE }>;
 type PayrollVacationEventRecord = NonNullable<StoredGeneralExpensePayrollEntry["laborFile"]>["vacationEvents"][number];
+type PayrollCachedSalaryDocument = Prisma.LaborFileDocumentGetPayload<{
+  select: typeof PAYROLL_LABOR_SALARY_DOCUMENT_SELECT;
+}>;
+type PayrollCachedSalaryLaborFile = {
+  dailySalaryMxn: Prisma.Decimal | number | null;
+  documents: PayrollCachedSalaryDocument[];
+};
 const PAYROLL_GLOBAL_VACATION_DAY_SELECT = {
   id: true,
   date: true,
@@ -169,6 +176,76 @@ type PayrollUpdateBuildResult = {
   data: Prisma.GeneralExpensePayrollEntryUpdateInput;
   laborFileUpdate?: Prisma.LaborFileUpdateInput;
 };
+
+function getPayrollCachedDailySalaryRiStatus(laborFile?: PayrollCachedSalaryLaborFile | null) {
+  if (!laborFile) {
+    return {
+      verified: false,
+      detail: "Sin expediente laboral vinculado."
+    };
+  }
+
+  const dailySalaryMxn = Number(laborFile.dailySalaryMxn ?? 0);
+  if (!dailySalaryMxn) {
+    return {
+      verified: false,
+      detail: "Falta salario diario en Expedientes Laborales."
+    };
+  }
+
+  const documents = laborFile.documents ?? [];
+  if (!documents.some((document) => document.documentType === "EMPLOYMENT_CONTRACT")) {
+    return {
+      verified: false,
+      detail: "Expedientes Laborales no tiene contrato laboral cargado."
+    };
+  }
+
+  const salaryDocuments = documents.slice().sort((left, right) => {
+    const uploadedDifference = left.uploadedAt.getTime() - right.uploadedAt.getTime();
+    if (uploadedDifference !== 0) {
+      return uploadedDifference;
+    }
+
+    return Number(left.documentType === "ADDENDUM") - Number(right.documentType === "ADDENDUM");
+  });
+  let currentSalaryDocument: (typeof salaryDocuments)[number] | undefined;
+
+  for (const document of salaryDocuments.slice().reverse()) {
+    if (Number(document.riExtractedDailySalaryMxn ?? 0) > 0) {
+      currentSalaryDocument = document;
+      break;
+    }
+
+    if (document.documentType === "ADDENDUM") {
+      break;
+    }
+  }
+
+  if (!currentSalaryDocument) {
+    return {
+      verified: false,
+      detail: "Contrato/addenda cargados sin salario diario legible."
+    };
+  }
+
+  const contractDailySalaryMxn = Number(currentSalaryDocument.riExtractedDailySalaryMxn);
+  const contractMonthlyGrossSalaryMxn = Number(currentSalaryDocument.riExtractedMonthlyGrossSalaryMxn ?? 0) || undefined;
+  const matches = Math.abs(dailySalaryMxn - contractDailySalaryMxn) <= 0.05;
+  const sourceLabel = currentSalaryDocument.documentType === "ADDENDUM" ? "addendum" : "contrato";
+  const salaryDetail = contractMonthlyGrossSalaryMxn
+    ? `${formatMxn(contractDailySalaryMxn)} diario calculado de ${formatMxn(contractMonthlyGrossSalaryMxn)} mensual / 30`
+    : `${formatMxn(contractDailySalaryMxn)} diario`;
+
+  return {
+    verified: matches,
+    detail: matches
+      ? `Coincide con el ${sourceLabel} vigente (${salaryDetail}).`
+      : `Contrato/addenda vigente: ${salaryDetail}.`,
+    contractDailySalaryMxn,
+    contractMonthlyGrossSalaryMxn
+  };
+}
 
 function hasOwn<T extends object>(payload: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(payload, key);
@@ -962,7 +1039,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       vacationDays,
       vacationPremiumMxn: roundPayrollNumber(vacationDays * dailySalaryMxn * PAYROLL_VACATION_PREMIUM_RATE)
     });
-    const riStatus = await getLaborDailySalaryRiStatus(record.laborFile);
+    const riStatus = getPayrollCachedDailySalaryRiStatus(record.laborFile);
 
     return {
       ...mapped,
@@ -1252,8 +1329,8 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       orderBy: [{ employmentStatus: "asc" }, { employeeName: "asc" }]
     });
 
-    return Promise.all(records.map(async (record) => {
-      const riStatus = await getLaborDailySalaryRiStatus(record);
+    return records.map((record) => {
+      const riStatus = getPayrollCachedDailySalaryRiStatus(record);
       return {
         laborFileId: record.id,
         employeeName: record.employeeName,
@@ -1261,7 +1338,7 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
         dailySalaryRiVerified: riStatus.verified,
         dailySalaryRiVerificationDetail: riStatus.detail
       };
-    }));
+    });
   }
 
   public async listPayrollEntries(year: number, month: number) {
