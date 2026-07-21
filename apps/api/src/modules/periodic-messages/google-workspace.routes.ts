@@ -56,7 +56,7 @@ function normalizeGoogleError(error: unknown) {
 
   return new GoogleWorkspaceClientError(
     "GOOGLE_WORKSPACE_UNEXPECTED",
-    "Google Workspace no pudo completar la operaci�n.",
+    "Google Workspace no pudo completar la operación.",
     502
   );
 }
@@ -99,7 +99,7 @@ export const googleWorkspaceRoutes: FastifyPluginAsync = async (app) => {
     const user = getSessionUser(request);
     const normalizedEmail = user.email.trim().toLowerCase();
     if (!user.isActive) {
-      throw new AppError(403, "GOOGLE_WORKSPACE_ACCOUNT_FORBIDDEN", "Tu usuario de SIGE no est� activo.");
+      throw new AppError(403, "GOOGLE_WORKSPACE_ACCOUNT_FORBIDDEN", "Tu usuario de SIGE no está activo.");
     }
 
     const returnPath = safeReturnPath(payload.returnPath);
@@ -129,13 +129,13 @@ export const googleWorkspaceRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       if (!query.state) {
-        throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_MISSING", "Google no devolvi� el estado de autorizaci�n.", 400);
+        throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_MISSING", "Google no devolvió el estado de autorización.", 400);
       }
 
       const state = parseGoogleOAuthState(query.state);
       returnPath = state.returnPath;
       if (query.error || !query.code) {
-        throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_DENIED", "La autorizaci�n de Google fue cancelada.", 400);
+        throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_DENIED", "La autorización de Google fue cancelada.", 400);
       }
 
       const user = await prisma.user.findFirst({
@@ -147,7 +147,7 @@ export const googleWorkspaceRoutes: FastifyPluginAsync = async (app) => {
         }
       });
       if (!user) {
-        throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_USER_INVALID", "El usuario de SIGE ya no est� disponible.", 403);
+        throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_USER_INVALID", "El usuario de SIGE ya no está disponible.", 403);
       }
 
       const tokens = await exchangeGoogleAuthorizationCode(query.code);
@@ -164,7 +164,7 @@ export const googleWorkspaceRoutes: FastifyPluginAsync = async (app) => {
       if (tokens.grantedScopes.length > 0 && !tokens.grantedScopes.includes(requiredScope)) {
         throw new GoogleWorkspaceClientError(
           "GOOGLE_OAUTH_SCOPE_MISSING",
-          "Google no concedi� el permiso para enviar correos.",
+          "Google no concedió el permiso para enviar correos.",
           403
         );
       }
@@ -182,7 +182,7 @@ export const googleWorkspaceRoutes: FastifyPluginAsync = async (app) => {
       if (connectedByAnotherUser) {
         throw new GoogleWorkspaceClientError(
           "GOOGLE_OAUTH_EMAIL_IN_USE",
-          "Esa cuenta de Google Workspace ya est� conectada a otro usuario de SIGE.",
+          "Esa cuenta de Google Workspace ya está conectada a otro usuario de SIGE.",
           409
         );
       }
@@ -194,7 +194,7 @@ export const googleWorkspaceRoutes: FastifyPluginAsync = async (app) => {
       if (!refreshTokenCiphertext) {
         throw new GoogleWorkspaceClientError(
           "GOOGLE_OAUTH_REFRESH_TOKEN_MISSING",
-          "Google no devolvi� autorizaci�n para uso sin conexi�n. Int�ntalo nuevamente.",
+          "Google no devolvió autorización para uso sin conexión. Inténtalo nuevamente.",
           400
         );
       }

@@ -96,7 +96,7 @@ async function loadCredentials(): Promise<GoogleOAuthCredentials> {
     if (!directClientId || !directClientSecret) {
       throw new GoogleWorkspaceClientError(
         "GOOGLE_OAUTH_INCOMPLETE",
-        "La configuraci�n OAuth de Google Workspace est� incompleta.",
+        "La configuración OAuth de Google Workspace está incompleta.",
         503
       );
     }
@@ -108,7 +108,7 @@ async function loadCredentials(): Promise<GoogleOAuthCredentials> {
   if (!credentialFile) {
     throw new GoogleWorkspaceClientError(
       "GOOGLE_OAUTH_NOT_CONFIGURED",
-      "Google Workspace todav�a no tiene credenciales OAuth configuradas.",
+      "Google Workspace todavía no tiene credenciales OAuth configuradas.",
       503
     );
   }
@@ -128,7 +128,7 @@ async function loadCredentials(): Promise<GoogleOAuthCredentials> {
   if (!block?.client_id || !block.client_secret) {
     throw new GoogleWorkspaceClientError(
       "GOOGLE_OAUTH_FILE_INVALID",
-      "El archivo de credenciales OAuth de Google Workspace no es v�lido.",
+      "El archivo de credenciales OAuth de Google Workspace no es válido.",
       503
     );
   }
@@ -136,7 +136,7 @@ async function loadCredentials(): Promise<GoogleOAuthCredentials> {
   if (block.redirect_uris?.length && !block.redirect_uris.includes(redirectUri)) {
     throw new GoogleWorkspaceClientError(
       "GOOGLE_OAUTH_REDIRECT_MISMATCH",
-      `La URI de redirecci�n ${redirectUri} no est� registrada en Google Cloud.`,
+      `La URI de redirección ${redirectUri} no está registrada en Google Cloud.`,
       503
     );
   }
@@ -157,7 +157,7 @@ export async function getGoogleWorkspaceConfigurationStatus() {
     return {
       configured: false,
       redirectUri: getRedirectUri(),
-      error: error instanceof Error ? error.message : "Google Workspace no est� configurado."
+      error: error instanceof Error ? error.message : "Google Workspace no está configurado."
     };
   }
 }
@@ -179,20 +179,20 @@ export function createGoogleOAuthState(input: Omit<GoogleOAuthState, "expiresAt"
 export function parseGoogleOAuthState(value: string): GoogleOAuthState {
   const [encodedPayload, encodedSignature, ...rest] = value.split(".");
   if (!encodedPayload || !encodedSignature || rest.length > 0) {
-    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_INVALID", "La autorizaci�n de Google no es v�lida.", 400);
+    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_INVALID", "La autorización de Google no es válida.", 400);
   }
 
   const expectedSignature = createHmac("sha256", stateSigningKey()).update(encodedPayload).digest();
   const receivedSignature = Buffer.from(encodedSignature, "base64url");
   if (receivedSignature.length !== expectedSignature.length || !timingSafeEqual(receivedSignature, expectedSignature)) {
-    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_INVALID", "La autorizaci�n de Google no es v�lida.", 400);
+    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_INVALID", "La autorización de Google no es válida.", 400);
   }
 
   let payload: GoogleOAuthState;
   try {
     payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as GoogleOAuthState;
   } catch {
-    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_INVALID", "La autorizaci�n de Google no es v�lida.", 400);
+    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_INVALID", "La autorización de Google no es válida.", 400);
   }
 
   if (
@@ -203,7 +203,7 @@ export function parseGoogleOAuthState(value: string): GoogleOAuthState {
     || !Number.isInteger(payload.expiresAt)
     || payload.expiresAt < Math.floor(Date.now() / 1000)
   ) {
-    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_EXPIRED", "La autorizaci�n de Google expir�. Int�ntalo nuevamente.", 400);
+    throw new GoogleWorkspaceClientError("GOOGLE_OAUTH_STATE_EXPIRED", "La autorización de Google expiró. Inténtalo nuevamente.", 400);
   }
 
   return payload;
@@ -269,7 +269,7 @@ export async function exchangeGoogleAuthorizationCode(code: string): Promise<Goo
   if (!response.ok || !payload || typeof payload.access_token !== "string") {
     throw new GoogleWorkspaceClientError(
       "GOOGLE_OAUTH_EXCHANGE_FAILED",
-      googleErrorMessage(payload, "Google no pudo completar la autorizaci�n."),
+      googleErrorMessage(payload, "Google no pudo completar la autorización."),
       400
     );
   }
@@ -296,7 +296,7 @@ export async function refreshGoogleAccessToken(refreshToken: string): Promise<Go
   });
   const payload = await readGoogleJson(response) as Record<string, unknown> | null;
   if (!response.ok || !payload || typeof payload.access_token !== "string") {
-    const message = googleErrorMessage(payload, "Google rechaz� la autorizaci�n almacenada.");
+    const message = googleErrorMessage(payload, "Google rechazó la autorización almacenada.");
     const isInvalidGrant = payload?.error === "invalid_grant";
     throw new GoogleWorkspaceClientError(
       isInvalidGrant ? "GOOGLE_OAUTH_REAUTH_REQUIRED" : "GOOGLE_OAUTH_REFRESH_FAILED",
@@ -348,7 +348,7 @@ export function encryptGoogleRefreshToken(refreshToken: string, email: string) {
 export function decryptGoogleRefreshToken(value: string, email: string) {
   const [version, encodedIv, encodedAuthTag, encodedCiphertext, ...rest] = value.split(".");
   if (version !== TOKEN_CIPHER_VERSION || !encodedIv || !encodedAuthTag || !encodedCiphertext || rest.length > 0) {
-    throw new GoogleWorkspaceClientError("GOOGLE_TOKEN_INVALID", "La autorizaci�n almacenada no es v�lida.", 500);
+    throw new GoogleWorkspaceClientError("GOOGLE_TOKEN_INVALID", "La autorización almacenada no es válida.", 500);
   }
 
   try {
@@ -360,7 +360,7 @@ export function decryptGoogleRefreshToken(value: string, email: string) {
       decipher.final()
     ]).toString("utf8");
   } catch {
-    throw new GoogleWorkspaceClientError("GOOGLE_TOKEN_DECRYPT_FAILED", "No fue posible abrir la autorizaci�n almacenada.", 500);
+    throw new GoogleWorkspaceClientError("GOOGLE_TOKEN_DECRYPT_FAILED", "No fue posible abrir la autorización almacenada.", 500);
   }
 }
 
@@ -377,13 +377,13 @@ function wrapBase64(value: string) {
 }
 
 export function buildTestMessageRaw(senderEmail: string, senderName: string) {
-  const subject = "Prueba de conexi�n de SIGE con Google Workspace";
+  const subject = "Prueba de conexión de SIGE con Google Workspace";
   const body = [
     `Hola ${senderName},`,
     "",
     "Este correo confirma que SIGE puede enviar mensajes mediante tu cuenta de Google Workspace.",
     "",
-    "La prueba fue enviada �nicamente a tu propia direcci�n.",
+    "La prueba fue enviada únicamente a tu propia dirección.",
     "",
     "SIGE"
   ].join("\r\n");
@@ -401,25 +401,18 @@ export function buildTestMessageRaw(senderEmail: string, senderName: string) {
 }
 
 export function buildPeriodicMessageRaw(input: {
-  senderEmail: string;
-  to: string[];
-  cc: string[];
-  bcc: string[];
-  subject: string;
-  bodyHtml: string;
-  signatureText?: string | null;
+  senderEmail: string; to: string[]; cc: string[]; bcc: string[];
+  subject: string; bodyHtml: string; signatureText?: string | null;
 }) {
   const body = `${input.bodyHtml}${input.signatureText ? `<br><br>${input.signatureText.replace(/\n/g, "<br>")}` : ""}`;
   const headers = [
-    `From: <${sanitizeHeader(input.senderEmail)}>` ,
+    `From: <${sanitizeHeader(input.senderEmail)}>`,
     `To: ${input.to.map(sanitizeHeader).join(", ")}`,
     input.cc.length ? `Cc: ${input.cc.map(sanitizeHeader).join(", ")}` : null,
     input.bcc.length ? `Bcc: ${input.bcc.map(sanitizeHeader).join(", ")}` : null,
     `Subject: ${encodeHeader(input.subject)}`,
-    "MIME-Version: 1.0",
-    "Content-Type: text/html; charset=UTF-8",
-    "Content-Transfer-Encoding: base64",
-    "",
+    "MIME-Version: 1.0", "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64", "",
     wrapBase64(Buffer.from(body, "utf8").toString("base64"))
   ].filter((value): value is string => value !== null);
   return Buffer.from(headers.join("\r\n"), "utf8").toString("base64url");
@@ -459,7 +452,7 @@ export async function revokeGoogleToken(token: string) {
   if (!response.ok && response.status !== 400) {
     throw new GoogleWorkspaceClientError(
       "GOOGLE_OAUTH_REVOKE_FAILED",
-      "Google no pudo revocar la autorizaci�n en este momento.",
+      "Google no pudo revocar la autorización en este momento.",
       502
     );
   }
