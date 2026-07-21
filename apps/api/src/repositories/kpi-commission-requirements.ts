@@ -703,6 +703,9 @@ export class KpiCommissionRequirementsService {
           data: { voidedAt: now }
         });
       }
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000
     });
   }
 }
