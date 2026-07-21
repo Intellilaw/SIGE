@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getSessionUser, requireAuth } from "../../core/auth/guards";
 import { AppError } from "../../core/errors/app-error";
 import { prisma } from "../../lib/prisma";
+import { getGoogleWorkspaceConfigurationStatus } from "./google-workspace.client";
 
 const emailList = z.array(z.string().trim().email()).max(500).default([]);
 const attachmentSchema = z.object({ name: z.string().min(1).max(180), size: z.number().int().nonnegative(), type: z.string().max(120) });
@@ -74,12 +75,24 @@ async function assertSenderBelongsToModule(request: FastifyRequest, moduleId: st
   }
 }
 
+async function assertSenderConnected(request: FastifyRequest, senderEmail: string) {
+  const user = getSessionUser(request);
+  const connection = await prisma.googleWorkspaceConnection.findFirst({ where: {
+    organizationId: user.organizationId, email: senderEmail.toLowerCase(), status: "ACTIVE", refreshTokenCiphertext: { not: null }
+  } });
+  if (!connection) throw new AppError(409, "PERIODIC_MESSAGE_SENDER_NOT_CONNECTED", "El remitente debe conectar su cuenta de Google Workspace antes de activar la programación.");
+}
+
 export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/periodic-messages/config", { preHandler: [requireAuth] }, async () => ({
-    deliveryEnabled: false,
-    provider: "GOOGLE_WORKSPACE",
-    notice: "Servicio de envío pendiente de configuración de Google Workspace."
-  }));
+  app.get("/periodic-messages/config", { preHandler: [requireAuth] }, async (request) => {
+    const user = getSessionUser(request);
+    const [configuration, connectedSenders] = await Promise.all([
+      getGoogleWorkspaceConfigurationStatus(),
+      prisma.googleWorkspaceConnection.count({ where: { organizationId: user.organizationId, status: "ACTIVE", refreshTokenCiphertext: { not: null } } })
+    ]);
+    return { deliveryEnabled: configuration.configured && connectedSenders > 0, oauthConfigured: configuration.configured, connectedSenders,
+      provider: "GOOGLE_WORKSPACE", notice: configuration.configured ? "Google Workspace listo para conectar y utilizar remitentes." : configuration.error };
+  });
 
   app.get("/periodic-messages/teams", { preHandler: [requireAuth] }, async (request) => {
     const service = new app.services.TasksService(app.repositories.tasks);
@@ -90,10 +103,11 @@ export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
     const query = z.object({ teamKey: z.string().min(1) }).parse(request.query);
     await assertModuleAccess(request, query.teamKey);
     const user = getSessionUser(request);
-    return prisma.$queryRaw<Array<{ id: string; email: string; displayName: string }>>`
-      SELECT u."id", u."email", u."displayName"
+    return prisma.$queryRaw<Array<{ id: string; email: string; displayName: string; connectionStatus: string; connectedAt: Date | null }>>`
+      SELECT u."id", u."email", u."displayName", COALESCE(gwc."status", 'NOT_CONNECTED') AS "connectionStatus", gwc."connectedAt"
       FROM "User" u
       INNER JOIN "TaskModule" tm ON tm."id" = ${query.teamKey}
+      LEFT JOIN "GoogleWorkspaceConnection" gwc ON gwc."organizationId" = u."organizationId" AND lower(gwc."email") = lower(u."email")
       WHERE u."organizationId" = ${user.organizationId}
         AND u."isActive" = true
         AND lower(u."email") LIKE '%@rusconi.law'
@@ -124,6 +138,7 @@ export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
     const payload = messageSchema.parse(request.body);
     await assertModuleAccess(request, payload.teamKey);
     await assertSenderBelongsToModule(request, payload.teamKey, payload.senderEmail);
+    if (payload.status === "ACTIVE") await assertSenderConnected(request, payload.senderEmail);
     const user = getSessionUser(request);
     const record = await prisma.periodicMessage.create({ data: {
       ...payload,
@@ -143,6 +158,7 @@ export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
     await assertModuleAccess(request, current.teamKey);
     await assertModuleAccess(request, payload.teamKey);
     await assertSenderBelongsToModule(request, payload.teamKey, payload.senderEmail);
+    if (payload.status === "ACTIVE") await assertSenderConnected(request, payload.senderEmail);
     return prisma.periodicMessage.update({ where: { id: messageId }, data: {
       ...payload, startAt: new Date(payload.startAt), endAt: payload.endAt ? new Date(payload.endAt) : null,
       nextRunAt: new Date(payload.startAt), updatedByUserId: user.id, updatedByName: user.displayName
