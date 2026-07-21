@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 
 type Sender = { id: string; email: string; displayName: string; connectionStatus: string; connectedAt: string | null };
+type SenderSignature = { senderEmail: string; signatureText: string | null };
 type Attachment = { name: string; size: number; type: string };
 type Delivery = { id: string; scheduledFor: string; status: string; attemptCount: number; sentAt: string | null; failureMessage: string | null };
 type Message = FormState & { id: string; nextRunAt: string | null; updatedAt: string; createdByName: string };
@@ -173,16 +174,23 @@ function TeamMessages({ teams, slug, onBack }: { teams: TaskModuleDefinition[]; 
   const [saving, setSaving] = useState(false);
   const [historyFor, setHistoryFor] = useState<Message | null>(null);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [signatures, setSignatures] = useState<Record<string, string>>({});
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   async function load(moduleId: string) {
-    const [senderRows, messageRows] = await Promise.all([
+    const [senderRows, messageRows, signatureRows] = await Promise.all([
       apiGet<Sender[]>(`/periodic-messages/senders?teamKey=${encodeURIComponent(moduleId)}`),
-      apiGet<Message[]>(`/periodic-messages?teamKey=${encodeURIComponent(moduleId)}`)
+      apiGet<Message[]>(`/periodic-messages?teamKey=${encodeURIComponent(moduleId)}`),
+      apiGet<SenderSignature[]>(`/periodic-messages/signatures?teamKey=${encodeURIComponent(moduleId)}`)
     ]);
+    const loadedSignatures = Object.fromEntries(signatureRows.map((row) => [row.senderEmail.toLowerCase(), row.signatureText ?? ""]));
+    setSignatures(loadedSignatures);
     setSenders(senderRows); setMessages(messageRows);
     const preferredSender = senderRows.find((sender) => sender.connectionStatus === "ACTIVE") ?? senderRows[0];
-    setForm((current) => ({ ...current, teamKey: moduleId, senderEmail: current.senderEmail || preferredSender?.email || "" }));
+    setForm((current) => {
+      const senderEmail = current.senderEmail || preferredSender?.email || "";
+      return { ...current, teamKey: moduleId, senderEmail, signatureText: current.signatureText || loadedSignatures[senderEmail.toLowerCase()] || "" };
+    });
   }
   useEffect(() => { if (team) void load(team.id).catch((reason) => setError(reason instanceof Error ? reason.message : "No fue posible cargar el módulo.")); }, [team?.id]);
   const totalFailures = useMemo(() => 0, [messages]);
@@ -227,13 +235,13 @@ function TeamMessages({ teams, slug, onBack }: { teams: TaskModuleDefinition[]; 
     <section className="panel"><div className="panel-header"><h2>{editingId ? "Editar programación" : "Nueva programación"}</h2><span>{senders.length} remitentes autorizados</span></div>
       <form className="periodic-message-form" onSubmit={submit}>
         <label>Nombre interno<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
-        <label>Remitente<select value={form.senderEmail} onChange={(e) => setForm({ ...form, senderEmail: e.target.value })} required><option value="">Seleccionar</option>{senders.map((sender) => <option key={sender.id} value={sender.email}>{sender.displayName} — {sender.email}{sender.connectionStatus === "ACTIVE" ? " — Google conectado" : " — sin conectar"}</option>)}</select></label>
+        <label>Remitente<select value={form.senderEmail} onChange={(e) => { const senderEmail = e.target.value; setForm({ ...form, senderEmail, signatureText: signatures[senderEmail.toLowerCase()] ?? "" }); }} required><option value="">Seleccionar</option>{senders.map((sender) => <option key={sender.id} value={sender.email}>{sender.displayName} — {sender.email}{sender.connectionStatus === "ACTIVE" ? " — Google conectado" : " — sin conectar"}</option>)}</select></label>
         <label className="span-2">Para<textarea value={form.toRecipients.join("; ")} onChange={(e) => setForm({ ...form, toRecipients: csv(e.target.value) })} placeholder="correo@ejemplo.com; otro@ejemplo.com" required /></label>
         <label>CC<textarea value={form.ccRecipients.join("; ")} onChange={(e) => setForm({ ...form, ccRecipients: csv(e.target.value) })} /></label>
         <label>CCO<textarea value={form.bccRecipients.join("; ")} onChange={(e) => setForm({ ...form, bccRecipients: csv(e.target.value) })} /></label>
         <label className="span-2">Asunto<input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required /></label>
         <div className="span-2 periodic-editor"><span>Mensaje</span><div className="periodic-editor-toolbar"><button type="button" onClick={() => applyFormat("<strong>", "</strong>")}><strong>N</strong></button><button type="button" onClick={() => applyFormat("<em>", "</em>")}><em>C</em></button><button type="button" onClick={() => applyFormat("<u>", "</u>")}><u>S</u></button><button type="button" onClick={() => applyFormat("<ul><li>", "</li></ul>")}>Lista</button><button type="button" onClick={() => applyFormat('<a href="https://">', "</a>")}>Enlace</button></div><textarea ref={bodyRef} value={form.bodyHtml} onChange={(e) => setForm({ ...form, bodyHtml: e.target.value })} rows={8} required /></div>
-        <label className="span-2">Firma en texto<textarea value={form.signatureText ?? ""} onChange={(e) => setForm({ ...form, signatureText: e.target.value })} rows={3} /></label>
+        <label className="span-2">Firma persistente del remitente para este equipo<textarea value={form.signatureText ?? ""} onChange={(e) => setForm({ ...form, signatureText: e.target.value })} rows={3} /><small>Al guardar, esta firma se aplicará a todas las automatizaciones de este remitente dentro de {team.label}.</small></label>
         <label className="span-2">Adjuntos (máximo 20; se registran ahora y se cargarán al habilitar Google Workspace)<input type="file" multiple onChange={(e) => setForm({ ...form, attachments: Array.from(e.target.files ?? []).map((file) => ({ name: file.name, size: file.size, type: file.type })) })} />{form.attachments.length ? <small>{form.attachments.map((item) => item.name).join(", ")}</small> : null}</label>
         <label>Frecuencia<select value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value as FormState["frequency"] })}><option value="DAILY">Diaria</option><option value="WEEKLY">Semanal</option><option value="MONTHLY">Mensual</option><option value="CUSTOM">Personalizada</option></select></label>
         <label>Intervalo<input type="number" min="1" max="365" value={form.interval} onChange={(e) => setForm({ ...form, interval: Number(e.target.value) })} /></label>

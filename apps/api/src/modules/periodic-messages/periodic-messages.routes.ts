@@ -116,6 +116,22 @@ export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
     `;
   });
 
+  app.get("/periodic-messages/signatures", { preHandler: [requireAuth] }, async (request) => {
+    const query = z.object({ teamKey: z.string().min(1) }).parse(request.query);
+    await assertModuleAccess(request, query.teamKey);
+    const user = getSessionUser(request);
+    return prisma.$queryRaw<Array<{ senderEmail: string; signatureText: string | null }>>`
+      SELECT DISTINCT ON (lower(pm."senderEmail"))
+        lower(pm."senderEmail") AS "senderEmail",
+        pm."signatureText" AS "signatureText"
+      FROM "PeriodicMessage" pm
+      WHERE pm."organizationId" = ${user.organizationId}
+        AND pm."teamKey" = ${query.teamKey}
+        AND pm."deletedAt" IS NULL
+      ORDER BY lower(pm."senderEmail"), pm."updatedAt" DESC
+    `;
+  });
+
   app.get("/periodic-messages", { preHandler: [requireAuth] }, async (request) => {
     const query = z.object({ teamKey: z.string().min(1) }).parse(request.query);
     await assertModuleAccess(request, query.teamKey);
@@ -146,6 +162,10 @@ export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
       nextRunAt: new Date(payload.startAt), organizationId: user.organizationId,
       createdByUserId: user.id, createdByName: user.displayName, updatedByUserId: user.id, updatedByName: user.displayName
     } });
+    await prisma.periodicMessage.updateMany({
+      where: { organizationId: user.organizationId, teamKey: payload.teamKey, senderEmail: { equals: payload.senderEmail, mode: "insensitive" }, deletedAt: null },
+      data: { signatureText: payload.signatureText ?? null, updatedByUserId: user.id, updatedByName: user.displayName }
+    });
     reply.code(201);
     return record;
   });
@@ -159,10 +179,15 @@ export const periodicMessagesRoutes: FastifyPluginAsync = async (app) => {
     await assertModuleAccess(request, payload.teamKey);
     await assertSenderBelongsToModule(request, payload.teamKey, payload.senderEmail);
     if (payload.status === "ACTIVE") await assertSenderConnected(request, payload.senderEmail);
-    return prisma.periodicMessage.update({ where: { id: messageId }, data: {
+    const updated = await prisma.periodicMessage.update({ where: { id: messageId }, data: {
       ...payload, startAt: new Date(payload.startAt), endAt: payload.endAt ? new Date(payload.endAt) : null,
       nextRunAt: new Date(payload.startAt), updatedByUserId: user.id, updatedByName: user.displayName
     } });
+    await prisma.periodicMessage.updateMany({
+      where: { organizationId: user.organizationId, teamKey: payload.teamKey, senderEmail: { equals: payload.senderEmail, mode: "insensitive" }, deletedAt: null },
+      data: { signatureText: payload.signatureText ?? null, updatedByUserId: user.id, updatedByName: user.displayName }
+    });
+    return updated;
   });
 
   app.delete("/periodic-messages/:messageId", { preHandler: [requireAuth] }, async (request, reply) => {
