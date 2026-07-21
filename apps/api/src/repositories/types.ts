@@ -55,6 +55,7 @@ import type {
   LaborGlobalVacationDayInput,
   LaborPreviousYearPendingVacationInput,
   LaborVacationConflictAuthorization,
+  LaborVacationConflictRequest,
   LaborVacationEvent,
   LaborVacationEventInput,
   LaborVacationTeamConflict,
@@ -300,6 +301,14 @@ export interface LaborVacationConflictAuthorizationWriteRecord {
   note?: string | null;
 }
 
+export interface LaborVacationConflictRequestWriteRecord {
+  vacationDates: string[];
+  conflicts: LaborVacationTeamConflict[];
+  requestedByUserId?: string | null;
+  requestedByName: string;
+  requestedByEmail: string;
+}
+
 export interface LaborFilesRepository {
   list(): Promise<LaborFile[]>;
   listActiveUserIds(): Promise<string[]>;
@@ -317,6 +326,10 @@ export interface LaborFilesRepository {
   createVacationEvent(laborFileId: string, payload: LaborVacationEventInput): Promise<LaborVacationEvent>;
   findVacationConflictAuthorization(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]): Promise<LaborVacationConflictAuthorization | null>;
   createVacationConflictAuthorization(laborFileId: string, payload: LaborVacationConflictAuthorizationWriteRecord): Promise<LaborVacationConflictAuthorization>;
+  listPendingVacationConflictRequests(): Promise<LaborVacationConflictRequest[]>;
+  upsertVacationConflictRequest(laborFileId: string, payload: LaborVacationConflictRequestWriteRecord): Promise<LaborVacationConflictRequest>;
+  resolveVacationConflictRequest(laborFileId: string, vacationDates: string[], conflicts: LaborVacationTeamConflict[]): Promise<void>;
+  clearVacationConflictRequest(laborFileId: string): Promise<void>;
   setPreviousYearPendingVacationDays(laborFileId: string, payload: LaborPreviousYearPendingVacationInput & {
     previousYearStartDate: string;
     previousYearEndDate: string;
@@ -562,6 +575,18 @@ export interface GeneralExpensePayrollUpdateRecord {
   reviewedByJnls?: boolean;
 }
 
+export interface GeneralExpensePayrollDistributionUpdateRecord {
+  pctLitigation: number;
+  pctCorporateLabor: number;
+  pctSettlements: number;
+  pctFinancialLaw: number;
+  pctTaxCompliance: number;
+}
+
+export interface GeneralExpensePayrollDistributionRecord extends GeneralExpensePayrollDistributionUpdateRecord {
+  id: string;
+}
+
 export interface GeneralExpenseActor extends Pick<
   AuthUser,
   "email" | "username" | "displayName" | "shortName" | "role" | "legacyRole" | "team" | "legacyTeam" | "secondaryTeam" | "secondaryLegacyTeam" | "specificRole" | "secondarySpecificRole" | "permissions"
@@ -596,6 +621,10 @@ export interface GeneralExpensesRepository {
     payload: GeneralExpensePayrollUpdateRecord,
     actor: GeneralExpenseActor
   ): Promise<GeneralExpensePayrollEntry | null>;
+  updatePayrollDistribution(
+    payrollEntryId: string,
+    payload: GeneralExpensePayrollDistributionUpdateRecord
+  ): Promise<GeneralExpensePayrollDistributionRecord>;
   deletePayrollEntry(payrollEntryId: string): Promise<void>;
 }
 

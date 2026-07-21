@@ -3,6 +3,7 @@ import type {
   GeneralExpenseCreateRecord,
   GeneralExpenseEmrtAcknowledgementUpdateRecord,
   GeneralExpensePayrollCreateRecord,
+  GeneralExpensePayrollDistributionUpdateRecord,
   GeneralExpensePayrollUpdateRecord,
   GeneralExpenseUpdateRecord,
   GeneralExpensesRepository
@@ -65,6 +66,13 @@ export class GeneralExpensesService {
     actor: GeneralExpenseActor
   ) {
     return this.repository.updatePayrollEntry(payrollEntryId, payload, actor);
+  }
+
+  public updatePayrollDistribution(
+    payrollEntryId: string,
+    payload: GeneralExpensePayrollDistributionUpdateRecord
+  ) {
+    return this.repository.updatePayrollDistribution(payrollEntryId, payload);
   }
 
   public deletePayrollEntry(payrollEntryId: string) {

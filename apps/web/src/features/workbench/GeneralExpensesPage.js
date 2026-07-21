@@ -44,6 +44,7 @@ const PAYROLL_MONEY_FIELDS = [
 const PAYROLL_DAILY_SALARY_RI_CONNECTION_ID = "RI-003";
 const PAYROLL_BONUS_RATE = 0.1;
 const PAYROLL_DISTRIBUTION_AUTOSAVE_DELAY_MS = 250;
+const PAYROLL_PATCH_MAX_CONCURRENCY = 4;
 function toErrorMessage(error) {
     if (error instanceof Error && error.message) {
         return error.message;
@@ -550,7 +551,9 @@ export function GeneralExpensesPage() {
     const now = new Date();
     const expensePatchSequenceRef = useRef({});
     const payrollPatchSequenceRef = useRef({});
-    const payrollPatchQueueRef = useRef(Promise.resolve());
+    const payrollPatchEntryQueuesRef = useRef({});
+    const payrollPatchActiveCountRef = useRef(0);
+    const payrollPatchWaitersRef = useRef([]);
     const payrollDistributionAutosaveTimersRef = useRef({});
     const emrtAcknowledgementPatchSequenceRef = useRef({});
     const expenseRowRefs = useRef(new Map());
@@ -917,7 +920,7 @@ export function GeneralExpensesPage() {
         updatePayrollEntryLocal(entryId, localPatch);
         const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
         payrollPatchSequenceRef.current[entryId] = requestSequence;
-        const queuedPatch = payrollPatchQueueRef.current.then(async () => {
+        await enqueuePayrollPatch(entryId, async () => {
             try {
                 const updated = await apiPatch(`/general-expenses/payroll/${entryId}`, payload);
                 if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
@@ -939,8 +942,73 @@ export function GeneralExpensesPage() {
                 }
             }
         });
-        payrollPatchQueueRef.current = queuedPatch.catch(() => undefined);
-        await queuedPatch;
+    }
+    async function acquirePayrollPatchSlot() {
+        if (payrollPatchActiveCountRef.current < PAYROLL_PATCH_MAX_CONCURRENCY) {
+            payrollPatchActiveCountRef.current += 1;
+            return;
+        }
+        await new Promise((resolve) => {
+            payrollPatchWaitersRef.current.push(resolve);
+        });
+    }
+    function releasePayrollPatchSlot() {
+        const nextWaiter = payrollPatchWaitersRef.current.shift();
+        if (nextWaiter) {
+            nextWaiter();
+            return;
+        }
+        payrollPatchActiveCountRef.current = Math.max(0, payrollPatchActiveCountRef.current - 1);
+    }
+    async function enqueuePayrollPatch(entryId, execute) {
+        const previous = payrollPatchEntryQueuesRef.current[entryId] ?? Promise.resolve();
+        const queued = previous.catch(() => undefined).then(async () => {
+            await acquirePayrollPatchSlot();
+            try {
+                await execute();
+            }
+            finally {
+                releasePayrollPatchSlot();
+            }
+        });
+        const settled = queued.catch(() => undefined);
+        payrollPatchEntryQueuesRef.current[entryId] = settled;
+        await queued;
+        if (payrollPatchEntryQueuesRef.current[entryId] === settled) {
+            delete payrollPatchEntryQueuesRef.current[entryId];
+        }
+    }
+    async function persistPayrollDistribution(entryId, patch) {
+        const currentEntry = payrollEntries.find((entry) => entry.id === entryId);
+        if (!currentEntry || !canWrite || currentEntry.finalPaymentApprovedByEmrt || currentEntry.generalExpense) {
+            return;
+        }
+        const previousPatch = {
+            pctLitigation: currentEntry.pctLitigation,
+            pctCorporateLabor: currentEntry.pctCorporateLabor,
+            pctSettlements: currentEntry.pctSettlements,
+            pctFinancialLaw: currentEntry.pctFinancialLaw,
+            pctTaxCompliance: currentEntry.pctTaxCompliance
+        };
+        updatePayrollEntryLocal(entryId, patch);
+        const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
+        payrollPatchSequenceRef.current[entryId] = requestSequence;
+        await enqueuePayrollPatch(entryId, async () => {
+            try {
+                const updated = await apiPatch(`/general-expenses/payroll/${entryId}/distribution`, patch);
+                if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+                    return;
+                }
+                updatePayrollEntryLocal(entryId, updated);
+            }
+            catch (error) {
+                if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
+                    return;
+                }
+                updatePayrollEntryLocal(entryId, previousPatch);
+                setErrorMessage(toErrorMessage(error));
+            }
+        });
     }
     async function flushPayrollDraftField(entryId, field) {
         const rawValue = payrollDrafts[entryId]?.[field];
@@ -961,7 +1029,7 @@ export function GeneralExpensesPage() {
         cancelPayrollDistributionAutosave(entry.id);
         const patch = getPayrollDistributionPatch(entry, overrides);
         clearPayrollDistributionDrafts(entry.id);
-        await persistPayrollPatch(entry.id, patch, patch);
+        await persistPayrollDistribution(entry.id, patch);
     }
     function schedulePayrollDistributionAutosave(entry, field, rawValue) {
         setPayrollDraft(entry.id, field, rawValue);
@@ -970,7 +1038,7 @@ export function GeneralExpensesPage() {
         payrollDistributionAutosaveTimersRef.current[entry.id] = window.setTimeout(() => {
             delete payrollDistributionAutosaveTimersRef.current[entry.id];
             clearPayrollDistributionDrafts(entry.id);
-            void persistPayrollPatch(entry.id, patch, patch);
+            void persistPayrollDistribution(entry.id, patch);
         }, PAYROLL_DISTRIBUTION_AUTOSAVE_DELAY_MS);
     }
     async function handleAddRow() {

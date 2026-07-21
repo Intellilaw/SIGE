@@ -25,6 +25,7 @@ import type {
   GeneralExpenseCreateRecord,
   GeneralExpenseEmrtAcknowledgementUpdateRecord,
   GeneralExpensePayrollCreateRecord,
+  GeneralExpensePayrollDistributionUpdateRecord,
   GeneralExpensePayrollUpdateRecord,
   GeneralExpenseUpdateRecord,
   GeneralExpensesRepository
@@ -1450,6 +1451,58 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
     });
 
     return this.mapPayrollEntryWithMonthlyBonuses(record);
+  }
+
+  public async updatePayrollDistribution(
+    payrollEntryId: string,
+    payload: GeneralExpensePayrollDistributionUpdateRecord
+  ) {
+    const current = await this.findPayrollEntryOrThrow(payrollEntryId);
+    await assertCommissionPeriodUnlocked(this.prisma, current.year, current.month);
+
+    if (current.finalPaymentApprovedByEmrt) {
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_PAYROLL_FINAL_PAYMENT_LOCKED",
+        "La fila ya fue autorizada por EMRT y no admite cambios."
+      );
+    }
+
+    if (current.generalExpense) {
+      throw new AppError(
+        400,
+        "GENERAL_EXPENSE_PAYROLL_GENERAL_DISTRIBUTION_LOCKED",
+        "Desmarca Gasto general antes de modificar la distribucion de la nomina."
+      );
+    }
+
+    const record = await this.prisma.generalExpensePayrollEntry.update({
+      where: { id: payrollEntryId, organizationId: this.getOrganizationId() },
+      data: {
+        pctLitigation: new Prisma.Decimal(clampPercentage(payload.pctLitigation)),
+        pctCorporateLabor: new Prisma.Decimal(clampPercentage(payload.pctCorporateLabor)),
+        pctSettlements: new Prisma.Decimal(clampPercentage(payload.pctSettlements)),
+        pctFinancialLaw: new Prisma.Decimal(clampPercentage(payload.pctFinancialLaw)),
+        pctTaxCompliance: new Prisma.Decimal(clampPercentage(payload.pctTaxCompliance))
+      },
+      select: {
+        id: true,
+        pctLitigation: true,
+        pctCorporateLabor: true,
+        pctSettlements: true,
+        pctFinancialLaw: true,
+        pctTaxCompliance: true
+      }
+    });
+
+    return {
+      id: record.id,
+      pctLitigation: Number(record.pctLitigation),
+      pctCorporateLabor: Number(record.pctCorporateLabor),
+      pctSettlements: Number(record.pctSettlements),
+      pctFinancialLaw: Number(record.pctFinancialLaw),
+      pctTaxCompliance: Number(record.pctTaxCompliance)
+    };
   }
 
   public async deletePayrollEntry(payrollEntryId: string) {

@@ -98,6 +98,17 @@ export const appModules: AppModuleDefinition[] = [
     coverage: ["Entrada por equipo", "Vista diaria por integrante", "Tablero con filas en rojo"]
   },
   {
+    id: "periodic-messages",
+    path: "/app/periodic-messages",
+    label: "Mensajes periódicos programados",
+    shortLabel: "Mensajes programados",
+    icon: "\u2709\uFE0F",
+    description: "Programación central de correos periódicos por equipo mediante remitentes autorizados de Google Workspace.",
+    phase: "Operativo",
+    available: true,
+    coverage: ["Entrada independiente por equipo", "Programaciones y días inhábiles", "Historial, reintentos y auditoría"]
+  },
+  {
     id: "sales",
     path: "/app/sales",
     label: "Ventas",

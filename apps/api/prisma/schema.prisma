@@ -59,6 +59,7 @@ model Organization {
   laborFileDocuments                     LaborFileDocument[]
   laborVacationEvents                    LaborVacationEvent[]
   laborVacationConflictAuthorizations    LaborVacationConflictAuthorization[]
+  laborVacationConflictRequests          LaborVacationConflictRequest[]
   laborGlobalVacationDays                LaborGlobalVacationDay[]
   userTeams                              UserTeam[]
   systemModuleSettings                   SystemModuleSetting[]
@@ -68,6 +69,8 @@ model Organization {
   kpiCommissionObligations               KpiCommissionObligation[]
   kpiCommissionRepairs                   KpiCommissionRepair[]
   auditLogs                              AuditLog[]
+  periodicMessages                       PeriodicMessage[]
+  periodicMessageDeliveries              PeriodicMessageDelivery[]
 
   @@index([isActive, name])
 }
@@ -100,6 +103,8 @@ model User {
   refreshTokens                      RefreshToken[]
   passwordResetTokens                PasswordResetToken[]
   auditLogs                          AuditLog[]
+  createdPeriodicMessages            PeriodicMessage[]         @relation("PeriodicMessageCreator")
+  periodicMessageDeliveries          PeriodicMessageDelivery[] @relation("PeriodicMessageDeliveryCreator")
   laborFile                          LaborFile?
   generalSupervisionObservedSettings GeneralSupervisionObservedUser[]
   organization                       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -127,6 +132,70 @@ model UserTeam {
   @@index([organizationId, isActive, sortOrder])
   @@index([organizationId, executionSpaceEnabled])
   @@index([organizationId, label])
+}
+
+model PeriodicMessage {
+  id                        String                    @id @default(uuid())
+  organizationId            String                    @default("org-rusconi")
+  teamKey                   String
+  name                      String
+  senderEmail               String
+  toRecipients              Json                      @default("[]")
+  ccRecipients              Json                      @default("[]")
+  bccRecipients             Json                      @default("[]")
+  subject                   String
+  bodyHtml                  String
+  signatureText             String?
+  attachments               Json                      @default("[]")
+  frequency                 String
+  interval                  Int                       @default(1)
+  weekdays                  Json                      @default("[]")
+  dayOfMonth                Int?
+  startAt                   DateTime
+  endAt                     DateTime?
+  timezone                  String                    @default("America/Mexico_City")
+  nonBusinessDayPolicy      String                    @default("NEXT_BUSINESS_DAY")
+  nonBusinessOverrideAck    Boolean                   @default(false)
+  status                    String                    @default("PAUSED")
+  nextRunAt                 DateTime?
+  lastRunAt                 DateTime?
+  createdByUserId           String
+  createdByName             String
+  updatedByUserId           String
+  updatedByName             String
+  deletedAt                 DateTime?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  organization              Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy                 User                      @relation("PeriodicMessageCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  deliveries               PeriodicMessageDelivery[]
+
+  @@index([organizationId, teamKey, status, deletedAt])
+  @@index([organizationId, nextRunAt, status])
+}
+
+model PeriodicMessageDelivery {
+  id                       String          @id @default(uuid())
+  organizationId           String          @default("org-rusconi")
+  periodicMessageId        String
+  scheduledFor             DateTime
+  idempotencyKey           String
+  status                   String          @default("PENDING")
+  attemptCount             Int             @default(0)
+  lastAttemptAt            DateTime?
+  sentAt                   DateTime?
+  failureMessage           String?
+  messageSnapshot          Json
+  createdByUserId          String
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  organization             Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  periodicMessage          PeriodicMessage @relation(fields: [periodicMessageId], references: [id], onDelete: Restrict)
+  createdBy                User            @relation("PeriodicMessageDeliveryCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, periodicMessageId, scheduledFor])
+  @@index([organizationId, status, scheduledFor])
 }
 
 model SystemModuleSetting {
@@ -212,6 +281,7 @@ model LaborFile {
   documents                         LaborFileDocument[]
   vacationEvents                    LaborVacationEvent[]
   vacationConflictAuthorizations    LaborVacationConflictAuthorization[]
+  vacationConflictRequests           LaborVacationConflictRequest[]
   generalExpensePayrollEntries      GeneralExpensePayrollEntry[]
 
   @@index([organizationId, status, employmentStatus])
@@ -283,6 +353,25 @@ model LaborVacationConflictAuthorization {
 
   @@unique([organizationId, laborFileId, requestKey])
   @@index([organizationId, laborFileId, createdAt])
+}
+
+model LaborVacationConflictRequest {
+  id                String       @id @default(uuid())
+  organizationId    String       @default("org-rusconi")
+  laborFileId       String
+  requestKey        String
+  vacationDates     Json
+  conflicts         Json
+  requestedByUserId String?
+  requestedByName   String
+  requestedByEmail  String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  laborFile         LaborFile    @relation(fields: [laborFileId], references: [id], onDelete: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, laborFileId])
+  @@index([organizationId, updatedAt])
 }
 
 model LaborGlobalVacationDay {

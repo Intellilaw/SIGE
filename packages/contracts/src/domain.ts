@@ -325,6 +325,20 @@ export interface LaborVacationConflictAuthorization {
   updatedAt: string;
 }
 
+export interface LaborVacationConflictRequest {
+  id: string;
+  laborFileId: string;
+  employeeName: string;
+  teamName: string;
+  requestedDates: string[];
+  conflicts: LaborVacationTeamConflict[];
+  requestedByUserId?: string;
+  requestedByName: string;
+  requestedByEmail: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LaborVacationConflictCheckResult {
   hasConflicts: boolean;
   canGenerate: boolean;

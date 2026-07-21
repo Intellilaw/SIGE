@@ -11,6 +11,7 @@ import {
   type LaborGlobalVacationDayInput,
   type LaborPreviousYearPendingVacationInput,
   type LaborVacationConflictCheckResult,
+  type LaborVacationConflictRequest,
   type LaborVacationEvent,
   type LaborVacationFormatFieldValues
 } from "@sige/contracts";
@@ -573,12 +574,12 @@ function isEduardoRusconi(input: {
   username?: string;
   displayName?: string;
   email?: string;
+  shortName?: string;
 }) {
-  return (
-    normalizeComparableText(input.username) === "eduardo rusconi" ||
-    normalizeComparableText(input.displayName) === "eduardo rusconi" ||
-    (input.email ?? "").toLowerCase().startsWith("eduardo.rusconi")
-  );
+  return [input.username, input.displayName, input.email, input.shortName].some((value) => {
+    const normalized = normalizeComparableText(value);
+    return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
+  });
 }
 
 function isMayraOrdonez(input: {
@@ -932,6 +933,10 @@ export function LaborFilesPage() {
   const [checkingVacationConflicts, setCheckingVacationConflicts] = useState(false);
   const [authorizingVacationConflict, setAuthorizingVacationConflict] = useState(false);
   const [vacationConflictAuthorizationNote, setVacationConflictAuthorizationNote] = useState("");
+  const [pendingVacationConflictRequests, setPendingVacationConflictRequests] = useState<LaborVacationConflictRequest[]>([]);
+  const [loadingPendingVacationConflicts, setLoadingPendingVacationConflicts] = useState(false);
+  const [pendingVacationConflictNotes, setPendingVacationConflictNotes] = useState<Record<string, string>>({});
+  const [authorizingPendingVacationConflictId, setAuthorizingPendingVacationConflictId] = useState<string | null>(null);
   const [previousYearPendingForm, setPreviousYearPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
   const [yearBeforeLastPendingForm, setYearBeforeLastPendingForm] = useState<PreviousYearPendingVacationForm>(EMPTY_PREVIOUS_YEAR_PENDING_FORM);
   const [savingPreviousYearPending, setSavingPreviousYearPending] = useState(false);
@@ -956,7 +961,8 @@ export function LaborFilesPage() {
   const canOverrideVacationConflicts = Boolean(user && isEduardoRusconi({
     username: user.username,
     displayName: user.displayName,
-    email: user.email
+    email: user.email,
+    shortName: user.shortName
   }));
   const canDeleteApprovedVacationFormats = Boolean(user && isEduardoRusconi({
     username: user.username,
@@ -1019,10 +1025,32 @@ export function LaborFilesPage() {
       setLaborFiles(sortedRows);
       setGlobalVacationDays(globalDays);
       setSelectedId((current) => getDefaultLaborFileId(sortedRows, preferredId || current));
+      if (canOverrideVacationConflicts) {
+        void refreshPendingVacationConflictRequests();
+      }
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function refreshPendingVacationConflictRequests(showError = false) {
+    if (!canOverrideVacationConflicts) {
+      setPendingVacationConflictRequests([]);
+      return;
+    }
+
+    setLoadingPendingVacationConflicts(true);
+    try {
+      const requests = await apiGet<LaborVacationConflictRequest[]>("/labor-files/vacation-conflict-requests/pending");
+      setPendingVacationConflictRequests(requests);
+    } catch (error) {
+      if (showError) {
+        setFlash({ tone: "error", text: toErrorMessage(error) });
+      }
+    } finally {
+      setLoadingPendingVacationConflicts(false);
     }
   }
 
@@ -1034,6 +1062,18 @@ export function LaborFilesPage() {
 
     void loadLaborFiles();
   }, [canRead]);
+
+  useEffect(() => {
+    if (!canOverrideVacationConflicts) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshPendingVacationConflictRequests();
+    }, 30_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [canOverrideVacationConflicts]);
 
   useEffect(() => {
     if (!selectedLaborFile) {
@@ -1490,6 +1530,9 @@ export function LaborFilesPage() {
         }
       );
       setVacationConflictCheck(result);
+      setPendingVacationConflictRequests((current) => current.filter((request) =>
+        request.laborFileId !== selectedLaborFile.id
+      ));
       setFlash({
         tone: "success",
         text: result.hasConflicts
@@ -1500,6 +1543,45 @@ export function LaborFilesPage() {
       setFlash({ tone: "error", text: toErrorMessage(error) });
     } finally {
       setAuthorizingVacationConflict(false);
+    }
+  }
+
+  async function handlePendingVacationConflictAuthorize(request: LaborVacationConflictRequest) {
+    if (!canOverrideVacationConflicts) {
+      return;
+    }
+
+    setAuthorizingPendingVacationConflictId(request.id);
+    setFlash(null);
+
+    try {
+      const result = await apiPost<LaborVacationConflictCheckResult>(
+        `/labor-files/${request.laborFileId}/vacation-format/conflicts/authorize`,
+        {
+          vacationDates: request.requestedDates,
+          note: pendingVacationConflictNotes[request.id] ?? ""
+        }
+      );
+      setPendingVacationConflictRequests((current) => current.filter((candidate) => candidate.id !== request.id));
+      setPendingVacationConflictNotes((current) => {
+        const next = { ...current };
+        delete next[request.id];
+        return next;
+      });
+      if (
+        selectedLaborFile?.id === request.laborFileId &&
+        vacationFormatForm.vacationDates.join("|") === request.requestedDates.join("|")
+      ) {
+        setVacationConflictCheck(result);
+      }
+      setFlash({
+        tone: "success",
+        text: `Conflicto de vacaciones autorizado para ${request.employeeName}. Ya se puede generar su Word.`
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setAuthorizingPendingVacationConflictId(null);
     }
   }
 
@@ -1934,6 +2016,98 @@ export function LaborFilesPage() {
         </div>
       ) : null}
       {errorMessage ? <div className="message-banner message-error">{errorMessage}</div> : null}
+
+      {canOverrideVacationConflicts ? (
+        <section className="panel labor-file-emrt-authorization-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Autorizaciones EMRT</h2>
+              <span>Conflictos de vacaciones que requieren tu decisión antes de generar el Word.</span>
+            </div>
+            <div className="labor-file-emrt-authorization-head-actions">
+              <span className={`status-pill ${pendingVacationConflictRequests.length > 0 ? "status-warning" : "status-live"}`}>
+                {pendingVacationConflictRequests.length} pendientes
+              </span>
+              <button
+                className="ghost-button"
+                disabled={loadingPendingVacationConflicts}
+                onClick={() => void refreshPendingVacationConflictRequests(true)}
+                type="button"
+              >
+                {loadingPendingVacationConflicts ? "Actualizando..." : "Actualizar"}
+              </button>
+            </div>
+          </div>
+
+          {loadingPendingVacationConflicts ? (
+            <div className="centered-inline-message">Cargando solicitudes pendientes...</div>
+          ) : pendingVacationConflictRequests.length === 0 ? (
+            <div className="centered-inline-message">No hay conflictos pendientes de autorización.</div>
+          ) : (
+            <div className="labor-file-emrt-authorization-list">
+              {pendingVacationConflictRequests.map((request) => (
+                <article className="labor-file-emrt-authorization-item" key={request.id}>
+                  <div className="labor-file-emrt-authorization-summary">
+                    <div>
+                      <strong>{request.employeeName}</strong>
+                      <span>{request.teamName}</span>
+                    </div>
+                    <div>
+                      <span>Periodo solicitado</span>
+                      <strong>{request.requestedDates.map(formatDate).join(", ")}</strong>
+                    </div>
+                    <small>
+                      Solicitado por {request.requestedByName} el {formatDateTime(request.updatedAt)}
+                    </small>
+                  </div>
+
+                  <div className="labor-file-emrt-authorization-conflicts">
+                    <strong>Se cruza con</strong>
+                    {request.conflicts.map((conflict) => (
+                      <div key={conflict.eventId}>
+                        <span>{conflict.employeeName}</span>
+                        <small>
+                          {conflict.dates.map(formatDate).join(", ")}
+                          {conflict.acceptanceOriginalFileName ? ` - ${conflict.acceptanceOriginalFileName}` : ""}
+                        </small>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="labor-file-emrt-authorization-actions">
+                    <label className="form-field">
+                      <span>Nota de autorización</span>
+                      <input
+                        placeholder="Motivo de la excepción (opcional)"
+                        value={pendingVacationConflictNotes[request.id] ?? ""}
+                        onChange={(event) => setPendingVacationConflictNotes((current) => ({
+                          ...current,
+                          [request.id]: event.target.value
+                        }))}
+                      />
+                    </label>
+                    <button
+                      className="ghost-button"
+                      onClick={() => setSelectedId(request.laborFileId)}
+                      type="button"
+                    >
+                      Ver expediente
+                    </button>
+                    <button
+                      className="primary-button"
+                      disabled={authorizingPendingVacationConflictId === request.id}
+                      onClick={() => void handlePendingVacationConflictAuthorize(request)}
+                      type="button"
+                    >
+                      {authorizingPendingVacationConflictId === request.id ? "Autorizando..." : "Autorizar conflicto"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {canWrite ? (
         <section className="panel labor-file-global-vacation-panel">

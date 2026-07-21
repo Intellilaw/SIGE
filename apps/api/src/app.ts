@@ -52,6 +52,7 @@ import { quotesRoutes } from "./modules/quotes/quotes.routes";
 import { leadsRoutes } from "./modules/leads/leads.routes";
 import { mattersRoutes } from "./modules/matters/matters.routes";
 import { moduleSettingsRoutes } from "./modules/module-settings/module-settings.routes";
+import { periodicMessagesRoutes } from "./modules/periodic-messages/periodic-messages.routes";
 import { salesRoutes } from "./modules/sales/sales.routes";
 import { tasksRoutes } from "./modules/tasks/tasks.routes";
 import { PrismaAccountingRepository } from "./repositories/accounting.repository";
@@ -328,6 +329,7 @@ export async function buildApp() {
     await api.register(leadsRoutes);
     await api.register(mattersRoutes);
     await api.register(moduleSettingsRoutes);
+    await api.register(periodicMessagesRoutes);
     await api.register(salesRoutes);
     await api.register(tasksRoutes);
   }, { prefix: "/api/v1" });

@@ -169,11 +169,10 @@ function normalizeComparableText(value?: string | null) {
 }
 
 function isEduardoRusconi(user: SessionUser) {
-  return (
-    normalizeComparableText(user.username) === "eduardo rusconi" ||
-    normalizeComparableText(user.displayName) === "eduardo rusconi" ||
-    user.email.toLowerCase().startsWith("eduardo.rusconi")
-  );
+  return [user.username, user.displayName, user.email, user.shortName].some((value) => {
+    const normalized = normalizeComparableText(value);
+    return normalized === "emrt" || (normalized.includes("eduardo") && normalized.includes("rusconi"));
+  });
 }
 
 function isMayraOrdonez(user: SessionUser) {
@@ -384,6 +383,55 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
   app.get("/labor-files", { preHandler: readGuards }, async (request) => {
     const user = getSessionUser(request);
     return canWriteLaborFiles(user) ? service.list() : service.listForUser(user.id);
+  });
+
+  app.get("/labor-files/vacation-conflict-requests/pending", { preHandler: writeGuards }, async (request) => {
+    const user = getSessionUser(request);
+    if (!isEduardoRusconi(user)) {
+      throw new AppError(
+        403,
+        "LABOR_VACATION_CONFLICT_REQUESTS_FORBIDDEN",
+        "Solo Eduardo Rusconi puede consultar las solicitudes pendientes por conflicto de vacaciones."
+      );
+    }
+
+    const [requests, laborFiles] = await Promise.all([
+      service.listPendingVacationConflictRequests(),
+      service.list()
+    ]);
+    const pending = [];
+
+    for (const conflictRequest of requests) {
+      const laborFile = laborFiles.find((candidate) => candidate.id === conflictRequest.laborFileId);
+      if (!laborFile) {
+        await service.clearVacationConflictRequest(conflictRequest.laborFileId);
+        continue;
+      }
+
+      const conflicts = findTeamVacationConflicts({
+        laborFiles,
+        laborFile,
+        dateKeys: conflictRequest.requestedDates
+      });
+      const authorization = conflicts.length > 0
+        ? await service.findVacationConflictAuthorization(laborFile.id, conflictRequest.requestedDates, conflicts)
+        : null;
+
+      if (conflicts.length === 0 || authorization) {
+        await service.clearVacationConflictRequest(conflictRequest.laborFileId);
+        continue;
+      }
+
+      pending.push(await service.upsertVacationConflictRequest(conflictRequest.laborFileId, {
+        vacationDates: conflictRequest.requestedDates,
+        conflicts,
+        requestedByUserId: conflictRequest.requestedByUserId,
+        requestedByName: conflictRequest.requestedByName,
+        requestedByEmail: conflictRequest.requestedByEmail
+      }));
+    }
+
+    return pending;
   });
 
   app.get("/labor-files/global-vacation-days", { preHandler: writeGuards }, async () => {
@@ -599,7 +647,22 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
   app.post("/labor-files/:laborFileId/vacation-format/conflicts/check", { preHandler: writeGuards }, async (request) => {
     const params = laborFileIdParamsSchema.parse(request.params);
     const payload = vacationConflictCheckSchema.parse(request.body ?? {});
-    return buildVacationConflictCheckResult(params.laborFileId, payload.vacationDates);
+    const user = getSessionUser(request);
+    const check = await buildVacationConflictCheckResult(params.laborFileId, payload.vacationDates);
+
+    if (check.hasConflicts && !check.authorization) {
+      await service.upsertVacationConflictRequest(params.laborFileId, {
+        vacationDates: check.requestedDates,
+        conflicts: check.conflicts,
+        requestedByUserId: user.id,
+        requestedByName: user.displayName || user.username || user.email,
+        requestedByEmail: user.email
+      });
+    } else {
+      await service.clearVacationConflictRequest(params.laborFileId);
+    }
+
+    return check;
   });
 
   app.post("/labor-files/:laborFileId/vacation-format/conflicts/authorize", { preHandler: writeGuards }, async (request) => {
@@ -617,6 +680,7 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
 
     const check = await buildVacationConflictCheckResult(params.laborFileId, payload.vacationDates);
     if (!check.hasConflicts) {
+      await service.clearVacationConflictRequest(params.laborFileId);
       return check;
     }
 
@@ -628,6 +692,7 @@ export const laborFilesRoutes: FastifyPluginAsync = async (app) => {
       authorizedByEmail: user.email,
       note: payload.note || null
     });
+    await service.resolveVacationConflictRequest(params.laborFileId, check.requestedDates, check.conflicts);
 
     return {
       ...check,

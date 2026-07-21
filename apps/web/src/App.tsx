@@ -25,6 +25,7 @@ import { TaskLegacyTablePage } from "./features/tasks/TaskLegacyTablePage";
 import { TaskTermsPage } from "./features/tasks/TaskTermsPage";
 import { TasksPage } from "./features/tasks/TasksPage";
 import { TasksTeamPage } from "./features/tasks/TasksTeamPage";
+import { PeriodicMessagesPage } from "./features/periodic-messages/PeriodicMessagesPage";
 import { UsersPage } from "./features/users/UsersPage";
 import { ClientsPage } from "./features/workbench/ClientsPage";
 import { QuotesPage } from "./features/workbench/QuotesPage";
@@ -133,6 +134,8 @@ export default function App() {
             <Route path="tasks/:slug/terminos-recurrentes" element={withEnabledModule("tasks", <TaskTermsPage />)} />
             <Route path="tasks/:slug/:tableId" element={withEnabledModule("tasks", <TaskLegacyTablePage />)} />
             <Route path="tasks/:slug" element={withEnabledModule("tasks", <TasksTeamPage />)} />
+            <Route path="periodic-messages" element={withEnabledModule("periodic-messages", <PeriodicMessagesPage />)} />
+            <Route path="periodic-messages/:slug" element={withEnabledModule("periodic-messages", <PeriodicMessagesPage />)} />
             <Route path="sales" element={withEnabledModule("sales", <SalesPage />)} />
             <Route path="kpis" element={withEnabledModule("kpis", <KpisPage />)} />
             <Route path="finances" element={withEnabledModule("finances", <FinancesPage />)} />

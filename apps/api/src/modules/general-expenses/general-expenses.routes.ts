@@ -97,6 +97,14 @@ const payrollUpdateSchema = z.object({
   reviewedByJnls: z.boolean().optional()
 });
 
+const payrollDistributionUpdateSchema = z.object({
+  pctLitigation: z.number().min(0).max(100),
+  pctCorporateLabor: z.number().min(0).max(100),
+  pctSettlements: z.number().min(0).max(100),
+  pctFinancialLaw: z.number().min(0).max(100),
+  pctTaxCompliance: z.number().min(0).max(100)
+}).strict();
+
 const payrollParamsSchema = z.object({
   payrollEntryId: z.string().min(1)
 });
@@ -251,6 +259,12 @@ export const generalExpensesRoutes: FastifyPluginAsync = async (app) => {
   app.post("/general-expenses/payroll/copy-to-next-month", { preHandler: writeGuards }, async (request) => {
     const payload = copySchema.parse(request.body ?? {});
     return service.copyPayrollToNextMonth(payload.year, payload.month);
+  });
+
+  app.patch("/general-expenses/payroll/:payrollEntryId/distribution", { preHandler: writeGuards }, async (request) => {
+    const params = payrollParamsSchema.parse(request.params);
+    const payload = payrollDistributionUpdateSchema.parse(request.body ?? {});
+    return service.updatePayrollDistribution(params.payrollEntryId, payload);
   });
 
   app.patch("/general-expenses/payroll/:payrollEntryId", { preHandler: payrollPatchGuards }, async (request) => {
