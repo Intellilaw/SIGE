@@ -4,6 +4,7 @@ import type {
   CommissionBreakdownEntry,
   CommissionExclusion,
   CommissionGroup1TeamBreakdown,
+  CommissionMatterCommission,
   CommissionPaymentAcknowledgement,
   CommissionPaymentFlowState,
   CommissionRecipientAssignment,
@@ -45,6 +46,7 @@ interface CommissionsOverviewResponse {
   receivers: CommissionReceiver[];
   recipientAssignments: CommissionRecipientAssignment[];
   exclusions: CommissionExclusion[];
+  matterCommissions: CommissionMatterCommission[];
   projectorCommissions: ProjectorCommission[];
   paymentAcknowledgements: CommissionPaymentAcknowledgement[];
   commissionReleaseEligibilities: CommissionReleaseEligibility[];
@@ -62,6 +64,8 @@ interface SectionCalculation {
   executionRecords: CommissionBreakdownEntry[];
   clientRecords: CommissionBreakdownEntry[];
   closingRecords: CommissionBreakdownEntry[];
+  matterCommissions: CommissionMatterCommission[];
+  matterCommissionsTotalMxn: number;
   group1TeamBreakdowns: CommissionGroup1TeamBreakdown[];
   highlightedCount: number;
   group1GrossMxn: number;
@@ -100,6 +104,8 @@ const EMPTY_CALCULATION: SectionCalculation = {
   executionRecords: [],
   clientRecords: [],
   closingRecords: [],
+  matterCommissions: [],
+  matterCommissionsTotalMxn: 0,
   group1TeamBreakdowns: [],
   highlightedCount: 0,
   group1GrossMxn: 0,
@@ -122,6 +128,7 @@ const SALES_COMMISSION_SECTION = "Ventas";
 const SALES_COMMISSION_RATE = 0.01;
 const COMMISSION_TOTALS_SECTION = "Totales de comisiones";
 const LITIGATION_LEADER_COMMISSION_SECTION = "Litigio (lider)";
+const LITIGATION_COLLABORATOR_COMMISSION_SECTION = "Litigio (colaborador)";
 const PROJECTOR_COMMISSION_SECTIONS = [
   { role: "Proyectista 1", code: "EKPO", section: "Proyectista 1 (EKPO)" },
   { role: "Proyectista 2", code: "NBSG", section: "Proyectista 2 (NBSG)" }
@@ -362,6 +369,10 @@ function isLitigationLeaderCommissionSection(section?: string | null) {
   return normalizeText(section) === normalizeText(LITIGATION_LEADER_COMMISSION_SECTION);
 }
 
+function isLitigationCollaboratorCommissionSection(section?: string | null) {
+  return normalizeText(section) === normalizeText(LITIGATION_COLLABORATOR_COMMISSION_SECTION);
+}
+
 function isCommissionTotalsSection(section?: string | null) {
   return normalizeText(section) === normalizeText(COMMISSION_TOTALS_SECTION);
 }
@@ -419,10 +430,14 @@ function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
   );
   const projectorPayableMxn = data.projectorPayableMxn ?? 0;
   const projectorBonusMxn = data.projectorBonusMxn ?? 0;
+  const matterCommissionsTotalMxn = data.matterCommissionsTotalMxn ?? (
+    data.matterCommissions ?? []
+  ).reduce((sum, entry) => sum + (entry.excluded ? 0 : entry.amountMxn), 0);
   const totalCommissionsMxn = data.totalCommissionsMxn ?? data.netTotalMxn ?? (
     group1PayableMxn +
     group2TotalMxn +
     group3TotalMxn +
+    matterCommissionsTotalMxn +
     projectorPayableMxn +
     projectorBonusMxn
   );
@@ -435,6 +450,7 @@ function getSnapshotCommissionTotals(data: CommissionSnapshotData) {
     group3TotalMxn,
     projectorPayableMxn,
     projectorBonusMxn,
+    matterCommissionsTotalMxn,
     totalCommissionsMxn,
     group1TeamBreakdowns
   };
@@ -818,7 +834,8 @@ function calculateSection(
   year: number,
   month: number,
   exclusions: CommissionExclusion[],
-  projectorCommissions: ProjectorCommission[]
+  projectorCommissions: ProjectorCommission[],
+  matterCommissions: CommissionMatterCommission[]
 ): SectionCalculation {
   if (!section) {
     return EMPTY_CALCULATION;
@@ -950,6 +967,13 @@ function calculateSection(
 
   const group2TotalMxn = sumIncludedCommissionRows(clientRecords);
   const group3TotalMxn = sumIncludedCommissionRows(closingRecords);
+  const sectionMatterCommissions = isLitigationCollaboratorCommissionSection(section)
+    ? matterCommissions
+    : [];
+  const matterCommissionsTotalMxn = sectionMatterCommissions.reduce(
+    (sum, entry) => sum + (entry.excluded ? 0 : entry.amountMxn),
+    0
+  );
 
   const deductionConfiguration = getDeductionConfiguration(section);
   let group1TeamBreakdowns: CommissionGroup1TeamBreakdown[] = [];
@@ -978,14 +1002,18 @@ function calculateSection(
     ? periodProjectorCommissions.filter((entry) => entry.authorized)
     : [];
   const projectorBonusMxn = mirroredProjectorCommissions.reduce((sum, entry) => sum + entry.amountMxn, 0);
-  const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn + projectorBonusMxn;
-  const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn + projectorBonusMxn;
+  const grossTotalMxn = group1GrossMxn + group2TotalMxn + group3TotalMxn
+    + matterCommissionsTotalMxn + projectorBonusMxn;
+  const totalCommissionsMxn = group1PayableMxn + group2TotalMxn + group3TotalMxn
+    + matterCommissionsTotalMxn + projectorBonusMxn;
 
   return {
     financeRecords: computedRecords,
     executionRecords,
     clientRecords,
     closingRecords,
+    matterCommissions: sectionMatterCommissions,
+    matterCommissionsTotalMxn,
     group1TeamBreakdowns,
     highlightedCount: computedRecords.filter((record) => record.highlighted).length,
     group1GrossMxn,
@@ -1177,6 +1205,92 @@ function CommissionGroupTable(props: {
               <td colSpan={totalLabelColumns}>Total rubro</td>
               <td>{formatCurrency(total)}</td>
               {props.showExclusionControls ? <td className="commissions-exclusion-cell" aria-label="Excluir gasto" /> : null}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function CommissionMatterTable(props: {
+  rows: CommissionMatterCommission[];
+  canManageExclusions?: boolean;
+  savingMatterIds?: Set<string>;
+  onToggleExclusion?: (entry: CommissionMatterCommission, excluded: boolean) => void;
+}) {
+  const totalMxn = props.rows.reduce((sum, entry) => sum + (entry.excluded ? 0 : entry.amountMxn), 0);
+
+  return (
+    <section className="panel commissions-matter-panel">
+      <div className="panel-header">
+        <h2>COMISIONES POR ASUNTO: Litigio (colaborador)</h2>
+        <span>{props.rows.length} asuntos vigentes</span>
+      </div>
+      <p className="muted commissions-caption">
+        Cada asunto vigente genera $100 mensuales. Las exclusiones que marque EMRT aplican desde el mes seleccionado
+        y permanecen en los meses siguientes hasta que se reviertan.
+      </p>
+      <div className="table-scroll">
+        <table className="data-table commissions-matter-table">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>No. asunto</th>
+              <th>Asunto</th>
+              <th>Registrado en Litigio</th>
+              <th>Monto</th>
+              <th className="commissions-exclusion-heading">Excluir comision</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.rows.length === 0 ? (
+              <tr>
+                <td colSpan={6}>No hay asuntos de Litigio vigentes para este mes.</td>
+              </tr>
+            ) : props.rows.map((entry) => {
+              const saving = props.savingMatterIds?.has(entry.matterId) ?? false;
+              return (
+                <tr className={entry.excluded ? "commissions-row-excluded" : undefined} key={entry.matterId}>
+                  <td>
+                    <strong>{entry.clientName || "-"}</strong>
+                    {entry.clientNumber ? <small>{entry.clientNumber}</small> : null}
+                  </td>
+                  <td>{entry.matterNumber || "-"}</td>
+                  <td>{entry.subject || "-"}</td>
+                  <td>{formatDate(entry.registeredAt)}</td>
+                  <td className="commissions-amount-cell">
+                    <span className={entry.excluded ? "commissions-amount-excluded" : undefined}>
+                      {formatCurrency(entry.amountMxn)}
+                    </span>
+                  </td>
+                  <td className="commissions-exclusion-cell">
+                    <label
+                      className="commissions-exclusion-toggle"
+                      title={
+                        props.canManageExclusions
+                          ? "Excluir esta comision desde el mes seleccionado"
+                          : "Solo EMRT puede cambiar esta exclusion"
+                      }
+                    >
+                      <input
+                        aria-label={`Excluir comision del asunto ${entry.matterNumber || entry.subject}`}
+                        checked={entry.excluded}
+                        disabled={!props.canManageExclusions || saving}
+                        onChange={(event) => props.onToggleExclusion?.(entry, event.target.checked)}
+                        type="checkbox"
+                      />
+                    </label>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={4}>Total comisiones por asunto</td>
+              <td>{formatCurrency(totalMxn)}</td>
+              <td className="commissions-exclusion-cell" aria-label="Excluir comision" />
             </tr>
           </tfoot>
         </table>
@@ -1716,6 +1830,7 @@ function SnapshotDetailModal(props: {
   const snapshotIsSalesSection = isSalesCommissionSection(props.snapshot.section);
   const snapshotIsProjectorSection = isProjectorCommissionSection(props.snapshot.section);
   const snapshotIsLitigationLeaderSection = isLitigationLeaderCommissionSection(props.snapshot.section);
+  const snapshotIsLitigationCollaboratorSection = isLitigationCollaboratorCommissionSection(props.snapshot.section);
   const snapshotProjectorCommissions = data?.projectorCommissions ?? [];
   const snapshotProjectorPendingMxn = snapshotProjectorCommissions.reduce(
     (sum, entry) => sum + (entry.authorized ? 0 : entry.amountMxn),
@@ -1799,6 +1914,13 @@ function SnapshotDetailModal(props: {
                     value={totals?.group3TotalMxn ?? 0}
                     accentClass="is-neutral"
                   />
+                  {snapshotIsLitigationCollaboratorSection ? (
+                    <CurrencyMetricCard
+                      label="Comisiones por asunto"
+                      value={totals?.matterCommissionsTotalMxn ?? 0}
+                      accentClass="is-primary"
+                    />
+                  ) : null}
                   {snapshotIsLitigationLeaderSection ? (
                     <CurrencyMetricCard
                       label="Comisiones espejo de proyectistas"
@@ -1833,6 +1955,9 @@ function SnapshotDetailModal(props: {
                 />
                 <CommissionGroupTable title="2. Comision por cliente" toneClass="tone-secondary" rows={data.clientRecords} showBaseNet />
                 <CommissionGroupTable title="3. Comision por cierre" toneClass="tone-tertiary" rows={data.closingRecords} showBaseNet />
+                {snapshotIsLitigationCollaboratorSection ? (
+                  <CommissionMatterTable rows={data.matterCommissions ?? []} />
+                ) : null}
                 {snapshotIsLitigationLeaderSection ? (
                   <ProjectorCommissionTable
                     title="COMISIONES ESPEJO: Escritos de fondo autorizados"
@@ -1862,12 +1987,14 @@ export function CommissionsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [snapshots, setSnapshots] = useState<CommissionSnapshot[]>([]);
   const [exclusions, setExclusions] = useState<CommissionExclusion[]>([]);
+  const [matterCommissions, setMatterCommissions] = useState<CommissionMatterCommission[]>([]);
   const [projectorCommissions, setProjectorCommissions] = useState<ProjectorCommission[]>([]);
   const [paymentAcknowledgements, setPaymentAcknowledgements] = useState<CommissionPaymentAcknowledgement[]>([]);
   const [commissionReleaseEligibilities, setCommissionReleaseEligibilities] = useState<CommissionReleaseEligibility[]>([]);
   const [periodLocked, setPeriodLocked] = useState(false);
   const [confirmedByEmrtCount, setConfirmedByEmrtCount] = useState(0);
   const [savingExclusionKeys, setSavingExclusionKeys] = useState<Set<string>>(new Set());
+  const [savingMatterExclusionIds, setSavingMatterExclusionIds] = useState<Set<string>>(new Set());
   const [savingProjectorCommissionIds, setSavingProjectorCommissionIds] = useState<Set<string>>(new Set());
   const [savingPaymentSections, setSavingPaymentSections] = useState<Set<string>>(new Set());
   const [uploadingSignedReceiptSections, setUploadingSignedReceiptSections] = useState<Set<string>>(new Set());
@@ -1891,6 +2018,7 @@ export function CommissionsPage() {
   const canManageExclusions = canManageCommissionExclusions(user);
   const canManageTotalsReceiverExclusions = canManageCommissionTotalsReceiverExclusions(user);
   const canManageProjectorEntries = canManageProjectorCommissions(user);
+  const canManageMatterExclusions = canManageProjectorCommissions(user);
   const canMarkPaymentsByTransfer = isRusconiTenant(user) && (
     isFinanceTeamUser(user) || (hasSuperadminAccess(user) && isEduardoRusconiUser(user))
   );
@@ -1982,6 +2110,7 @@ export function CommissionsPage() {
       setReceivers(overview.receivers);
       setRecipientAssignments(overview.recipientAssignments ?? []);
       setExclusions(overview.exclusions ?? []);
+      setMatterCommissions(overview.matterCommissions ?? []);
       setProjectorCommissions(overview.projectorCommissions ?? []);
       setPaymentAcknowledgements(overview.paymentAcknowledgements ?? []);
       setCommissionReleaseEligibilities(overview.commissionReleaseEligibilities ?? []);
@@ -2025,9 +2154,20 @@ export function CommissionsPage() {
       selectedYear,
       selectedMonth,
       exclusions,
-      projectorCommissions
+      projectorCommissions,
+      matterCommissions
     ),
-    [activeSection, clients, exclusions, financeRecords, generalExpenses, projectorCommissions, selectedMonth, selectedYear]
+    [
+      activeSection,
+      clients,
+      exclusions,
+      financeRecords,
+      generalExpenses,
+      matterCommissions,
+      projectorCommissions,
+      selectedMonth,
+      selectedYear
+    ]
   );
   const commissionTotalsRows = useMemo<CommissionTotalsRow[]>(() => {
     if (!isTotalsActiveSection) {
@@ -2046,7 +2186,8 @@ export function CommissionsPage() {
           selectedYear,
           selectedMonth,
           exclusions,
-          projectorCommissions
+          projectorCommissions,
+          matterCommissions
         )
       }));
   }, [
@@ -2056,6 +2197,7 @@ export function CommissionsPage() {
     financeRecords,
     generalExpenses,
     isTotalsActiveSection,
+    matterCommissions,
     projectorCommissions,
     selectedMonth,
     selectedYear
@@ -2375,6 +2517,44 @@ export function CommissionsPage() {
     }
   }
 
+  async function handleToggleMatterCommissionExclusion(
+    entry: CommissionMatterCommission,
+    excluded: boolean
+  ) {
+    if (!canManageMatterExclusions || periodLocked) {
+      return;
+    }
+
+    setSavingMatterExclusionIds((current) => new Set(current).add(entry.matterId));
+    setFlash(null);
+
+    try {
+      await apiPatch("/commissions/matter-exclusions", {
+        year: selectedYear,
+        month: selectedMonth,
+        matterId: entry.matterId,
+        excluded
+      });
+      setMatterCommissions((current) => current.map((candidate) =>
+        candidate.matterId === entry.matterId ? { ...candidate, excluded } : candidate
+      ));
+      setFlash({
+        tone: "success",
+        text: excluded
+          ? `Asunto excluido desde ${MONTH_NAMES[selectedMonth - 1]} de ${selectedYear}.`
+          : `Asunto reincluido desde ${MONTH_NAMES[selectedMonth - 1]} de ${selectedYear}.`
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: getErrorMessage(error) });
+    } finally {
+      setSavingMatterExclusionIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.matterId);
+        return next;
+      });
+    }
+  }
+
   function handleProjectorAmountDraftChange(entryId: string, value: string) {
     setProjectorAmountDrafts((current) => ({ ...current, [entryId]: value }));
   }
@@ -2560,6 +2740,8 @@ export function CommissionsPage() {
       executionRecords: sectionCalculation.executionRecords,
       clientRecords: sectionCalculation.clientRecords,
       closingRecords: sectionCalculation.closingRecords,
+      matterCommissions: sectionCalculation.matterCommissions,
+      matterCommissionsTotalMxn: sectionCalculation.matterCommissionsTotalMxn,
       group1TeamBreakdowns: sectionCalculation.group1TeamBreakdowns,
       group1GrossMxn: sectionCalculation.group1GrossMxn,
       group1NetMxn: sectionCalculation.group1NetMxn,
@@ -2609,6 +2791,7 @@ export function CommissionsPage() {
   );
   const isProjectorActiveSection = isProjectorCommissionSection(activeSection);
   const isLitigationLeaderActiveSection = isLitigationLeaderCommissionSection(activeSection);
+  const isLitigationCollaboratorActiveSection = isLitigationCollaboratorCommissionSection(activeSection);
   const projectorPendingMxn = sectionCalculation.projectorCommissions.reduce(
     (sum, entry) => sum + (entry.authorized ? 0 : entry.amountMxn),
     0
@@ -2792,6 +2975,14 @@ export function CommissionsPage() {
                         value={isTotalsActiveSection ? commissionTotalsSummary.group3TotalMxn : sectionCalculation.group3TotalMxn}
                         accentClass="is-neutral"
                       />
+                      {isLitigationCollaboratorActiveSection ? (
+                        <CurrencyMetricCard
+                          label="Comisiones por asunto"
+                          value={sectionCalculation.matterCommissionsTotalMxn}
+                          accentClass="is-primary"
+                          helper="$100 por cada asunto de Litigio vigente"
+                        />
+                      ) : null}
                       {isTotalsActiveSection ? (
                         <CurrencyMetricCard
                           label="Proyectistas y espejo Litigio líder"
@@ -2917,6 +3108,15 @@ export function CommissionsPage() {
                     />
                   </div>
 
+                  {isLitigationCollaboratorActiveSection ? (
+                    <CommissionMatterTable
+                      rows={sectionCalculation.matterCommissions}
+                      canManageExclusions={canManageMatterExclusions && !periodLocked}
+                      savingMatterIds={savingMatterExclusionIds}
+                      onToggleExclusion={handleToggleMatterCommissionExclusion}
+                    />
+                  ) : null}
+
                   {isLitigationLeaderActiveSection ? (
                     <ProjectorCommissionTable
                       title="COMISIONES ESPEJO: Escritos de fondo autorizados"
@@ -2954,6 +3154,9 @@ export function CommissionsPage() {
                         <span>Grupo 1 aplicado al total: <strong>{formatCurrency(sectionCalculation.group1PayableMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 2 (20%): <strong>{formatCurrency(sectionCalculation.group2TotalMxn)}</strong></span>
                         <span>(+) Comisiones Grupo 3 (10%): <strong>{formatCurrency(sectionCalculation.group3TotalMxn)}</strong></span>
+                        {sectionCalculation.matterCommissionsTotalMxn > 0 ? (
+                          <span>(+) Comisiones por asunto: <strong>{formatCurrency(sectionCalculation.matterCommissionsTotalMxn)}</strong></span>
+                        ) : null}
                         {sectionCalculation.projectorBonusMxn > 0 ? (
                           <span>(+) Comisiones espejo de proyectistas: <strong>{formatCurrency(sectionCalculation.projectorBonusMxn)}</strong></span>
                         ) : null}

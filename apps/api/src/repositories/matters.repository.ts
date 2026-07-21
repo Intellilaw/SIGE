@@ -172,49 +172,64 @@ export class PrismaMattersRepository implements MattersRepository {
     });
     const count = await this.prisma.matter.count();
 
-    const record = await this.prisma.matter.create({
-      data: {
-        matterNumber: buildMatterNumber(count + 1),
-        clientId: clientFields.clientId,
-        clientNumber: clientFields.clientNumber,
-        clientName: clientFields.clientName,
-        quoteId: linkedQuote?.id ?? normalizeIdentifier(payload.quoteId),
-        quoteNumber: linkedQuote?.quoteNumber ?? normalizeOptionalText(payload.quoteNumber),
-        commissionAssignee: normalizeOptionalText(payload.commissionAssignee),
-        matterType: payload.matterType ?? linkedQuote?.quoteType ?? DEFAULT_MATTER_TYPE,
-        subject: linkedQuote?.subject ?? normalizeRequiredText(payload.subject),
-        specificProcess: normalizeOptionalText(payload.specificProcess),
-        totalFeesMxn: new Prisma.Decimal(linkedQuote?.totalMxn ?? payload.totalFeesMxn ?? 0),
-        responsibleTeam: payload.responsibleTeam ?? null,
-        nextPaymentDate: parseDateValue(payload.nextPaymentDate),
-        communicationChannel: payload.communicationChannel ?? DEFAULT_CHANNEL,
-        r1InternalCreated: payload.r1InternalCreated ?? false,
-        telegramBotLinked: payload.telegramBotLinked ?? false,
-        rdCreated: payload.rdCreated ?? false,
-        rfCreated: payload.rfCreated ?? DEFAULT_RF_STATUS,
-        r1ExternalCreated: payload.r1ExternalCreated ?? false,
-        billingChatCreated: payload.billingChatCreated ?? false,
-        matterIdentifier: normalizeOptionalText(payload.matterIdentifier),
-        executionLinkedModule: normalizeOptionalText(payload.executionLinkedModule),
-        executionLinkedAt: parseDateValue(payload.executionLinkedAt),
-        executionPrompt: normalizeOptionalText(payload.executionPrompt),
-        expirationDate: parseDateValue(payload.expirationDate),
-        expirationRiOutput: normalizeOptionalText(payload.expirationRiOutput),
-        promotionCommand: normalizeOptionalText(payload.promotionCommand),
-        holidayAuthorityShortName: normalizeHolidayAuthority(payload.holidayAuthorityShortName),
-        internalTelegramGroupId: normalizeOptionalText(payload.internalTelegramGroupId),
-        internalTelegramGroupName: normalizeOptionalText(payload.internalTelegramGroupName),
-        nextAction: normalizeOptionalText(payload.nextAction),
-        nextActionDueAt: parseDateValue(payload.nextActionDueAt),
-        nextActionSource: normalizeOptionalText(payload.nextActionSource),
-        visibility: normalizeVisibility(payload.visibility),
-        milestone: normalizeOptionalText(payload.milestone),
-        concluded: payload.concluded ?? false,
-        stage: payload.stage ?? "INTAKE",
-        origin: payload.origin ?? "MANUAL",
-        notes: normalizeOptionalText(payload.notes),
-        deletedAt: parseDateValue(payload.deletedAt)
+    const record = await this.prisma.$transaction(async (transaction) => {
+      const created = await transaction.matter.create({
+        data: {
+          matterNumber: buildMatterNumber(count + 1),
+          clientId: clientFields.clientId,
+          clientNumber: clientFields.clientNumber,
+          clientName: clientFields.clientName,
+          quoteId: linkedQuote?.id ?? normalizeIdentifier(payload.quoteId),
+          quoteNumber: linkedQuote?.quoteNumber ?? normalizeOptionalText(payload.quoteNumber),
+          commissionAssignee: normalizeOptionalText(payload.commissionAssignee),
+          matterType: payload.matterType ?? linkedQuote?.quoteType ?? DEFAULT_MATTER_TYPE,
+          subject: linkedQuote?.subject ?? normalizeRequiredText(payload.subject),
+          specificProcess: normalizeOptionalText(payload.specificProcess),
+          totalFeesMxn: new Prisma.Decimal(linkedQuote?.totalMxn ?? payload.totalFeesMxn ?? 0),
+          responsibleTeam: payload.responsibleTeam ?? null,
+          nextPaymentDate: parseDateValue(payload.nextPaymentDate),
+          communicationChannel: payload.communicationChannel ?? DEFAULT_CHANNEL,
+          r1InternalCreated: payload.r1InternalCreated ?? false,
+          telegramBotLinked: payload.telegramBotLinked ?? false,
+          rdCreated: payload.rdCreated ?? false,
+          rfCreated: payload.rfCreated ?? DEFAULT_RF_STATUS,
+          r1ExternalCreated: payload.r1ExternalCreated ?? false,
+          billingChatCreated: payload.billingChatCreated ?? false,
+          matterIdentifier: normalizeOptionalText(payload.matterIdentifier),
+          executionLinkedModule: normalizeOptionalText(payload.executionLinkedModule),
+          executionLinkedAt: parseDateValue(payload.executionLinkedAt),
+          executionPrompt: normalizeOptionalText(payload.executionPrompt),
+          expirationDate: parseDateValue(payload.expirationDate),
+          expirationRiOutput: normalizeOptionalText(payload.expirationRiOutput),
+          promotionCommand: normalizeOptionalText(payload.promotionCommand),
+          holidayAuthorityShortName: normalizeHolidayAuthority(payload.holidayAuthorityShortName),
+          internalTelegramGroupId: normalizeOptionalText(payload.internalTelegramGroupId),
+          internalTelegramGroupName: normalizeOptionalText(payload.internalTelegramGroupName),
+          nextAction: normalizeOptionalText(payload.nextAction),
+          nextActionDueAt: parseDateValue(payload.nextActionDueAt),
+          nextActionSource: normalizeOptionalText(payload.nextActionSource),
+          visibility: normalizeVisibility(payload.visibility),
+          milestone: normalizeOptionalText(payload.milestone),
+          concluded: payload.concluded ?? false,
+          stage: payload.stage ?? "INTAKE",
+          origin: payload.origin ?? "MANUAL",
+          notes: normalizeOptionalText(payload.notes),
+          deletedAt: parseDateValue(payload.deletedAt)
+        }
+      });
+
+      if (created.concluded) {
+        await transaction.matterConclusionEvent.create({
+          data: {
+            organizationId: created.organizationId,
+            matterId: created.id,
+            concluded: true,
+            effectiveAt: created.createdAt
+          }
+        });
       }
+
+      return created;
     });
 
     return mapMatter(record);
@@ -276,7 +291,7 @@ export class PrismaMattersRepository implements MattersRepository {
   }
 
   public async update(matterId: string, payload: MatterWriteRecord) {
-    await this.findMatterOrThrow(this.prisma, matterId);
+    const current = await this.findMatterOrThrow(this.prisma, matterId);
     const data = await this.buildUpdatePayload(this.prisma, matterId, payload);
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -284,6 +299,16 @@ export class PrismaMattersRepository implements MattersRepository {
         where: { id: matterId },
         data
       });
+
+      if (hasOwn(payload, "concluded") && updated.concluded !== current.concluded) {
+        await tx.matterConclusionEvent.create({
+          data: {
+            organizationId: updated.organizationId,
+            matterId: updated.id,
+            concluded: updated.concluded
+          }
+        });
+      }
 
       if (hasOwn(payload, "milestone")) {
         await this.syncMilestoneDependents(tx, updated);

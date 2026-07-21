@@ -37,6 +37,13 @@ const exclusionBodySchema = z.object({
   excluded: z.boolean()
 });
 
+const matterExclusionBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  matterId: z.string().min(1),
+  excluded: z.boolean()
+});
+
 const projectorCommissionParamsSchema = z.object({
   entryId: z.string().min(1)
 });
@@ -331,6 +338,21 @@ export const commissionsRoutes: FastifyPluginAsync = async (app) => {
       createdByUserId: getSessionUser(request).id,
       createdByName: getSessionUser(request).displayName
     });
+  });
+
+  app.patch("/commissions/matter-exclusions", { preHandler: [requireAuth] }, async (request) => {
+    if (!isEmrtSuperadmin(request)) {
+      throw new app.errors.AppError(403, "FORBIDDEN", "Solo EMRT puede excluir comisiones por asunto.");
+    }
+
+    const payload = matterExclusionBodySchema.parse(request.body ?? {});
+    const user = getSessionUser(request);
+    await service.setMatterExclusion({
+      ...payload,
+      createdByUserId: user.id,
+      createdByName: user.displayName
+    });
+    return payload;
   });
 
   app.patch("/commissions/projector-commissions/:entryId", { preHandler: [requireAuth] }, async (request) => {

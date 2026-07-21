@@ -8,6 +8,7 @@ import {
   getCommissionPeriodLock,
   isRusconiCommissionPaymentFlow
 } from "./commission-period-lock";
+import { getLitigationMatterCommissions } from "./commission-matter-calculation";
 import { getRequiredCommissionReceiverNames } from "./commission-receiver-defaults";
 import { attachSalesCommissionsToFinanceRecords } from "./finance-sales-commissions";
 import type { KpiCommissionRequirementsService } from "./kpi-commission-requirements";
@@ -22,6 +23,7 @@ import {
 } from "./mappers";
 import type {
   CommissionExclusionWriteRecord,
+  CommissionMatterExclusionWriteRecord,
   CommissionPaymentAcknowledgementUpdateRecord,
   CommissionPaymentActor,
   CommissionPaymentReconcileRow,
@@ -218,7 +220,16 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
     await this.ensureDefaultReceivers();
     await this.reconcileAuthorizedProjectorCommissionExpenses(year, month);
 
-    const [financeRecords, generalExpenses, receivers, exclusions, projectorCommissions, paymentFlow, activeUsers] = await Promise.all([
+    const [
+      financeRecords,
+      generalExpenses,
+      receivers,
+      exclusions,
+      projectorCommissions,
+      paymentFlow,
+      activeUsers,
+      matterCommissions
+    ] = await Promise.all([
       this.prisma.financeRecord.findMany({
         where: { year, month },
         orderBy: [{ clientNumber: "asc" }, { clientName: "asc" }, { subject: "asc" }, { createdAt: "asc" }]
@@ -258,7 +269,8 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
           specificRole: true,
           secondarySpecificRole: true
         }
-      })
+      }),
+      getLitigationMatterCommissions(this.prisma, year, month)
     ]);
     const enrichedFinanceRecords = await attachSalesCommissionsToFinanceRecords(
       this.prisma,
@@ -283,6 +295,7 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
       receivers: receivers.map(mapCommissionReceiver),
       recipientAssignments,
       exclusions: exclusions.map(mapCommissionExclusion),
+      matterCommissions,
       projectorCommissions: projectorCommissions.map(mapProjectorCommission),
       paymentAcknowledgements: paymentFlow.acknowledgements,
       commissionReleaseEligibilities: releaseEligibility.map((eligibility) => ({
@@ -437,6 +450,73 @@ export class PrismaCommissionsRepository implements CommissionsRepository {
         section: payload.section,
         group: payload.group,
         financeRecordId: payload.financeRecordId
+      }
+    });
+  }
+
+  public async setMatterExclusion(payload: CommissionMatterExclusionWriteRecord) {
+    await assertCommissionPeriodUnlocked(this.prisma, payload.year, payload.month);
+    const organizationId = getCurrentOrganizationIdOrDefault();
+    const matter = await this.prisma.matter.findUnique({
+      where: { id: payload.matterId },
+      select: { id: true, responsibleTeam: true }
+    });
+    if (!matter || matter.responsibleTeam !== "LITIGATION") {
+      throw new AppError(404, "LITIGATION_MATTER_NOT_FOUND", "No se encontro el asunto de Litigio seleccionado.");
+    }
+
+    const laterEvent = await this.prisma.commissionMatterExclusionEvent.findFirst({
+      where: {
+        matterId: payload.matterId,
+        OR: [
+          { effectiveYear: { gt: payload.year } },
+          { effectiveYear: payload.year, effectiveMonth: { gt: payload.month } }
+        ]
+      },
+      orderBy: [{ effectiveYear: "asc" }, { effectiveMonth: "asc" }]
+    });
+    const lockedPeriods = await this.prisma.commissionPaymentAcknowledgement.findMany({
+      where: { receivedByEmrt: true },
+      select: { year: true, month: true }
+    });
+    const affectedLockedPeriod = lockedPeriods.find((period) => {
+      const atOrAfterStart = period.year > payload.year
+        || (period.year === payload.year && period.month >= payload.month);
+      const beforeLaterEvent = !laterEvent
+        || period.year < laterEvent.effectiveYear
+        || (period.year === laterEvent.effectiveYear && period.month < laterEvent.effectiveMonth);
+      return atOrAfterStart && beforeLaterEvent;
+    });
+    if (affectedLockedPeriod) {
+      throw new AppError(
+        423,
+        "COMMISSION_PERIOD_LOCKED",
+        `La exclusion afectaria el periodo cerrado ${affectedLockedPeriod.month}/${affectedLockedPeriod.year}. Reabre sus pagos antes de modificarla.`
+      );
+    }
+
+    await this.prisma.commissionMatterExclusionEvent.upsert({
+      where: {
+        organizationId_matterId_effectiveYear_effectiveMonth: {
+          organizationId,
+          matterId: payload.matterId,
+          effectiveYear: payload.year,
+          effectiveMonth: payload.month
+        }
+      },
+      create: {
+        organizationId,
+        matterId: payload.matterId,
+        effectiveYear: payload.year,
+        effectiveMonth: payload.month,
+        excluded: payload.excluded,
+        createdByUserId: payload.createdByUserId,
+        createdByName: payload.createdByName
+      },
+      update: {
+        excluded: payload.excluded,
+        createdByUserId: payload.createdByUserId,
+        createdByName: payload.createdByName
       }
     });
   }

@@ -176,7 +176,7 @@ interface GeneralSupervisionOverview {
 
 const KPI_STATUS_LABELS: Record<KpiMetric["status"], string> = {
   met: "Cumplido",
-  warning: "En riesgo",
+  warning: "Incumplido",
   missed: "Incumplido",
   "not-configured": "Sin configurar"
 };
@@ -545,12 +545,8 @@ function summarizeDailyStatus(dailyBreakdown: KpiMetric["dailyBreakdown"]): KpiM
     return "not-configured";
   }
 
-  if (evaluatedDays.some((day) => day.status === "missed")) {
+  if (evaluatedDays.some((day) => day.status === "missed" || day.status === "warning")) {
     return "missed";
-  }
-
-  if (evaluatedDays.some((day) => day.status === "warning")) {
-    return "warning";
   }
 
   return "met";
@@ -571,15 +567,18 @@ function pluralizeDays(count: number) {
 function buildRangeMetric(metric: KpiMetric, dailyBreakdown: KpiMetric["dailyBreakdown"]): KpiMetric {
   const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
   const nonEvaluatedDays = dailyBreakdown.filter(isNonEvaluatedKpiDay);
+  const missingSnapshotDays = nonEvaluatedDays.filter((day) => day.actualLabel === "Sin snapshot diario");
+  const otherNonEvaluatedDays = nonEvaluatedDays.filter((day) => day.actualLabel !== "Sin snapshot diario");
   const missedDays = evaluatedDays.filter((day) => day.status === "missed").length;
   const warningDays = evaluatedDays.filter((day) => day.status === "warning").length;
+  const unmetDays = missedDays + warningDays;
   const metDays = evaluatedDays.filter((day) => day.status === "met").length;
   const incidents = evaluatedDays.flatMap((day) => day.incidents);
   const actualLabel = [
-    missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
-    warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
-    missedDays === 0 && warningDays === 0 && metDays > 0 ? `${pluralizeDays(metDays)} cumplidos` : "",
-    nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
+    unmetDays > 0 ? `${pluralizeDays(unmetDays)} incumplidos` : "",
+    unmetDays === 0 && metDays > 0 ? `${pluralizeDays(metDays)} cumplidos` : "",
+    missingSnapshotDays.length > 0 ? `${pluralizeDays(missingSnapshotDays.length)} sin snapshot de cierre` : "",
+    otherNonEvaluatedDays.length > 0 ? `${pluralizeDays(otherNonEvaluatedDays.length)} no evaluados` : ""
   ].filter(Boolean).join(" / ") || "Sin dias evaluados";
 
   return {
@@ -590,7 +589,8 @@ function buildRangeMetric(metric: KpiMetric, dailyBreakdown: KpiMetric["dailyBre
     actualLabel,
     targetLabel: [
       `${pluralizeDays(evaluatedDays.length)} habiles evaluados`,
-      nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
+      missingSnapshotDays.length > 0 ? `${pluralizeDays(missingSnapshotDays.length)} sin snapshot de cierre` : "",
+      otherNonEvaluatedDays.length > 0 ? `${pluralizeDays(otherNonEvaluatedDays.length)} no evaluados` : ""
     ].filter(Boolean).join(" / "),
     progressPct: metric.progressPct,
     helper: `Periodo evaluado: ${formatDateRange(dailyBreakdown[0]?.date ?? "", dailyBreakdown.at(-1)?.date ?? "")}`,
@@ -749,7 +749,7 @@ function getKpiWeekIncidentItems(
       const key = [day.date, metric.id, day.status].join(":");
       items.set(key, {
         key,
-        status: day.status,
+        status: day.status === "warning" ? "missed" : day.status,
         label: `${formatShortDate(day.date)} - ${day.actualLabel}`,
         description: `${day.targetLabel}. ${day.helper}`
       });
@@ -758,12 +758,34 @@ function getKpiWeekIncidentItems(
   return Array.from(items.values()).sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function getKpiUnmetMetrics(periods: SupervisionUserKpiAlertPeriod[]) {
+function getKpiMissedDaysLabel(periods: SupervisionUserKpiAlertPeriod[], metricId: string) {
+  const missedDateKeys = new Set<string>();
+
+  periods.forEach((period) => {
+    period.metrics
+      .find((metric) => metric.id === metricId)
+      ?.dailyBreakdown
+      .filter((day) => (day.status === "missed" || day.status === "warning") && !isNonEvaluatedKpiDay(day))
+      .forEach((day) => missedDateKeys.add(day.date));
+  });
+
+  const count = missedDateKeys.size;
+  return `${count} ${count === 1 ? "día incumplido" : "días incumplidos"} en las últimas dos semanas`;
+}
+
+function getKpiUnmetMetrics(
+  periods: SupervisionUserKpiAlertPeriod[],
+  blockedCommissionMetricIds = new Set<string>()
+) {
   const metricsById = new Map<string, { metric: KpiMetric; periodKey: SupervisionKpiPeriod["key"] }>();
 
   periods.forEach((period) => {
     period.metrics.forEach((metric) => {
-      if (!KPI_ALERT_STATUSES.includes(metric.status) && !metricHasNonEvaluatedDays(metric)) {
+      if (
+        !KPI_ALERT_STATUSES.includes(metric.status)
+        && !metricHasNonEvaluatedDays(metric)
+        && !blockedCommissionMetricIds.has(metric.id)
+      ) {
         return;
       }
 
@@ -800,13 +822,19 @@ function getKpiMetMetrics(periods: SupervisionUserKpiAlertPeriod[]) {
     .map((entry) => entry.metric);
 }
 
-function getKpiDetailCountLabel(view: KpiDetailView, metrics: KpiMetric[]) {
+function getKpiDetailCountLabel(
+  view: KpiDetailView,
+  metrics: KpiMetric[],
+  blockedCommissionMetricIds = new Set<string>()
+) {
   const primaryCount = view === "unmet"
-    ? metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status)).length
+    ? metrics.filter((metric) =>
+      KPI_ALERT_STATUSES.includes(metric.status) || blockedCommissionMetricIds.has(metric.id)
+    ).length
     : metrics.filter((metric) => metric.status === "met").length;
   const nonEvaluatedOnlyCount = metrics.filter((metric) => {
     const isPrimary = view === "unmet"
-      ? KPI_ALERT_STATUSES.includes(metric.status)
+      ? KPI_ALERT_STATUSES.includes(metric.status) || blockedCommissionMetricIds.has(metric.id)
       : metric.status === "met";
 
     return !isPrimary && metricHasNonEvaluatedDays(metric);
@@ -850,20 +878,42 @@ function TaskUserRow(props: {
   } = props;
   const [showDetail, setShowDetail] = useState(false);
   const [kpiDetailView, setKpiDetailView] = useState<KpiDetailView>("unmet");
+  const [expandedKpiId, setExpandedKpiId] = useState<string | null>(null);
   const canToggle = canToggleUserObservation(user);
   const isObserved = isObservedTaskUser(user);
   const completedThisMonth = getCompletedThisMonth(user);
   const kpiMetDays = getKpiMetDays(user);
   const kpiMissedDays = getKpiMissedDays(user);
-  const kpiUnmetMetrics = getKpiUnmetMetrics(kpiAlerts);
+  const blockedCommissionMetricIds = new Set(
+    isObserved && !muted
+      ? user.commissionRequirements
+        ?.filter((requirement) => requirement.blocked)
+        .map((requirement) => requirement.metricId) ?? []
+      : []
+  );
+  const kpiUnmetMetrics = getKpiUnmetMetrics(kpiAlerts, blockedCommissionMetricIds);
   const kpiMetMetrics = getKpiMetMetrics(kpiAlerts);
   const displayedKpiMetrics = kpiDetailView === "unmet" ? kpiUnmetMetrics : kpiMetMetrics;
-  const displayedKpiCountLabel = getKpiDetailCountLabel(kpiDetailView, displayedKpiMetrics);
+  const displayedKpiCountLabel = getKpiDetailCountLabel(
+    kpiDetailView,
+    displayedKpiMetrics,
+    blockedCommissionMetricIds
+  );
   const detailPeriodTitle = kpiDetailView === "met" ? "Semanas evaluadas" : "Semana actual";
   const detailPeriodRange = kpiDetailView === "met"
     ? `${formatDateRange(kpiWeekReference.lastWeek.startDate, kpiWeekReference.lastWeek.endDate)} / ${formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate)}`
     : formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate);
   const detailId = `supervision-detail-${user.userId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+
+  function selectKpiDetailView(view: KpiDetailView) {
+    setKpiDetailView(view);
+    setExpandedKpiId(null);
+  }
+
+  function toggleUserDetail() {
+    setShowDetail((current) => !current);
+    setExpandedKpiId(null);
+  }
 
   return (
     <section className={`supervision-task-user-row ${muted ? "is-muted" : ""}`}>
@@ -923,7 +973,7 @@ function TaskUserRow(props: {
           aria-controls={detailId}
           aria-expanded={showDetail}
           className="secondary-button supervision-task-detail-button"
-          onClick={() => setShowDetail((current) => !current)}
+          onClick={toggleUserDetail}
           type="button"
         >
           {showDetail ? "Ocultar detalle" : "Ver detalle"}
@@ -957,7 +1007,7 @@ function TaskUserRow(props: {
                     type="button"
                     className={kpiDetailView === "unmet" ? "is-active" : ""}
                     aria-pressed={kpiDetailView === "unmet"}
-                    onClick={() => setKpiDetailView("unmet")}
+                    onClick={() => selectKpiDetailView("unmet")}
                   >
                     Ver KPI's incumplidos
                   </button>
@@ -965,7 +1015,7 @@ function TaskUserRow(props: {
                     type="button"
                     className={kpiDetailView === "met" ? "is-active" : ""}
                     aria-pressed={kpiDetailView === "met"}
-                    onClick={() => setKpiDetailView("met")}
+                    onClick={() => selectKpiDetailView("met")}
                   >
                     Ver KPI's cumplidos
                   </button>
@@ -984,24 +1034,30 @@ function TaskUserRow(props: {
                   </span>
                 </header>
                 <div className="supervision-kpi-list">
-                  {displayedKpiMetrics.map((metric) => (
-                    <KpiMetricRow
-                      key={metric.id}
-                      metric={metric}
-                      periods={kpiAlerts}
-                      weekReference={kpiWeekReference}
-                      view={kpiDetailView}
-                      showCommissionRelease={isObserved && !muted}
-                      userId={user.userId}
-                      kpiOverrides={kpiOverrides}
-                      kpiOverridePeriods={kpiOverridePeriods}
-                      savingKpiOverrideKey={savingKpiOverrideKey}
-                      onToggleKpiOverride={onToggleKpiOverride}
-                      commissionRequirement={user.commissionRequirements?.find((requirement) =>
-                        requirement.metricId === metric.id
-                      )}
-                    />
-                  ))}
+                  {displayedKpiMetrics.map((metric) => {
+                    const commissionRequirement = user.commissionRequirements?.find((requirement) =>
+                      requirement.metricId === metric.id
+                    );
+
+                    return (
+                      <KpiMetricRow
+                        key={metric.id}
+                        metric={metric}
+                        periods={kpiAlerts}
+                        weekReference={kpiWeekReference}
+                        view={kpiDetailView}
+                        showCommissionRelease={isObserved && !muted}
+                        userId={user.userId}
+                        kpiOverrides={kpiOverrides}
+                        kpiOverridePeriods={kpiOverridePeriods}
+                        savingKpiOverrideKey={savingKpiOverrideKey}
+                        onToggleKpiOverride={onToggleKpiOverride}
+                        commissionRequirement={commissionRequirement}
+                        isExpanded={expandedKpiId === metric.id}
+                        onToggle={() => setExpandedKpiId((current) => current === metric.id ? null : metric.id)}
+                      />
+                    );
+                  })}
                 </div>
               </section>
             ) : (
@@ -1195,7 +1251,9 @@ function KpiMetricRow({
   kpiOverrides,
   kpiOverridePeriods,
   savingKpiOverrideKey,
-  onToggleKpiOverride
+  onToggleKpiOverride,
+  isExpanded,
+  onToggle
 }: {
   metric: KpiMetric;
   periods: SupervisionUserKpiAlertPeriod[];
@@ -1208,92 +1266,128 @@ function KpiMetricRow({
   kpiOverridePeriods: SupervisionKpiOverridePeriod[];
   savingKpiOverrideKey: string;
   onToggleKpiOverride: (userId: string, metricId: string, date: string, isExcluded: boolean) => void;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
   const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek", view);
   const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek", view);
   const emptyLabel = view === "met" ? "Sin KPI's cumplidos registrados." : "Sin incidencias registradas.";
-  const statusLabel = metric.status === "not-configured" && metricHasNonEvaluatedDays(metric)
+  const displayedStatus: KpiMetricStatus = metric.status === "warning"
+    ? "missed"
+    : view === "unmet" && commissionRequirement?.blocked
+    ? "missed"
+    : metric.status;
+  const missedDaysLabel = getKpiMissedDaysLabel(periods, metric.id);
+  const statusLabel = displayedStatus === "not-configured" && metricHasNonEvaluatedDays(metric)
     ? "No evaluado"
-    : KPI_STATUS_LABELS[metric.status];
+    : KPI_STATUS_LABELS[displayedStatus];
+  const metricContentId = `supervision-kpi-${userId}-${metric.id}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const incidentLabel = `${metric.incidents.length} ${metric.incidents.length === 1 ? "incidencia" : "incidencias"}`;
 
   return (
-    <section className={`supervision-kpi-metric is-${metric.status}`}>
-      <div className="supervision-kpi-metric-evaluation">
-        <div className="supervision-kpi-metric-head">
-          <strong className="supervision-kpi-metric-title">{metric.label}</strong>
-          <span className={`kpis-status-badge is-${metric.status}`}>{statusLabel}</span>
-        </div>
-        <div className="supervision-kpi-values">
-          <span>{metric.actualLabel}</span>
-        </div>
-        <div className="kpis-progress-track" aria-label={`Avance ${metric.progressPct}%`}>
-          <span style={{ width: `${metric.progressPct}%` }} />
-        </div>
-        {metric.incidents.length > 0 ? (
-          <small>{metric.incidents.length} incidencias detectadas</small>
-        ) : (
-          <small>{metric.helper}</small>
-        )}
-        <div className="supervision-kpi-week-reference">
-          <KpiWeekIncidents
-            incidents={currentWeekIncidents}
-            label="Semana actual"
-            startDate={weekReference.currentWeek.startDate}
-            endDate={weekReference.currentWeek.endDate}
-            emptyLabel={emptyLabel}
-          />
-          <KpiWeekIncidents
-            incidents={lastWeekIncidents}
-            label="Semana pasada"
-            startDate={weekReference.lastWeek.startDate}
-            endDate={weekReference.lastWeek.endDate}
-            emptyLabel={emptyLabel}
-          />
-        </div>
-        {showCommissionRelease ? (
-          metric.emrtOverridePolicy === "not-allowed" ? (
-            <div className="supervision-kpi-override-locked">
-              Los KPI de terminos y vencimientos no admiten override.
-            </div>
-          ) : (
-            <KpiOverrideControls
-              userId={userId}
-              metric={metric}
-              periods={periods}
-              weekReference={weekReference}
-              overrides={kpiOverrides}
-              calendarPeriods={kpiOverridePeriods}
-              savingKey={savingKpiOverrideKey}
-              onToggle={onToggleKpiOverride}
-            />
-          )
-        ) : null}
-      </div>
-      {showCommissionRelease ? (
-        <aside className={`supervision-kpi-commission-release ${commissionRequirement?.blocked ? "is-blocked" : "is-clear"}`}>
-          <strong>Requisitos para liberar comisiones</strong>
-          {commissionRequirement?.blocked ? (
-            <>
-              <span className="supervision-kpi-commission-total">
+    <section className={`supervision-kpi-metric is-${displayedStatus} ${isExpanded ? "is-expanded" : "is-collapsed"}`}>
+      <button
+        type="button"
+        className="supervision-kpi-metric-toggle"
+        aria-controls={metricContentId}
+        aria-expanded={isExpanded}
+        onClick={onToggle}
+      >
+        <span className="supervision-kpi-metric-summary-main">
+          <strong>{metric.label}</strong>
+          <small>{missedDaysLabel}</small>
+        </span>
+        <span className="supervision-kpi-metric-summary-meta">
+          <span className={`kpis-status-badge is-${displayedStatus}`}>{statusLabel}</span>
+          <span className="supervision-kpi-metric-incident-count">{incidentLabel}</span>
+          {showCommissionRelease ? (
+            commissionRequirement?.blocked ? (
+              <span className="supervision-kpi-metric-commission-summary is-blocked">
                 Pendiente: {commissionRequirement.pendingAmount} {commissionRequirement.unit}
               </span>
-              {commissionRequirement.oldestOriginDate ? (
-                <small>Origen mas antiguo: {commissionRequirement.oldestOriginDate}</small>
-              ) : null}
-              <ul>
-                {commissionRequirement.requirements.map((requirement) => (
-                  <li key={requirement.obligationId}>
-                    <strong>{requirement.summary}</strong>
-                    <span>{requirement.pendingAmount} {requirement.unit} - {requirement.originDate}</span>
-                    {requirement.details.map((detail) => <small key={detail}>{detail}</small>)}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <span>Sin pendientes de este KPI que bloqueen el pago.</span>
-          )}
-        </aside>
+            ) : (
+              <span className="supervision-kpi-metric-commission-summary is-clear">Sin pendientes de comision</span>
+            )
+          ) : null}
+        </span>
+        <span className="supervision-kpi-metric-chevron" aria-hidden="true" />
+      </button>
+      {isExpanded ? (
+        <div className="supervision-kpi-metric-content" id={metricContentId}>
+          <div className="supervision-kpi-metric-evaluation">
+            <div className="supervision-kpi-values">
+              <span>{missedDaysLabel}</span>
+            </div>
+            <div className="kpis-progress-track" aria-label={`Avance ${metric.progressPct}%`}>
+              <span style={{ width: `${metric.progressPct}%` }} />
+            </div>
+            {metric.incidents.length > 0 ? (
+              <small>{metric.incidents.length} incidencias detectadas</small>
+            ) : (
+              <small>{metric.helper}</small>
+            )}
+            <div className="supervision-kpi-week-reference">
+              <KpiWeekIncidents
+                incidents={currentWeekIncidents}
+                label="Semana actual"
+                startDate={weekReference.currentWeek.startDate}
+                endDate={weekReference.currentWeek.endDate}
+                emptyLabel={emptyLabel}
+              />
+              <KpiWeekIncidents
+                incidents={lastWeekIncidents}
+                label="Semana pasada"
+                startDate={weekReference.lastWeek.startDate}
+                endDate={weekReference.lastWeek.endDate}
+                emptyLabel={emptyLabel}
+              />
+            </div>
+            {showCommissionRelease ? (
+              metric.emrtOverridePolicy === "not-allowed" ? (
+                <div className="supervision-kpi-override-locked">
+                  Los KPI de terminos y vencimientos no admiten override.
+                </div>
+              ) : (
+                <KpiOverrideControls
+                  userId={userId}
+                  metric={metric}
+                  periods={periods}
+                  weekReference={weekReference}
+                  overrides={kpiOverrides}
+                  calendarPeriods={kpiOverridePeriods}
+                  savingKey={savingKpiOverrideKey}
+                  onToggle={onToggleKpiOverride}
+                />
+              )
+            ) : null}
+          </div>
+          {showCommissionRelease ? (
+            <aside className={`supervision-kpi-commission-release ${commissionRequirement?.blocked ? "is-blocked" : "is-clear"}`}>
+              <strong>Requisitos para liberar comisiones</strong>
+              {commissionRequirement?.blocked ? (
+                <>
+                  <span className="supervision-kpi-commission-total">
+                    Pendiente: {commissionRequirement.pendingAmount} {commissionRequirement.unit}
+                  </span>
+                  {commissionRequirement.oldestOriginDate ? (
+                    <small>Origen mas antiguo: {commissionRequirement.oldestOriginDate}</small>
+                  ) : null}
+                  <ul>
+                    {commissionRequirement.requirements.map((requirement) => (
+                      <li key={requirement.obligationId}>
+                        <strong>{requirement.summary}</strong>
+                        <span>{requirement.pendingAmount} {requirement.unit} - {requirement.originDate}</span>
+                        {requirement.details.map((detail) => <small key={detail}>{detail}</small>)}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <span>Sin pendientes de este KPI que bloqueen el pago.</span>
+              )}
+            </aside>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

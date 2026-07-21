@@ -29,6 +29,7 @@ const PREVENTION_TABLE_ALIASES = ["desahogo-prevenciones", "desahogo_prevencione
 const DEFAULT_ORGANIZATION_ID = "org-rusconi";
 const BUSINESS_TIME_ZONE = "America/Mexico_City";
 const KPI_HISTORY_BASELINE_DATE_KEY = "2026-06-17";
+const TEAM_EXECUTION_KPI_BASELINE_DATE_KEY = "2026-07-21";
 const LAMR_KPI_USER_KEY = "LAMR";
 const LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID = "lamr-filas-incompletas-ejecucion";
 const LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD = 2;
@@ -46,6 +47,75 @@ const LITIGATION_VERIFICATION_KEYS: Record<string, string> = {
   EKPO: "verificado_ekpo",
   NBSG: "verificado_nbsg"
 };
+
+interface ExecutionIncompleteRowsScope {
+  teamKey: string;
+  teamLabel: string;
+  moduleId: string;
+  snapshotUserKey: string;
+  metricId: string;
+  threshold: number;
+  baselineDateKey: string;
+  description: string;
+  sourceDescription: string;
+  includeInUserTeamKpis: boolean;
+}
+
+const LAMR_EXECUTION_KPI_SCOPE: ExecutionIncompleteRowsScope = {
+  teamKey: "LITIGATION",
+  teamLabel: "Litigio",
+  moduleId: LITIGATION_MODULE_ID,
+  snapshotUserKey: LAMR_KPI_USER_KEY,
+  metricId: LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID,
+  threshold: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+  baselineDateKey: KPI_HISTORY_BASELINE_DATE_KEY,
+  description: "Al cierre del dia debe haber como maximo 2 filas incompletas en el modulo de Ejecucion.",
+  sourceDescription: "Modulo de Ejecucion: asuntos activos de Litigio y columna Faltantes.",
+  includeInUserTeamKpis: false
+};
+
+const TEAM_EXECUTION_KPI_SCOPES: ExecutionIncompleteRowsScope[] = [
+  {
+    teamKey: "CORPORATE_LABOR",
+    teamLabel: "Corporativo y laboral",
+    moduleId: "corporate-labor",
+    snapshotUserKey: "TEAM:CORPORATE_LABOR",
+    metricId: "corporate-labor-filas-incompletas-ejecucion",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    description: "Al cierre del dia se deben completar todas las filas faltantes en el modulo de Ejecucion.",
+    sourceDescription: "Modulo de Ejecucion: asuntos activos de Corporativo y laboral y columna Faltantes.",
+    includeInUserTeamKpis: true
+  },
+  {
+    teamKey: "SETTLEMENTS",
+    teamLabel: "Convenios",
+    moduleId: "settlements",
+    snapshotUserKey: "TEAM:SETTLEMENTS",
+    metricId: "settlements-filas-incompletas-ejecucion",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    description: "Al cierre del dia se deben completar todas las filas faltantes en el modulo de Ejecucion.",
+    sourceDescription: "Modulo de Ejecucion: asuntos activos de Convenios y columna Faltantes.",
+    includeInUserTeamKpis: true
+  },
+  {
+    teamKey: "TAX_COMPLIANCE",
+    teamLabel: "Compliance Fiscal",
+    moduleId: "tax-compliance",
+    snapshotUserKey: "TEAM:TAX_COMPLIANCE",
+    metricId: "tax-compliance-filas-incompletas-ejecucion",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    description: "Al cierre del dia se deben completar todas las filas faltantes en el modulo de Ejecucion.",
+    sourceDescription: "Modulo de Ejecucion: asuntos activos de Compliance Fiscal y columna Faltantes.",
+    includeInUserTeamKpis: true
+  }
+];
+
+const EXECUTION_KPI_SCOPES = [LAMR_EXECUTION_KPI_SCOPE, ...TEAM_EXECUTION_KPI_SCOPES];
+const EXECUTION_KPI_MODULE_IDS = Array.from(new Set(EXECUTION_KPI_SCOPES.map((scope) => scope.moduleId)));
+const EXECUTION_KPI_TEAM_KEYS = Array.from(new Set(EXECUTION_KPI_SCOPES.map((scope) => scope.teamKey)));
 
 const TEAM_LABELS: Record<string, string> = {
   ADMIN: "Direccion general",
@@ -932,6 +1002,7 @@ function sourceMatchesMatter(
 
 function getPendingMatterTaskCount(input: {
   matter: MatterRecord;
+  moduleId: string;
   trackingRecords: TrackingRecord[];
   terms: TermRecord[];
 }) {
@@ -939,13 +1010,13 @@ function getPendingMatterTaskCount(input: {
   const taskIdentities = new Set<string>();
 
   input.trackingRecords
-    .filter((record) => record.moduleId === LITIGATION_MODULE_ID && !record.deletedAt)
+    .filter((record) => record.moduleId === input.moduleId && !record.deletedAt)
     .filter((record) => record.status === "pendiente")
     .filter((record) => sourceMatchesMatter(record, matterKeys))
     .forEach((record) => taskIdentities.add(`tracking:${record.id}`));
 
   input.terms
-    .filter((term) => term.moduleId === LITIGATION_MODULE_ID && !term.deletedAt && !term.sourceRecordId)
+    .filter((term) => term.moduleId === input.moduleId && !term.deletedAt && !term.sourceRecordId)
     .filter((term) => term.status === "pendiente")
     .filter((term) => sourceMatchesMatter(term, matterKeys))
     .forEach((term) => taskIdentities.add(`term:${term.id}`));
@@ -966,18 +1037,20 @@ function buildMatterIncident(input: {
   matter: MatterRecord;
   missing: string[];
   dateKey: string;
+  moduleId: string;
+  responsible: string;
 }): KpiIncident {
   return {
     id: input.matter.id,
     sourceType: "matter",
-    moduleId: input.matter.executionLinkedModule ?? LITIGATION_MODULE_ID,
+    moduleId: input.matter.executionLinkedModule ?? input.moduleId,
     tableCode: "execution",
     tableLabel: "Ejecucion",
     clientName: input.matter.clientName || "-",
     subject: input.matter.subject || "-",
     matterIdentifier: input.matter.matterIdentifier ?? input.matter.matterNumber,
     taskName: "Fila incompleta en Ejecucion",
-    responsible: "LAMR",
+    responsible: input.responsible,
     dueDate: input.dateKey,
     status: "pendiente",
     reason: `Faltantes: ${input.missing.join(", ")}`
@@ -1642,10 +1715,14 @@ function getExecutionIncompleteRows(input: {
   clients: ClientRecord[];
   trackingRecords: TrackingRecord[];
   terms: TermRecord[];
+  scope: ExecutionIncompleteRowsScope;
 }) {
   return input.matters
     .filter((matter) => !matter.deletedAt)
-    .filter((matter) => matter.responsibleTeam === "LITIGATION" || matter.executionLinkedModule === LITIGATION_MODULE_ID)
+    .filter((matter) => matter.responsibleTeam
+      ? matter.responsibleTeam === input.scope.teamKey
+      : matter.executionLinkedModule === input.scope.moduleId
+    )
     .map((matter) => {
       const missing = getExecutionMatterMissingFields({
         clientNumber: getClientNumberForMatter(matter, input.clients),
@@ -1657,6 +1734,7 @@ function getExecutionIncompleteRows(input: {
         milestone: matter.milestone,
         taskCount: getPendingMatterTaskCount({
           matter,
+          moduleId: input.scope.moduleId,
           trackingRecords: input.trackingRecords,
           terms: input.terms
         })
@@ -1675,21 +1753,24 @@ function buildExecutionIncompleteRowsEvaluation(input: {
   clients: ClientRecord[];
   trackingRecords: TrackingRecord[];
   terms: TermRecord[];
+  scope: ExecutionIncompleteRowsScope;
   dateKey: string;
   isOpenBusinessDay: boolean;
 }) {
   const incompleteRows = getExecutionIncompleteRows(input);
   const value = incompleteRows.length;
-  const status: KpiMetricStatus = !input.dateKey || value <= LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD
+  const status: KpiMetricStatus = !input.dateKey || value <= input.scope.threshold
     ? "met"
     : input.isOpenBusinessDay
       ? "warning"
       : "missed";
-  const incidents = value > LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD && input.dateKey
+  const incidents = value > input.scope.threshold && input.dateKey
     ? incompleteRows.map((row) => buildMatterIncident({
       matter: row.matter,
       missing: row.missing,
-      dateKey: input.dateKey
+      dateKey: input.dateKey,
+      moduleId: input.scope.moduleId,
+      responsible: input.scope.teamLabel
     }))
     : [];
 
@@ -1697,15 +1778,19 @@ function buildExecutionIncompleteRowsEvaluation(input: {
     dateKey: input.dateKey,
     status,
     value,
-    target: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+    target: input.scope.threshold,
     unit: "filas",
     actualLabel: `${value} filas incompletas`,
-    targetLabel: `Maximo ${LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD} filas incompletas`,
-    helper: value <= LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD
-      ? "El modulo de Ejecucion estuvo dentro del maximo permitido de filas incompletas."
+    targetLabel: input.scope.threshold === 0
+      ? "0 filas incompletas"
+      : `Maximo ${input.scope.threshold} filas incompletas`,
+    helper: value <= input.scope.threshold
+      ? input.scope.threshold === 0
+        ? "Todas las filas del modulo de Ejecucion quedaron completas."
+        : "El modulo de Ejecucion estuvo dentro del maximo permitido de filas incompletas."
       : input.isOpenBusinessDay
-        ? "El dia sigue abierto; hay mas filas incompletas que el maximo permitido."
-        : "Hay mas filas incompletas que el maximo permitido al cierre.",
+        ? "El dia sigue abierto; todavia hay filas incompletas por corregir."
+        : "Quedaron filas incompletas al cierre del dia.",
     incidents,
     sourceData: {
       incompleteRows: incompleteRows.map((row) => ({
@@ -1754,12 +1839,12 @@ function snapshotToDailyMetric(snapshot: KpiDailySnapshotRecord) {
   } satisfies KpiMetric["dailyBreakdown"][number];
 }
 
-function buildMissingExecutionSnapshotDailyMetric(dateKey: string) {
+function buildMissingExecutionSnapshotDailyMetric(dateKey: string, threshold: number) {
   return {
     date: dateKey,
     status: "not-configured",
     value: 0,
-    target: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+    target: threshold,
     unit: NON_EVALUATED_KPI_DAY_UNIT,
     actualLabel: "Sin snapshot diario",
     targetLabel: "No evaluado",
@@ -1935,6 +2020,7 @@ function buildExecutionIncompleteRowsMetric(input: {
   terms: TermRecord[];
   kpiDailySnapshots: KpiDailySnapshotRecord[];
   period: PeriodContext;
+  scope: ExecutionIncompleteRowsScope;
 }) {
   const liveDateKey = input.period.cutoffKey >= input.period.startKey ? input.period.cutoffKey : "";
   const liveEvaluation = liveDateKey
@@ -1943,18 +2029,19 @@ function buildExecutionIncompleteRowsMetric(input: {
       clients: input.clients,
       trackingRecords: input.trackingRecords,
       terms: input.terms,
+      scope: input.scope,
       dateKey: liveDateKey,
       isOpenBusinessDay: liveDateKey === input.period.todayKey && !input.period.periodComplete
     })
     : null;
   const snapshotsByDate = new Map(
     input.kpiDailySnapshots
-      .filter((snapshot) => snapshot.userKey === LAMR_KPI_USER_KEY)
-      .filter((snapshot) => snapshot.metricId === LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID)
+      .filter((snapshot) => snapshot.userKey === input.scope.snapshotUserKey)
+      .filter((snapshot) => snapshot.metricId === input.scope.metricId)
       .map((snapshot) => [toDateKey(snapshot.snapshotDate), snapshot])
   );
   const dailyBreakdown = withNonEvaluatedDays(input.period, input.period.evaluatedDateKeys
-    .filter((dateKey) => dateKey >= KPI_HISTORY_BASELINE_DATE_KEY)
+    .filter((dateKey) => dateKey >= input.scope.baselineDateKey)
     .flatMap((dateKey) => {
       const snapshot = snapshotsByDate.get(dateKey);
       if (snapshot) {
@@ -1969,7 +2056,7 @@ function buildExecutionIncompleteRowsMetric(input: {
         return [executionEvaluationToDailyMetric(liveEvaluation)];
       }
 
-      return [buildMissingExecutionSnapshotDailyMetric(dateKey)];
+      return [buildMissingExecutionSnapshotDailyMetric(dateKey, input.scope.threshold)];
     }));
   const status = summarizeDailyStatus(dailyBreakdown);
   const currentDay = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day)).at(-1) ?? null;
@@ -1984,24 +2071,26 @@ function buildExecutionIncompleteRowsMetric(input: {
     .flatMap((day) => day.incidents);
 
   return {
-    id: LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID,
+    id: input.scope.metricId,
     label: "Filas incompletas en Ejecucion",
-    description: "Al cierre del dia debe haber como maximo 2 filas incompletas en el modulo de Ejecucion.",
+    description: input.scope.description,
     kind: "deadline",
     status,
     value,
-    target: LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD,
+    target: input.scope.threshold,
     unit: "filas",
     progressPct,
-    targetLabel: `Maximo ${LAMR_EXECUTION_INCOMPLETE_ROWS_THRESHOLD} filas incompletas`,
+    targetLabel: input.scope.threshold === 0
+      ? "0 filas incompletas"
+      : `Maximo ${input.scope.threshold} filas incompletas`,
     actualLabel: currentDay?.actualLabel ?? "Sin snapshot diario",
     helper: dailyBreakdown.length > 0
       ? "Los dias cerrados se leen desde snapshots diarios del cierre; el dia abierto solo aparece si esta en observacion."
       : "Sin snapshots diarios disponibles para el periodo evaluado.",
-    sourceDescription: "Modulo de Ejecucion: asuntos activos de Litigio y columna Faltantes.",
+    sourceDescription: input.scope.sourceDescription,
     sourceTables: ["execution_matters"],
     incidents,
-    commissionStrategy: "state-threshold",
+    commissionStrategy: input.scope === LAMR_EXECUTION_KPI_SCOPE ? "state-threshold" : undefined,
     dailyBreakdown
   } satisfies KpiMetric;
 }
@@ -2185,7 +2274,8 @@ const KPI_USER_CONFIGS: KpiUserConfig[] = [
         trackingRecords,
         terms,
         kpiDailySnapshots,
-        period
+        period,
+        scope: LAMR_EXECUTION_KPI_SCOPE
       })
     ]
   },
@@ -2328,6 +2418,7 @@ export class PrismaKpisRepository implements KpisRepository {
       clients: clients as ClientRecord[],
       trackingRecords: trackingRecords as TrackingRecord[],
       terms: terms as TermRecord[],
+      scope: LAMR_EXECUTION_KPI_SCOPE,
       dateKey,
       isOpenBusinessDay: true
     });
@@ -2360,14 +2451,14 @@ export class PrismaKpisRepository implements KpisRepository {
     const [trackingRecords, terms, matters, clients] = await Promise.all([
       this.prisma.taskTrackingRecord.findMany({
         where: {
-          moduleId: LITIGATION_MODULE_ID,
+          moduleId: { in: EXECUTION_KPI_MODULE_IDS },
           deletedAt: null
         },
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
       }),
       this.prisma.taskTerm.findMany({
         where: {
-          moduleId: LITIGATION_MODULE_ID,
+          moduleId: { in: EXECUTION_KPI_MODULE_IDS },
           deletedAt: null
         },
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
@@ -2390,8 +2481,8 @@ export class PrismaKpisRepository implements KpisRepository {
         where: {
           deletedAt: null,
           OR: [
-            { responsibleTeam: "LITIGATION" },
-            { executionLinkedModule: LITIGATION_MODULE_ID }
+            { responsibleTeam: { in: EXECUTION_KPI_TEAM_KEYS } },
+            { executionLinkedModule: { in: EXECUTION_KPI_MODULE_IDS } }
           ]
         },
         orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
@@ -2409,77 +2500,95 @@ export class PrismaKpisRepository implements KpisRepository {
       })
     ]);
 
-    const evaluation = buildExecutionIncompleteRowsEvaluation({
-      matters: matters as MatterRecord[],
-      clients: clients as ClientRecord[],
-      trackingRecords: trackingRecords as TrackingRecord[],
-      terms: terms as TermRecord[],
-      dateKey,
-      isOpenBusinessDay: false
-    });
     const snapshotDate = dateFromKey(dateKey);
-    const snapshotId = randomUUID();
     const now = new Date();
-    const snapshots = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      INSERT INTO "KpiDailySnapshot" (
-        "id",
-        "organizationId",
-        "userKey",
-        "metricId",
-        "snapshotDate",
-        "status",
-        "value",
-        "target",
-        "unit",
-        "actualLabel",
-        "targetLabel",
-        "helper",
-        "incidents",
-        "sourceData",
-        "createdAt",
-        "updatedAt"
-      )
-      VALUES (
-        ${snapshotId},
-        ${DEFAULT_ORGANIZATION_ID},
-        ${LAMR_KPI_USER_KEY},
-        ${LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID},
-        CAST(${snapshotDate} AS date),
-        ${evaluation.status},
-        ${evaluation.value},
-        ${evaluation.target},
-        ${evaluation.unit},
-        ${evaluation.actualLabel},
-        ${evaluation.targetLabel},
-        ${evaluation.helper},
-        CAST(${JSON.stringify(evaluation.incidents)} AS jsonb),
-        CAST(${JSON.stringify(evaluation.sourceData)} AS jsonb),
-        ${now},
-        ${now}
-      )
-      ON CONFLICT ("organizationId", "userKey", "metricId", "snapshotDate")
-      DO UPDATE SET
-        "status" = EXCLUDED."status",
-        "value" = EXCLUDED."value",
-        "target" = EXCLUDED."target",
-        "unit" = EXCLUDED."unit",
-        "actualLabel" = EXCLUDED."actualLabel",
-        "targetLabel" = EXCLUDED."targetLabel",
-        "helper" = EXCLUDED."helper",
-        "incidents" = EXCLUDED."incidents",
-        "sourceData" = EXCLUDED."sourceData",
-        "updatedAt" = EXCLUDED."updatedAt"
-      RETURNING "id"
-    `);
-    const snapshot = snapshots[0];
+    const capturedSnapshots = [];
+
+    for (const scope of EXECUTION_KPI_SCOPES) {
+      const evaluation = buildExecutionIncompleteRowsEvaluation({
+        matters: matters as MatterRecord[],
+        clients: clients as ClientRecord[],
+        trackingRecords: trackingRecords as TrackingRecord[],
+        terms: terms as TermRecord[],
+        scope,
+        dateKey,
+        isOpenBusinessDay: false
+      });
+      const snapshotId = randomUUID();
+      const snapshots = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        INSERT INTO "KpiDailySnapshot" (
+          "id",
+          "organizationId",
+          "userKey",
+          "metricId",
+          "snapshotDate",
+          "status",
+          "value",
+          "target",
+          "unit",
+          "actualLabel",
+          "targetLabel",
+          "helper",
+          "incidents",
+          "sourceData",
+          "createdAt",
+          "updatedAt"
+        )
+        VALUES (
+          ${snapshotId},
+          ${DEFAULT_ORGANIZATION_ID},
+          ${scope.snapshotUserKey},
+          ${scope.metricId},
+          CAST(${snapshotDate} AS date),
+          ${evaluation.status},
+          ${evaluation.value},
+          ${evaluation.target},
+          ${evaluation.unit},
+          ${evaluation.actualLabel},
+          ${evaluation.targetLabel},
+          ${evaluation.helper},
+          CAST(${JSON.stringify(evaluation.incidents)} AS jsonb),
+          CAST(${JSON.stringify(evaluation.sourceData)} AS jsonb),
+          ${now},
+          ${now}
+        )
+        ON CONFLICT ("organizationId", "userKey", "metricId", "snapshotDate")
+        DO UPDATE SET
+          "status" = EXCLUDED."status",
+          "value" = EXCLUDED."value",
+          "target" = EXCLUDED."target",
+          "unit" = EXCLUDED."unit",
+          "actualLabel" = EXCLUDED."actualLabel",
+          "targetLabel" = EXCLUDED."targetLabel",
+          "helper" = EXCLUDED."helper",
+          "incidents" = EXCLUDED."incidents",
+          "sourceData" = EXCLUDED."sourceData",
+          "updatedAt" = EXCLUDED."updatedAt"
+        RETURNING "id"
+      `);
+
+      capturedSnapshots.push({
+        snapshotId: snapshots[0]?.id ?? snapshotId,
+        userKey: scope.snapshotUserKey,
+        metricId: scope.metricId,
+        teamKey: scope.teamKey,
+        status: evaluation.status,
+        value: evaluation.value,
+        target: evaluation.target,
+        incidentCount: evaluation.incidents.length
+      });
+    }
+
+    const legacySnapshot = capturedSnapshots.find((snapshot) => snapshot.metricId === LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID);
 
     return {
       dateKey,
       skipped: false,
-      snapshotId: snapshot?.id ?? snapshotId,
-      status: evaluation.status,
-      value: evaluation.value,
-      incidentCount: evaluation.incidents.length
+      snapshotId: legacySnapshot?.snapshotId,
+      status: legacySnapshot?.status,
+      value: legacySnapshot?.value,
+      incidentCount: legacySnapshot?.incidentCount ?? 0,
+      snapshots: capturedSnapshots
     };
   }
 
@@ -2524,14 +2633,14 @@ export class PrismaKpisRepository implements KpisRepository {
       }),
       this.prisma.taskTrackingRecord.findMany({
         where: {
-          moduleId: LITIGATION_MODULE_ID,
+          moduleId: { in: EXECUTION_KPI_MODULE_IDS },
           deletedAt: null
         },
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
       }),
       this.prisma.taskTerm.findMany({
         where: {
-          moduleId: LITIGATION_MODULE_ID,
+          moduleId: { in: EXECUTION_KPI_MODULE_IDS },
           deletedAt: null
         },
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
@@ -2554,8 +2663,8 @@ export class PrismaKpisRepository implements KpisRepository {
         where: {
           deletedAt: null,
           OR: [
-            { responsibleTeam: "LITIGATION" },
-            { executionLinkedModule: LITIGATION_MODULE_ID }
+            { responsibleTeam: { in: EXECUTION_KPI_TEAM_KEYS } },
+            { executionLinkedModule: { in: EXECUTION_KPI_MODULE_IDS } }
           ]
         },
         orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
@@ -2697,7 +2806,7 @@ export class PrismaKpisRepository implements KpisRepository {
           personalVacationKeys,
           globalVacationKeys
         });
-        const builtMetrics = config
+        const personalMetrics = config
           ? config.buildMetrics({
               user,
               aliases,
@@ -2710,25 +2819,42 @@ export class PrismaKpisRepository implements KpisRepository {
               period: userPeriod
             })
           : [];
-        const metrics = builtMetrics.map((metric) => applyKpiEmrtOverrides(
-          metric,
-          overrideDatesByUserMetric.get(`${user.id}:${metric.id}`) ?? new Set<string>(),
-          userPeriod
-        ));
 
         return getUserTeamAssignments(user, teamLabelByKey)
           .filter((assignment) => assignment.teamKey === "UNASSIGNED" || activeTeamKeys.has(assignment.teamKey))
-          .map((assignment) => ({
-          userId: user.id,
-          username: user.username,
-          displayName: user.displayName,
-          shortName: user.shortName ?? undefined,
+          .map((assignment) => {
+            const executionScope = TEAM_EXECUTION_KPI_SCOPES.find((scope) =>
+              scope.includeInUserTeamKpis && scope.teamKey === assignment.teamKey
+            );
+            const teamMetrics = executionScope
+              ? [buildExecutionIncompleteRowsMetric({
+                  matters: matters as MatterRecord[],
+                  clients: clients as ClientRecord[],
+                  trackingRecords: trackingRecords as TrackingRecord[],
+                  terms: terms as TermRecord[],
+                  kpiDailySnapshots: kpiDailySnapshots as KpiDailySnapshotRecord[],
+                  period: userPeriod,
+                  scope: executionScope
+                })]
+              : [];
+            const metrics = [...personalMetrics, ...teamMetrics].map((metric) => applyKpiEmrtOverrides(
+              metric,
+              overrideDatesByUserMetric.get(`${user.id}:${metric.id}`) ?? new Set<string>(),
+              userPeriod
+            ));
+
+            return {
+              userId: user.id,
+              username: user.username,
+              displayName: user.displayName,
+              shortName: user.shortName ?? undefined,
             team: assignment.teamKey === "UNASSIGNED" ? undefined : assignment.teamKey as Team,
             teamLabel: assignment.teamLabel,
             specificRole: assignment.specificRole,
-          configured: Boolean(config),
-          metrics
-          }));
+              configured: Boolean(config || executionScope),
+              metrics
+            };
+          });
       });
 
     const visibleTeams = this.filterTeamsByAccessScope(activeTeamCatalog, accessScope, teamLabelByKey);
@@ -2775,8 +2901,6 @@ export class PrismaKpisRepository implements KpisRepository {
         FROM "KpiDailySnapshot"
         WHERE "snapshotDate" >= CAST(${dateFromKey(startKey)} AS date)
           AND "snapshotDate" <= CAST(${dateFromKey(endKey)} AS date)
-          AND "metricId" = ${LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID}
-          AND "userKey" = ${LAMR_KPI_USER_KEY}
         ORDER BY "snapshotDate" ASC, "userKey" ASC, "metricId" ASC
       `);
     } catch (error) {

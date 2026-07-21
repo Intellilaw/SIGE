@@ -7112,6 +7112,40 @@ div.sales-product-card-main {
   grid-template-columns: 1fr;
 }
 
+.commissions-matter-panel {
+  border-color: rgba(30, 64, 175, 0.16);
+}
+
+.commissions-matter-table td:first-child strong,
+.commissions-matter-table td:first-child small {
+  display: block;
+}
+
+.commissions-matter-table td:first-child small {
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.commissions-matter-table th:nth-child(1) {
+  width: 20%;
+}
+
+.commissions-matter-table th:nth-child(2) {
+  width: 12%;
+}
+
+.commissions-matter-table th:nth-child(3) {
+  width: 31%;
+}
+
+.commissions-matter-table th:nth-child(4) {
+  width: 15%;
+}
+
+.commissions-matter-table th:nth-child(5) {
+  width: 12%;
+}
+
 .commissions-snapshot-grid {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
@@ -7876,7 +7910,33 @@ div.sales-product-card-main {
   align-items: flex-start;
 }
 
+.kpis-team-panel-actions {
+  align-items: flex-end;
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.kpis-team-panel-actions > span {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.kpis-team-panel-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.kpis-team-panel-actions .secondary-button {
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
 .kpis-team-panel {
+  align-content: start;
+  align-self: start;
   background: #f8fafc;
   border: 1px solid rgba(15, 23, 42, 0.08);
 }
@@ -7913,6 +7973,95 @@ div.sales-product-card-main {
 
 .kpis-user-block.is-unconfigured::before {
   background: #94a3b8;
+}
+
+.kpis-user-block.is-collapsed {
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+.kpis-user-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 4px;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.kpis-user-toggle:hover,
+.kpis-user-toggle:focus-visible {
+  background: rgba(15, 118, 110, 0.06);
+  outline: none;
+}
+
+.kpis-user-toggle:focus-visible {
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18);
+}
+
+.kpis-user-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.kpis-user-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.kpis-user-counts {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.kpis-user-counts span {
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
+  font-size: 0.76rem;
+  font-weight: 900;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.kpis-user-counts span.is-warning {
+  background: rgba(180, 83, 9, 0.1);
+  color: #b45309;
+}
+
+.kpis-user-counts span.is-missed {
+  background: rgba(190, 18, 60, 0.1);
+  color: #be123c;
+}
+
+.kpis-user-chevron {
+  border-bottom: 2px solid #64748b;
+  border-right: 2px solid #64748b;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 9px;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  width: 9px;
+}
+
+.kpis-user-block.is-collapsed .kpis-user-chevron {
+  transform: rotate(-45deg);
 }
 
 .kpis-user-sections {
@@ -7965,8 +8114,8 @@ div.sales-product-card-main {
 
 .kpis-definition-item {
   display: grid;
-  gap: 5px;
-  padding: 12px 0;
+  gap: 12px;
+  padding: 18px 0;
   border-top: 1px solid rgba(31, 41, 51, 0.08);
 }
 
@@ -7981,11 +8130,28 @@ div.sales-product-card-main {
 
 .kpis-definition-item strong {
   color: #102a43;
+  font-size: 1rem;
 }
 
 .kpis-definition-item p,
 .kpis-definition-item small {
   margin: 0;
+}
+
+.kpis-definition-field {
+  display: grid;
+  gap: 4px;
+}
+
+.kpis-definition-field > span {
+  color: #0f766e;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.kpis-definition-field p {
+  line-height: 1.55;
 }
 
 .kpis-results-grid {
@@ -8833,13 +8999,12 @@ div.sales-product-card-main {
 }
 
 .supervision-kpi-metric {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-  gap: 12px;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid rgba(124, 58, 237, 0.16);
   border-radius: 8px;
   background: #fbfaff;
-  padding: 14px;
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
 }
 
@@ -8851,6 +9016,118 @@ div.sales-product-card-main {
 .supervision-kpi-metric.is-warning {
   border-color: rgba(180, 83, 9, 0.22);
   border-left: 4px solid #b45309;
+}
+
+.supervision-kpi-metric-toggle {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto 16px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #102a43;
+  cursor: pointer;
+  padding: 13px 14px;
+  text-align: left;
+  transition: background-color 160ms ease;
+}
+
+.supervision-kpi-metric-toggle:hover {
+  background: rgba(237, 233, 254, 0.42);
+}
+
+.supervision-kpi-metric-toggle:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.3);
+  outline-offset: -3px;
+}
+
+.supervision-kpi-metric.is-expanded .supervision-kpi-metric-toggle {
+  border-bottom: 1px solid rgba(124, 58, 237, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.supervision-kpi-metric-summary-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.supervision-kpi-metric-summary-main strong,
+.supervision-kpi-metric-summary-main small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.supervision-kpi-metric-summary-main strong {
+  font-size: 0.96rem;
+  line-height: 1.3;
+}
+
+.supervision-kpi-metric-summary-main small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.supervision-kpi-metric-summary-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.supervision-kpi-metric-incident-count,
+.supervision-kpi-metric-commission-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.supervision-kpi-metric-incident-count {
+  background: #f1f5f9;
+  color: #52657a;
+}
+
+.supervision-kpi-metric-commission-summary.is-blocked {
+  background: #fbe4ea;
+  color: #be123c;
+}
+
+.supervision-kpi-metric-commission-summary.is-clear {
+  background: #e7f6f0;
+  color: #0f766e;
+}
+
+.supervision-kpi-metric-chevron {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #64748b;
+  border-bottom: 2px solid #64748b;
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 160ms ease;
+}
+
+.supervision-kpi-metric.is-expanded .supervision-kpi-metric-chevron {
+  transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.supervision-kpi-metric-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
 }
 
 .supervision-kpi-metric-title {
@@ -10188,6 +10465,25 @@ div.sales-product-card-main {
 
   .kpis-sidebar {
     position: static;
+  }
+
+  .kpis-team-panel-actions {
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .kpis-team-panel-actions > div {
+    justify-content: flex-start;
+  }
+
+  .kpis-user-toggle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .kpis-user-summary {
+    justify-content: flex-start;
+    width: 100%;
   }
 
   .commissions-modal-backdrop {
@@ -12797,7 +13093,7 @@ div.sales-product-card-main {
 }
 
 @media (max-width: 960px) {
-  .supervision-kpi-metric {
+  .supervision-kpi-metric-content {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -12812,6 +13108,37 @@ div.sales-product-card-main {
 }
 
 @media (max-width: 640px) {
+  .supervision-kpi-metric-toggle {
+    grid-template-columns: minmax(0, 1fr) 16px;
+    gap: 8px 10px;
+    padding: 12px;
+  }
+
+  .supervision-kpi-metric-summary-main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .supervision-kpi-metric-summary-meta {
+    grid-column: 1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .supervision-kpi-metric-chevron {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .supervision-kpi-metric-incident-count,
+  .supervision-kpi-metric-commission-summary {
+    white-space: normal;
+  }
+
+  .supervision-kpi-metric-content {
+    padding: 12px;
+  }
+
   .supervision-kpi-override-week > div {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

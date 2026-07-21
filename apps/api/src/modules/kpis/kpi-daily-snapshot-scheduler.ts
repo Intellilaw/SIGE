@@ -1,7 +1,7 @@
 import type { PrismaKpisRepository } from "../../repositories/kpis.repository";
 
 const BUSINESS_TIME_ZONE = "America/Mexico_City";
-const SNAPSHOT_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const SNAPSHOT_CHECK_INTERVAL_MS = 60 * 1000;
 const SNAPSHOT_RUN_HOUR = 23;
 const SNAPSHOT_RUN_MINUTE = 55;
 
@@ -60,14 +60,22 @@ export function startKpiDailySnapshotScheduler(repository: PrismaKpisRepository,
         return;
       }
 
+      const snapshots = result.snapshots ?? [];
       logger?.info(
         {
           dateKey: result.dateKey,
           status: result.status,
           value: result.value,
-          incidentCount: result.incidentCount
+          incidentCount: result.incidentCount,
+          snapshotCount: snapshots.length,
+          teams: snapshots.map((snapshot) => ({
+            teamKey: snapshot.teamKey,
+            value: snapshot.value,
+            target: snapshot.target,
+            status: snapshot.status
+          }))
         },
-        "Captured KPI daily snapshot."
+        "Captured KPI daily snapshots."
       );
     } catch (error) {
       logger?.error(error, "Unable to capture KPI daily snapshot.");

@@ -1450,6 +1450,14 @@ export class PrismaGeneralExpensesRepository implements GeneralExpensesRepositor
       return updated;
     });
 
+    if (payload.finalPaymentApprovedByEmrt === true && payrollSnapshot) {
+      return {
+        ...payrollSnapshot,
+        finalPaymentApprovedByEmrt: true,
+        updatedAt: record.updatedAt.toISOString()
+      };
+    }
+
     return this.mapPayrollEntryWithMonthlyBonuses(record);
   }
 

@@ -5,10 +5,20 @@ import type { TaskModuleDefinition } from "@sige/contracts";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
 
-type Sender = { id: string; email: string; displayName: string };
+type Sender = { id: string; email: string; displayName: string; connectionStatus: string; connectedAt: string | null };
 type Attachment = { name: string; size: number; type: string };
 type Delivery = { id: string; scheduledFor: string; status: string; attemptCount: number; sentAt: string | null; failureMessage: string | null };
 type Message = FormState & { id: string; nextRunAt: string | null; updatedAt: string; createdByName: string };
+type GoogleConnection = {
+  configured: boolean;
+  configurationError: string | null;
+  status: "NOT_CONNECTED" | "ACTIVE" | "REAUTH_REQUIRED" | "REVOKED";
+  email: string | null;
+  connectedAt: string | null;
+  lastValidatedAt: string | null;
+  lastUsedAt: string | null;
+  lastError: string | null;
+};
 type FormState = {
   teamKey: string; name: string; senderEmail: string; toRecipients: string[]; ccRecipients: string[]; bccRecipients: string[];
   subject: string; bodyHtml: string; signatureText: string | null; attachments: Attachment[]; frequency: "DAILY" | "WEEKLY" | "MONTHLY" | "CUSTOM";
@@ -33,6 +43,103 @@ function frequencyLabel(message: Message) {
   return `Personalizada, cada ${message.interval} día(s)`;
 }
 
+const GOOGLE_CALLBACK_MESSAGES: Record<string, string> = {
+  GOOGLE_OAUTH_DENIED: "La autorización de Google fue cancelada.",
+  GOOGLE_OAUTH_EMAIL_MISMATCH: "Debes elegir una cuenta de Google Workspace terminada en @rusconi.law.",
+  GOOGLE_OAUTH_EMAIL_IN_USE: "Esa cuenta de Google Workspace ya está conectada a otro usuario de SIGE.",
+  GOOGLE_OAUTH_SCOPE_MISSING: "Google no concedió el permiso para enviar correos.",
+  GOOGLE_OAUTH_REFRESH_TOKEN_MISSING: "Google no devolvió autorización para envíos posteriores.",
+  GOOGLE_OAUTH_STATE_EXPIRED: "La autorización expiró. Intenta conectar la cuenta nuevamente."
+};
+
+function GoogleWorkspaceConnectionPanel() {
+  const [connection, setConnection] = useState<GoogleConnection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [panelError, setPanelError] = useState<string | null>(null);
+
+  async function loadConnection() {
+    setConnection(await apiGet<GoogleConnection>("/google-workspace/connection"));
+  }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const googleStatus = params.get("google");
+    if (googleStatus === "connected") {
+      setNotice("Tu cuenta de Google Workspace quedó conectada correctamente.");
+    } else if (googleStatus === "error") {
+      const code = params.get("googleCode") ?? "";
+      setPanelError(GOOGLE_CALLBACK_MESSAGES[code] ?? "Google no pudo completar la autorización. Inténtalo nuevamente.");
+    }
+    if (googleStatus) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    void loadConnection()
+      .catch((reason) => setPanelError(reason instanceof Error ? reason.message : "No fue posible consultar Google Workspace."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function connect() {
+    setWorking(true); setPanelError(null); setNotice(null);
+    try {
+      const response = await apiPost<{ authorizationUrl: string }>("/google-workspace/oauth/start", {
+        returnPath: window.location.pathname
+      });
+      window.location.assign(response.authorizationUrl);
+    } catch (reason) {
+      setPanelError(reason instanceof Error ? reason.message : "No fue posible iniciar la autorización de Google.");
+      setWorking(false);
+    }
+  }
+
+  async function disconnect() {
+    if (!window.confirm("¿Desconectar tu cuenta de Google Workspace de SIGE?")) return;
+    setWorking(true); setPanelError(null); setNotice(null);
+    try {
+      await apiDelete("/google-workspace/connection");
+      await loadConnection();
+      setNotice("La cuenta fue desconectada de SIGE.");
+    } catch (reason) {
+      setPanelError(reason instanceof Error ? reason.message : "No fue posible desconectar la cuenta.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function sendTest() {
+    setWorking(true); setPanelError(null); setNotice(null);
+    try {
+      const response = await apiPost<{ recipient: string }>("/google-workspace/test", {});
+      setNotice(`Prueba enviada a ${response.recipient}. Revisa Recibidos y Enviados en Gmail.`);
+      await loadConnection();
+    } catch (reason) {
+      setPanelError(reason instanceof Error ? reason.message : "Gmail no pudo enviar el mensaje de prueba.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  const isActive = connection?.status === "ACTIVE";
+  const statusLabel = loading ? "Consultando" : isActive ? "Conectada" : connection?.status === "REAUTH_REQUIRED" ? "Requiere reconexión" : "Sin conectar";
+
+  return <section className="panel">
+    <div className="panel-header"><h2>Google Workspace</h2><span>{statusLabel}</span></div>
+    {loading ? <div className="centered-inline-message">Verificando la conexión…</div> : null}
+    {!loading && !connection?.configured ? <div className="message-banner message-warning"><strong>Credenciales locales no disponibles.</strong> {connection?.configurationError}</div> : null}
+    {!loading && connection?.configured && isActive ? <div className="message-banner message-success"><strong>Cuenta conectada:</strong> {connection.email}</div> : null}
+    {!loading && connection?.configured && !isActive ? <div className="message-banner message-warning"><strong>Conecta una cuenta @rusconi.law.</strong> SIGE sólo solicitará identidad y permiso para enviar correo.</div> : null}
+    {notice ? <div className="message-banner message-success">{notice}</div> : null}
+    {panelError ? <div className="message-banner message-error">{panelError}</div> : null}
+    {!loading && connection?.configured ? <div className="periodic-form-actions">
+      {isActive
+        ? <><button type="button" className="primary-button" disabled={working} onClick={() => void sendTest()}>{working ? "Procesando…" : "Enviar prueba a mi correo"}</button><button type="button" className="secondary-button" disabled={working} onClick={() => void disconnect()}>Desconectar</button></>
+        : <button type="button" className="primary-button" disabled={working} onClick={() => void connect()}>{working ? "Abriendo Google…" : "Conectar cuenta @rusconi.law"}</button>}
+    </div> : null}
+  </section>;
+}
+
 export function PeriodicMessagesPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -48,7 +155,8 @@ export function PeriodicMessagesPage() {
   return <section className="page-stack periodic-messages-page">
     <header className="hero module-hero"><div className="module-hero-head"><span className="module-hero-icon">✉</span><div><h2>Mensajes periódicos programados</h2></div></div>
       <p className="muted">Programación central de correos por equipo, con remitentes autorizados e historial de ejecución.</p></header>
-    <div className="message-banner message-warning"><strong>Servicio de envío pendiente de configuración.</strong> Google Workspace todavía no está autorizado; las programaciones se guardarán sin enviar mensajes.</div>
+    <GoogleWorkspaceConnectionPanel />
+    <div className="message-banner message-warning"><strong>Envíos automáticos aún deshabilitados.</strong> La conexión y el envío de prueba ya pueden validarse; las programaciones permanecerán pausadas hasta habilitar el worker.</div>
     <section className="panel"><div className="panel-header"><h2>Equipos</h2><span>{loading ? "Cargando" : `${teams.length} módulos`}</span></div>
       <div className="execution-module-grid">{teams.map((team) => <button key={team.id} className="execution-module-card" onClick={() => navigate(`/app/periodic-messages/${encodeURIComponent(team.id)}`)}>
         <span className="execution-module-icon">✉</span><strong>{team.label}</strong><p>Programaciones, remitentes e historial de {team.label}.</p></button>)}</div></section>
@@ -73,7 +181,8 @@ function TeamMessages({ teams, slug, onBack }: { teams: TaskModuleDefinition[]; 
       apiGet<Message[]>(`/periodic-messages?teamKey=${encodeURIComponent(moduleId)}`)
     ]);
     setSenders(senderRows); setMessages(messageRows);
-    setForm((current) => ({ ...current, teamKey: moduleId, senderEmail: current.senderEmail || senderRows[0]?.email || "" }));
+    const preferredSender = senderRows.find((sender) => sender.connectionStatus === "ACTIVE") ?? senderRows[0];
+    setForm((current) => ({ ...current, teamKey: moduleId, senderEmail: current.senderEmail || preferredSender?.email || "" }));
   }
   useEffect(() => { if (team) void load(team.id).catch((reason) => setError(reason instanceof Error ? reason.message : "No fue posible cargar el módulo.")); }, [team?.id]);
   const totalFailures = useMemo(() => 0, [messages]);
@@ -112,12 +221,13 @@ function TeamMessages({ teams, slug, onBack }: { teams: TaskModuleDefinition[]; 
   return <section className="page-stack periodic-messages-page">
     <header className="hero module-hero"><button className="secondary-button" onClick={onBack}>Volver a equipos</button><h2>Mensajes periódicos — {team.label}</h2>
       <p className="muted">Todos los integrantes del equipo y los super admins pueden administrar estas programaciones.</p></header>
-    <div className="message-banner message-warning"><strong>Servicio de envío pendiente de configuración de Google Workspace.</strong> Puedes preparar y pausar programaciones; no se enviará ningún correo todavía.</div>
+    <GoogleWorkspaceConnectionPanel />
+    <div className="message-banner message-warning"><strong>Worker pendiente.</strong> Puedes conectar remitentes y probar Gmail; las programaciones automáticas todavía no se ejecutan.</div>
     {error ? <div className="message-banner message-error">{error}</div> : null}
     <section className="panel"><div className="panel-header"><h2>{editingId ? "Editar programación" : "Nueva programación"}</h2><span>{senders.length} remitentes autorizados</span></div>
       <form className="periodic-message-form" onSubmit={submit}>
         <label>Nombre interno<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
-        <label>Remitente<select value={form.senderEmail} onChange={(e) => setForm({ ...form, senderEmail: e.target.value })} required><option value="">Seleccionar</option>{senders.map((sender) => <option key={sender.id} value={sender.email}>{sender.displayName} — {sender.email}</option>)}</select></label>
+        <label>Remitente<select value={form.senderEmail} onChange={(e) => setForm({ ...form, senderEmail: e.target.value })} required><option value="">Seleccionar</option>{senders.map((sender) => <option key={sender.id} value={sender.email}>{sender.displayName} — {sender.email}{sender.connectionStatus === "ACTIVE" ? " — Google conectado" : " — sin conectar"}</option>)}</select></label>
         <label className="span-2">Para<textarea value={form.toRecipients.join("; ")} onChange={(e) => setForm({ ...form, toRecipients: csv(e.target.value) })} placeholder="correo@ejemplo.com; otro@ejemplo.com" required /></label>
         <label>CC<textarea value={form.ccRecipients.join("; ")} onChange={(e) => setForm({ ...form, ccRecipients: csv(e.target.value) })} /></label>
         <label>CCO<textarea value={form.bccRecipients.join("; ")} onChange={(e) => setForm({ ...form, bccRecipients: csv(e.target.value) })} /></label>

@@ -25,6 +25,7 @@ import type {
   CommissionRecipientAssignment,
   CommissionReceiver,
   CommissionExclusion,
+  CommissionMatterCommission,
   CommissionPaymentAcknowledgement,
   CommissionPaymentFlowState,
   CommissionReleaseEligibility,
@@ -763,6 +764,7 @@ export interface CommissionsOverviewRecord {
   receivers: CommissionReceiver[];
   recipientAssignments: CommissionRecipientAssignment[];
   exclusions: CommissionExclusion[];
+  matterCommissions: CommissionMatterCommission[];
   projectorCommissions: ProjectorCommission[];
   paymentAcknowledgements: CommissionPaymentAcknowledgement[];
   commissionReleaseEligibilities: CommissionReleaseEligibility[];
@@ -784,6 +786,15 @@ export interface CommissionExclusionWriteRecord {
   section: string;
   group: CommissionExclusion["group"];
   financeRecordId: string;
+  createdByUserId?: string;
+  createdByName?: string;
+}
+
+export interface CommissionMatterExclusionWriteRecord {
+  year: number;
+  month: number;
+  matterId: string;
+  excluded: boolean;
   createdByUserId?: string;
   createdByName?: string;
 }
@@ -839,6 +850,7 @@ export interface CommissionsRepository {
   createSnapshot(payload: CreateCommissionSnapshotRecord): Promise<CommissionSnapshot>;
   setExclusion(payload: CommissionExclusionWriteRecord): Promise<CommissionExclusion>;
   clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">): Promise<void>;
+  setMatterExclusion(payload: CommissionMatterExclusionWriteRecord): Promise<void>;
   updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord): Promise<ProjectorCommission | null>;
   getPaymentFlowState(year: number, month: number): Promise<CommissionPaymentFlowState>;
   reconcilePaymentAcknowledgements(

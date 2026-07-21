@@ -1,5 +1,6 @@
 import type {
   CommissionExclusionWriteRecord,
+  CommissionMatterExclusionWriteRecord,
   CommissionPaymentAcknowledgementUpdateRecord,
   CommissionPaymentActor,
   CommissionPaymentReconcileRow,
@@ -46,6 +47,10 @@ export class CommissionsService {
 
   public clearExclusion(payload: Omit<CommissionExclusionWriteRecord, "createdByUserId" | "createdByName">) {
     return this.repository.clearExclusion(payload);
+  }
+
+  public setMatterExclusion(payload: CommissionMatterExclusionWriteRecord) {
+    return this.repository.setMatterExclusion(payload);
   }
 
   public updateProjectorCommission(entryId: string, payload: ProjectorCommissionUpdateRecord) {

@@ -801,6 +801,8 @@ export function GeneralExpensesPage() {
   const expensePatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchSequenceRef = useRef<Record<string, number>>({});
   const payrollPatchEntryQueuesRef = useRef<Record<string, Promise<void>>>({});
+  const payrollFinalApprovalQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const payrollFinalApprovalReconciliationRef = useRef(false);
   const payrollPatchActiveCountRef = useRef(0);
   const payrollPatchWaitersRef = useRef<Array<() => void>>([]);
   const payrollDistributionAutosaveTimersRef = useRef<Record<string, number>>({});
@@ -940,24 +942,36 @@ export function GeneralExpensesPage() {
     }
   }
 
-  async function loadPayrollEntries() {
+  async function loadPayrollEntries({
+    showLoading = true,
+    clearDrafts = true
+  }: {
+    showLoading?: boolean;
+    clearDrafts?: boolean;
+  } = {}) {
     if (!canRead) {
       setPayrollEntries([]);
       setLoadingPayroll(false);
       return;
     }
 
-    setLoadingPayroll(true);
-    setErrorMessage(null);
+    if (showLoading) {
+      setLoadingPayroll(true);
+      setErrorMessage(null);
+    }
 
     try {
       const response = await apiGet<GeneralExpensePayrollEntry[]>(`/general-expenses/payroll?year=${selectedYear}&month=${selectedMonth}`);
       setPayrollEntries(applyPayrollCalculationsToEntries(response));
-      setPayrollDrafts({});
+      if (clearDrafts) {
+        setPayrollDrafts({});
+      }
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
-      setLoadingPayroll(false);
+      if (showLoading) {
+        setLoadingPayroll(false);
+      }
     }
   }
 
@@ -1256,7 +1270,7 @@ export function GeneralExpensesPage() {
     const requestSequence = (payrollPatchSequenceRef.current[entryId] ?? 0) + 1;
     payrollPatchSequenceRef.current[entryId] = requestSequence;
 
-    await enqueuePayrollPatch(entryId, async () => {
+    const finalApprovalQueueDrained = await enqueuePayrollPatch(entryId, async () => {
       try {
         const updated = await apiPatch<GeneralExpensePayrollEntry>(`/general-expenses/payroll/${entryId}`, payload);
         if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
@@ -1264,21 +1278,32 @@ export function GeneralExpensesPage() {
         }
 
         setPayrollEntries((items) => replacePayrollEntry(items, updated));
-        if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
-          await loadRecords();
-        }
       } catch (error) {
         if (payrollPatchSequenceRef.current[entryId] !== requestSequence) {
           return;
         }
 
+        if (currentEntry) {
+          setPayrollEntries((items) => replacePayrollEntry(items, currentEntry));
+        }
         setErrorMessage(toErrorMessage(error));
-        await loadPayrollEntries();
-        if (Object.prototype.hasOwnProperty.call(payload, "finalPaymentApprovedByEmrt")) {
-          await loadRecords();
+        if (isFinalApprovalOnlyPatch) {
+          payrollFinalApprovalReconciliationRef.current = true;
+        } else {
+          await loadPayrollEntries({ showLoading: false, clearDrafts: false });
         }
       }
-    });
+    }, isFinalApprovalOnlyPatch);
+
+    if (!isFinalApprovalOnlyPatch || !finalApprovalQueueDrained) {
+      return;
+    }
+
+    if (payrollFinalApprovalReconciliationRef.current) {
+      payrollFinalApprovalReconciliationRef.current = false;
+      await loadPayrollEntries({ showLoading: false, clearDrafts: false });
+    }
+    await loadRecords();
   }
 
   async function acquirePayrollPatchSlot() {
@@ -1302,9 +1327,18 @@ export function GeneralExpensesPage() {
     payrollPatchActiveCountRef.current = Math.max(0, payrollPatchActiveCountRef.current - 1);
   }
 
-  async function enqueuePayrollPatch(entryId: string, execute: () => Promise<void>) {
-    const previous = payrollPatchEntryQueuesRef.current[entryId] ?? Promise.resolve();
-    const queued = previous.catch(() => undefined).then(async () => {
+  async function enqueuePayrollPatch(
+    entryId: string,
+    execute: () => Promise<void>,
+    serializeFinalApproval = false
+  ) {
+    const previousEntry = payrollPatchEntryQueuesRef.current[entryId] ?? Promise.resolve();
+    const dependencies = [previousEntry.catch(() => undefined)];
+    if (serializeFinalApproval) {
+      dependencies.push(payrollFinalApprovalQueueRef.current.catch(() => undefined));
+    }
+
+    const queued = Promise.all(dependencies).then(async () => {
       await acquirePayrollPatchSlot();
       try {
         await execute();
@@ -1314,11 +1348,16 @@ export function GeneralExpensesPage() {
     });
     const settled = queued.catch(() => undefined);
     payrollPatchEntryQueuesRef.current[entryId] = settled;
+    if (serializeFinalApproval) {
+      payrollFinalApprovalQueueRef.current = settled;
+    }
 
     await queued;
     if (payrollPatchEntryQueuesRef.current[entryId] === settled) {
       delete payrollPatchEntryQueuesRef.current[entryId];
     }
+
+    return serializeFinalApproval && payrollFinalApprovalQueueRef.current === settled;
   }
 
   async function persistPayrollDistribution(entryId: string, patch: PayrollDistributionPatchPayload) {

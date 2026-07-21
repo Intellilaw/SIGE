@@ -6,7 +6,7 @@ import { canAccessGeneralSupervision } from "../../config/modules";
 import { useAuth } from "../auth/AuthContext";
 const KPI_STATUS_LABELS = {
     met: "Cumplido",
-    warning: "En riesgo",
+    warning: "Incumplido",
     missed: "Incumplido",
     "not-configured": "Sin configurar"
 };
@@ -294,11 +294,8 @@ function summarizeDailyStatus(dailyBreakdown) {
     if (evaluatedDays.length === 0) {
         return "not-configured";
     }
-    if (evaluatedDays.some((day) => day.status === "missed")) {
+    if (evaluatedDays.some((day) => day.status === "missed" || day.status === "warning")) {
         return "missed";
-    }
-    if (evaluatedDays.some((day) => day.status === "warning")) {
-        return "warning";
     }
     return "met";
 }
@@ -314,15 +311,18 @@ function pluralizeDays(count) {
 function buildRangeMetric(metric, dailyBreakdown) {
     const evaluatedDays = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day));
     const nonEvaluatedDays = dailyBreakdown.filter(isNonEvaluatedKpiDay);
+    const missingSnapshotDays = nonEvaluatedDays.filter((day) => day.actualLabel === "Sin snapshot diario");
+    const otherNonEvaluatedDays = nonEvaluatedDays.filter((day) => day.actualLabel !== "Sin snapshot diario");
     const missedDays = evaluatedDays.filter((day) => day.status === "missed").length;
     const warningDays = evaluatedDays.filter((day) => day.status === "warning").length;
+    const unmetDays = missedDays + warningDays;
     const metDays = evaluatedDays.filter((day) => day.status === "met").length;
     const incidents = evaluatedDays.flatMap((day) => day.incidents);
     const actualLabel = [
-        missedDays > 0 ? `${pluralizeDays(missedDays)} incumplidos` : "",
-        warningDays > 0 ? `${pluralizeDays(warningDays)} en riesgo` : "",
-        missedDays === 0 && warningDays === 0 && metDays > 0 ? `${pluralizeDays(metDays)} cumplidos` : "",
-        nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
+        unmetDays > 0 ? `${pluralizeDays(unmetDays)} incumplidos` : "",
+        unmetDays === 0 && metDays > 0 ? `${pluralizeDays(metDays)} cumplidos` : "",
+        missingSnapshotDays.length > 0 ? `${pluralizeDays(missingSnapshotDays.length)} sin snapshot de cierre` : "",
+        otherNonEvaluatedDays.length > 0 ? `${pluralizeDays(otherNonEvaluatedDays.length)} no evaluados` : ""
     ].filter(Boolean).join(" / ") || "Sin dias evaluados";
     return {
         ...metric,
@@ -332,7 +332,8 @@ function buildRangeMetric(metric, dailyBreakdown) {
         actualLabel,
         targetLabel: [
             `${pluralizeDays(evaluatedDays.length)} habiles evaluados`,
-            nonEvaluatedDays.length > 0 ? `${pluralizeDays(nonEvaluatedDays.length)} no evaluados` : ""
+            missingSnapshotDays.length > 0 ? `${pluralizeDays(missingSnapshotDays.length)} sin snapshot de cierre` : "",
+            otherNonEvaluatedDays.length > 0 ? `${pluralizeDays(otherNonEvaluatedDays.length)} no evaluados` : ""
         ].filter(Boolean).join(" / "),
         progressPct: metric.progressPct,
         helper: `Periodo evaluado: ${formatDateRange(dailyBreakdown[0]?.date ?? "", dailyBreakdown.at(-1)?.date ?? "")}`,
@@ -456,18 +457,32 @@ function getKpiWeekIncidentItems(periods, metricId, periodKey, view) {
         const key = [day.date, metric.id, day.status].join(":");
         items.set(key, {
             key,
-            status: day.status,
+            status: day.status === "warning" ? "missed" : day.status,
             label: `${formatShortDate(day.date)} - ${day.actualLabel}`,
             description: `${day.targetLabel}. ${day.helper}`
         });
     });
     return Array.from(items.values()).sort((left, right) => left.key.localeCompare(right.key));
 }
-function getKpiUnmetMetrics(periods) {
+function getKpiMissedDaysLabel(periods, metricId) {
+    const missedDateKeys = new Set();
+    periods.forEach((period) => {
+        period.metrics
+            .find((metric) => metric.id === metricId)
+            ?.dailyBreakdown
+            .filter((day) => (day.status === "missed" || day.status === "warning") && !isNonEvaluatedKpiDay(day))
+            .forEach((day) => missedDateKeys.add(day.date));
+    });
+    const count = missedDateKeys.size;
+    return `${count} ${count === 1 ? "día incumplido" : "días incumplidos"} en las últimas dos semanas`;
+}
+function getKpiUnmetMetrics(periods, blockedCommissionMetricIds = new Set()) {
     const metricsById = new Map();
     periods.forEach((period) => {
         period.metrics.forEach((metric) => {
-            if (!KPI_ALERT_STATUSES.includes(metric.status) && !metricHasNonEvaluatedDays(metric)) {
+            if (!KPI_ALERT_STATUSES.includes(metric.status)
+                && !metricHasNonEvaluatedDays(metric)
+                && !blockedCommissionMetricIds.has(metric.id)) {
                 return;
             }
             const current = metricsById.get(metric.id);
@@ -497,13 +512,13 @@ function getKpiMetMetrics(periods) {
         .sort((left, right) => left.metric.label.localeCompare(right.metric.label))
         .map((entry) => entry.metric);
 }
-function getKpiDetailCountLabel(view, metrics) {
+function getKpiDetailCountLabel(view, metrics, blockedCommissionMetricIds = new Set()) {
     const primaryCount = view === "unmet"
-        ? metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status)).length
+        ? metrics.filter((metric) => KPI_ALERT_STATUSES.includes(metric.status) || blockedCommissionMetricIds.has(metric.id)).length
         : metrics.filter((metric) => metric.status === "met").length;
     const nonEvaluatedOnlyCount = metrics.filter((metric) => {
         const isPrimary = view === "unmet"
-            ? KPI_ALERT_STATUSES.includes(metric.status)
+            ? KPI_ALERT_STATUSES.includes(metric.status) || blockedCommissionMetricIds.has(metric.id)
             : metric.status === "met";
         return !isPrimary && metricHasNonEvaluatedDays(metric);
     }).length;
@@ -521,21 +536,38 @@ function TaskUserRow(props) {
     const { user, kpiAlerts, kpiWeekReference, kpiOverrides, kpiOverridePeriods, muted = false, saving, savingKpiOverrideKey, onToggleObserved, onToggleKpiOverride } = props;
     const [showDetail, setShowDetail] = useState(false);
     const [kpiDetailView, setKpiDetailView] = useState("unmet");
+    const [expandedKpiId, setExpandedKpiId] = useState(null);
     const canToggle = canToggleUserObservation(user);
     const isObserved = isObservedTaskUser(user);
     const completedThisMonth = getCompletedThisMonth(user);
     const kpiMetDays = getKpiMetDays(user);
     const kpiMissedDays = getKpiMissedDays(user);
-    const kpiUnmetMetrics = getKpiUnmetMetrics(kpiAlerts);
+    const blockedCommissionMetricIds = new Set(isObserved && !muted
+        ? user.commissionRequirements
+            ?.filter((requirement) => requirement.blocked)
+            .map((requirement) => requirement.metricId) ?? []
+        : []);
+    const kpiUnmetMetrics = getKpiUnmetMetrics(kpiAlerts, blockedCommissionMetricIds);
     const kpiMetMetrics = getKpiMetMetrics(kpiAlerts);
     const displayedKpiMetrics = kpiDetailView === "unmet" ? kpiUnmetMetrics : kpiMetMetrics;
-    const displayedKpiCountLabel = getKpiDetailCountLabel(kpiDetailView, displayedKpiMetrics);
+    const displayedKpiCountLabel = getKpiDetailCountLabel(kpiDetailView, displayedKpiMetrics, blockedCommissionMetricIds);
     const detailPeriodTitle = kpiDetailView === "met" ? "Semanas evaluadas" : "Semana actual";
     const detailPeriodRange = kpiDetailView === "met"
         ? `${formatDateRange(kpiWeekReference.lastWeek.startDate, kpiWeekReference.lastWeek.endDate)} / ${formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate)}`
         : formatDateRange(kpiWeekReference.currentWeek.startDate, kpiWeekReference.currentWeek.endDate);
     const detailId = `supervision-detail-${user.userId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-    return (_jsxs("section", { className: `supervision-task-user-row ${muted ? "is-muted" : ""}`, children: [_jsxs("div", { className: "supervision-task-user-main", children: [_jsx("h4", { children: user.displayName }), _jsx("span", { children: user.shortName ?? user.teamLabel })] }), _jsxs("label", { className: `supervision-observe-toggle ${canToggle ? "" : "is-locked"}`, children: [canToggle ? (_jsx("input", { type: "checkbox", checked: isObserved, disabled: saving, onChange: (event) => onToggleObserved(user.userId, event.currentTarget.checked) })) : null, _jsx("span", { children: canToggle ? "Observar" : "Automatico abajo" })] }), _jsxs("div", { className: "supervision-task-counts", "aria-label": `${user.displayName}: ${formatTaskCount(completedThisMonth)} realizadas este mes, ${formatTaskCount(user.today)} para hoy incluyendo vencidas, ${formatTaskCount(user.overdue)} vencidas, ${kpiMetDays} días KPI cumplidos este mes y ${kpiMissedDays} días KPI incumplidos este mes`, children: [_jsxs("span", { className: "is-total", children: [_jsx("strong", { children: completedThisMonth }), "Realizadas mes"] }), _jsxs("span", { children: [_jsx("strong", { children: user.today }), "Hoy + vencidas"] }), _jsxs("span", { className: "is-overdue", children: [_jsx("strong", { children: user.overdue }), "Vencidas"] }), _jsxs("span", { className: "is-kpi-met", children: [_jsx("strong", { children: kpiMetDays }), "D\u00EDas KPI cumplidos este mes"] }), _jsxs("span", { className: "is-kpi-missed", children: [_jsx("strong", { children: kpiMissedDays }), "D\u00EDas KPI incumplidos este mes"] })] }), _jsxs("div", { className: "supervision-task-link-list", children: [user.dashboardLinks.length > 0 ? (user.dashboardLinks.map((link) => (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: link.path, children: user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label }, link.moduleId)))) : (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: "/app/kpis", children: "Ir a KPI's" })), _jsx("button", { "aria-controls": detailId, "aria-expanded": showDetail, className: "secondary-button supervision-task-detail-button", onClick: () => setShowDetail((current) => !current), type: "button", children: showDetail ? "Ocultar detalle" : "Ver detalle" })] }), showDetail ? (_jsxs("div", { className: "supervision-task-user-detail", id: detailId, children: [user.dashboardLinks.length > 0 ? (_jsx("div", { className: "supervision-task-detail-list", children: user.dashboardLinks.map((link) => (_jsx("div", { className: "supervision-task-detail-row", children: _jsx("div", { children: _jsx("strong", { children: link.label }) }) }, link.moduleId))) })) : (_jsx(EmptyState, { children: "Sin dashboards asociados para esta persona." })), _jsxs("section", { className: "supervision-task-kpi-card", "aria-label": `Key Performance Indicators de ${user.displayName}`, children: [_jsxs("header", { className: "supervision-task-kpi-card-head", children: [_jsx("div", { children: _jsx("strong", { children: "Key Performance Indicators" }) }), _jsxs("div", { className: "supervision-task-kpi-card-actions", children: [_jsxs("div", { className: "supervision-kpi-view-toggle", role: "group", "aria-label": "Vista de KPI", children: [_jsx("button", { type: "button", className: kpiDetailView === "unmet" ? "is-active" : "", "aria-pressed": kpiDetailView === "unmet", onClick: () => setKpiDetailView("unmet"), children: "Ver KPI's incumplidos" }), _jsx("button", { type: "button", className: kpiDetailView === "met" ? "is-active" : "", "aria-pressed": kpiDetailView === "met", onClick: () => setKpiDetailView("met"), children: "Ver KPI's cumplidos" })] }), _jsx("span", { className: `supervision-task-kpi-alert-count ${kpiDetailView === "met" ? "is-met" : ""}`, children: displayedKpiCountLabel })] })] }), displayedKpiMetrics.length > 0 ? (_jsxs("section", { className: "supervision-task-kpi-detail-period", children: [_jsxs("header", { children: [_jsx("strong", { children: detailPeriodTitle }), _jsxs("span", { children: [detailPeriodRange, " - ", displayedKpiCountLabel] })] }), _jsx("div", { className: "supervision-kpi-list", children: displayedKpiMetrics.map((metric) => (_jsx(KpiMetricRow, { metric: metric, periods: kpiAlerts, weekReference: kpiWeekReference, view: kpiDetailView, showCommissionRelease: isObserved && !muted, userId: user.userId, kpiOverrides: kpiOverrides, kpiOverridePeriods: kpiOverridePeriods, savingKpiOverrideKey: savingKpiOverrideKey, onToggleKpiOverride: onToggleKpiOverride, commissionRequirement: user.commissionRequirements?.find((requirement) => requirement.metricId === metric.id) }, metric.id))) })] })) : (_jsx(EmptyState, { children: kpiDetailView === "unmet"
+    function selectKpiDetailView(view) {
+        setKpiDetailView(view);
+        setExpandedKpiId(null);
+    }
+    function toggleUserDetail() {
+        setShowDetail((current) => !current);
+        setExpandedKpiId(null);
+    }
+    return (_jsxs("section", { className: `supervision-task-user-row ${muted ? "is-muted" : ""}`, children: [_jsxs("div", { className: "supervision-task-user-main", children: [_jsx("h4", { children: user.displayName }), _jsx("span", { children: user.shortName ?? user.teamLabel })] }), _jsxs("label", { className: `supervision-observe-toggle ${canToggle ? "" : "is-locked"}`, children: [canToggle ? (_jsx("input", { type: "checkbox", checked: isObserved, disabled: saving, onChange: (event) => onToggleObserved(user.userId, event.currentTarget.checked) })) : null, _jsx("span", { children: canToggle ? "Observar" : "Automatico abajo" })] }), _jsxs("div", { className: "supervision-task-counts", "aria-label": `${user.displayName}: ${formatTaskCount(completedThisMonth)} realizadas este mes, ${formatTaskCount(user.today)} para hoy incluyendo vencidas, ${formatTaskCount(user.overdue)} vencidas, ${kpiMetDays} días KPI cumplidos este mes y ${kpiMissedDays} días KPI incumplidos este mes`, children: [_jsxs("span", { className: "is-total", children: [_jsx("strong", { children: completedThisMonth }), "Realizadas mes"] }), _jsxs("span", { children: [_jsx("strong", { children: user.today }), "Hoy + vencidas"] }), _jsxs("span", { className: "is-overdue", children: [_jsx("strong", { children: user.overdue }), "Vencidas"] }), _jsxs("span", { className: "is-kpi-met", children: [_jsx("strong", { children: kpiMetDays }), "D\u00EDas KPI cumplidos este mes"] }), _jsxs("span", { className: "is-kpi-missed", children: [_jsx("strong", { children: kpiMissedDays }), "D\u00EDas KPI incumplidos este mes"] })] }), _jsxs("div", { className: "supervision-task-link-list", children: [user.dashboardLinks.length > 0 ? (user.dashboardLinks.map((link) => (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: link.path, children: user.dashboardLinks.length === 1 ? "Ir al dashboard" : link.label }, link.moduleId)))) : (_jsx(Link, { className: "secondary-button supervision-task-dashboard-link", to: "/app/kpis", children: "Ir a KPI's" })), _jsx("button", { "aria-controls": detailId, "aria-expanded": showDetail, className: "secondary-button supervision-task-detail-button", onClick: toggleUserDetail, type: "button", children: showDetail ? "Ocultar detalle" : "Ver detalle" })] }), showDetail ? (_jsxs("div", { className: "supervision-task-user-detail", id: detailId, children: [user.dashboardLinks.length > 0 ? (_jsx("div", { className: "supervision-task-detail-list", children: user.dashboardLinks.map((link) => (_jsx("div", { className: "supervision-task-detail-row", children: _jsx("div", { children: _jsx("strong", { children: link.label }) }) }, link.moduleId))) })) : (_jsx(EmptyState, { children: "Sin dashboards asociados para esta persona." })), _jsxs("section", { className: "supervision-task-kpi-card", "aria-label": `Key Performance Indicators de ${user.displayName}`, children: [_jsxs("header", { className: "supervision-task-kpi-card-head", children: [_jsx("div", { children: _jsx("strong", { children: "Key Performance Indicators" }) }), _jsxs("div", { className: "supervision-task-kpi-card-actions", children: [_jsxs("div", { className: "supervision-kpi-view-toggle", role: "group", "aria-label": "Vista de KPI", children: [_jsx("button", { type: "button", className: kpiDetailView === "unmet" ? "is-active" : "", "aria-pressed": kpiDetailView === "unmet", onClick: () => selectKpiDetailView("unmet"), children: "Ver KPI's incumplidos" }), _jsx("button", { type: "button", className: kpiDetailView === "met" ? "is-active" : "", "aria-pressed": kpiDetailView === "met", onClick: () => selectKpiDetailView("met"), children: "Ver KPI's cumplidos" })] }), _jsx("span", { className: `supervision-task-kpi-alert-count ${kpiDetailView === "met" ? "is-met" : ""}`, children: displayedKpiCountLabel })] })] }), displayedKpiMetrics.length > 0 ? (_jsxs("section", { className: "supervision-task-kpi-detail-period", children: [_jsxs("header", { children: [_jsx("strong", { children: detailPeriodTitle }), _jsxs("span", { children: [detailPeriodRange, " - ", displayedKpiCountLabel] })] }), _jsx("div", { className: "supervision-kpi-list", children: displayedKpiMetrics.map((metric) => {
+                                            const commissionRequirement = user.commissionRequirements?.find((requirement) => requirement.metricId === metric.id);
+                                            return (_jsx(KpiMetricRow, { metric: metric, periods: kpiAlerts, weekReference: kpiWeekReference, view: kpiDetailView, showCommissionRelease: isObserved && !muted, userId: user.userId, kpiOverrides: kpiOverrides, kpiOverridePeriods: kpiOverridePeriods, savingKpiOverrideKey: savingKpiOverrideKey, onToggleKpiOverride: onToggleKpiOverride, commissionRequirement: commissionRequirement, isExpanded: expandedKpiId === metric.id, onToggle: () => setExpandedKpiId((current) => current === metric.id ? null : metric.id) }, metric.id));
+                                        }) })] })) : (_jsx(EmptyState, { children: kpiDetailView === "unmet"
                                     ? "Sin KPI's incumplidos para esta persona."
                                     : "Sin KPI's cumplidos para esta persona en la semana actual o pasada." }))] })] })) : null] }));
 }
@@ -552,14 +584,22 @@ function TaskOverviewPanel(props) {
 function TermBucketPanel({ bucket }) {
     return (_jsxs("article", { className: "supervision-bucket-card", children: [_jsxs("header", { className: "supervision-bucket-head", children: [_jsxs("div", { children: [_jsx("h3", { children: bucket.label }), _jsx("span", { children: formatDateRange(bucket.startDate, bucket.endDate) })] }), _jsx("strong", { children: bucket.total })] }), _jsx("div", { className: "supervision-group-list", children: bucket.teams.length === 0 ? (_jsx(EmptyState, { children: "Sin terminos en esta ventana." })) : (bucket.teams.map((team) => (_jsxs("section", { className: "supervision-user-group", children: [_jsxs("div", { className: "supervision-group-head", children: [_jsxs("div", { children: [_jsx("h4", { children: team.teamLabel }), _jsxs("span", { children: [team.total, " terminos"] })] }), _jsx("strong", { children: team.total })] }), _jsx("div", { className: "supervision-row-list", children: team.terms.map((term) => (_jsxs(Link, { className: "supervision-list-row is-term", to: term.originPath, children: [_jsxs("div", { children: [_jsx("strong", { children: term.termLabel }), _jsx(EntityMeta, { clientName: term.clientName, subject: term.subject, sourceLabel: term.sourceLabel }), _jsx("small", { children: term.responsible || "Sin responsable" })] }), _jsx("span", { children: formatShortDate(term.termDate) })] }, term.id))) })] }, team.moduleId)))) })] }));
 }
-function KpiMetricRow({ metric, periods, weekReference, view, showCommissionRelease, commissionRequirement, userId, kpiOverrides, kpiOverridePeriods, savingKpiOverrideKey, onToggleKpiOverride }) {
+function KpiMetricRow({ metric, periods, weekReference, view, showCommissionRelease, commissionRequirement, userId, kpiOverrides, kpiOverridePeriods, savingKpiOverrideKey, onToggleKpiOverride, isExpanded, onToggle }) {
     const currentWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "currentWeek", view);
     const lastWeekIncidents = getKpiWeekIncidentItems(periods, metric.id, "lastWeek", view);
     const emptyLabel = view === "met" ? "Sin KPI's cumplidos registrados." : "Sin incidencias registradas.";
-    const statusLabel = metric.status === "not-configured" && metricHasNonEvaluatedDays(metric)
+    const displayedStatus = metric.status === "warning"
+        ? "missed"
+        : view === "unmet" && commissionRequirement?.blocked
+            ? "missed"
+            : metric.status;
+    const missedDaysLabel = getKpiMissedDaysLabel(periods, metric.id);
+    const statusLabel = displayedStatus === "not-configured" && metricHasNonEvaluatedDays(metric)
         ? "No evaluado"
-        : KPI_STATUS_LABELS[metric.status];
-    return (_jsxs("section", { className: `supervision-kpi-metric is-${metric.status}`, children: [_jsxs("div", { className: "supervision-kpi-metric-evaluation", children: [_jsxs("div", { className: "supervision-kpi-metric-head", children: [_jsx("strong", { className: "supervision-kpi-metric-title", children: metric.label }), _jsx("span", { className: `kpis-status-badge is-${metric.status}`, children: statusLabel })] }), _jsx("div", { className: "supervision-kpi-values", children: _jsx("span", { children: metric.actualLabel }) }), _jsx("div", { className: "kpis-progress-track", "aria-label": `Avance ${metric.progressPct}%`, children: _jsx("span", { style: { width: `${metric.progressPct}%` } }) }), metric.incidents.length > 0 ? (_jsxs("small", { children: [metric.incidents.length, " incidencias detectadas"] })) : (_jsx("small", { children: metric.helper })), _jsxs("div", { className: "supervision-kpi-week-reference", children: [_jsx(KpiWeekIncidents, { incidents: currentWeekIncidents, label: "Semana actual", startDate: weekReference.currentWeek.startDate, endDate: weekReference.currentWeek.endDate, emptyLabel: emptyLabel }), _jsx(KpiWeekIncidents, { incidents: lastWeekIncidents, label: "Semana pasada", startDate: weekReference.lastWeek.startDate, endDate: weekReference.lastWeek.endDate, emptyLabel: emptyLabel })] }), showCommissionRelease ? (metric.emrtOverridePolicy === "not-allowed" ? (_jsx("div", { className: "supervision-kpi-override-locked", children: "Los KPI de terminos y vencimientos no admiten override." })) : (_jsx(KpiOverrideControls, { userId: userId, metric: metric, periods: periods, weekReference: weekReference, overrides: kpiOverrides, calendarPeriods: kpiOverridePeriods, savingKey: savingKpiOverrideKey, onToggle: onToggleKpiOverride }))) : null] }), showCommissionRelease ? (_jsxs("aside", { className: `supervision-kpi-commission-release ${commissionRequirement?.blocked ? "is-blocked" : "is-clear"}`, children: [_jsx("strong", { children: "Requisitos para liberar comisiones" }), commissionRequirement?.blocked ? (_jsxs(_Fragment, { children: [_jsxs("span", { className: "supervision-kpi-commission-total", children: ["Pendiente: ", commissionRequirement.pendingAmount, " ", commissionRequirement.unit] }), commissionRequirement.oldestOriginDate ? (_jsxs("small", { children: ["Origen mas antiguo: ", commissionRequirement.oldestOriginDate] })) : null, _jsx("ul", { children: commissionRequirement.requirements.map((requirement) => (_jsxs("li", { children: [_jsx("strong", { children: requirement.summary }), _jsxs("span", { children: [requirement.pendingAmount, " ", requirement.unit, " - ", requirement.originDate] }), requirement.details.map((detail) => _jsx("small", { children: detail }, detail))] }, requirement.obligationId))) })] })) : (_jsx("span", { children: "Sin pendientes de este KPI que bloqueen el pago." }))] })) : null] }));
+        : KPI_STATUS_LABELS[displayedStatus];
+    const metricContentId = `supervision-kpi-${userId}-${metric.id}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const incidentLabel = `${metric.incidents.length} ${metric.incidents.length === 1 ? "incidencia" : "incidencias"}`;
+    return (_jsxs("section", { className: `supervision-kpi-metric is-${displayedStatus} ${isExpanded ? "is-expanded" : "is-collapsed"}`, children: [_jsxs("button", { type: "button", className: "supervision-kpi-metric-toggle", "aria-controls": metricContentId, "aria-expanded": isExpanded, onClick: onToggle, children: [_jsxs("span", { className: "supervision-kpi-metric-summary-main", children: [_jsx("strong", { children: metric.label }), _jsx("small", { children: missedDaysLabel })] }), _jsxs("span", { className: "supervision-kpi-metric-summary-meta", children: [_jsx("span", { className: `kpis-status-badge is-${displayedStatus}`, children: statusLabel }), _jsx("span", { className: "supervision-kpi-metric-incident-count", children: incidentLabel }), showCommissionRelease ? (commissionRequirement?.blocked ? (_jsxs("span", { className: "supervision-kpi-metric-commission-summary is-blocked", children: ["Pendiente: ", commissionRequirement.pendingAmount, " ", commissionRequirement.unit] })) : (_jsx("span", { className: "supervision-kpi-metric-commission-summary is-clear", children: "Sin pendientes de comision" }))) : null] }), _jsx("span", { className: "supervision-kpi-metric-chevron", "aria-hidden": "true" })] }), isExpanded ? (_jsxs("div", { className: "supervision-kpi-metric-content", id: metricContentId, children: [_jsxs("div", { className: "supervision-kpi-metric-evaluation", children: [_jsx("div", { className: "supervision-kpi-values", children: _jsx("span", { children: missedDaysLabel }) }), _jsx("div", { className: "kpis-progress-track", "aria-label": `Avance ${metric.progressPct}%`, children: _jsx("span", { style: { width: `${metric.progressPct}%` } }) }), metric.incidents.length > 0 ? (_jsxs("small", { children: [metric.incidents.length, " incidencias detectadas"] })) : (_jsx("small", { children: metric.helper })), _jsxs("div", { className: "supervision-kpi-week-reference", children: [_jsx(KpiWeekIncidents, { incidents: currentWeekIncidents, label: "Semana actual", startDate: weekReference.currentWeek.startDate, endDate: weekReference.currentWeek.endDate, emptyLabel: emptyLabel }), _jsx(KpiWeekIncidents, { incidents: lastWeekIncidents, label: "Semana pasada", startDate: weekReference.lastWeek.startDate, endDate: weekReference.lastWeek.endDate, emptyLabel: emptyLabel })] }), showCommissionRelease ? (metric.emrtOverridePolicy === "not-allowed" ? (_jsx("div", { className: "supervision-kpi-override-locked", children: "Los KPI de terminos y vencimientos no admiten override." })) : (_jsx(KpiOverrideControls, { userId: userId, metric: metric, periods: periods, weekReference: weekReference, overrides: kpiOverrides, calendarPeriods: kpiOverridePeriods, savingKey: savingKpiOverrideKey, onToggle: onToggleKpiOverride }))) : null] }), showCommissionRelease ? (_jsxs("aside", { className: `supervision-kpi-commission-release ${commissionRequirement?.blocked ? "is-blocked" : "is-clear"}`, children: [_jsx("strong", { children: "Requisitos para liberar comisiones" }), commissionRequirement?.blocked ? (_jsxs(_Fragment, { children: [_jsxs("span", { className: "supervision-kpi-commission-total", children: ["Pendiente: ", commissionRequirement.pendingAmount, " ", commissionRequirement.unit] }), commissionRequirement.oldestOriginDate ? (_jsxs("small", { children: ["Origen mas antiguo: ", commissionRequirement.oldestOriginDate] })) : null, _jsx("ul", { children: commissionRequirement.requirements.map((requirement) => (_jsxs("li", { children: [_jsx("strong", { children: requirement.summary }), _jsxs("span", { children: [requirement.pendingAmount, " ", requirement.unit, " - ", requirement.originDate] }), requirement.details.map((detail) => _jsx("small", { children: detail }, detail))] }, requirement.obligationId))) })] })) : (_jsx("span", { children: "Sin pendientes de este KPI que bloqueen el pago." }))] })) : null] })) : null] }));
 }
 function KpiOverrideControls(props) {
     const [showOlderWeeks, setShowOlderWeeks] = useState(false);

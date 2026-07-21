@@ -54,7 +54,18 @@ const envSchema = z.object({
   INTELLILAW_BOT_API_KEY: optionalNonEmptyString,
   INTELLILAW_BOT_PROMOTION_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
   TELEGRAM_BOT_TOKEN: optionalNonEmptyString,
-  TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS: z.coerce.number().int().positive().default(5000)
+  TELEGRAM_GROUP_LOOKUP_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  GOOGLE_WORKSPACE_OAUTH_CLIENT_FILE: optionalNonEmptyString,
+  GOOGLE_WORKSPACE_OAUTH_CLIENT_ID: optionalNonEmptyString,
+  GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET: optionalNonEmptyString,
+  GOOGLE_WORKSPACE_OAUTH_REDIRECT_URI: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().url().optional()
+  ),
+  GOOGLE_WORKSPACE_TOKEN_ENCRYPTION_SECRET: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional()
+  )
 });
 
 export const env = envSchema.parse(process.env);

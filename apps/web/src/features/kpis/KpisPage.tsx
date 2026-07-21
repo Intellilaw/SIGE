@@ -1,37 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { KpiMetric, KpiMetricStatus, KpiOverview, KpiTeamSummary } from "@sige/contracts";
+import type { KpiMetric, KpiOverview, KpiTeamSummary } from "@sige/contracts";
 
 import { apiGet } from "../../api/http-client";
 
-type KpiViewMode = "monthly" | "daily";
-
-const MONTH_NAMES = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre"
-];
-
-const STATUS_LABELS: Record<KpiMetricStatus, string> = {
-  met: "En meta",
-  warning: "En observacion",
-  missed: "Fuera de meta",
-  "not-configured": "Sin configurar"
-};
-
-const NON_EVALUATED_KPI_DAY_UNIT = "dias-no-evaluados";
-
-function isNonEvaluatedKpiDay(day: KpiMetric["dailyBreakdown"][number]) {
-  return day.status === "not-configured" && day.unit === NON_EVALUATED_KPI_DAY_UNIT;
-}
+type KpiUserSummary = KpiTeamSummary["users"][number];
 
 function getCurrentPeriod() {
   const date = new Date();
@@ -41,278 +13,108 @@ function getCurrentPeriod() {
   };
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("es-MX", {
-    maximumFractionDigits: Number.isInteger(value) ? 0 : 1,
-    minimumFractionDigits: Number.isInteger(value) ? 0 : 1
-  }).format(value);
-}
-
-function formatDate(value?: string) {
-  if (!value) {
-    return "-";
-  }
-
-  const [year, month, day] = value.slice(0, 10).split("-");
-  return year && month && day ? `${day}/${month}/${year}` : value;
-}
-
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Ocurrio un error inesperado.";
-}
-
-function KpiStatusBadge(props: { status: KpiMetricStatus; label?: string }) {
-  return (
-    <span className={`kpis-status-badge is-${props.status}`}>
-      {props.label ?? STATUS_LABELS[props.status]}
-    </span>
-  );
-}
-
-function KpiMetricRow(props: { metric: KpiMetric }) {
-  const { metric } = props;
-
-  return (
-    <section className={`kpis-metric-row is-${metric.status}`}>
-      <div className="kpis-metric-main">
-        <div className="kpis-metric-title">
-          <strong>{metric.label}</strong>
-          <KpiStatusBadge status={metric.status} />
-        </div>
-        <p>{metric.description}</p>
-        <div className="kpis-metric-values">
-          <span>{metric.actualLabel}</span>
-          <span>{metric.targetLabel}</span>
-        </div>
-        {metric.kind === "production" ? (
-          <div className="kpis-progress-track" aria-label={`Avance ${metric.progressPct}%`}>
-            <span style={{ width: `${metric.progressPct}%` }} />
-          </div>
-        ) : null}
-        <small>{metric.helper}</small>
-        <small>Fuente: {metric.sourceDescription}</small>
-      </div>
-
-      {metric.incidents.length > 0 ? (
-        <div className="kpis-incidents">
-          <div className="kpis-incidents-head">
-            <strong>Incidencias detectadas</strong>
-            <span>{metric.incidents.length}</span>
-          </div>
-          <div className="table-scroll">
-            <table className="data-table kpis-incidents-table">
-              <thead>
-                <tr>
-                  <th>Tabla</th>
-                  <th>Cliente</th>
-                  <th>Asunto</th>
-                  <th>Tarea</th>
-                  <th>Termino</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metric.incidents.map((incident) => (
-                  <tr key={`${incident.sourceType}-${incident.id}-${incident.reason}`}>
-                    <td>{incident.tableLabel}</td>
-                    <td>{incident.clientName}</td>
-                    <td>{incident.subject}</td>
-                    <td>
-                      <div className="kpis-task-cell">
-                        <strong>{incident.taskName}</strong>
-                        <span>{incident.reason}</span>
-                      </div>
-                    </td>
-                    <td>{formatDate(incident.termDate ?? incident.dueDate)}</td>
-                    <td>{incident.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function KpiDailyMetricTable(props: { metric: KpiMetric }) {
-  const { metric } = props;
-  const failedDays = metric.dailyBreakdown.filter((entry) => entry.status === "missed").length;
-  const warningDays = metric.dailyBreakdown.filter((entry) => entry.status === "warning").length;
-  const nonEvaluatedDays = metric.dailyBreakdown.filter(isNonEvaluatedKpiDay).length;
-  const summaryLabel = failedDays > 0
-    ? `${failedDays} dias con falla`
-    : warningDays > 0
-      ? `${warningDays} en observacion`
-      : nonEvaluatedDays > 0
-        ? `${nonEvaluatedDays} no evaluados`
-        : "Sin fallas";
-
-  return (
-    <section className="kpis-daily-metric">
-      <div className="kpis-daily-metric-head">
-        <div>
-          <strong>{metric.label}</strong>
-          <p>{metric.description}</p>
-        </div>
-        <span className={failedDays > 0 ? "is-alert" : warningDays > 0 ? "is-warning" : ""}>
-          {summaryLabel}
-        </span>
-      </div>
-
-      {metric.dailyBreakdown.length > 0 ? (
-        <div className="table-scroll">
-          <table className="data-table kpis-daily-table">
-            <thead>
-              <tr>
-                <th>Dia</th>
-                <th>Resultado</th>
-                <th>Real</th>
-                <th>Meta del dia/corte</th>
-                <th>Detalle</th>
-              </tr>
-            </thead>
-            <tbody>
-              {metric.dailyBreakdown.map((entry) => (
-                <tr key={`${metric.id}-${entry.date}`} className={`kpis-daily-row is-${entry.status}`}>
-                  <td>{formatDate(entry.date)}</td>
-                  <td>
-                    <KpiStatusBadge
-                      status={entry.status}
-                      label={isNonEvaluatedKpiDay(entry) ? "No evaluado" : undefined}
-                    />
-                  </td>
-                  <td>{entry.actualLabel}</td>
-                  <td>{entry.targetLabel}</td>
-                  <td>
-                    <div className="kpis-daily-detail">
-                      <span>{entry.helper}</span>
-                      {entry.incidents.length > 0 ? (
-                        <ul>
-                          {entry.incidents.map((incident) => (
-                            <li key={`${incident.sourceType}-${incident.id}-${incident.reason}`}>
-                              {incident.clientName} - {incident.taskName}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="kpis-empty-user">No hay dias habiles evaluados para esta metrica en el periodo seleccionado.</div>
-      )}
-    </section>
-  );
+  return error instanceof Error ? error.message : "Ocurrió un error inesperado.";
 }
 
 function KpiDefinitionList(props: { metrics: KpiMetric[] }) {
   return (
     <section className="kpis-user-section">
       <div className="kpis-user-section-head">
-        <h4>KPI's definidos</h4>
+        <h4>KPI's medidos</h4>
         <span>{props.metrics.length}</span>
       </div>
       <div className="kpis-definition-list">
         {props.metrics.map((metric) => (
-          <div className="kpis-definition-item" key={`${metric.id}-definition`}>
+          <article className="kpis-definition-item" key={metric.id}>
             <strong>{metric.label}</strong>
-            <p>{metric.description}</p>
-            <small>{metric.targetLabel}</small>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function KpiResultGroup(props: {
-  emptyText: string;
-  metrics: KpiMetric[];
-  title: string;
-  tone: "met" | "warning" | "missed" | "not-configured";
-}) {
-  return (
-    <div className={`kpis-result-group is-${props.tone}`}>
-      <div className="kpis-result-group-head">
-        <h5>{props.title}</h5>
-        <span>{props.metrics.length}</span>
-      </div>
-      <div className="kpis-result-list">
-        {props.metrics.length === 0 ? <div className="kpis-result-empty">{props.emptyText}</div> : null}
-        {props.metrics.map((metric) => (
-          <div className="kpis-result-row" key={`${metric.id}-result`}>
-            <div>
-              <strong>{metric.label}</strong>
-              <span>{metric.actualLabel}</span>
+            <div className="kpis-definition-field">
+              <span>Meta</span>
+              <p>{metric.description}</p>
             </div>
-            <KpiStatusBadge status={metric.status} />
-          </div>
+            <div className="kpis-definition-field">
+              <span>Fuente automática</span>
+              <p>{metric.sourceDescription}</p>
+            </div>
+          </article>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function KpiResultSummary(props: { metrics: KpiMetric[] }) {
-  const metMetrics = props.metrics.filter((metric) => metric.status === "met");
-  const missedMetrics = props.metrics.filter((metric) => metric.status === "missed");
-  const warningMetrics = props.metrics.filter((metric) => metric.status === "warning");
-  const unconfiguredMetrics = props.metrics.filter((metric) => metric.status === "not-configured");
-
-  return (
-    <section className="kpis-user-section">
-      <div className="kpis-user-section-head">
-        <h4>Cumplimiento al corte</h4>
-        <span>{metMetrics.length} de {props.metrics.length}</span>
-      </div>
-      <div className="kpis-results-grid">
-        <KpiResultGroup
-          emptyText="Sin KPI's cumplidos al corte."
-          metrics={metMetrics}
-          title="Cumplidos"
-          tone="met"
-        />
-        <KpiResultGroup
-          emptyText="Sin KPI's incumplidos."
-          metrics={missedMetrics}
-          title="No cumplidos"
-          tone="missed"
-        />
-        <KpiResultGroup
-          emptyText="Sin KPI's en observacion."
-          metrics={warningMetrics}
-          title="En observacion"
-          tone="warning"
-        />
-        {unconfiguredMetrics.length > 0 ? (
-          <KpiResultGroup
-            emptyText="Sin KPI's pendientes."
-            metrics={unconfiguredMetrics}
-            title="Sin configurar"
-            tone="not-configured"
-          />
-        ) : null}
       </div>
     </section>
   );
 }
 
-function KpiUserSummarySections(props: { metrics: KpiMetric[] }) {
+function KpiUserCard(props: {
+  isExpanded: boolean;
+  onToggle: () => void;
+  user: KpiUserSummary;
+}) {
+  const { user } = props;
+  const detailId = `kpis-user-definitions-${user.userId}`;
+
   return (
-    <>
-      <KpiDefinitionList metrics={props.metrics} />
-      <KpiResultSummary metrics={props.metrics} />
-    </>
+    <article
+      className={`kpis-user-block ${user.configured ? "" : "is-unconfigured"} ${
+        props.isExpanded ? "is-expanded" : "is-collapsed"
+      }`}
+    >
+      <header className="kpis-user-head">
+        <button
+          type="button"
+          className="kpis-user-toggle"
+          aria-expanded={props.isExpanded}
+          aria-controls={detailId}
+          onClick={props.onToggle}
+        >
+          <span className="kpis-user-main">
+            <h3>
+              {user.displayName}
+              {user.shortName ? <span>{user.shortName}</span> : null}
+            </h3>
+            <p>{user.specificRole ?? user.teamLabel}</p>
+          </span>
+          <span className="kpis-user-summary">
+            <span className={`kpis-user-state ${user.configured ? "is-configured" : "is-pending"}`}>
+              {user.configured ? `${user.metrics.length} KPI's` : "Sin KPI's definidos"}
+            </span>
+            <span className="kpis-user-chevron" aria-hidden="true" />
+          </span>
+        </button>
+      </header>
+
+      {props.isExpanded ? (
+        <div className="kpis-user-detail" id={detailId}>
+          {user.configured ? (
+            <KpiDefinitionList metrics={user.metrics} />
+          ) : (
+            <div className="kpis-empty-user">
+              Esta persona aún no tiene KPI's definidos. El módulo no solicita captura manual.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
 function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolean }) {
+  const teamUserIds = useMemo(() => props.team?.users.map((user) => user.userId) ?? [], [props.team]);
+  const teamUserIdsSignature = teamUserIds.join("|");
+  const [expandedUserIds, setExpandedUserIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setExpandedUserIds([]);
+  }, [props.team?.teamKey, teamUserIdsSignature]);
+
+  const expandedUserIdSet = useMemo(() => new Set(expandedUserIds), [expandedUserIds]);
+  const allUsersExpanded = teamUserIds.length > 0 && teamUserIds.every((userId) => expandedUserIdSet.has(userId));
+  const noUsersExpanded = !teamUserIds.some((userId) => expandedUserIdSet.has(userId));
+
+  function toggleUser(userId: string) {
+    setExpandedUserIds((current) =>
+      current.includes(userId) ? current.filter((currentUserId) => currentUserId !== userId) : [...current, userId]
+    );
+  }
+
   if (props.loading) {
     return (
       <section className="panel">
@@ -333,84 +135,30 @@ function KpiTeamPanel(props: { team: KpiTeamSummary | undefined; loading: boolea
     <section className="panel kpis-team-panel">
       <div className="panel-header">
         <div>
-          <h2>Vista mensual - {props.team.teamLabel}</h2>
-          <p className="muted">KPI's definidos y cumplimiento mensual por usuario.</p>
+          <h2>KPI's medidos - {props.team.teamLabel}</h2>
+          <p className="muted">Indicadores definidos para cada integrante del equipo.</p>
         </div>
-        <span>{props.team.users.length} usuarios</span>
-      </div>
-
-      <div className="kpis-user-list">
-        {props.team.users.length === 0 ? (
-          <div className="kpis-empty-user">Equipo creado. Sus usuarios y KPI's se mostraran cuando sean asignados.</div>
-        ) : null}
-        {props.team.users.map((user) => (
-          <article key={user.userId} className={`kpis-user-block ${user.configured ? "" : "is-unconfigured"}`}>
-            <header className="kpis-user-head">
-              <div>
-                <h3>
-                  {user.displayName}
-                  {user.shortName ? <span>{user.shortName}</span> : null}
-                </h3>
-                <p>{user.specificRole ?? user.teamLabel}</p>
-              </div>
-              <span className={`kpis-user-state ${user.configured ? "is-configured" : "is-pending"}`}>
-                {user.configured ? `${user.metrics.length} KPI's` : "KPI's pendientes"}
-              </span>
-            </header>
-
-            {user.configured ? (
-              <div className="kpis-user-sections">
-                <KpiUserSummarySections metrics={user.metrics} />
-                <section className="kpis-user-section">
-                  <div className="kpis-user-section-head">
-                    <h4>Detalle mensual</h4>
-                    <span>{user.metrics.length} KPI's</span>
-                  </div>
-                  <div className="kpis-metric-list">
-                    {user.metrics.map((metric) => (
-                      <KpiMetricRow key={metric.id} metric={metric} />
-                    ))}
-                  </div>
-                </section>
-              </div>
-            ) : (
-              <div className="kpis-empty-user">
-                Seccion creada para este usuario. Sus KPI's aun no estan definidos, por lo que el modulo no solicita
-                captura manual ni genera reportería adicional.
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: boolean }) {
-  if (props.loading) {
-    return (
-      <section className="panel">
-        <div className="centered-inline-message">Cargando detalle diario...</div>
-      </section>
-    );
-  }
-
-  if (!props.team) {
-    return (
-      <section className="panel">
-        <div className="centered-inline-message">No hay usuarios para mostrar.</div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="panel kpis-team-panel">
-      <div className="panel-header">
-        <div>
-          <h2>Vista diaria - {props.team.teamLabel}</h2>
-          <p className="muted">Cumplimiento diario calculado desde seguimiento, terminos, dias inhabiles y vacaciones.</p>
+        <div className="kpis-team-panel-actions">
+          <span>{props.team.users.length} usuarios</span>
+          <div>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setExpandedUserIds(teamUserIds)}
+              disabled={allUsersExpanded || teamUserIds.length === 0}
+            >
+              Expandir todo
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setExpandedUserIds([])}
+              disabled={noUsersExpanded || teamUserIds.length === 0}
+            >
+              Colapsar todo
+            </button>
+          </div>
         </div>
-        <span>{props.team.users.length} usuarios</span>
       </div>
 
       <div className="kpis-user-list">
@@ -418,39 +166,12 @@ function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: b
           <div className="kpis-empty-user">No hay usuarios activos asignados a este equipo.</div>
         ) : null}
         {props.team.users.map((user) => (
-          <article key={user.userId} className={`kpis-user-block ${user.configured ? "" : "is-unconfigured"}`}>
-            <header className="kpis-user-head">
-              <div>
-                <h3>
-                  {user.displayName}
-                  {user.shortName ? <span>{user.shortName}</span> : null}
-                </h3>
-                <p>{user.specificRole ?? user.teamLabel}</p>
-              </div>
-              <span className={`kpis-user-state ${user.configured ? "is-configured" : "is-pending"}`}>
-                {user.configured ? `${user.metrics.length} KPI's` : "KPI's pendientes"}
-              </span>
-            </header>
-
-            {user.configured ? (
-              <div className="kpis-user-sections">
-                <KpiUserSummarySections metrics={user.metrics} />
-                <section className="kpis-user-section">
-                  <div className="kpis-user-section-head">
-                    <h4>Detalle diario</h4>
-                    <span>{user.metrics.length} KPI's</span>
-                  </div>
-                  <div className="kpis-daily-metric-list">
-                    {user.metrics.map((metric) => (
-                      <KpiDailyMetricTable key={metric.id} metric={metric} />
-                    ))}
-                  </div>
-                </section>
-              </div>
-            ) : (
-              <div className="kpis-empty-user">No hay KPI's definidos para desglosar por dia.</div>
-            )}
-          </article>
+          <KpiUserCard
+            key={user.userId}
+            user={user}
+            isExpanded={expandedUserIdSet.has(user.userId)}
+            onToggle={() => toggleUser(user.userId)}
+          />
         ))}
       </div>
     </section>
@@ -459,69 +180,55 @@ function KpiTeamDailyPanel(props: { team: KpiTeamSummary | undefined; loading: b
 
 export function KpisPage() {
   const currentPeriod = getCurrentPeriod();
-  const [selectedYear, setSelectedYear] = useState(currentPeriod.year);
-  const [selectedMonth, setSelectedMonth] = useState(currentPeriod.month);
   const [overview, setOverview] = useState<KpiOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTeamKey, setActiveTeamKey] = useState<string>("");
-  const [viewMode, setViewMode] = useState<KpiViewMode>("monthly");
-
-  async function loadOverview() {
-    setLoading(true);
-    setErrorMessage(null);
-
-    try {
-      const loaded = await apiGet<KpiOverview>(`/kpis/overview?year=${selectedYear}&month=${selectedMonth}`);
-      setOverview(loaded);
-      setActiveTeamKey((current) => {
-        if (current && loaded.teams.some((team) => team.teamKey === current)) {
-          return current;
-        }
-
-        return loaded.teams[0]?.teamKey ?? "";
-      });
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
+    let active = true;
+
+    async function loadOverview() {
+      setLoading(true);
+      setErrorMessage(null);
+
+      try {
+        const loaded = await apiGet<KpiOverview>(
+          `/kpis/overview?year=${currentPeriod.year}&month=${currentPeriod.month}`
+        );
+        if (!active) {
+          return;
+        }
+
+        setOverview(loaded);
+        setActiveTeamKey((current) => {
+          if (current && loaded.teams.some((team) => team.teamKey === current)) {
+            return current;
+          }
+
+          return loaded.teams[0]?.teamKey ?? "";
+        });
+      } catch (error) {
+        if (active) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
     void loadOverview();
-  }, [selectedYear, selectedMonth]);
+    return () => {
+      active = false;
+    };
+  }, [currentPeriod.month, currentPeriod.year]);
 
   const activeTeam = useMemo(
     () => overview?.teams.find((team) => team.teamKey === activeTeamKey),
     [activeTeamKey, overview]
   );
-
-  const totals = useMemo(() => {
-    const teams = overview?.teams ?? [];
-    const users = teams.reduce((sum, team) => sum + team.users.length, 0);
-    const configuredUsers = teams.reduce((sum, team) => sum + team.users.filter((user) => user.configured).length, 0);
-    const metrics = teams.reduce((sum, team) => sum + team.configuredMetricsCount, 0);
-    const met = teams.reduce(
-      (sum, team) => sum + team.users.reduce(
-        (userSum, user) => userSum + user.metrics.filter((metric) => metric.status === "met").length,
-        0
-      ),
-      0
-    );
-    const warning = teams.reduce(
-      (sum, team) => sum + team.users.reduce(
-        (userSum, user) => userSum + user.metrics.filter((metric) => metric.status === "warning").length,
-        0
-      ),
-      0
-    );
-    const missed = teams.reduce((sum, team) => sum + team.missedMetricsCount, 0);
-
-    return { users, configuredUsers, metrics, met, warning, missed };
-  }, [overview]);
-
-  const yearOptions = Array.from({ length: 7 }, (_, index) => currentPeriod.year - 3 + index);
 
   return (
     <section className="page-stack kpis-page">
@@ -535,95 +242,12 @@ export function KpisPage() {
           </div>
         </div>
         <p className="muted">
-          KPI's significa Key Performance Indicators, o indicadores clave de desempeño. Este modulo mide metas
-          individuales y terminos a partir de las tablas de seguimiento del sistema, sin captura manual.
+          KPI significa Key Performance Indicator, o indicador clave de desempeño. Este módulo muestra los indicadores
+          medidos automáticamente para cada persona; su evaluación se consulta en Supervisión General.
         </p>
       </header>
 
       {errorMessage ? <div className="message-banner message-error">{errorMessage}</div> : null}
-
-      <section className="panel kpis-toolbar-panel">
-        <div className="kpis-toolbar">
-          <div className="kpis-view-tabs" role="tablist" aria-label="Vista de KPI's">
-            <button
-              type="button"
-              className={`kpis-view-tab ${viewMode === "monthly" ? "is-active" : ""}`}
-              onClick={() => setViewMode("monthly")}
-            >
-              Mensual
-            </button>
-            <button
-              type="button"
-              className={`kpis-view-tab ${viewMode === "daily" ? "is-active" : ""}`}
-              onClick={() => setViewMode("daily")}
-            >
-              Diaria
-            </button>
-          </div>
-          <label className="form-field">
-            <span>Ano</span>
-            <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
-              {yearOptions.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Mes</span>
-            <select value={selectedMonth} onChange={(event) => setSelectedMonth(Number(event.target.value))}>
-              {MONTH_NAMES.map((monthLabel, index) => (
-                <option key={monthLabel} value={index + 1}>
-                  {monthLabel}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="secondary-button" onClick={() => void loadOverview()} disabled={loading}>
-            {loading ? "Actualizando..." : "Refrescar"}
-          </button>
-        </div>
-
-        {overview ? (
-          <div className="kpis-summary-grid">
-            <div>
-              <span>Usuarios</span>
-              <strong>{totals.users}</strong>
-            </div>
-            <div>
-              <span>Usuarios con KPI's</span>
-              <strong>{totals.configuredUsers}</strong>
-            </div>
-            <div>
-              <span>KPI's definidos</span>
-              <strong>{totals.metrics}</strong>
-            </div>
-            <div>
-              <span>Cumplidos</span>
-              <strong>{totals.met}</strong>
-            </div>
-            <div className={totals.warning > 0 ? "is-warning" : ""}>
-              <span>En observacion</span>
-              <strong>{totals.warning}</strong>
-            </div>
-            <div className={totals.missed > 0 ? "is-alert" : ""}>
-              <span>No cumplidos</span>
-              <strong>{totals.missed}</strong>
-            </div>
-            <div>
-              <span>Dias habiles al corte</span>
-              <strong>{formatNumber(overview.businessDaysElapsed)}</strong>
-            </div>
-          </div>
-        ) : null}
-
-        {overview ? (
-          <p className="muted kpis-source-note">
-            Corte: {formatDate(overview.cutoffDate)}. {overview.sourceNote}
-          </p>
-        ) : null}
-      </section>
 
       <div className="kpis-layout">
         <aside className="panel kpis-sidebar">
@@ -640,19 +264,13 @@ export function KpisPage() {
                 onClick={() => setActiveTeamKey(team.teamKey)}
               >
                 <strong>{team.teamLabel}</strong>
-                <span>
-                  {team.users.length} usuarios - {team.missedMetricsCount} fuera de meta
-                </span>
+                <span>{team.users.length} usuarios</span>
               </button>
             ))}
           </div>
         </aside>
 
-        {viewMode === "monthly" ? (
-          <KpiTeamPanel team={activeTeam} loading={loading} />
-        ) : (
-          <KpiTeamDailyPanel team={activeTeam} loading={loading} />
-        )}
+        <KpiTeamPanel team={activeTeam} loading={loading} />
       </div>
     </section>
   );

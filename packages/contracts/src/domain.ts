@@ -1030,6 +1030,17 @@ export interface CommissionExclusion {
   updatedAt: string;
 }
 
+export interface CommissionMatterCommission {
+  matterId: string;
+  matterNumber: string;
+  clientName: string;
+  clientNumber?: string;
+  subject: string;
+  registeredAt: string;
+  amountMxn: number;
+  excluded: boolean;
+}
+
 export interface CommissionPaymentAcknowledgement {
   id: string;
   year: number;
@@ -1084,6 +1095,8 @@ export interface CommissionSnapshotData {
   executionRecords: CommissionBreakdownEntry[];
   clientRecords: CommissionBreakdownEntry[];
   closingRecords: CommissionBreakdownEntry[];
+  matterCommissions?: CommissionMatterCommission[];
+  matterCommissionsTotalMxn?: number;
   group1TeamBreakdowns?: CommissionGroup1TeamBreakdown[];
   group1GrossMxn?: number;
   group1NetMxn?: number;

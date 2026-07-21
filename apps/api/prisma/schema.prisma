@@ -23,6 +23,7 @@ model Organization {
   quoteTemplates                         QuoteTemplate[]
   leads                                  Lead[]
   matters                                Matter[]
+  matterConclusionEvents                 MatterConclusionEvent[]
   executionSubmatters                    ExecutionSubmatter[]
   generalExpenses                        GeneralExpense[]
   generalExpenseEmrtAcknowledgements     GeneralExpenseEmrtAcknowledgement[]
@@ -32,6 +33,7 @@ model Organization {
   budgetPlanSnapshots                    BudgetPlanSnapshot[]
   commissionReceivers                    CommissionReceiver[]
   commissionExclusions                   CommissionExclusion[]
+  commissionMatterExclusionEvents        CommissionMatterExclusionEvent[]
   projectorCommissions                   ProjectorCommission[]
   commissionPaymentAcknowledgements      CommissionPaymentAcknowledgement[]
   commissionPaymentAcknowledgementEvents CommissionPaymentAcknowledgementEvent[]
@@ -71,6 +73,7 @@ model Organization {
   auditLogs                              AuditLog[]
   periodicMessages                       PeriodicMessage[]
   periodicMessageDeliveries              PeriodicMessageDelivery[]
+  googleWorkspaceConnections             GoogleWorkspaceConnection[]
 
   @@index([isActive, name])
 }
@@ -105,6 +108,7 @@ model User {
   auditLogs                          AuditLog[]
   createdPeriodicMessages            PeriodicMessage[]         @relation("PeriodicMessageCreator")
   periodicMessageDeliveries          PeriodicMessageDelivery[] @relation("PeriodicMessageDeliveryCreator")
+  googleWorkspaceConnection          GoogleWorkspaceConnection?
   laborFile                          LaborFile?
   generalSupervisionObservedSettings GeneralSupervisionObservedUser[]
   organization                       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -196,6 +200,28 @@ model PeriodicMessageDelivery {
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, periodicMessageId, scheduledFor])
   @@index([organizationId, status, scheduledFor])
+}
+
+model GoogleWorkspaceConnection {
+  id                       String       @id @default(uuid())
+  organizationId           String       @default("org-rusconi")
+  userId                   String       @unique
+  email                    String
+  refreshTokenCiphertext   String?
+  grantedScopes            Json         @default("[]")
+  status                   String       @default("ACTIVE")
+  connectedAt              DateTime     @default(now())
+  lastValidatedAt          DateTime?
+  lastUsedAt               DateTime?
+  revokedAt                DateTime?
+  lastError                String?
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user                     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([organizationId, status])
 }
 
 model SystemModuleSetting {
@@ -643,11 +669,26 @@ model Matter {
   organization              Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tasks                     TaskItem[]
   executionSubmatters       ExecutionSubmatter[]
+  conclusionEvents          MatterConclusionEvent[]
+  commissionExclusionEvents CommissionMatterExclusionEvent[]
 
   @@unique([organizationId, matterNumber])
   @@index([organizationId, deletedAt, createdAt])
   @@index([organizationId, matterType, deletedAt])
   @@index([organizationId, quoteNumber])
+}
+
+model MatterConclusionEvent {
+  id             String       @id @default(uuid())
+  organizationId String       @default("org-rusconi")
+  matterId       String
+  concluded      Boolean
+  effectiveAt    DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  matter         Matter       @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, matterId, effectiveAt])
 }
 
 model ExecutionSubmatter {
@@ -863,6 +904,25 @@ model CommissionExclusion {
 
   @@unique([organizationId, year, month, section, group, financeRecordId])
   @@index([organizationId, year, month, section])
+}
+
+model CommissionMatterExclusionEvent {
+  id              String       @id @default(uuid())
+  organizationId  String       @default("org-rusconi")
+  matterId        String
+  effectiveYear   Int
+  effectiveMonth  Int
+  excluded        Boolean
+  createdByUserId String?
+  createdByName   String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  matter          Matter       @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, matterId, effectiveYear, effectiveMonth], map: "CommissionMatterExclusion_org_matter_period_key")
+  @@index([organizationId, effectiveYear, effectiveMonth], map: "CommissionMatterExclusion_org_period_idx")
+  @@index([organizationId, matterId, effectiveYear, effectiveMonth], map: "CommissionMatterExclusion_org_matter_period_idx")
 }
 
 model ProjectorCommission {

@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
+import { getLitigationMatterCommissions } from "./commission-matter-calculation";
 
 const RUSCONI_ORGANIZATION_ID = "org-rusconi";
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
@@ -101,7 +102,7 @@ export async function buildCommissionPeriodSourceHash(prisma: PrismaExecutor, ye
     return "";
   }
 
-  const [financeRecords, generalExpenses, exclusions, projectorCommissions] = await Promise.all([
+  const [financeRecords, generalExpenses, exclusions, projectorCommissions, matterCommissions] = await Promise.all([
     prisma.financeRecord.findMany({
       where: { year, month },
       select: { id: true, quoteNumber: true, updatedAt: true },
@@ -121,7 +122,8 @@ export async function buildCommissionPeriodSourceHash(prisma: PrismaExecutor, ye
       where: { year, month },
       select: { id: true, updatedAt: true },
       orderBy: { id: "asc" }
-    })
+    }),
+    getLitigationMatterCommissions(prisma, year, month)
   ]);
   const quoteNumbersByKey = new Map<string, string>();
   financeRecords.forEach((record) => {
@@ -154,7 +156,12 @@ export async function buildCommissionPeriodSourceHash(prisma: PrismaExecutor, ye
     ]),
     generalExpenses: generalExpenses.map((record) => [record.id, record.updatedAt.toISOString()]),
     exclusions: exclusions.map((record) => [record.id, record.updatedAt.toISOString()]),
-    projectorCommissions: projectorCommissions.map((record) => [record.id, record.updatedAt.toISOString()])
+    projectorCommissions: projectorCommissions.map((record) => [record.id, record.updatedAt.toISOString()]),
+    litigationMatterCommissions: matterCommissions.map((record) => [
+      record.matterId,
+      record.registeredAt,
+      record.excluded
+    ])
   };
 
   return createHash("sha256").update(JSON.stringify(source)).digest("hex");
