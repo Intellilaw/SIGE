@@ -75,6 +75,8 @@ const TIMEFRAMES: Array<{ id: DashboardTimeframe; label: string; colorClass: str
 ];
 const LITIGATION_MODULE_ID = "litigation";
 const CORPORATE_LABOR_MODULE_ID = "corporate-labor";
+const SETTLEMENTS_MODULE_ID = "settlements";
+const FINANCIAL_LAW_MODULE_ID = "financial-law";
 const TAX_COMPLIANCE_MODULE_ID = "tax-compliance";
 const FINANCE_TASK_MODULE_ID = "finance";
 const GENERAL_EXPENSES_PATH = "/app/general-expenses";
@@ -82,6 +84,8 @@ const TEAM_WIDE_DASHBOARD_MODULE_IDS = new Set([CORPORATE_LABOR_MODULE_ID, TAX_C
 const EXECUTION_INCOMPLETE_DASHBOARD_MODULE_IDS = new Set([
   LITIGATION_MODULE_ID,
   CORPORATE_LABOR_MODULE_ID,
+  SETTLEMENTS_MODULE_ID,
+  FINANCIAL_LAW_MODULE_ID,
   TAX_COMPLIANCE_MODULE_ID
 ]);
 const LITIGATION_RESPONSIBLE_ASSIGNMENT_OWNER = "MEOO";

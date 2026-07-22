@@ -135,6 +135,15 @@ function isFinanceNextPaymentDatePatch(value: unknown) {
   return keys.length === 1 && keys[0] === "nextPaymentDate";
 }
 
+function isCommissionAssigneePatch(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const keys = Object.keys(value);
+  return keys.length === 1 && keys[0] === "commissionAssignee";
+}
+
 function isExecutionMatterPatch(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -218,6 +227,28 @@ function getExecutionReadableTeams(request: FastifyRequest, permissions: string[
 
 function canReadAllMatters(permissions: string[]) {
   return permissions.includes("*") || permissions.includes("matters:read") || permissions.includes("matters:write");
+}
+
+function normalizeComparableText(value?: string | null) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isClientRelationsUser(user: ReturnType<typeof getSessionUser>) {
+  if (user.team === "CLIENT_RELATIONS" || user.secondaryTeam === "CLIENT_RELATIONS") {
+    return true;
+  }
+
+  return [user.legacyTeam, user.secondaryLegacyTeam]
+    .map(normalizeComparableText)
+    .some((team) => team === "comunicacion con cliente");
+}
+
+function isSuperadminUser(user: ReturnType<typeof getSessionUser>) {
+  return user.role === "SUPERADMIN" || user.legacyRole === "SUPERADMIN";
 }
 
 function buildMatterMatchKeys(matter: Matter) {
@@ -444,6 +475,7 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch("/matters/:matterId", { preHandler: [requireAuth] }, async (request) => {
     const params = matterIdParamsSchema.parse(request.params);
+    const sessionUser = getSessionUser(request);
     const permissions = getEffectivePermissionsForRequest(request);
     const matterRecords = await service.list();
     const currentMatter = matterRecords.find((matter) => matter.id === params.matterId);
@@ -451,12 +483,16 @@ export const mattersRoutes: FastifyPluginAsync = async (app) => {
     const canUpdateFinanceDate = permissions.includes("*") || (
       permissions.includes("finances:write") && isFinanceNextPaymentDatePatch(request.body)
     );
+    const canUpdateRetainerCommission =
+      isCommissionAssigneePatch(request.body) &&
+      currentMatter?.matterType === "RETAINER" &&
+      (isSuperadminUser(sessionUser) || isClientRelationsUser(sessionUser));
     const canUpdateExecutionMatter = isExecutionMatterPatch(request.body) && canAccessExecutionMatter({
       permissions,
       responsibleTeam: currentMatter?.responsibleTeam
     });
 
-    if (!canWriteMatters && !canUpdateFinanceDate && !canUpdateExecutionMatter) {
+    if (!canWriteMatters && !canUpdateFinanceDate && !canUpdateRetainerCommission && !canUpdateExecutionMatter) {
       throw new app.errors.AppError(403, "FORBIDDEN", "You do not have enough permissions for this action.");
     }
 

@@ -109,6 +109,27 @@ function normalizeComparableText(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function isClientRelationsUser(user?: {
+  role?: string | null;
+  legacyRole?: string | null;
+  team?: string | null;
+  secondaryTeam?: string | null;
+  legacyTeam?: string | null;
+  secondaryLegacyTeam?: string | null;
+} | null) {
+  if (user?.team === "CLIENT_RELATIONS" || user?.secondaryTeam === "CLIENT_RELATIONS") {
+    return true;
+  }
+
+  return [user?.legacyTeam, user?.secondaryLegacyTeam]
+    .map(normalizeComparableText)
+    .some((team) => team === "comunicacion con cliente");
+}
+
+function isSuperadminUser(user?: { role?: string | null; legacyRole?: string | null } | null) {
+  return user?.role === "SUPERADMIN" || user?.legacyRole === "SUPERADMIN";
+}
+
 function getSearchWords(value?: string | null) {
   return normalizeComparableText(value).split(/\s+/).filter(Boolean);
 }
@@ -536,12 +557,14 @@ interface MatterTableProps {
   rowRefs: MutableRefObject<Map<string, HTMLTableRowElement>>;
   readOnly: boolean;
   variant: MatterTableVariant;
+  canEditCommissionAssignee: boolean;
   canDeleteReadOnlyRows: boolean;
   onToggleSelection: (matterId: string) => void;
   onToggleAll: (items: Matter[]) => void;
   onClientChange: (matterId: string, value: string) => void;
   onLocalChange: (matterId: string, field: keyof MatterPatchPayload, value: string | number) => void;
   onImmediateChange: (matterId: string, field: keyof MatterPatchPayload, value: string | boolean) => Promise<void>;
+  onCommissionAssigneeChange: (matterId: string, value: string) => Promise<void>;
   onQuoteChange: (matterId: string, quoteNumber: string) => Promise<void>;
   onBlur: (matterId: string) => void;
   onGenerateIdentifier: (matterId: string) => Promise<void>;
@@ -561,12 +584,14 @@ function MatterTable({
   rowRefs,
   readOnly,
   variant,
+  canEditCommissionAssignee,
   canDeleteReadOnlyRows,
   onToggleSelection,
   onToggleAll,
   onClientChange,
   onLocalChange,
   onImmediateChange,
+  onCommissionAssigneeChange,
   onQuoteChange,
   onBlur,
   onGenerateIdentifier,
@@ -773,8 +798,8 @@ function MatterTable({
                       <select
                         className="lead-cell-input"
                         value={item.commissionAssignee || ""}
-                        disabled={readOnly}
-                        onChange={(event) => void onImmediateChange(item.id, "commissionAssignee", event.target.value)}
+                        disabled={!canEditCommissionAssignee}
+                        onChange={(event) => void onCommissionAssigneeChange(item.id, event.target.value)}
                       >
                         <option value="">Sel...</option>
                         {commissionOptions.map((option) => (
@@ -1034,6 +1059,7 @@ export function MattersPage() {
   const canWriteMatters = canWriteModule(user, "active-matters");
   const canReadTasks = canReadModule(user, "tasks");
   const canDeleteReadOnlyRows = hasPermission(user, "*");
+  const canEditRetainerCommission = canWriteMatters || isSuperadminUser(user) || isClientRelationsUser(user);
   const commissionOptions = useMemo(
     () =>
       [...new Set(
@@ -1124,18 +1150,22 @@ export function MattersPage() {
     return updated;
   }
 
-  async function persistMatter(matter: Matter) {
-    if (!canWriteMatters) {
-      return;
-    }
-
+  async function persistMatterPayload(matterId: string, payload: MatterPatchPayload) {
     try {
-      const updated = await apiPatch<Matter>(`/matters/${matter.id}`, buildMatterPatch(matter));
+      const updated = await apiPatch<Matter>(`/matters/${matterId}`, payload);
       syncMatterAcrossViews(updated);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
       await loadBoard();
     }
+  }
+
+  async function persistMatter(matter: Matter) {
+    if (!canWriteMatters) {
+      return;
+    }
+
+    await persistMatterPayload(matter.id, buildMatterPatch(matter));
   }
 
   function handleLocalChange(matterId: string, field: keyof MatterPatchPayload, value: string | number) {
@@ -1191,6 +1221,26 @@ export function MattersPage() {
 
     if (updated) {
       await persistMatter(updated);
+    }
+  }
+
+  async function handleCommissionAssigneeChange(matterId: string, value: string) {
+    const currentMatter = activeItems.find((item) => item.id === matterId);
+    const canEditCommission = canWriteMatters ||
+      (currentMatter?.matterType === "RETAINER" && canEditRetainerCommission);
+    if (!canEditCommission) {
+      return;
+    }
+
+    const updated = updateMatterLocal(matterId, (matter) => {
+      matter.commissionAssignee = normalizeText(value) || undefined;
+      return matter;
+    });
+
+    if (updated) {
+      await persistMatterPayload(matterId, {
+        commissionAssignee: normalizeText(value) ? value : null
+      });
     }
   }
 
@@ -1566,12 +1616,14 @@ export function MattersPage() {
           rowRefs={matterRowRefs}
           readOnly={!canWriteMatters}
           variant="unique"
+          canEditCommissionAssignee={canWriteMatters}
           canDeleteReadOnlyRows={canDeleteReadOnlyRows}
           onToggleSelection={toggleSelection}
           onToggleAll={toggleAll}
           onClientChange={handleClientChange}
           onLocalChange={handleLocalChange}
           onImmediateChange={handleImmediateChange}
+          onCommissionAssigneeChange={handleCommissionAssigneeChange}
           onQuoteChange={handleQuoteChange}
           onBlur={handleBlur}
           onGenerateIdentifier={handleGenerateIdentifier}
@@ -1602,12 +1654,14 @@ export function MattersPage() {
           rowRefs={matterRowRefs}
           readOnly={true}
           variant="retainer"
+          canEditCommissionAssignee={canEditRetainerCommission}
           canDeleteReadOnlyRows={canDeleteReadOnlyRows}
           onToggleSelection={() => undefined}
           onToggleAll={() => undefined}
           onClientChange={handleClientChange}
           onLocalChange={handleLocalChange}
           onImmediateChange={handleImmediateChange}
+          onCommissionAssigneeChange={handleCommissionAssigneeChange}
           onQuoteChange={handleQuoteChange}
           onBlur={handleBlur}
           onGenerateIdentifier={handleGenerateIdentifier}
