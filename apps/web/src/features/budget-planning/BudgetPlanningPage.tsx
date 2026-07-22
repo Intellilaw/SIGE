@@ -498,22 +498,26 @@ export function BudgetPlanningPage() {
                 </div>
                 <strong>{Math.round(totals.incomeProgress)}%</strong>
               </div>
-              <div className="budget-pair-grid budget-income-grid">
-                <div className="budget-reported-field budget-readonly-field">
-                  <span>Esperados total</span>
-                  <strong>{formatCurrency(totals.expectedIncomeMxn)}</strong>
+              <div className="budget-income-layout">
+                <div className="budget-income-expected-group">
+                  <div className="budget-reported-field budget-readonly-field budget-income-total">
+                    <span>Esperados total</span>
+                    <strong>{formatCurrency(totals.expectedIncomeMxn)}</strong>
+                  </div>
+                  <div className="budget-income-probability-grid">
+                    <div className="budget-reported-field budget-readonly-field">
+                      <span>Alta prob.</span>
+                      <strong>{formatCurrency(totals.expectedHighProbabilityIncomeMxn)}</strong>
+                    </div>
+                    <div className="budget-reported-field budget-readonly-field">
+                      <span>Baja prob.</span>
+                      <strong>{formatCurrency(totals.expectedLowProbabilityIncomeMxn)}</strong>
+                    </div>
+                  </div>
                 </div>
-                <div className="budget-reported-field">
+                <div className="budget-reported-field budget-income-reported">
                   <span>Reportados</span>
                   <strong>{formatCurrency(totals.actualIncomeMxn)}</strong>
-                </div>
-                <div className="budget-reported-field budget-readonly-field">
-                  <span>Alta prob.</span>
-                  <strong>{formatCurrency(totals.expectedHighProbabilityIncomeMxn)}</strong>
-                </div>
-                <div className="budget-reported-field budget-readonly-field">
-                  <span>Baja prob.</span>
-                  <strong>{formatCurrency(totals.expectedLowProbabilityIncomeMxn)}</strong>
                 </div>
               </div>
               <div className="budget-progress-track">
