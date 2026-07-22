@@ -35,7 +35,6 @@ type FinanceRecordPatchPayload = {
   workingConcepts?: string | null;
   conceptFeesMxn?: number;
   previousPaymentsMxn?: number;
-  nextPaymentDate?: string | null;
   nextPaymentNotes?: string | null;
   delinquencyStatus?: FinanceRecord["delinquencyStatus"];
   paidThisMonthMxn?: number;
@@ -935,7 +934,6 @@ function normalizeRecordPatchForState(patch: FinanceRecordPatchPayload): Partial
     "quoteNumber",
     "responsibleTeam",
     "workingConcepts",
-    "nextPaymentDate",
     "nextPaymentNotes",
     "paymentDate1",
     "paymentDate2",
@@ -2158,7 +2156,7 @@ export function FinancesPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td><input className="finance-input" type="date" value={toDateInput(record.nextPaymentDate)} onChange={(event) => updateRecordLocal(record.id, { nextPaymentDate: event.target.value || null })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentDate: event.target.value || null })} /></td>
+                  <td><input className="finance-input finance-input-readonly" type="date" value={toDateInput(record.nextPaymentDate)} readOnly /></td>
                   <td><input className="finance-input" value={record.nextPaymentNotes ?? ""} onChange={(event) => updateRecordLocal(record.id, { nextPaymentNotes: event.target.value })} onBlur={(event) => void persistRecordPatch(record.id, { nextPaymentNotes: event.target.value })} /></td>
                   <td>
                     <select

@@ -36,7 +36,6 @@ const financeRecordFieldsSchema = z.object({
   workingConcepts: z.string().nullable().optional(),
   conceptFeesMxn: z.coerce.number().nonnegative().optional(),
   previousPaymentsMxn: z.coerce.number().nonnegative().optional(),
-  nextPaymentDate: z.string().nullable().optional(),
   nextPaymentNotes: z.string().nullable().optional(),
   delinquencyStatus: z.enum(["CURRENT", "DAYS_1_TO_10", "MORE_THAN_10", "MORE_THAN_20", "MORE_THAN_30"]).optional(),
   paidThisMonthMxn: z.coerce.number().nonnegative().optional(),

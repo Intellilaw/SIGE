@@ -384,7 +384,7 @@ function areAllPercentagesZero(record: {
   );
 }
 
-function getMatterMatchKey(input: Pick<FinanceMatterProjection, "quoteNumber" | "clientName" | "subject">) {
+function getMatterMatchKey(input: { quoteNumber?: string | null; clientName?: string | null; subject?: string | null }) {
   const quoteNumber = normalizeComparableText(input.quoteNumber);
   if (quoteNumber) {
     return `quote:${quoteNumber}`;
@@ -567,13 +567,44 @@ export class PrismaFinanceRepository implements FinanceRepository {
     includeCollectionProbability: boolean,
     includePeriod: boolean
   ) {
-    const records = await this.prisma.financeRecord.findMany({
-      where: { year, month },
-      orderBy: [{ createdAt: "asc" }, { clientNumber: "asc" }],
-      select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
+    const [records, matters] = await Promise.all([
+      this.prisma.financeRecord.findMany({
+        where: { year, month },
+        orderBy: [{ createdAt: "asc" }, { clientNumber: "asc" }],
+        select: getFinanceRecordSelect(includeCollectionProbability, includePeriod)
+      }),
+      this.prisma.matter.findMany({
+        where: { deletedAt: null },
+        select: {
+          quoteNumber: true,
+          clientName: true,
+          subject: true,
+          nextPaymentDate: true
+        }
+      })
+    ]);
+    const nextPaymentDateByMatter = new Map<string, string | undefined>();
+
+    matters.forEach((matter) => {
+      const matchKey = getMatterMatchKey(matter);
+      if (matchKey && !nextPaymentDateByMatter.has(matchKey)) {
+        nextPaymentDateByMatter.set(matchKey, matter.nextPaymentDate?.toISOString());
+      }
     });
 
-    return attachSalesCommissionsToFinanceRecords(this.prisma, records.map(mapFinanceRecordWithOptionalDefaults));
+    const canonicalRecords = records.map(mapFinanceRecordWithOptionalDefaults).map((record) => {
+      const matchKey = getRecordMatchKey(record);
+      if (!matchKey || !nextPaymentDateByMatter.has(matchKey)) {
+        return record;
+      }
+
+      return {
+        ...record,
+        nextPaymentDate: nextPaymentDateByMatter.get(matchKey)
+      };
+    });
+
+    return attachSalesCommissionsToFinanceRecords(this.prisma, canonicalRecords);
   }
 
   public async createRecord(year: number, month: number, payload: FinanceRecordWriteRecord = {}) {
