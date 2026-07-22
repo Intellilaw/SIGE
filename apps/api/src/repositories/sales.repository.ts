@@ -214,7 +214,7 @@ export class PrismaSalesRepository implements SalesRepository {
     const archivedProducts = products.filter((product) => product.status === "archived");
     const activeProductIds = new Set(activeProducts.map((product) => product.id));
     const today = getTodayDateKey();
-    const tasks = buildLegalFlowSalesTasks(today).filter((task) => activeProductIds.has(task.productId));
+    const scheduledTasks = buildLegalFlowSalesTasks(today).filter((task) => activeProductIds.has(task.productId));
     const taskSeeds = LEGALFLOW_SALES_TASK_SEEDS.filter((task) => activeProductIds.has(task.productId));
     const [strategies, dailyReports] = await Promise.all([
       this.prisma.salesStrategy.findMany({
@@ -227,6 +227,14 @@ export class PrismaSalesRepository implements SalesRepository {
       this.listDailyReports(LEGALFLOW_SALES_START_DATE, today)
     ]);
     const strategyByProduct = new Map(strategies.map((strategy) => [strategy.productId, mapStrategy(strategy)]));
+    const completedReportKeys = new Set(
+      dailyReports
+        .filter((report) => report.content.trim().length > 0)
+        .map((report) => `${report.productId}:${report.reportDate}`)
+    );
+    const tasks = scheduledTasks.map((task) => completedReportKeys.has(`${task.productId}:${task.dueDate}`)
+      ? { ...task, status: "concluida" as const }
+      : task);
 
     return {
       products: activeProducts,

@@ -88,6 +88,7 @@ export interface SalesOverview {
 }
 
 export const LEGALFLOW_SALES_START_DATE = "2026-06-08";
+export const LEGALFLOW_PLD_SALES_START_DATE = "2026-07-22";
 export const LEGALFLOW_SALES_FUTURE_BUSINESS_DAYS = 20;
 
 export const LEGALFLOW_SALES_PRODUCTS: SalesProduct[] = [
@@ -183,15 +184,15 @@ export function addSalesBusinessDays(value: string, days: number) {
 
 export const LEGALFLOW_SALES_TASK_SEEDS: SalesTaskSeed[] = [
   {
-    id: "legalflow-remates-reporte-diario",
+    id: "legalflow-pld-reporte-diario",
     company: "LegalFlow",
-    productId: "remates",
+    productId: "pld",
     responsibleId: "IR",
-    task: "Publicar reporte diario de tareas realizadas de Remates by LegalFlow",
+    task: "Publicar reporte diario de tareas realizadas de Intellilaw PLD",
     channel: "Reporte diario",
     periodicity: "Cada dos dias habiles, alternando con Start by LegalFlow",
     priority: "alta",
-    firstDueDate: LEGALFLOW_SALES_START_DATE
+    firstDueDate: LEGALFLOW_PLD_SALES_START_DATE
   },
   {
     id: "legalflow-start-reporte-diario",
@@ -200,7 +201,7 @@ export const LEGALFLOW_SALES_TASK_SEEDS: SalesTaskSeed[] = [
     responsibleId: "IR",
     task: "Publicar reporte diario de tareas realizadas de Start by LegalFlow",
     channel: "Reporte diario",
-    periodicity: "Cada dos dias habiles, alternando con Remates by LegalFlow",
+    periodicity: "Cada dos dias habiles, alternando con Intellilaw PLD",
     priority: "alta",
     firstDueDate: addSalesBusinessDays(LEGALFLOW_SALES_START_DATE, 1)
   }
@@ -222,12 +223,14 @@ export function buildLegalFlowSalesTasks(todayInput = getTodayDateKey()) {
       const dueDate = toDateKey(cursor);
       const definition = LEGALFLOW_SALES_TASK_SEEDS[businessDayIndex % LEGALFLOW_SALES_TASK_SEEDS.length];
 
-      tasks.push({
-        ...definition,
-        id: `${definition.id}-${dueDate}`,
-        dueDate,
-        status: "pendiente"
-      });
+      if (dueDate >= definition.firstDueDate) {
+        tasks.push({
+          ...definition,
+          id: `${definition.id}-${dueDate}`,
+          dueDate,
+          status: "pendiente"
+        });
+      }
 
       businessDayIndex += 1;
     }
