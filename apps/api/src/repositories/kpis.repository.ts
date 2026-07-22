@@ -61,6 +61,20 @@ interface ExecutionIncompleteRowsScope {
   includeInUserTeamKpis: boolean;
 }
 
+interface OperationalIncompleteRowsScope {
+  teamKey: "CLIENT_RELATIONS" | "FINANCE";
+  teamLabel: string;
+  source: "leads" | "active-matters" | "finance-active-matters" | "finance-monthly" | "general-expenses";
+  snapshotUserKey: string;
+  metricId: string;
+  threshold: 0;
+  baselineDateKey: string;
+  label: string;
+  description: string;
+  sourceDescription: string;
+  sourceTables: string[];
+}
+
 const LAMR_EXECUTION_KPI_SCOPE: ExecutionIncompleteRowsScope = {
   teamKey: "LITIGATION",
   teamLabel: "Litigio",
@@ -110,6 +124,74 @@ const TEAM_EXECUTION_KPI_SCOPES: ExecutionIncompleteRowsScope[] = [
     description: "Al cierre del dia se deben completar todas las filas faltantes en el modulo de Ejecucion.",
     sourceDescription: "Modulo de Ejecucion: asuntos activos de Compliance Fiscal y columna Faltantes.",
     includeInUserTeamKpis: true
+  }
+];
+
+const OPERATIONAL_INCOMPLETE_ROWS_SCOPES: OperationalIncompleteRowsScope[] = [
+  {
+    teamKey: "CLIENT_RELATIONS",
+    teamLabel: "Comunicacion con cliente",
+    source: "leads",
+    snapshotUserKey: "TEAM:CLIENT_RELATIONS",
+    metricId: "client-relations-filas-incompletas-leads",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    label: "Filas incompletas en Seguimiento a Leads y Cotizaciones",
+    description: "Al cierre del dia se deben completar todas las filas faltantes en Seguimiento a Leads y Cotizaciones.",
+    sourceDescription: "Seguimiento a Leads y Cotizaciones: filas activas marcadas en rojo.",
+    sourceTables: ["Lead"]
+  },
+  {
+    teamKey: "CLIENT_RELATIONS",
+    teamLabel: "Comunicacion con cliente",
+    source: "active-matters",
+    snapshotUserKey: "TEAM:CLIENT_RELATIONS",
+    metricId: "client-relations-filas-incompletas-asuntos-activos",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    label: "Filas incompletas en Asuntos Activos",
+    description: "Al cierre del dia se deben completar todas las filas faltantes en 1. Asuntos Activos.",
+    sourceDescription: "Modulo de Asuntos Activos: tabla 1. Asuntos Activos y filas marcadas en rojo.",
+    sourceTables: ["Matter", "TaskItem", "Client"]
+  },
+  {
+    teamKey: "FINANCE",
+    teamLabel: "Finanzas",
+    source: "finance-active-matters",
+    snapshotUserKey: "TEAM:FINANCE",
+    metricId: "finance-filas-incompletas-asuntos-activos",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    label: "Filas incompletas en 1. Asuntos activos",
+    description: "Al cierre del dia se deben completar todas las filas faltantes en 1. Asuntos activos de Finanzas.",
+    sourceDescription: "Modulo de Finanzas: tabla 1. Asuntos activos y filas marcadas en rojo.",
+    sourceTables: ["Matter", "FinanceRecord"]
+  },
+  {
+    teamKey: "FINANCE",
+    teamLabel: "Finanzas",
+    source: "finance-monthly",
+    snapshotUserKey: "TEAM:FINANCE",
+    metricId: "finance-filas-incompletas-ver-mes",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    label: "Filas incompletas en 2. Ver mes",
+    description: "Al cierre del dia se deben completar todas las filas faltantes en 2. Ver mes de Finanzas.",
+    sourceDescription: "Modulo de Finanzas: tabla 2. Ver mes, columna Faltantes y filas marcadas en rojo.",
+    sourceTables: ["FinanceRecord", "Client"]
+  },
+  {
+    teamKey: "FINANCE",
+    teamLabel: "Finanzas",
+    source: "general-expenses",
+    snapshotUserKey: "TEAM:FINANCE",
+    metricId: "finance-filas-incompletas-gastos-generales-registro",
+    threshold: 0,
+    baselineDateKey: TEAM_EXECUTION_KPI_BASELINE_DATE_KEY,
+    label: "Filas incompletas en Gastos generales / 1. Registro",
+    description: "Al cierre del dia se deben completar todas las filas faltantes en 1. Registro de Gastos generales.",
+    sourceDescription: "Modulo de Gastos generales: pestana 1. Registro y filas marcadas en rojo.",
+    sourceTables: ["GeneralExpense"]
   }
 ];
 
@@ -285,16 +367,124 @@ interface ClientRecord {
 interface MatterRecord {
   id: string;
   matterNumber: string;
+  clientId?: string | null;
   clientNumber: string | null;
   clientName: string;
   quoteNumber: string | null;
+  matterType: string;
   subject: string;
+  specificProcess: string | null;
   responsibleTeam: string | null;
+  nextPaymentDate: Date | null;
   communicationChannel: string;
+  r1InternalCreated: boolean;
+  telegramBotLinked: boolean;
+  rdCreated: boolean;
+  rfCreated: string;
+  r1ExternalCreated: boolean;
+  billingChatCreated: boolean;
   matterIdentifier: string | null;
   executionLinkedModule: string | null;
+  executionLinkedAt: Date | null;
+  nextAction: string | null;
+  nextActionDueAt: Date | null;
   milestone: string | null;
   deletedAt: Date | null;
+}
+
+interface LeadRecord {
+  id: string;
+  clientName: string;
+  prospectName: string | null;
+  quoteNumber: string | null;
+  subject: string;
+  communicationChannel: string;
+  lastInteractionLabel: string | null;
+  lastInteraction: Date | null;
+  nextInteractionLabel: string | null;
+  nextInteraction: Date | null;
+  status: string;
+  hiddenFromTracking: boolean;
+}
+
+interface QuoteRecord {
+  quoteNumber: string;
+  quoteType: string;
+}
+
+interface FinanceRecordMatch {
+  id: string;
+  year: number;
+  month: number;
+  clientNumber: string | null;
+  quoteNumber: string | null;
+  clientName: string;
+  subject: string;
+  matterType: string;
+  periodYear: number | null;
+  periodMonth: number | null;
+  responsibleTeam: string | null;
+  totalMatterMxn: unknown;
+  workingConcepts: string | null;
+  conceptFeesMxn: unknown;
+  previousPaymentsMxn: unknown;
+  nextPaymentDate: Date | null;
+  nextPaymentNotes: string | null;
+  delinquencyStatus: string;
+  paidThisMonthMxn: unknown;
+  payment2Mxn: unknown;
+  payment3Mxn: unknown;
+  paymentDate1: Date | null;
+  paymentDate2: Date | null;
+  paymentDate3: Date | null;
+  paymentMethod: string;
+  paymentMethod2: string;
+  paymentMethod3: string;
+  paymentReceived: boolean;
+  paymentReceived2: boolean;
+  paymentReceived3: boolean;
+  pctLitigation: unknown;
+  pctCorporateLabor: unknown;
+  pctSettlements: unknown;
+  pctFinancialLaw: unknown;
+  pctTaxCompliance: unknown;
+  clientCommissionRecipient: string | null;
+  closingCommissionRecipient: string | null;
+  highCollectionProbability: boolean;
+  lowCollectionProbability: boolean;
+  milestone: string | null;
+}
+
+interface TaskItemRecord {
+  id: string;
+  matterId: string | null;
+  matterNumber: string | null;
+  trackId: string;
+  dueDate: Date;
+  state: string;
+}
+
+interface GeneralExpenseRecord {
+  id: string;
+  year: number;
+  month: number;
+  detail: string;
+  amountMxn: unknown;
+  generalExpense: boolean;
+  expenseWithoutTeam: boolean;
+  pctLitigation: unknown;
+  pctCorporateLabor: unknown;
+  pctSettlements: unknown;
+  pctFinancialLaw: unknown;
+  pctTaxCompliance: unknown;
+  paymentMethod: string;
+  bank: string | null;
+  approvedByEmrt: boolean;
+  reviewedByJnls: boolean;
+  paid: boolean;
+  paidAt: Date | null;
+  payrollEntryId: string | null;
+  projectorCommissionId: string | null;
 }
 
 interface KpiDailySnapshotRecord {
@@ -1026,9 +1216,12 @@ function getPendingMatterTaskCount(input: {
 
 function getClientNumberForMatter(matter: MatterRecord, clients: ClientRecord[]) {
   const normalizedClientName = normalizeText(matter.clientName);
-  const matchedClient = normalizedClientName
-    ? clients.find((client) => normalizeText(client.name) === normalizedClientName)
-    : undefined;
+  const normalizedClientNumber = normalizeText(matter.clientNumber);
+  const matchedClient = clients.find((client) =>
+    Boolean(matter.clientId && client.id === matter.clientId)
+    || Boolean(normalizedClientName && normalizeText(client.name) === normalizedClientName)
+    || Boolean(normalizedClientNumber && normalizeText(client.clientNumber) === normalizedClientNumber)
+  );
 
   return matchedClient?.clientNumber ?? matter.clientNumber ?? "";
 }
@@ -1805,7 +1998,10 @@ function buildExecutionIncompleteRowsEvaluation(input: {
   } satisfies ExecutionIncompleteRowsEvaluation;
 }
 
-function executionEvaluationToDailyMetric(evaluation: ExecutionIncompleteRowsEvaluation) {
+function executionEvaluationToDailyMetric(evaluation: Pick<
+  ExecutionIncompleteRowsEvaluation,
+  "dateKey" | "status" | "value" | "target" | "unit" | "actualLabel" | "targetLabel" | "helper" | "incidents"
+>) {
   return {
     date: evaluation.dateKey,
     status: evaluation.status,
@@ -1817,6 +2013,288 @@ function executionEvaluationToDailyMetric(evaluation: ExecutionIncompleteRowsEva
     helper: evaluation.helper,
     incidents: evaluation.incidents
   } satisfies KpiMetric["dailyBreakdown"][number];
+}
+
+function buildOperationalIncompleteRowsEvaluation(input: {
+  scope: OperationalIncompleteRowsScope;
+  dateKey: string;
+  isOpenBusinessDay: boolean;
+  leads: LeadRecord[];
+  quotes: QuoteRecord[];
+  matters: MatterRecord[];
+  clients: ClientRecord[];
+  taskItems: TaskItemRecord[];
+  financeRecords: FinanceRecordMatch[];
+  generalExpenses: GeneralExpenseRecord[];
+}) {
+  type Row = { id: string; clientName: string; subject: string; identifier?: string; missing: string[] };
+  const [year, month] = input.dateKey.split("-").map(Number);
+  let rows: Row[] = [];
+
+  if (input.scope.source === "leads") {
+    rows = input.leads
+      .filter((lead) => lead.status === "ACTIVE" && !lead.hiddenFromTracking)
+      .map((lead) => {
+        const missing: string[] = [];
+        if (!lead.clientName.trim() && !lead.prospectName?.trim()) missing.push("Cliente o prospecto");
+        if (!lead.subject.trim()) missing.push("Asunto");
+        if (!lead.communicationChannel) missing.push("Canal");
+        if (!lead.lastInteractionLabel?.trim()) missing.push("Ultima interaccion");
+        if (!lead.lastInteraction) missing.push("Fecha de ultima interaccion");
+        if (!lead.nextInteractionLabel?.trim()) missing.push("Siguiente interaccion");
+        if (!lead.nextInteraction) missing.push("Fecha de siguiente interaccion");
+        if (lead.nextInteraction && toDateKey(lead.nextInteraction) <= input.dateKey) {
+          missing.push("Seguimiento vencido o programado para hoy");
+        }
+        return {
+          id: lead.id,
+          clientName: lead.clientName || lead.prospectName || "-",
+          subject: lead.subject || "-",
+          identifier: lead.quoteNumber ?? undefined,
+          missing
+        };
+      })
+      .filter((row) => row.missing.length > 0);
+  }
+
+  if (input.scope.source === "active-matters") {
+    const earliestTaskByMatter = new Map<string, TaskItemRecord>();
+    input.taskItems
+      .filter((task) => task.state !== "COMPLETED")
+      .slice()
+      .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime())
+      .forEach((task) => {
+        [task.matterId, task.matterNumber].filter((key): key is string => Boolean(key)).forEach((key) => {
+          if (!earliestTaskByMatter.has(normalizeText(key))) earliestTaskByMatter.set(normalizeText(key), task);
+        });
+      });
+    const executionModuleByTeam: Record<string, string> = {
+      LITIGATION: "litigation",
+      CORPORATE_LABOR: "corporate-labor",
+      SETTLEMENTS: "settlements",
+      FINANCIAL_LAW: "financial-law",
+      TAX_COMPLIANCE: "tax-compliance"
+    };
+
+    rows = input.matters.map((matter) => {
+      const missing: string[] = [];
+      const clientNumber = getClientNumberForMatter(matter, input.clients);
+      const task = earliestTaskByMatter.get(normalizeText(matter.id))
+        ?? earliestTaskByMatter.get(normalizeText(matter.matterNumber));
+      const nextAction = task?.trackId ?? matter.nextAction;
+      const nextActionDueAt = task?.dueDate ?? matter.nextActionDueAt;
+      const expectedModule = matter.responsibleTeam ? executionModuleByTeam[matter.responsibleTeam] : undefined;
+      const linked = Boolean(
+        matter.matterIdentifier?.trim()
+        && expectedModule
+        && matter.executionLinkedModule === expectedModule
+        && matter.executionLinkedAt
+      );
+
+      const linkedQuote = input.quotes.find((quote) => normalizeText(quote.quoteNumber) === normalizeText(matter.quoteNumber));
+      const matterType = linkedQuote?.quoteType === "RETAINER" ? "RETAINER" : matter.matterType;
+
+      if (matterType === "RETAINER") {
+        if (!clientNumber.trim()) missing.push("Numero de cliente");
+        else if (!matter.clientName.trim()) missing.push("Cliente");
+        else if (!matter.quoteNumber?.trim()) missing.push("Numero de cotizacion");
+        else if (!matter.subject.trim()) missing.push("Asunto");
+        else if (!matter.specificProcess?.trim()) missing.push("Proceso especifico");
+        else if (!linked) missing.push("No vinculado con ID Asunto valido");
+        else if (!matter.r1InternalCreated) missing.push("R1 Interno");
+        else if (!matter.telegramBotLinked) missing.push("Bot Telegram");
+        else if (!matter.rdCreated) missing.push("RD Creado");
+        else if (!matter.r1ExternalCreated) missing.push("R1 Externo");
+        else if (!matter.billingChatCreated) missing.push("Chat Facturacion");
+        else if (nextActionDueAt && toDateKey(nextActionDueAt) <= input.dateKey) {
+          missing.push("Fecha de siguiente tarea vencida o programada para hoy");
+        }
+      } else {
+        if (!clientNumber.trim()) missing.push("Numero de cliente");
+        else if (!matter.clientName.trim()) missing.push("Cliente");
+        else if (!matter.subject.trim()) missing.push("Asunto");
+        else if (!matter.matterIdentifier?.trim()) missing.push("ID Asunto");
+        else if (!matter.quoteNumber?.trim()) missing.push("Numero de cotizacion");
+        else if (!matter.communicationChannel) missing.push("Canal de comunicacion");
+        else if (!matter.responsibleTeam) missing.push("Equipo responsable");
+        else if (!matter.rfCreated || matter.rfCreated === "NO") missing.push("RF Creado (o seleccionado)");
+        else if (!matter.r1InternalCreated) missing.push("R1 Interno");
+        else if (!matter.telegramBotLinked) missing.push("Bot Telegram");
+        else if (!matter.rdCreated) missing.push("RD Creado");
+        else if (!matter.r1ExternalCreated) missing.push("R1 Externo");
+        else if (!matter.billingChatCreated) missing.push("Chat Facturacion");
+        else if (!linked) missing.push("No vinculado con ID Asunto valido");
+        else if (!nextAction?.trim() || !nextActionDueAt) missing.push("Siguiente accion / Fecha");
+        else if (toDateKey(nextActionDueAt) <= input.dateKey) missing.push("Fecha de siguiente tarea vencida o programada para hoy");
+        else if (!matter.milestone?.trim()) missing.push("Hito de conclusion");
+      }
+
+      return {
+        id: matter.id,
+        clientName: matter.clientName || "-",
+        subject: matter.subject || "-",
+        identifier: matter.matterIdentifier ?? matter.matterNumber,
+        missing
+      };
+    }).filter((row) => row.missing.length > 0);
+  }
+
+  if (input.scope.source === "finance-active-matters") {
+    const currentRecordKeys = new Set<string>();
+    input.financeRecords
+      .filter((record) => record.year === year && record.month === month)
+      .forEach((record) => {
+        const quote = normalizeText(record.quoteNumber);
+        const client = normalizeText(record.clientName);
+        const subject = normalizeText(record.subject);
+        if (quote) currentRecordKeys.add(`quote:${quote}`);
+        if (client && subject) currentRecordKeys.add(`matter:${client}|${subject}`);
+      });
+    const monthEndKey = getMonthEndKey(year, month);
+    rows = input.matters.map((matter) => {
+      const keys: string[] = [];
+      const quote = normalizeText(matter.quoteNumber);
+      const client = normalizeText(matter.clientName);
+      const subject = normalizeText(matter.subject);
+      if (quote) keys.push(`quote:${quote}`);
+      if (client && subject) keys.push(`matter:${client}|${subject}`);
+      const missing = !matter.nextPaymentDate
+        ? ["Fecha de proximo pago"]
+        : toDateKey(matter.nextPaymentDate) <= monthEndKey
+          && keys.length > 0
+          && !keys.some((key) => currentRecordKeys.has(key))
+          ? ["Vence este mes o antes y no esta en Finanzas > Ver mes"]
+          : [];
+      return {
+        id: matter.id,
+        clientName: matter.clientName || "-",
+        subject: matter.subject || "-",
+        identifier: matter.matterIdentifier ?? matter.matterNumber,
+        missing
+      };
+    }).filter((row) => row.missing.length > 0);
+  }
+
+  if (input.scope.source === "finance-monthly") {
+    rows = input.financeRecords
+      .filter((record) => record.year === year && record.month === month)
+      .map((record) => {
+        const missing: string[] = [];
+        const clientNumber = input.clients.find((client) => normalizeText(client.name) === normalizeText(record.clientName))?.clientNumber
+          ?? record.clientNumber
+          ?? "";
+        const totalMatter = Number(record.totalMatterMxn) || 0;
+        const previousPayments = Number(record.previousPaymentsMxn) || 0;
+        const conceptFees = Number(record.conceptFeesMxn) || 0;
+        const received = [
+          [record.paymentDate1, record.paymentMethod, record.paymentReceived, record.paidThisMonthMxn],
+          [record.paymentDate2, record.paymentMethod2, record.paymentReceived2, record.payment2Mxn],
+          [record.paymentDate3, record.paymentMethod3, record.paymentReceived3, record.payment3Mxn]
+        ].reduce((sum, [date, method, confirmed, amount]) =>
+          sum + (date && (method === "T" || (method === "E" && confirmed === true)) ? Number(amount) || 0 : 0), 0);
+        const futurePayments = Math.round((totalMatter - previousPayments - conceptFees) * 100) / 100;
+        const difference = Math.round((totalMatter - previousPayments - conceptFees - futurePayments) * 100) / 100;
+        const pctSum = Number(record.pctLitigation) + Number(record.pctCorporateLabor) + Number(record.pctSettlements)
+          + Number(record.pctFinancialLaw) + Number(record.pctTaxCompliance);
+        const requiredChecks = [
+          ["No. Cliente", Boolean(clientNumber.trim())],
+          ["Cliente", Boolean(record.clientName.trim())],
+          ["No. Cotizacion", Boolean(record.quoteNumber?.trim())],
+          ["Tipo", Boolean(record.matterType)],
+          ["Periodo", record.matterType !== "RETAINER" || Boolean(record.periodYear ?? record.year) && Boolean(record.periodMonth ?? record.month)],
+          ["Asunto", Boolean(record.subject.trim())],
+          ["Equipo Responsable", Boolean(record.responsibleTeam)],
+          ["Conceptos trabajando", record.matterType !== "ONE_TIME" || Boolean(record.workingConcepts?.trim())],
+          ["Fecha de proximo pago", Boolean(record.nextPaymentDate)],
+          ["Detalle Fecha", Boolean(record.nextPaymentNotes?.trim())],
+          ["En mora", Boolean(record.delinquencyStatus)],
+          ["Probabilidad de cobro este mes", record.highCollectionProbability !== record.lowCollectionProbability],
+          ["Receptor comision cliente 20%", Boolean(record.clientCommissionRecipient?.trim())],
+          ["Receptor comision cierre 10%", Boolean(record.closingCommissionRecipient?.trim())],
+          ["Hito conclusion", Boolean(record.milestone?.trim())]
+        ] as Array<[string, boolean]>;
+        requiredChecks.filter(([, present]) => !present).forEach(([label]) => missing.push(label));
+        if (record.nextPaymentDate && toDateKey(record.nextPaymentDate) <= input.dateKey && conceptFees - received > 1) {
+          missing.push("Fecha urgente vencida/hoy sin pago");
+        }
+        if (pctSum !== 100) missing.push(`SUM % ${pctSum}% (debe ser 100%)`);
+        if (futurePayments < 0) missing.push("Desglose excede Total asunto");
+        else if (difference !== 0) missing.push(`Desglose no suma Total asunto (${difference})`);
+        return {
+          id: record.id,
+          clientName: record.clientName || "-",
+          subject: record.subject || "-",
+          identifier: record.quoteNumber ?? undefined,
+          missing
+        };
+      })
+      .filter((row) => row.missing.length > 0);
+  }
+
+  if (input.scope.source === "general-expenses") {
+    rows = input.generalExpenses
+      .filter((expense) => expense.year === year && expense.month === month)
+      .map((expense) => {
+        const missing: string[] = [];
+        if (!expense.detail.trim()) missing.push("Detalle de gasto");
+        if (!Number(expense.amountMxn)) missing.push("Monto");
+        const pctSum = Number(expense.pctLitigation) + Number(expense.pctCorporateLabor) + Number(expense.pctSettlements)
+          + Number(expense.pctFinancialLaw) + Number(expense.pctTaxCompliance);
+        if (!expense.expenseWithoutTeam && !expense.generalExpense && pctSum !== 100) missing.push("Distribucion por equipo (100%)");
+        if (!expense.payrollEntryId && !expense.projectorCommissionId) {
+          if (!expense.paymentMethod) missing.push("Metodo de pago");
+          if (expense.paymentMethod === "Transferencia" && !expense.bank) missing.push("Banco");
+        }
+        if (!expense.approvedByEmrt) missing.push("Aprobado por EMRT");
+        if (!expense.reviewedByJnls) missing.push("Revisado por JNLS");
+        if (!expense.paid) missing.push("Pagado");
+        if (!expense.paidAt) missing.push("Fecha de pago");
+        return {
+          id: expense.id,
+          clientName: "Gastos generales",
+          subject: expense.detail || "Gasto sin detalle",
+          missing
+        };
+      })
+      .filter((row) => row.missing.length > 0);
+  }
+
+  const value = rows.length;
+  const status: KpiMetricStatus = value === 0 ? "met" : input.isOpenBusinessDay ? "warning" : "missed";
+  const incidents: KpiIncident[] = rows.map((row) => ({
+    id: row.id,
+    sourceType: "matter",
+    moduleId: input.scope.source === "leads" ? "lead-tracking"
+      : input.scope.source === "active-matters" ? "active-matters"
+        : input.scope.source === "general-expenses" ? "general-expenses" : "finances",
+    tableCode: input.scope.source,
+    tableLabel: input.scope.label,
+    clientName: row.clientName,
+    subject: row.subject,
+    matterIdentifier: row.identifier,
+    taskName: input.scope.label,
+    responsible: input.scope.teamLabel,
+    dueDate: input.dateKey,
+    status: "pendiente",
+    reason: `Faltantes: ${row.missing.join(", ")}`
+  }));
+
+  return {
+    dateKey: input.dateKey,
+    status,
+    value,
+    target: 0,
+    unit: "filas",
+    actualLabel: `${value} filas incompletas`,
+    targetLabel: "0 filas incompletas",
+    helper: value === 0
+      ? "Todas las filas quedaron completas."
+      : input.isOpenBusinessDay
+        ? "El dia sigue abierto; todavia hay filas incompletas por corregir."
+        : "Quedaron filas incompletas al cierre del dia.",
+    incidents,
+    sourceData: { incompleteRows: rows }
+  };
 }
 
 function snapshotToDailyMetric(snapshot: KpiDailySnapshotRecord) {
@@ -2091,6 +2569,71 @@ function buildExecutionIncompleteRowsMetric(input: {
     sourceTables: ["execution_matters"],
     incidents,
     commissionStrategy: input.scope === LAMR_EXECUTION_KPI_SCOPE ? "state-threshold" : undefined,
+    dailyBreakdown
+  } satisfies KpiMetric;
+}
+
+function buildOperationalIncompleteRowsMetric(input: {
+  scope: OperationalIncompleteRowsScope;
+  leads: LeadRecord[];
+  quotes: QuoteRecord[];
+  matters: MatterRecord[];
+  clients: ClientRecord[];
+  taskItems: TaskItemRecord[];
+  financeRecords: FinanceRecordMatch[];
+  generalExpenses: GeneralExpenseRecord[];
+  kpiDailySnapshots: KpiDailySnapshotRecord[];
+  period: PeriodContext;
+}) {
+  const liveDateKey = input.period.cutoffKey >= input.period.startKey ? input.period.cutoffKey : "";
+  const liveEvaluation = liveDateKey ? buildOperationalIncompleteRowsEvaluation({
+    scope: input.scope,
+    dateKey: liveDateKey,
+    isOpenBusinessDay: liveDateKey === input.period.todayKey && !input.period.periodComplete,
+    leads: input.leads,
+    quotes: input.quotes,
+    matters: input.matters,
+    clients: input.clients,
+    taskItems: input.taskItems,
+    financeRecords: input.financeRecords,
+    generalExpenses: input.generalExpenses
+  }) : null;
+  const snapshotsByDate = new Map(input.kpiDailySnapshots
+    .filter((snapshot) => snapshot.userKey === input.scope.snapshotUserKey && snapshot.metricId === input.scope.metricId)
+    .map((snapshot) => [toDateKey(snapshot.snapshotDate), snapshot]));
+  const dailyBreakdown = withNonEvaluatedDays(input.period, input.period.evaluatedDateKeys
+    .filter((dateKey) => dateKey >= input.scope.baselineDateKey)
+    .map((dateKey) => {
+      const snapshot = snapshotsByDate.get(dateKey);
+      if (snapshot) return snapshotToDailyMetric(snapshot);
+      if (liveEvaluation && dateKey === input.period.todayKey && dateKey === liveEvaluation.dateKey) {
+        return executionEvaluationToDailyMetric(liveEvaluation);
+      }
+      return buildMissingExecutionSnapshotDailyMetric(dateKey, 0);
+    }));
+  const currentDay = dailyBreakdown.filter((day) => !isNonEvaluatedKpiDay(day)).at(-1) ?? null;
+  const incidents = dailyBreakdown
+    .filter((day) => day.status === "missed" || day.status === "warning")
+    .flatMap((day) => day.incidents);
+
+  return {
+    id: input.scope.metricId,
+    label: input.scope.label,
+    description: input.scope.description,
+    kind: "deadline",
+    status: summarizeDailyStatus(dailyBreakdown),
+    value: currentDay?.value ?? 0,
+    target: 0,
+    unit: "filas",
+    progressPct: currentDay?.value === 0 ? 100 : 0,
+    targetLabel: "0 filas incompletas",
+    actualLabel: currentDay?.actualLabel ?? "Sin snapshot diario",
+    helper: dailyBreakdown.length > 0
+      ? "Los dias cerrados se leen desde snapshots diarios del cierre; el dia abierto solo aparece si esta en observacion."
+      : "Sin snapshots diarios disponibles para el periodo evaluado.",
+    sourceDescription: input.scope.sourceDescription,
+    sourceTables: input.scope.sourceTables,
+    incidents,
     dailyBreakdown
   } satisfies KpiMetric;
 }
@@ -2385,6 +2928,7 @@ export class PrismaKpisRepository implements KpisRepository {
           quoteNumber: true,
           subject: true,
           responsibleTeam: true,
+          nextPaymentDate: true,
           communicationChannel: true,
           matterIdentifier: true,
           executionLinkedModule: true,
@@ -2448,7 +2992,7 @@ export class PrismaKpisRepository implements KpisRepository {
       };
     }
 
-    const [trackingRecords, terms, matters, clients] = await Promise.all([
+    const [trackingRecords, terms, matters, clients, leads, quotes, taskItems, financeRecords, generalExpenses] = await Promise.all([
       this.prisma.taskTrackingRecord.findMany({
         where: {
           moduleId: { in: EXECUTION_KPI_MODULE_IDS },
@@ -2464,26 +3008,8 @@ export class PrismaKpisRepository implements KpisRepository {
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
       }),
       this.prisma.matter.findMany({
-        select: {
-          id: true,
-          matterNumber: true,
-          clientNumber: true,
-          clientName: true,
-          quoteNumber: true,
-          subject: true,
-          responsibleTeam: true,
-          communicationChannel: true,
-          matterIdentifier: true,
-          executionLinkedModule: true,
-          milestone: true,
-          deletedAt: true
-        },
         where: {
           deletedAt: null,
-          OR: [
-            { responsibleTeam: { in: EXECUTION_KPI_TEAM_KEYS } },
-            { executionLinkedModule: { in: EXECUTION_KPI_MODULE_IDS } }
-          ]
         },
         orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
       }),
@@ -2497,6 +3023,24 @@ export class PrismaKpisRepository implements KpisRepository {
           deletedAt: null
         },
         orderBy: [{ clientNumber: "asc" }]
+      }),
+      this.prisma.lead.findMany({
+        where: { status: "ACTIVE", hiddenFromTracking: false },
+        orderBy: [{ createdAt: "asc" }]
+      }),
+      this.prisma.quote.findMany({
+        select: { quoteNumber: true, quoteType: true }
+      }),
+      this.prisma.taskItem.findMany({
+        where: { state: { not: "COMPLETED" } },
+        orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.financeRecord.findMany({
+        where: { year: Number(dateKey.slice(0, 4)), month: Number(dateKey.slice(5, 7)) }
+      }),
+      this.prisma.generalExpense.findMany({
+        where: { year: Number(dateKey.slice(0, 4)), month: Number(dateKey.slice(5, 7)) },
+        orderBy: [{ createdAt: "asc" }]
       })
     ]);
 
@@ -2579,6 +3123,49 @@ export class PrismaKpisRepository implements KpisRepository {
       });
     }
 
+    for (const scope of OPERATIONAL_INCOMPLETE_ROWS_SCOPES) {
+      const evaluation = buildOperationalIncompleteRowsEvaluation({
+        scope,
+        dateKey,
+        isOpenBusinessDay: false,
+        leads: leads as LeadRecord[],
+        quotes: quotes as QuoteRecord[],
+        matters: matters as MatterRecord[],
+        clients: clients as ClientRecord[],
+        taskItems: taskItems as TaskItemRecord[],
+        financeRecords: financeRecords as unknown as FinanceRecordMatch[],
+        generalExpenses: generalExpenses as unknown as GeneralExpenseRecord[]
+      });
+      const snapshotId = randomUUID();
+      const snapshots = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        INSERT INTO "KpiDailySnapshot" (
+          "id", "organizationId", "userKey", "metricId", "snapshotDate", "status", "value", "target",
+          "unit", "actualLabel", "targetLabel", "helper", "incidents", "sourceData", "createdAt", "updatedAt"
+        ) VALUES (
+          ${snapshotId}, ${DEFAULT_ORGANIZATION_ID}, ${scope.snapshotUserKey}, ${scope.metricId}, CAST(${snapshotDate} AS date),
+          ${evaluation.status}, ${evaluation.value}, ${evaluation.target}, ${evaluation.unit}, ${evaluation.actualLabel},
+          ${evaluation.targetLabel}, ${evaluation.helper}, CAST(${JSON.stringify(evaluation.incidents)} AS jsonb),
+          CAST(${JSON.stringify(evaluation.sourceData)} AS jsonb), ${now}, ${now}
+        )
+        ON CONFLICT ("organizationId", "userKey", "metricId", "snapshotDate") DO UPDATE SET
+          "status" = EXCLUDED."status", "value" = EXCLUDED."value", "target" = EXCLUDED."target",
+          "unit" = EXCLUDED."unit", "actualLabel" = EXCLUDED."actualLabel", "targetLabel" = EXCLUDED."targetLabel",
+          "helper" = EXCLUDED."helper", "incidents" = EXCLUDED."incidents", "sourceData" = EXCLUDED."sourceData",
+          "updatedAt" = EXCLUDED."updatedAt"
+        RETURNING "id"
+      `);
+      capturedSnapshots.push({
+        snapshotId: snapshots[0]?.id ?? snapshotId,
+        userKey: scope.snapshotUserKey,
+        metricId: scope.metricId,
+        teamKey: scope.teamKey,
+        status: evaluation.status,
+        value: evaluation.value,
+        target: evaluation.target,
+        incidentCount: evaluation.incidents.length
+      });
+    }
+
     const legacySnapshot = capturedSnapshots.find((snapshot) => snapshot.metricId === LAMR_EXECUTION_INCOMPLETE_ROWS_KPI_ID);
 
     return {
@@ -2620,7 +3207,7 @@ export class PrismaKpisRepository implements KpisRepository {
     const cutoffKey = getCutoffKey(startKey, endKey, todayKey);
 
     const organizationId = getCurrentOrganizationIdOrDefault();
-    const [users, userTeams, trackingRecords, terms, matters, clients, kpiDailySnapshots, salesDailyReports, holidays, vacationEvents, globalVacationDays, kpiEmrtOverrides] = await Promise.all([
+    const [users, userTeams, trackingRecords, terms, matters, clients, leads, quotes, taskItems, financeRecords, generalExpenses, kpiDailySnapshots, salesDailyReports, holidays, vacationEvents, globalVacationDays, kpiEmrtOverrides] = await Promise.all([
       this.prisma.user.findMany({
         where: { isActive: true },
         orderBy: [{ legacyTeam: "asc" }, { team: "asc" }, { displayName: "asc" }]
@@ -2646,26 +3233,8 @@ export class PrismaKpisRepository implements KpisRepository {
         orderBy: [{ sourceTable: "asc" }, { termDate: "asc" }, { dueDate: "asc" }, { updatedAt: "desc" }]
       }),
       this.prisma.matter.findMany({
-        select: {
-          id: true,
-          matterNumber: true,
-          clientNumber: true,
-          clientName: true,
-          quoteNumber: true,
-          subject: true,
-          responsibleTeam: true,
-          communicationChannel: true,
-          matterIdentifier: true,
-          executionLinkedModule: true,
-          milestone: true,
-          deletedAt: true
-        },
         where: {
           deletedAt: null,
-          OR: [
-            { responsibleTeam: { in: EXECUTION_KPI_TEAM_KEYS } },
-            { executionLinkedModule: { in: EXECUTION_KPI_MODULE_IDS } }
-          ]
         },
         orderBy: [{ clientNumber: "asc" }, { createdAt: "asc" }]
       }),
@@ -2679,6 +3248,30 @@ export class PrismaKpisRepository implements KpisRepository {
           deletedAt: null
         },
         orderBy: [{ clientNumber: "asc" }]
+      }),
+      this.prisma.lead.findMany({
+        where: { status: "ACTIVE", hiddenFromTracking: false },
+        orderBy: [{ createdAt: "asc" }]
+      }),
+      this.prisma.quote.findMany({
+        select: { quoteNumber: true, quoteType: true }
+      }),
+      this.prisma.taskItem.findMany({
+        where: { state: { not: "COMPLETED" } },
+        orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }]
+      }),
+      this.prisma.financeRecord.findMany({
+        where: {
+          year: Number(cutoffKey.slice(0, 4)),
+          month: Number(cutoffKey.slice(5, 7))
+        }
+      }),
+      this.prisma.generalExpense.findMany({
+        where: {
+          year: Number(cutoffKey.slice(0, 4)),
+          month: Number(cutoffKey.slice(5, 7))
+        },
+        orderBy: [{ createdAt: "asc" }]
       }),
       this.listKpiDailySnapshots(startKey, cutoffKey),
       this.prisma.salesDailyReport.findMany({
@@ -2826,8 +3419,11 @@ export class PrismaKpisRepository implements KpisRepository {
             const executionScope = TEAM_EXECUTION_KPI_SCOPES.find((scope) =>
               scope.includeInUserTeamKpis && scope.teamKey === assignment.teamKey
             );
-            const teamMetrics = executionScope
-              ? [buildExecutionIncompleteRowsMetric({
+            const operationalScopes = OPERATIONAL_INCOMPLETE_ROWS_SCOPES.filter((scope) =>
+              scope.teamKey === assignment.teamKey
+            );
+            const teamMetrics = [
+              ...(executionScope ? [buildExecutionIncompleteRowsMetric({
                   matters: matters as MatterRecord[],
                   clients: clients as ClientRecord[],
                   trackingRecords: trackingRecords as TrackingRecord[],
@@ -2835,8 +3431,20 @@ export class PrismaKpisRepository implements KpisRepository {
                   kpiDailySnapshots: kpiDailySnapshots as KpiDailySnapshotRecord[],
                   period: userPeriod,
                   scope: executionScope
-                })]
-              : [];
+                })] : []),
+              ...operationalScopes.map((operationalScope) => buildOperationalIncompleteRowsMetric({
+                scope: operationalScope,
+                leads: leads as LeadRecord[],
+                quotes: quotes as QuoteRecord[],
+                matters: matters as MatterRecord[],
+                clients: clients as ClientRecord[],
+                taskItems: taskItems as TaskItemRecord[],
+                financeRecords: financeRecords as unknown as FinanceRecordMatch[],
+                generalExpenses: generalExpenses as unknown as GeneralExpenseRecord[],
+                kpiDailySnapshots: kpiDailySnapshots as KpiDailySnapshotRecord[],
+                period: userPeriod
+              }))
+            ];
             const metrics = [...personalMetrics, ...teamMetrics].map((metric) => applyKpiEmrtOverrides(
               metric,
               overrideDatesByUserMetric.get(`${user.id}:${metric.id}`) ?? new Set<string>(),
@@ -2851,7 +3459,7 @@ export class PrismaKpisRepository implements KpisRepository {
             team: assignment.teamKey === "UNASSIGNED" ? undefined : assignment.teamKey as Team,
             teamLabel: assignment.teamLabel,
             specificRole: assignment.specificRole,
-              configured: Boolean(config || executionScope),
+              configured: Boolean(config || executionScope || operationalScopes.length > 0),
               metrics
             };
           });
@@ -2872,7 +3480,7 @@ export class PrismaKpisRepository implements KpisRepository {
       cutoffDate: cutoffKey,
       businessDaysInPeriod,
       businessDaysElapsed,
-      sourceNote: "Los KPI's se alimentan automaticamente desde usuarios, tablas de seguimiento, terminos, reportes de ventas en RDS, dias inhabiles y vacaciones registradas; no reciben captura manual.",
+      sourceNote: "Los KPI's se alimentan automaticamente desde usuarios, Leads, Asuntos Activos, Finanzas, Gastos generales, tablas de seguimiento, terminos, reportes de ventas en RDS, dias inhabiles y vacaciones registradas; no reciben captura manual.",
       teams: this.groupUsersByTeam(visibleUserSummaries, visibleTeams, teamLabelByKey)
     };
   }

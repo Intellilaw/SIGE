@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import type {
   Client,
   FinanceRecord,
+  GeneralExpense,
   Matter,
   TaskAdditionalTask,
   TaskDistributionHistory,
@@ -76,6 +77,7 @@ const LITIGATION_MODULE_ID = "litigation";
 const CORPORATE_LABOR_MODULE_ID = "corporate-labor";
 const TAX_COMPLIANCE_MODULE_ID = "tax-compliance";
 const FINANCE_TASK_MODULE_ID = "finance";
+const GENERAL_EXPENSES_PATH = "/app/general-expenses";
 const TEAM_WIDE_DASHBOARD_MODULE_IDS = new Set([CORPORATE_LABOR_MODULE_ID, TAX_COMPLIANCE_MODULE_ID]);
 const EXECUTION_INCOMPLETE_DASHBOARD_MODULE_IDS = new Set([
   LITIGATION_MODULE_ID,
@@ -154,11 +156,39 @@ function getLocalDateInput(offset = 0) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function getCurrentFinancePeriodQuery() {
+function getCurrentFinancePeriod() {
   const date = new Date();
   date.setHours(12, 0, 0, 0);
 
-  return `year=${date.getFullYear()}&month=${date.getMonth() + 1}`;
+  return { year: date.getFullYear(), month: date.getMonth() + 1 };
+}
+
+function getCurrentFinancePeriodQuery() {
+  const { year, month } = getCurrentFinancePeriod();
+
+  return `year=${year}&month=${month}`;
+}
+
+function getMonthEndDateInput(year: number, month: number) {
+  const date = new Date(year, month, 0, 12, 0, 0, 0);
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function buildFinanceRecordMatchKeys(input: { quoteNumber?: string | null; clientName?: string | null; subject?: string | null }) {
+  const keys: string[] = [];
+  const quote = normalizeComparableText(input.quoteNumber);
+  const client = normalizeComparableText(input.clientName);
+  const subject = normalizeComparableText(input.subject);
+
+  if (quote) {
+    keys.push(`quote:${quote}`);
+  }
+  if (client && subject) {
+    keys.push(`matter:${client}|${subject}`);
+  }
+
+  return keys;
 }
 
 function matchesResponsible(taskResponsible: string, member: TaskDashboardMember, sharedResponsibleAliases: string[]) {
@@ -318,6 +348,39 @@ function resolveFinanceClientNumber(record: FinanceRecord, clients: Client[]) {
   return clients.find((client) => normalizeComparableText(client.name) === normalizedName)?.clientNumber ?? "";
 }
 
+function buildCurrentFinanceRecordKeys(records: FinanceRecord[]) {
+  const { year, month } = getCurrentFinancePeriod();
+  const keys = new Set<string>();
+
+  records
+    .filter((record) => record.year === year && record.month === month)
+    .forEach((record) => {
+      buildFinanceRecordMatchKeys(record).forEach((key) => keys.add(key));
+    });
+
+  return keys;
+}
+
+function evaluateFinanceActiveMatterForTasks(matter: Matter, records: FinanceRecord[], clients: Client[]) {
+  const { year, month } = getCurrentFinancePeriod();
+  const currentRecordKeys = buildCurrentFinanceRecordKeys(records);
+  const monthEnd = getMonthEndDateInput(year, month);
+  const paymentDate = toDateInput(matter.nextPaymentDate);
+  const matterKeys = buildFinanceRecordMatchKeys(matter);
+  const missing: string[] = [];
+
+  if (!paymentDate) {
+    missing.push("Fecha de proximo pago");
+  } else if (paymentDate <= monthEnd && !matterKeys.some((key) => currentRecordKeys.has(key))) {
+    missing.push("Vence este mes o antes y no esta en Finanzas > Ver mes");
+  }
+
+  return {
+    effectiveClientNumber: getEffectiveClientNumber(matter, clients),
+    missing
+  };
+}
+
 function evaluateFinanceRecordForTasks(record: FinanceRecord, clients: Client[]) {
   const stats = calculateFinanceDashboardStats(record);
   const effectiveClientNumber = resolveFinanceClientNumber(record, clients);
@@ -335,11 +398,13 @@ function evaluateFinanceRecordForTasks(record: FinanceRecord, clients: Client[])
     },
     { label: "Asunto", present: Boolean(normalizeText(record.subject)) },
     { label: "Equipo Responsable", present: Boolean(record.responsibleTeam) },
-    { label: "Conceptos trabajando", present: Boolean(normalizeText(record.workingConcepts)) },
+    {
+      label: "Conceptos trabajando",
+      present: record.matterType !== "ONE_TIME" || Boolean(normalizeText(record.workingConcepts))
+    },
     { label: "Fecha de proximo pago", present: Boolean(record.nextPaymentDate) },
     { label: "Detalle Fecha", present: Boolean(normalizeText(record.nextPaymentNotes)) },
     { label: "En mora", present: Boolean(record.delinquencyStatus) },
-    { label: "Fecha Pago Real", present: Boolean(record.paymentDate1) },
     { label: "Probabilidad de cobro este mes", present: hasExactlyOneCollectionProbability },
     { label: "Receptor comision cliente 20%", present: Boolean(normalizeText(record.clientCommissionRecipient)) },
     { label: "Receptor comision cierre 10%", present: Boolean(normalizeText(record.closingCommissionRecipient)) },
@@ -374,6 +439,52 @@ function evaluateFinanceRecordForTasks(record: FinanceRecord, clients: Client[])
     displayDate: isDateUrgent && paymentDate ? paymentDate : today,
     reasons
   };
+}
+
+function getGeneralExpenseDistributionPctSum(expense: GeneralExpense) {
+  return (
+    Number(expense.pctLitigation) +
+    Number(expense.pctCorporateLabor) +
+    Number(expense.pctSettlements) +
+    Number(expense.pctFinancialLaw) +
+    Number(expense.pctTaxCompliance)
+  );
+}
+
+function evaluateGeneralExpenseForTasks(expense: GeneralExpense) {
+  const missing: string[] = [];
+
+  if (!normalizeText(expense.detail)) {
+    missing.push("Detalle de gasto");
+  }
+  if (!Number(expense.amountMxn)) {
+    missing.push("Monto");
+  }
+  if (!expense.expenseWithoutTeam && !expense.generalExpense && getGeneralExpenseDistributionPctSum(expense) !== 100) {
+    missing.push("Distribucion por equipo (100%)");
+  }
+  if (!expense.payrollEntryId && !expense.projectorCommissionId) {
+    if (!expense.paymentMethod) {
+      missing.push("Metodo de pago");
+    }
+    if (expense.paymentMethod === "Transferencia" && !expense.bank) {
+      missing.push("Banco");
+    }
+  }
+  if (!expense.approvedByEmrt) {
+    missing.push("Aprobado por EMRT");
+  }
+  if (!expense.reviewedByJnls) {
+    missing.push("Revisado por JNLS");
+  }
+  if (!expense.paid) {
+    missing.push("Pagado");
+  }
+  if (!expense.paidAt) {
+    missing.push("Fecha de pago");
+  }
+
+  return missing;
 }
 
 function isLitigationWritingTable(table: LegacyTaskTableConfig | undefined) {
@@ -623,6 +734,8 @@ export function TasksTeamPage() {
   const [terms, setTerms] = useState<TaskTerm[]>([]);
   const [additionalTasks, setAdditionalTasks] = useState<TaskAdditionalTask[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
+  const [financeActiveMatters, setFinanceActiveMatters] = useState<Matter[]>([]);
+  const [generalExpenses, setGeneralExpenses] = useState<GeneralExpense[]>([]);
   const [executionMatters, setExecutionMatters] = useState<Matter[]>([]);
   const [executionClients, setExecutionClients] = useState<Client[]>([]);
   const [executionDistributionHistory, setExecutionDistributionHistory] = useState<TaskDistributionHistory[]>([]);
@@ -690,6 +803,7 @@ export function TasksTeamPage() {
         const shouldLoadFinanceRows = currentModule.moduleId === FINANCE_TASK_MODULE_ID;
         const shouldLoadExecutionMissingRows = shouldLoadLegacyRows && usesExecutionIncompleteDashboard(currentModule.moduleId);
         const shouldLoadClients = shouldLoadExecutionMissingRows || shouldLoadFinanceRows;
+        const financePeriodQuery = getCurrentFinancePeriodQuery();
         const trackingRecordsPromise = shouldLoadLegacyRows
           ? apiGet<TaskTrackingRecord[]>(`/tasks/tracking-records?moduleId=${currentModule.moduleId}`)
           : Promise.resolve<TaskTrackingRecord[]>([]);
@@ -697,10 +811,14 @@ export function TasksTeamPage() {
           ? apiGet<TaskTerm[]>(`/tasks/terms?moduleId=${currentModule.moduleId}`)
           : Promise.resolve<TaskTerm[]>([]);
         const financeRecordsPromise = shouldLoadFinanceRows
-          ? apiGet<FinanceRecord[]>(`/finances/records?${getCurrentFinancePeriodQuery()}`).catch(() => [])
+          ? apiGet<FinanceRecord[]>(`/finances/records?${financePeriodQuery}`).catch(() => [])
           : Promise.resolve<FinanceRecord[]>([]);
+        const generalExpensesPromise = shouldLoadFinanceRows
+          ? apiGet<GeneralExpense[]>(`/general-expenses?${financePeriodQuery}`).catch(() => [])
+          : Promise.resolve<GeneralExpense[]>([]);
         const additionalTasksPromise = apiGet<TaskAdditionalTask[]>(`/tasks/additional?moduleId=${currentModule.moduleId}`).catch(() => []);
         const executionMattersPromise = shouldLoadExecutionMissingRows
+          || shouldLoadFinanceRows
           ? apiGet<Matter[]>("/matters").catch(() => [])
           : Promise.resolve<Matter[]>([]);
         const executionClientsPromise = shouldLoadClients
@@ -713,6 +831,7 @@ export function TasksTeamPage() {
           loadedTracking,
           loadedTerms,
           loadedFinanceRecords,
+          loadedGeneralExpenses,
           loadedAdditionalTasks,
           loadedExecutionMatters,
           loadedExecutionClients,
@@ -721,6 +840,7 @@ export function TasksTeamPage() {
           trackingRecordsPromise,
           termsPromise,
           financeRecordsPromise,
+          generalExpensesPromise,
           additionalTasksPromise,
           executionMattersPromise,
           executionClientsPromise,
@@ -730,6 +850,12 @@ export function TasksTeamPage() {
         setTrackingRecords(loadedTracking);
         setTerms(loadedTerms);
         setFinanceRecords(loadedFinanceRecords);
+        setFinanceActiveMatters(
+          shouldLoadFinanceRows
+            ? loadedExecutionMatters.filter((matter) => !matter.concluded)
+            : []
+        );
+        setGeneralExpenses(shouldLoadFinanceRows ? loadedGeneralExpenses : []);
         setAdditionalTasks(loadedAdditionalTasks);
         setExecutionClients(loadedExecutionClients);
         setExecutionMatters(
@@ -1043,7 +1169,41 @@ export function TasksTeamPage() {
     });
   }
 
-  function buildFinanceRows(timeframe: DashboardTimeframe): DashboardRow[] {
+  function buildFinanceActiveMatterRows(timeframe: DashboardTimeframe): DashboardRow[] {
+    if (module?.moduleId !== FINANCE_TASK_MODULE_ID) {
+      return [];
+    }
+
+    const today = getLocalDateInput();
+
+    if (!belongsToTimeframe({ state: "open", date: today }, timeframe)) {
+      return [];
+    }
+
+    return financeActiveMatters.flatMap((matter) => {
+      const evaluation = evaluateFinanceActiveMatterForTasks(matter, financeRecords, executionClients);
+      if (evaluation.missing.length === 0) {
+        return [];
+      }
+
+      return [{
+        taskId: `finance-active-matter-${matter.id}`,
+        clientNumber: evaluation.effectiveClientNumber || "-",
+        clientName: matter.clientName || "-",
+        subject: matter.subject || "-",
+        specificProcess: matter.quoteNumber || matter.matterIdentifier || matter.matterType || "-",
+        taskLabel: `Completar asunto activo: ${evaluation.missing.join(", ")}`,
+        typeLabel: "Finanzas / Asuntos activos",
+        displayDate: today,
+        originLabel: "Finanzas / 1. Asuntos activos",
+        originPath: "/app/finances",
+        actionLabel: "Ir a Finanzas",
+        highlighted: true
+      }];
+    });
+  }
+
+  function buildFinanceMonthlyRows(timeframe: DashboardTimeframe): DashboardRow[] {
     if (module?.moduleId !== FINANCE_TASK_MODULE_ID) {
       return [];
     }
@@ -1067,14 +1227,48 @@ export function TasksTeamPage() {
           subject: record.subject || "-",
           specificProcess: record.quoteNumber || record.matterType || "-",
           taskLabel: evaluation.reasons.join(" / "),
-          typeLabel: "Finanzas",
+          typeLabel: "Finanzas / Ver mes",
           displayDate: evaluation.displayDate,
-          originLabel: "Finanzas",
+          originLabel: "Finanzas / 2. Ver mes",
           originPath: "/app/finances",
           actionLabel: "Ir a Finanzas",
           highlighted: true
         }];
       });
+  }
+
+  function buildGeneralExpenseRows(timeframe: DashboardTimeframe): DashboardRow[] {
+    if (module?.moduleId !== FINANCE_TASK_MODULE_ID) {
+      return [];
+    }
+
+    const today = getLocalDateInput();
+
+    if (!belongsToTimeframe({ state: "open", date: today }, timeframe)) {
+      return [];
+    }
+
+    return generalExpenses.flatMap((expense) => {
+      const missing = evaluateGeneralExpenseForTasks(expense);
+      if (missing.length === 0) {
+        return [];
+      }
+
+      return [{
+        taskId: `general-expense-${expense.id}`,
+        clientNumber: "-",
+        clientName: "Gastos generales",
+        subject: expense.detail || "Gasto sin detalle",
+        specificProcess: expense.team || "-",
+        taskLabel: `Completar gasto: ${missing.join(", ")}`,
+        typeLabel: "Gastos generales",
+        displayDate: today,
+        originLabel: "Gastos generales / 1. Registro",
+        originPath: GENERAL_EXPENSES_PATH,
+        actionLabel: "Ir a Gastos",
+        highlighted: true
+      }];
+    });
   }
 
   function buildAdditionalTaskRows(member: TaskDashboardMember, timeframe: DashboardTimeframe): DashboardRow[] {
@@ -1114,7 +1308,9 @@ export function TasksTeamPage() {
 
   function buildRows(member: TaskDashboardMember, timeframe: DashboardTimeframe) {
     return [
-      ...buildFinanceRows(timeframe),
+      ...buildFinanceActiveMatterRows(timeframe),
+      ...buildFinanceMonthlyRows(timeframe),
+      ...buildGeneralExpenseRows(timeframe),
       ...buildAdditionalTaskRows(member, timeframe),
       ...buildTrackingRows(member, timeframe),
       ...buildTermRows(timeframe),
@@ -1346,12 +1542,20 @@ export function TasksTeamPage() {
         <section className="panel">
           <div className="panel-header">
             <h2>Fuentes de tareas</h2>
-            <span>2 fuentes</span>
+            <span>4 fuentes</span>
           </div>
           <div className="tasks-table-card-grid">
             <button type="button" className="tasks-table-card" onClick={() => navigate("/app/finances")}>
-              <strong>Tabla de Finanzas</strong>
+              <strong>Finanzas / 1. Asuntos activos</strong>
               <span>Solo lectura en Tareas; se corrige desde Finanzas.</span>
+            </button>
+            <button type="button" className="tasks-table-card" onClick={() => navigate("/app/finances")}>
+              <strong>Finanzas / 2. Ver mes</strong>
+              <span>Solo lectura en Tareas; se corrige desde Finanzas.</span>
+            </button>
+            <button type="button" className="tasks-table-card" onClick={() => navigate(GENERAL_EXPENSES_PATH)}>
+              <strong>Gastos generales / 1. Registro</strong>
+              <span>Solo lectura en Tareas; se corrige desde Gastos generales.</span>
             </button>
             <button type="button" className="tasks-table-card" onClick={() => navigate(`/app/tasks/${module.slug}/adicionales`)}>
               <strong>Tareas adicionales</strong>

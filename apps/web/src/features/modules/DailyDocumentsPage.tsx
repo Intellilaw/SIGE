@@ -34,7 +34,7 @@ type DailyDocumentField = {
     | "checkbox";
   placeholder?: string;
   defaultValue?: string;
-  visibleWhen?: { name: string; value: string };
+  visibleWhen?: { name: string; value: string } | Array<{ name: string; value: string }>;
 };
 
 type DailyDocumentTemplate = {
@@ -103,6 +103,7 @@ export type GeneratedDocument = {
   subtitle: string;
   subtitleAlignment?: "center" | "right";
   paragraphs: string[];
+  emphasizedTerms?: string[];
   details?: Array<{ label: string; value: string }>;
   signers: string[];
   signatures?: DailyDocumentSignature[];
@@ -515,22 +516,60 @@ function promissoryNoteCreditorList(rawCreditors: string) {
 
 function getPromissoryNoteDebtor(values: DailyDocumentValues) {
   const debtorType: GrantorType = values.debtorType === "moral" ? "moral" : "physical";
-  const physicalName = normalizePartyName(value(values, "debtorPersonName", "deudor pendiente"));
-  const companyName = normalizePartyName(value(values, "debtorCompanyName", "sociedad deudora pendiente"));
-  const representativeName = normalizePartyName(value(values, "debtorCompanyRepresentative", "representante pendiente"));
+  const physicalName = normalizePartyName(value(values, "debtorPersonName", "deudor pendiente"), true);
+  const companyName = normalizePartyName(value(values, "debtorCompanyName", "sociedad deudora pendiente"), true);
+  const representativeName = normalizePartyName(
+    value(values, "debtorCompanyRepresentative", "representante pendiente"),
+    true
+  );
 
   if (debtorType === "moral") {
     return {
       text: `${companyName}, representada en este acto por ${representativeName}`,
       signatureName: representativeName,
-      signatureRole: `Representante legal de ${companyName}`
+      signatureRole: `Representante legal de ${companyName}`,
+      emphasizedTerms: [companyName, representativeName]
     };
   }
 
   return {
     text: physicalName,
     signatureName: physicalName,
-    signatureRole: "Deudor suscriptor"
+    signatureRole: "Deudor suscriptor",
+    emphasizedTerms: [physicalName]
+  };
+}
+
+function getPromissoryNoteGuarantor(values: DailyDocumentValues) {
+  if (values.includeGuarantor !== "true") {
+    return null;
+  }
+
+  const guarantorType: GrantorType = values.guarantorType === "moral" ? "moral" : "physical";
+  const physicalName = normalizePartyName(value(values, "guarantorPersonName", "avalista pendiente"), true);
+  const companyName = normalizePartyName(value(values, "guarantorCompanyName", "sociedad avalista pendiente"), true);
+  const representativeName = normalizePartyName(
+    value(values, "guarantorCompanyRepresentative", "representante del avalista pendiente"),
+    true
+  );
+  const address = value(values, "guarantorAddress", "domicilio del avalista pendiente").replace(/[.\s]+$/g, "");
+
+  if (guarantorType === "moral") {
+    return {
+      text: `${companyName}, representada en este acto por ${representativeName}`,
+      address,
+      signatureName: representativeName,
+      signatureRole: `En representación de ${companyName}, parte avalista`,
+      emphasizedTerms: [companyName, representativeName]
+    };
+  }
+
+  return {
+    text: physicalName,
+    address,
+    signatureName: physicalName,
+    signatureRole: "Avalista",
+    emphasizedTerms: [physicalName]
   };
 }
 
@@ -917,32 +956,92 @@ const dailyDocumentTemplates: DailyDocumentTemplate[] = [
         label: "Domicilio del deudor",
         type: "textarea",
         placeholder: "Calle, número, colonia, alcaldía o municipio, entidad federativa"
+      },
+      {
+        name: "includeGuarantor",
+        label: "Incluir aval en el pagaré",
+        type: "checkbox"
+      },
+      {
+        name: "guarantorType",
+        label: "Tipo de aval",
+        type: "grantor-type",
+        defaultValue: "physical",
+        visibleWhen: { name: "includeGuarantor", value: "true" }
+      },
+      {
+        name: "guarantorPersonName",
+        label: "Nombre de la persona física avalista",
+        placeholder: "Nombre completo del avalista",
+        visibleWhen: [
+          { name: "includeGuarantor", value: "true" },
+          { name: "guarantorType", value: "physical" }
+        ]
+      },
+      {
+        name: "guarantorCompanyName",
+        label: "Nombre de la sociedad avalista",
+        placeholder: "Nombre de la sociedad",
+        visibleWhen: [
+          { name: "includeGuarantor", value: "true" },
+          { name: "guarantorType", value: "moral" }
+        ]
+      },
+      {
+        name: "guarantorCompanyRepresentative",
+        label: "Representante legal de la sociedad avalista",
+        placeholder: "Nombre del representante legal",
+        visibleWhen: [
+          { name: "includeGuarantor", value: "true" },
+          { name: "guarantorType", value: "moral" }
+        ]
+      },
+      {
+        name: "guarantorAddress",
+        label: "Domicilio del avalista",
+        type: "textarea",
+        placeholder: "Calle, número, colonia, alcaldía o municipio, entidad federativa",
+        visibleWhen: { name: "includeGuarantor", value: "true" }
       }
     ],
     build: (values) => {
       const debtor = getPromissoryNoteDebtor(values);
+      const guarantor = getPromissoryNoteGuarantor(values);
       const creditors = promissoryNoteCreditorList(values.creditors);
       const paymentPlace = fallbackValue(values, ["paymentPlace", "place"], "Ciudad de México");
       const debtorAddress = value(values, "debtorAddress", "domicilio del deudor pendiente").replace(/[.\s]+$/g, "");
+      const paragraphs = [
+        `${formatPlaceDate(values)}.`,
+        `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatDateField(
+          values,
+          "dueDate"
+        )}, la cantidad de ${promissoryNoteAmountText(values)}.`,
+        `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${promissoryNoteDefaultInterestRate(
+          values
+        )} ${interestPeriodText[getInterestPeriod(values)]}, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
+        `DOMICILIO DEL DEUDOR: ${debtorAddress}.`
+      ];
+
+      if (guarantor) {
+        paragraphs.push(
+          `POR AVAL: ${guarantor.text} garantiza el pago total de este pagaré por cuenta de ${debtor.text}, y la parte avalista queda obligada solidariamente con dicha parte suscriptora respecto del importe, intereses y demás accesorios consignados en el título, en términos de los artículos 109 a 116 y 174 de la Ley General de Títulos y Operaciones de Crédito.`,
+          `DOMICILIO DEL AVALISTA: ${guarantor.address}.`
+        );
+      }
+
+      paragraphs.push("ACEPTO,");
 
       return {
         title: "Pagaré",
         subtitle: `Pagaré número ${value(values, "noteNumber", "1 de 1")}`,
-        paragraphs: [
-          `${formatPlaceDate(values)}.`,
-          `Por medio del presente PAGARÉ, la parte suscriptora, ${debtor.text}, reconoce deber y se obliga a pagar incondicionalmente a la orden de ${creditors}, en ${paymentPlace}, el ${formatDateField(
-            values,
-            "dueDate"
-          )}, la cantidad de ${promissoryNoteAmountText(values)}.`,
-          `Desde la fecha de vencimiento de este documento y hasta el día de su pago total, la cantidad insoluta causará intereses moratorios al tipo del ${promissoryNoteDefaultInterestRate(
-            values
-          )} ${interestPeriodText[getInterestPeriod(values)]}, pagaderos en ${paymentPlace} conjuntamente con la suerte principal.`,
-          `DOMICILIO DEL DEUDOR: ${debtorAddress}.`,
-          "ACEPTO,"
+        paragraphs,
+        emphasizedTerms: [...debtor.emphasizedTerms, ...(guarantor?.emphasizedTerms ?? [])],
+        signers: guarantor ? [debtor.signatureName, guarantor.signatureName] : [debtor.signatureName],
+        signatures: [
+          { name: debtor.signatureName, role: debtor.signatureRole },
+          ...(guarantor ? [{ name: guarantor.signatureName, role: guarantor.signatureRole }] : [])
         ],
-        signers: [debtor.signatureName],
-        signatures: [{ name: debtor.signatureName, role: debtor.signatureRole }],
-        signatureColumns: 1,
+        signatureColumns: guarantor ? 2 : 1,
         showPageNumbers: false
       };
     }
@@ -1113,6 +1212,61 @@ function escapeHtml(valueToEscape: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+type EmphasizedTextSegment = {
+  text: string;
+  bold: boolean;
+};
+
+function escapeRegularExpression(valueToEscape: string) {
+  return valueToEscape.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function emphasizedTextSegments(text: string, terms?: string[]): EmphasizedTextSegment[] {
+  const normalizedTerms = [...new Set((terms ?? []).map(normalizeText).filter(Boolean))].sort(
+    (left, right) => right.length - left.length
+  );
+
+  if (!normalizedTerms.length) {
+    return [{ text, bold: false }];
+  }
+
+  const uppercaseTerms = new Set(normalizedTerms.map((term) => term.toLocaleUpperCase("es-MX")));
+  const expression = new RegExp(`(${normalizedTerms.map(escapeRegularExpression).join("|")})`, "giu");
+
+  return text
+    .split(expression)
+    .filter(Boolean)
+    .map((segment) => {
+      const bold = uppercaseTerms.has(segment.toLocaleUpperCase("es-MX"));
+
+      return {
+        text: bold ? segment.toLocaleUpperCase("es-MX") : segment,
+        bold
+      };
+    });
+}
+
+function formatEmphasizedPlainText(text: string, terms?: string[]) {
+  return emphasizedTextSegments(text, terms)
+    .map((segment) => segment.text)
+    .join("");
+}
+
+function formatEmphasizedHtml(text: string, terms?: string[]) {
+  return emphasizedTextSegments(text, terms)
+    .map((segment) => {
+      const escapedText = escapeHtml(segment.text);
+      return segment.bold ? `<strong>${escapedText}</strong>` : escapedText;
+    })
+    .join("");
+}
+
+function renderEmphasizedText(text: string, terms?: string[]) {
+  return emphasizedTextSegments(text, terms).map((segment, index) =>
+    segment.bold ? <strong key={`emphasis-${index}`}>{segment.text}</strong> : segment.text
+  );
 }
 
 function getDocumentSignatures(document: GeneratedDocument): DailyDocumentSignature[] {
@@ -1318,16 +1472,25 @@ function moneyReceiptFormHtml(form: MoneyReceiptForm) {
 function generatedDocumentToText(document: GeneratedDocument) {
   const form = getRcDeliveredForm(document);
   const moneyForm = getMoneyReceiptForm(document);
+  const paragraphLines = document.paragraphs.map((paragraph) =>
+    formatEmphasizedPlainText(paragraph, document.emphasizedTerms)
+  );
   const detailLines = document.details?.map((detail) => `${detail.label}: ${detail.value}`) ?? [];
   const signerLines = getDocumentSignatures(document).map(
     (signature) =>
-      `______________________________\n${signature.name}${signature.role ? `\n${signature.role}` : ""}`
+      `______________________________\n${formatEmphasizedPlainText(signature.name, document.emphasizedTerms)}${
+        signature.role ? `\n${formatEmphasizedPlainText(signature.role, document.emphasizedTerms)}` : ""
+      }`
   );
 
   return [
     document.title,
     document.subtitle,
-    ...(form ? [...rcDeliveredFormText(form), ...document.paragraphs] : moneyForm ? [...moneyReceiptFormText(moneyForm), ...document.paragraphs] : document.paragraphs),
+    ...(form
+      ? [...rcDeliveredFormText(form), ...paragraphLines]
+      : moneyForm
+        ? [...moneyReceiptFormText(moneyForm), ...paragraphLines]
+        : paragraphLines),
     ...detailLines,
     ...signerLines,
     shouldShowPageNumbers(document) ? pageNumberLabel(1, 1) : ""
@@ -1353,7 +1516,11 @@ export function generatedDocumentToHtml(document: GeneratedDocument) {
   const signerRows = signatures
     .map(
       (signature) =>
-        `<div class="signature"><span></span><strong>${escapeHtml(signature.name)}</strong>${signature.role ? `<em>${escapeHtml(signature.role)}</em>` : ""}</div>`
+        `<div class="signature"><span></span><strong>${escapeHtml(
+          formatEmphasizedPlainText(signature.name, document.emphasizedTerms)
+        )}</strong>${
+          signature.role ? `<em>${formatEmphasizedHtml(signature.role, document.emphasizedTerms)}</em>` : ""
+        }</div>`
     )
     .join("");
   const pageNumber = shouldShowPageNumbers(document)
@@ -1362,7 +1529,10 @@ export function generatedDocumentToHtml(document: GeneratedDocument) {
   const paragraphHtml = document.paragraphs
     .map(
       (paragraph) =>
-        `<p${isDocumentStandaloneHeading(paragraph) ? ' class="clause-heading"' : ""}>${escapeHtml(paragraph)}</p>`
+        `<p${isDocumentStandaloneHeading(paragraph) ? ' class="clause-heading"' : ""}>${formatEmphasizedHtml(
+          paragraph,
+          document.emphasizedTerms
+        )}</p>`
     )
     .join("");
   const regularBody = `${paragraphHtml}
@@ -1419,7 +1589,7 @@ export function generatedDocumentToHtml(document: GeneratedDocument) {
     .signatures { display: grid; gap: 42px 28px; grid-template-columns: repeat(${signatureColumns}, minmax(0, 1fr)); margin-top: 72px; }
     .signature { text-align: center; }
     .signature span { border-top: 1px solid #172033; display: block; margin-bottom: 8px; }
-    .signature strong, .signature em { display: block; overflow-wrap: anywhere; }
+    .signature > strong, .signature > em { display: block; overflow-wrap: anywhere; }
     .signature em { color: #52606d; font-style: normal; font-weight: 700; margin-top: 4px; }
     .page-number { bottom: 24px; color: #52606d; font-size: 11px; left: 0; position: fixed; right: 0; text-align: center; }
     @page { margin: 0; size: letter; }
@@ -1753,15 +1923,16 @@ export async function downloadWordDocument(document: GeneratedDocument, filename
       new Paragraph({
         alignment: isHeading ? AlignmentType.CENTER : AlignmentType.JUSTIFIED,
         spacing: { after: isHeading ? 160 : 220, line: 360 },
-        children: [
-          new TextRun({
-            text: paragraph,
-            bold: isHeading,
-            size: 24,
-            font: "Arial",
-            color: "172033"
-          })
-        ]
+        children: emphasizedTextSegments(paragraph, document.emphasizedTerms).map(
+          (segment) =>
+            new TextRun({
+              text: segment.text,
+              bold: isHeading || segment.bold,
+              size: 24,
+              font: "Arial",
+              color: "172033"
+            })
+        )
       })
     );
   });
@@ -1821,7 +1992,14 @@ export async function downloadWordDocument(document: GeneratedDocument, filename
                           new Paragraph({
                             alignment: AlignmentType.CENTER,
                             spacing: { before: 120 },
-                            children: [new TextRun({ text: signature.name, bold: true, font: "Arial", size: 22 })]
+                            children: [
+                              new TextRun({
+                                text: formatEmphasizedPlainText(signature.name, document.emphasizedTerms),
+                                bold: true,
+                                font: "Arial",
+                                size: 22
+                              })
+                            ]
                           }),
                           ...(signature.role
                             ? [
@@ -1830,7 +2008,7 @@ export async function downloadWordDocument(document: GeneratedDocument, filename
                                   spacing: { before: 60, after: 280 },
                                   children: [
                                     new TextRun({
-                                      text: signature.role,
+                                      text: formatEmphasizedPlainText(signature.role, document.emphasizedTerms),
                                       bold: true,
                                       font: "Arial",
                                       size: 20,
@@ -1974,16 +2152,66 @@ export async function downloadPdfDocument(document: GeneratedDocument, filenameB
 
   function addParagraph(text: string) {
     const isHeading = isDocumentStandaloneHeading(text);
-
-    pdf.setFont("helvetica", isHeading ? "bold" : "normal");
     pdf.setFontSize(12);
-    const lines = splitPdfText(pdf, text, contentWidth);
+    const textTokens = emphasizedTextSegments(text, document.emphasizedTerms).flatMap((segment) =>
+      (segment.text.match(/\S+|\s+/g) ?? []).map((token) => ({
+        text: token,
+        bold: segment.bold,
+        whitespace: /^\s+$/.test(token)
+      }))
+    );
+    const lines: Array<Array<{ text: string; bold: boolean }>> = [];
+    let currentLine: Array<{ text: string; bold: boolean }> = [];
+    let currentLineWidth = 0;
+    let hasPendingWhitespace = false;
+
+    function tokenWidth(token: string, bold: boolean) {
+      pdf.setFont("helvetica", isHeading || bold ? "bold" : "normal");
+      return pdf.getTextWidth(token);
+    }
+
+    textTokens.forEach((token) => {
+      if (token.whitespace) {
+        hasPendingWhitespace = currentLine.length > 0;
+        return;
+      }
+
+      const spaceWidth = hasPendingWhitespace ? tokenWidth(" ", token.bold) : 0;
+      const wordWidth = tokenWidth(token.text, token.bold);
+
+      if (currentLine.length && currentLineWidth + spaceWidth + wordWidth > contentWidth) {
+        lines.push(currentLine);
+        currentLine = [];
+        currentLineWidth = 0;
+        hasPendingWhitespace = false;
+      }
+
+      if (hasPendingWhitespace && currentLine.length) {
+        currentLine.push({ text: " ", bold: token.bold });
+        currentLineWidth += tokenWidth(" ", token.bold);
+      }
+
+      currentLine.push({ text: token.text, bold: token.bold });
+      currentLineWidth += wordWidth;
+      hasPendingWhitespace = false;
+    });
+
+    if (currentLine.length) {
+      lines.push(currentLine);
+    }
+
     const lineHeight = 18;
 
     ensureSpace(lines.length * lineHeight + 12);
-    pdf.text(lines, isHeading ? pageWidth / 2 : margin, y, {
-      align: isHeading ? "center" : "left",
-      maxWidth: contentWidth
+    lines.forEach((line, lineIndex) => {
+      const lineWidth = line.reduce((width, token) => width + tokenWidth(token.text, token.bold), 0);
+      let cursorX = isHeading ? (pageWidth - lineWidth) / 2 : margin;
+
+      line.forEach((token) => {
+        pdf.setFont("helvetica", isHeading || token.bold ? "bold" : "normal");
+        pdf.text(token.text, cursorX, y + lineIndex * lineHeight);
+        cursorX += tokenWidth(token.text, token.bold);
+      });
     });
     y += lines.length * lineHeight + 14;
   }
@@ -2206,7 +2434,11 @@ export async function downloadPdfDocument(document: GeneratedDocument, filenameB
         const lineStart = left + 16;
         const lineEnd = left + signatureWidth - 16;
         const center = left + signatureWidth / 2;
-        const nameLines = splitPdfText(pdf, signature.name, signatureWidth - 28);
+        const nameLines = splitPdfText(
+          pdf,
+          formatEmphasizedPlainText(signature.name, document.emphasizedTerms),
+          signatureWidth - 28
+        );
 
         pdf.setDrawColor(23, 32, 51);
         pdf.line(lineStart, y, lineEnd, y);
@@ -2219,10 +2451,19 @@ export async function downloadPdfDocument(document: GeneratedDocument, filenameB
 
         if (signature.role) {
           pdf.setTextColor(82, 96, 109);
-          pdf.text(splitPdfText(pdf, signature.role, signatureWidth - 28), center, y + 22 + nameLines.length * 12, {
-            align: "center",
-            maxWidth: signatureWidth - 28
-          });
+          pdf.text(
+            splitPdfText(
+              pdf,
+              formatEmphasizedPlainText(signature.role, document.emphasizedTerms),
+              signatureWidth - 28
+            ),
+            center,
+            y + 22 + nameLines.length * 12,
+            {
+              align: "center",
+              maxWidth: signatureWidth - 28
+            }
+          );
           pdf.setTextColor(0, 0, 0);
         }
       });
@@ -2264,7 +2505,7 @@ export function DocumentPreview({ document }: { document: GeneratedDocument }) {
           className={isDocumentStandaloneHeading(paragraph) ? "daily-doc-clause-heading" : undefined}
           key={`${paragraph}-${index}`}
         >
-          {paragraph}
+          {renderEmphasizedText(paragraph, document.emphasizedTerms)}
         </p>
       ))}
     </div>
@@ -2406,8 +2647,8 @@ export function DocumentPreview({ document }: { document: GeneratedDocument }) {
           {signatures.map((signature, index) => (
             <div key={`${signature.name}-${signature.role ?? ""}-${index}`}>
               <span />
-              <strong>{signature.name}</strong>
-              {signature.role ? <em>{signature.role}</em> : null}
+              <strong>{formatEmphasizedPlainText(signature.name, document.emphasizedTerms)}</strong>
+              {signature.role ? <em>{renderEmphasizedText(signature.role, document.emphasizedTerms)}</em> : null}
             </div>
           ))}
         </footer>
@@ -3095,8 +3336,12 @@ export function DailyDocumentsPage() {
                   </label>
                 ) : null}
                 {selectedTemplate.fields.map((field) => {
-                  if (field.visibleWhen && values[field.visibleWhen.name] !== field.visibleWhen.value) {
-                    return null;
+                  if (field.visibleWhen) {
+                    const visibilityConditions = Array.isArray(field.visibleWhen) ? field.visibleWhen : [field.visibleWhen];
+
+                    if (visibilityConditions.some((condition) => values[condition.name] !== condition.value)) {
+                      return null;
+                    }
                   }
 
                   if (field.type === "grantor-type") {
