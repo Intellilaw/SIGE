@@ -175,7 +175,7 @@ async function executeWithTransientRetry(execute, init) {
     }
     throw lastError instanceof Error ? lastError : new Error("La solicitud fallo temporalmente. Intenta de nuevo.");
 }
-async function request(path, init, fallback, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function request(path, init, timeoutMs = REQUEST_TIMEOUT_MS) {
     const execute = () => fetchWithTimeout(`${API_BASE_URL}${path}`, {
         ...init,
         credentials: "include",
@@ -199,7 +199,8 @@ async function request(path, init, fallback, timeoutMs = REQUEST_TIMEOUT_MS) {
             clearAuthTokens();
             throw new ApiError("La sesion expiro. Inicia sesion nuevamente.", 401, "SESSION_EXPIRED");
         }
-        throw await toError(response, fallback);
+        const method = (init.method ?? "GET").toUpperCase();
+        throw await toError(response, `No fue posible completar ${method} ${path} (HTTP ${response.status}).`);
     }
     return response;
 }
@@ -219,7 +220,7 @@ export async function apiGet(path) {
         headers: {
             "Content-Type": "application/json"
         }
-    }, `GET ${path} failed with status request`);
+    });
     return readJson(response);
 }
 export async function apiPost(path, body) {
@@ -229,7 +230,7 @@ export async function apiPost(path, body) {
             "Content-Type": "application/json"
         },
         body: JSON.stringify(body)
-    }, `POST ${path} failed with status request`);
+    });
     return readJson(response);
 }
 export async function apiPostLongRunning(path, body) {
@@ -239,7 +240,7 @@ export async function apiPostLongRunning(path, body) {
             "Content-Type": "application/json"
         },
         body: JSON.stringify(body)
-    }, `POST ${path} failed with status request`, LONG_RUNNING_REQUEST_TIMEOUT_MS);
+    }, LONG_RUNNING_REQUEST_TIMEOUT_MS);
     return readJson(response);
 }
 export async function apiPatch(path, body) {
@@ -249,16 +250,16 @@ export async function apiPatch(path, body) {
             "Content-Type": "application/json"
         },
         body: JSON.stringify(body)
-    }, `PATCH ${path} failed with status request`);
+    });
     return readJson(response);
 }
 export async function apiDelete(path) {
     await request(path, {
         method: "DELETE"
-    }, `DELETE ${path} failed with status request`);
+    });
 }
 export async function apiDownload(path) {
-    const response = await request(path, {}, `GET ${path} failed with status request`);
+    const response = await request(path, {});
     return {
         blob: await response.blob(),
         filename: getFilenameFromDisposition(response.headers.get("Content-Disposition"))

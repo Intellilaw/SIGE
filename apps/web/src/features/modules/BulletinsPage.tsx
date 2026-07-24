@@ -12,6 +12,7 @@ import {
   apiDownload,
   apiGet,
   apiPatch,
+  apiPost,
   apiPostLongRunning
 } from "../../api/http-client";
 import { useAuth } from "../auth/AuthContext";
@@ -132,9 +133,11 @@ export function BulletinsPage() {
     });
   }, [bulletins, search, statusFilter]);
 
-  async function loadBulletins(preferredId?: string) {
-    setLoading(true);
-    setFlash(null);
+  async function loadBulletins(preferredId?: string, options: { silent?: boolean } = {}) {
+    if (!options.silent) {
+      setLoading(true);
+      setFlash(null);
+    }
     try {
       const rows = await apiGet<Bulletin[]>("/bulletins");
       setBulletins(rows);
@@ -145,14 +148,32 @@ export function BulletinsPage() {
           : rows[0]?.id ?? null;
       setSelectedId(nextId);
       const nextSelected = rows.find((row) => row.id === nextId);
-      setEditor(nextSelected?.origin === "GENERATED" ? draftFromBulletin(nextSelected) : null);
+      if (options.silent) {
+        setEditor((current) =>
+          nextSelected?.origin === "GENERATED" && nextSelected.generationStatus === "READY"
+            ? current ?? draftFromBulletin(nextSelected)
+            : null
+        );
+      } else {
+        setEditor(
+          nextSelected?.origin === "GENERATED" && nextSelected.generationStatus === "READY"
+            ? draftFromBulletin(nextSelected)
+            : null
+        );
+      }
+      return rows;
     } catch (error) {
-      setFlash({ tone: "error", text: toErrorMessage(error) });
-      setBulletins([]);
-      setSelectedId(null);
-      setEditor(null);
+      if (!options.silent) {
+        setFlash({ tone: "error", text: toErrorMessage(error) });
+        setBulletins([]);
+        setSelectedId(null);
+        setEditor(null);
+      }
+      return null;
     } finally {
-      setLoading(false);
+      if (!options.silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -160,9 +181,52 @@ export function BulletinsPage() {
     void loadBulletins();
   }, []);
 
+  const hasActiveGeneration = useMemo(
+    () => bulletins.some((bulletin) =>
+      bulletin.generationStatus === "PENDING" || bulletin.generationStatus === "PROCESSING"
+    ),
+    [bulletins]
+  );
+
+  useEffect(() => {
+    if (!hasActiveGeneration) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void (async () => {
+        const rows = await loadBulletins(selectedId ?? undefined, { silent: true });
+        if (!rows || rows.some((bulletin) =>
+          bulletin.generationStatus === "PENDING" || bulletin.generationStatus === "PROCESSING"
+        )) {
+          return;
+        }
+
+        const completed = rows.find((bulletin) => bulletin.id === selectedId);
+        if (completed?.generationStatus === "READY") {
+          setFlash({
+            tone: "success",
+            text: "Borrador generado. Revisa ambos idiomas y apruebalo para producir Word y PDF."
+          });
+        } else if (completed?.generationStatus === "FAILED") {
+          setFlash({
+            tone: "error",
+            text: completed.generationError ?? "No se pudo generar el borrador."
+          });
+        }
+      })();
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [hasActiveGeneration, selectedId]);
+
   function selectBulletin(bulletin: Bulletin) {
     setSelectedId(bulletin.id);
-    setEditor(bulletin.origin === "GENERATED" ? draftFromBulletin(bulletin) : null);
+    setEditor(
+      bulletin.origin === "GENERATED" && bulletin.generationStatus === "READY"
+        ? draftFromBulletin(bulletin)
+        : null
+    );
     setSidePanel(null);
     setFlash(null);
   }
@@ -182,7 +246,7 @@ export function BulletinsPage() {
         .split(/\r?\n/)
         .map((value) => value.trim())
         .filter(Boolean);
-      const created = await apiPostLongRunning<Bulletin>("/bulletins/generate", {
+      const created = await apiPost<Bulletin>("/bulletins/generate", {
         sourceText: generationText.trim() || null,
         sourceUrls,
         attachments
@@ -193,8 +257,27 @@ export function BulletinsPage() {
       setSidePanel(null);
       await loadBulletins(created.id);
       setFlash({
-        tone: "success",
-        text: "Borrador generado. Revisa ambos idiomas y apruebalo para producir Word y PDF."
+        tone: "warning",
+        text: "Solicitud recibida. OpenAI esta investigando; puedes permanecer aqui o volver mas tarde."
+      });
+    } catch (error) {
+      setFlash({ tone: "error", text: toErrorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRetryGeneration() {
+    if (!selected) return;
+    setBusy("retry");
+    setFlash(null);
+    try {
+      const pending = await apiPost<Bulletin>(`/bulletins/${selected.id}/retry-generation`, {});
+      setBulletins((current) => current.map((item) => item.id === pending.id ? pending : item));
+      setEditor(null);
+      setFlash({
+        tone: "warning",
+        text: "La generacion se reintento y continuara en segundo plano."
       });
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
@@ -297,7 +380,11 @@ export function BulletinsPage() {
       const remaining = bulletins.filter((item) => item.id !== selected.id);
       setBulletins(remaining);
       setSelectedId(remaining[0]?.id ?? null);
-      setEditor(remaining[0]?.origin === "GENERATED" ? draftFromBulletin(remaining[0]) : null);
+      setEditor(
+        remaining[0]?.origin === "GENERATED" && remaining[0].generationStatus === "READY"
+          ? draftFromBulletin(remaining[0])
+          : null
+      );
       setFlash({ tone: "success", text: "Boletin eliminado de la biblioteca." });
     } catch (error) {
       setFlash({ tone: "error", text: toErrorMessage(error) });
@@ -516,13 +603,35 @@ export function BulletinsPage() {
                 type="button"
               >
                 <span className="bulletins-list-item-top">
-                  <span className={`status-pill ${bulletin.status === "APPROVED" ? "status-live" : "status-warning"}`}>
-                    {bulletin.status === "APPROVED" ? "Aprobado" : "Borrador"}
+                  <span className={`status-pill ${
+                    bulletin.generationStatus === "FAILED"
+                      ? "status-warning"
+                      : bulletin.generationStatus === "PENDING" || bulletin.generationStatus === "PROCESSING"
+                        ? "bulletins-status-processing"
+                        : bulletin.status === "APPROVED"
+                          ? "status-live"
+                          : "status-warning"
+                  }`}>
+                    {bulletin.generationStatus === "FAILED"
+                      ? "Error"
+                      : bulletin.generationStatus === "PENDING" || bulletin.generationStatus === "PROCESSING"
+                        ? "Generando"
+                        : bulletin.status === "APPROVED"
+                          ? "Aprobado"
+                          : "Borrador"}
                   </span>
                   <time>{formatDate(bulletin.bulletinDate)}</time>
                 </span>
                 <strong>{bulletin.titleEs}</strong>
-                <span>{bulletin.origin === "UPLOADED" ? "Cargado" : `${bulletin.pageCount} pág. · Bilingüe`}</span>
+                <span>
+                  {bulletin.generationStatus === "PENDING" || bulletin.generationStatus === "PROCESSING"
+                    ? "Investigacion en curso"
+                    : bulletin.generationStatus === "FAILED"
+                      ? "Requiere reintento"
+                      : bulletin.origin === "UPLOADED"
+                        ? "Cargado"
+                        : `${bulletin.pageCount} pág. · Bilingüe`}
+                </span>
               </button>
             ))}
           </div>
@@ -534,6 +643,48 @@ export function BulletinsPage() {
               <span aria-hidden="true">RC</span>
               <h2>Selecciona un boletin</h2>
               <p className="muted">Los borradores se pueden editar y deben aprobarse antes de descargar.</p>
+            </div>
+          ) : selected.generationStatus === "PENDING" || selected.generationStatus === "PROCESSING" ? (
+            <div className="bulletins-generation-state">
+              <span className="bulletins-progress-mark" aria-hidden="true" />
+              <span className="bulletins-eyebrow">Generacion en segundo plano</span>
+              <h2>Investigando y preparando el borrador</h2>
+              <p className="muted">
+                OpenAI esta consultando la informacion disponible y redactando ambas columnas.
+                Puedes salir del modulo; el borrador permanecera en la biblioteca.
+              </p>
+              <button
+                className="danger-button"
+                disabled={busy === "delete"}
+                onClick={() => void handleDelete()}
+                type="button"
+              >
+                Cancelar y eliminar
+              </button>
+            </div>
+          ) : selected.generationStatus === "FAILED" ? (
+            <div className="bulletins-generation-state bulletins-generation-failed">
+              <span className="bulletins-eyebrow">No se completo la generacion</span>
+              <h2>No fue posible preparar el borrador</h2>
+              <p>{selected.generationError ?? "OpenAI no pudo completar la solicitud."}</p>
+              <div className="bulletins-uploaded-file-actions">
+                <button
+                  className="primary-button"
+                  disabled={busy === "retry"}
+                  onClick={() => void handleRetryGeneration()}
+                  type="button"
+                >
+                  {busy === "retry" ? "Reintentando..." : "Reintentar generacion"}
+                </button>
+                <button
+                  className="danger-button"
+                  disabled={busy === "delete"}
+                  onClick={() => void handleDelete()}
+                  type="button"
+                >
+                  Eliminar
+                </button>
+              </div>
             </div>
           ) : selected.origin === "UPLOADED" ? (
             <div className="bulletins-uploaded-detail">

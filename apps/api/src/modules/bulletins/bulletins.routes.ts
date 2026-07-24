@@ -161,7 +161,7 @@ export const bulletinsRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     "/bulletins/generate",
     { preHandler: internalGuards, bodyLimit: GENERATION_BODY_LIMIT },
-    async (request) => {
+    async (request, reply) => {
       const payload = generationSchema.parse(request.body ?? {});
       const attachments = payload.attachments.map((attachment) =>
         toAttachmentRecord(attachment, { maxBytes: MAX_GENERATION_FILE_BYTES })
@@ -171,13 +171,34 @@ export const bulletinsRoutes: FastifyPluginAsync = async (app) => {
         throw new AppError(400, "BULLETIN_ATTACHMENTS_TOO_LARGE", "Los adjuntos exceden 18 MB en conjunto.");
       }
 
-      return service.generate({
+      const actor = actorFromRequest(request);
+      const bulletin = await service.createPendingGeneration({
         sourceText: payload.sourceText,
         sourceUrls: payload.sourceUrls,
         attachments
-      }, actorFromRequest(request));
+      }, actor);
+      reply.raw.once("finish", () => {
+        void service.processGeneration(bulletin.id, actor).catch((error: unknown) => {
+          app.log.error({ error, bulletinId: bulletin.id }, "Asynchronous bulletin generation failed.");
+        });
+      });
+      reply.code(202);
+      return bulletin;
     }
   );
+
+  app.post("/bulletins/:bulletinId/retry-generation", { preHandler: internalGuards }, async (request, reply) => {
+    const params = paramsSchema.parse(request.params);
+    const actor = actorFromRequest(request);
+    const bulletin = await service.retryGeneration(params.bulletinId);
+    reply.raw.once("finish", () => {
+      void service.processGeneration(bulletin.id, actor).catch((error: unknown) => {
+        app.log.error({ error, bulletinId: bulletin.id }, "Asynchronous bulletin retry failed.");
+      });
+    });
+    reply.code(202);
+    return bulletin;
+  });
 
   app.patch("/bulletins/:bulletinId", { preHandler: internalGuards }, async (request) => {
     const params = paramsSchema.parse(request.params);

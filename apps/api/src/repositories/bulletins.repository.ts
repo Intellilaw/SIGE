@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { Bulletin, BulletinBlock, BulletinPageCount } from "@sige/contracts";
+import type { Bulletin, BulletinBlock, BulletinDraftInput, BulletinPageCount } from "@sige/contracts";
 
 import { AppError } from "../core/errors/app-error";
 import { getCurrentOrganizationIdOrDefault } from "../core/tenant/tenant-context";
@@ -9,6 +9,8 @@ import type {
   BulletinApprovalWriteRecord,
   BulletinDocumentRecord,
   BulletinDraftWriteRecord,
+  BulletinGenerationInputRecord,
+  BulletinPendingGenerationWriteRecord,
   BulletinsRepository,
   BulletinUploadWriteRecord
 } from "./types";
@@ -91,6 +93,12 @@ function mapBulletin(record: BulletinRecord): Bulletin {
     organizationId: record.organizationId,
     origin: record.origin === "UPLOADED" ? "UPLOADED" : "GENERATED",
     status: record.status === "APPROVED" ? "APPROVED" : "DRAFT",
+    generationStatus: ["PENDING", "PROCESSING", "FAILED"].includes(record.generationStatus)
+      ? record.generationStatus as Bulletin["generationStatus"]
+      : "READY",
+    generationError: record.generationError,
+    generationStartedAt: record.generationStartedAt?.toISOString() ?? null,
+    generationCompletedAt: record.generationCompletedAt?.toISOString() ?? null,
     bulletinDate: record.bulletinDate.toISOString().slice(0, 10),
     titleEs: record.titleEs,
     titleEn: record.titleEn,
@@ -166,18 +174,18 @@ export class PrismaBulletinsRepository implements BulletinsRepository {
     return record ? mapBulletin(record) : null;
   }
 
-  public async createDraft(payload: BulletinDraftWriteRecord) {
+  public async createPendingGeneration(payload: BulletinPendingGenerationWriteRecord) {
     const organizationId = getCurrentOrganizationIdOrDefault();
     const record = await this.prisma.bulletin.create({
       data: {
         origin: "GENERATED",
         status: "DRAFT",
+        generationStatus: "PENDING",
         bulletinDate: new Date(`${payload.bulletinDate}T00:00:00.000Z`),
-        titleEs: normalizeText(payload.titleEs),
-        titleEn: normalizeText(payload.titleEn),
-        pageCount: normalizePageCount(payload.pageCount),
-        twoPageReason: normalizeText(payload.twoPageReason) || null,
-        blocks: toPrismaBlocks(payload.blocks),
+        titleEs: "Borrador en preparacion",
+        titleEn: "Draft in progress",
+        pageCount: 1,
+        blocks: [],
         sourceText: normalizeText(payload.sourceText) || null,
         sourceUrls: (payload.sourceUrls ?? []).map(normalizeText).filter(Boolean),
         createdByUserId: payload.createdByUserId ?? null,
@@ -210,12 +218,148 @@ export class PrismaBulletinsRepository implements BulletinsRepository {
     return mapBulletin(record);
   }
 
+  public async claimPendingGeneration(bulletinId: string) {
+    const result = await this.prisma.bulletin.updateMany({
+      where: {
+        id: bulletinId,
+        deletedAt: null,
+        generationStatus: "PENDING"
+      },
+      data: {
+        generationStatus: "PROCESSING",
+        generationError: null,
+        generationStartedAt: new Date(),
+        generationCompletedAt: null
+      }
+    });
+
+    return result.count === 1;
+  }
+
+  public async findGenerationInput(bulletinId: string): Promise<BulletinGenerationInputRecord | null> {
+    const record = await this.prisma.bulletin.findFirst({
+      where: { id: bulletinId, deletedAt: null, origin: "GENERATED" },
+      select: {
+        sourceText: true,
+        sourceUrls: true,
+        attachments: {
+          select: {
+            originalFileName: true,
+            fileMimeType: true,
+            fileContent: true
+          },
+          orderBy: { uploadedAt: "asc" }
+        }
+      }
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return {
+      sourceText: record.sourceText,
+      sourceUrls: asStringArray(record.sourceUrls),
+      attachments: record.attachments.map((attachment) => ({
+        originalFileName: attachment.originalFileName,
+        fileMimeType: attachment.fileMimeType,
+        fileContent: Buffer.from(attachment.fileContent)
+      }))
+    };
+  }
+
+  public async completeGeneration(bulletinId: string, payload: BulletinDraftInput) {
+    await this.findActiveOrThrow(bulletinId);
+    const record = await this.prisma.bulletin.update({
+      where: { id: bulletinId },
+      data: {
+        status: "DRAFT",
+        generationStatus: "READY",
+        generationError: null,
+        generationCompletedAt: new Date(),
+        bulletinDate: new Date(`${payload.bulletinDate}T00:00:00.000Z`),
+        titleEs: normalizeText(payload.titleEs),
+        titleEn: normalizeText(payload.titleEn),
+        pageCount: normalizePageCount(payload.pageCount),
+        twoPageReason: normalizeText(payload.twoPageReason) || null,
+        blocks: toPrismaBlocks(payload.blocks)
+      },
+      include: {
+        attachments: {
+          select: {
+            id: true,
+            originalFileName: true,
+            fileMimeType: true,
+            fileSizeBytes: true,
+            uploadedAt: true
+          }
+        }
+      }
+    });
+
+    return mapBulletin(record);
+  }
+
+  public async failGeneration(bulletinId: string, message: string) {
+    await this.findActiveOrThrow(bulletinId);
+    const record = await this.prisma.bulletin.update({
+      where: { id: bulletinId },
+      data: {
+        generationStatus: "FAILED",
+        generationError: normalizeText(message).slice(0, 2000) || "No se pudo generar el borrador.",
+        generationCompletedAt: new Date()
+      },
+      include: {
+        attachments: {
+          select: {
+            id: true,
+            originalFileName: true,
+            fileMimeType: true,
+            fileSizeBytes: true,
+            uploadedAt: true
+          }
+        }
+      }
+    });
+
+    return mapBulletin(record);
+  }
+
+  public async retryGeneration(bulletinId: string) {
+    await this.findActiveOrThrow(bulletinId);
+    const record = await this.prisma.bulletin.update({
+      where: { id: bulletinId },
+      data: {
+        status: "DRAFT",
+        generationStatus: "PENDING",
+        generationError: null,
+        generationStartedAt: null,
+        generationCompletedAt: null
+      },
+      include: {
+        attachments: {
+          select: {
+            id: true,
+            originalFileName: true,
+            fileMimeType: true,
+            fileSizeBytes: true,
+            uploadedAt: true
+          }
+        }
+      }
+    });
+
+    return mapBulletin(record);
+  }
+
   public async updateDraft(bulletinId: string, payload: BulletinDraftWriteRecord) {
     await this.findActiveOrThrow(bulletinId);
     const record = await this.prisma.bulletin.update({
       where: { id: bulletinId },
       data: {
         status: "DRAFT",
+        generationStatus: "READY",
+        generationError: null,
         bulletinDate: new Date(`${payload.bulletinDate}T00:00:00.000Z`),
         titleEs: normalizeText(payload.titleEs),
         titleEn: normalizeText(payload.titleEn),
@@ -296,6 +440,8 @@ export class PrismaBulletinsRepository implements BulletinsRepository {
       data: {
         origin: "UPLOADED",
         status: "APPROVED",
+        generationStatus: "READY",
+        generationCompletedAt: new Date(),
         bulletinDate: new Date(`${payload.bulletinDate}T00:00:00.000Z`),
         titleEs: title,
         titleEn: title,

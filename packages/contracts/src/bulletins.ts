@@ -4,6 +4,9 @@ export type BulletinStatus = (typeof BULLETIN_STATUSES)[number];
 export const BULLETIN_ORIGINS = ["GENERATED", "UPLOADED"] as const;
 export type BulletinOrigin = (typeof BULLETIN_ORIGINS)[number];
 
+export const BULLETIN_GENERATION_STATUSES = ["PENDING", "PROCESSING", "READY", "FAILED"] as const;
+export type BulletinGenerationStatus = (typeof BULLETIN_GENERATION_STATUSES)[number];
+
 export type BulletinPageCount = 1 | 2;
 
 export interface BulletinBlock {
@@ -27,6 +30,10 @@ export interface Bulletin {
   organizationId: string;
   origin: BulletinOrigin;
   status: BulletinStatus;
+  generationStatus: BulletinGenerationStatus;
+  generationError: string | null;
+  generationStartedAt: string | null;
+  generationCompletedAt: string | null;
   bulletinDate: string;
   titleEs: string;
   titleEn: string;

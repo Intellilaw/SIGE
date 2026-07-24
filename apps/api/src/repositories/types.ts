@@ -376,6 +376,21 @@ export interface BulletinDraftWriteRecord extends BulletinDraftInput {
   createdByName?: string | null;
 }
 
+export interface BulletinPendingGenerationWriteRecord {
+  bulletinDate: string;
+  sourceText?: string | null;
+  sourceUrls?: string[];
+  attachments?: BulletinAttachmentWriteRecord[];
+  createdByUserId?: string | null;
+  createdByName?: string | null;
+}
+
+export interface BulletinGenerationInputRecord {
+  sourceText: string | null;
+  sourceUrls: string[];
+  attachments: BulletinAttachmentWriteRecord[];
+}
+
 export interface BulletinApprovalWriteRecord {
   approvedByUserId?: string | null;
   approvedByName?: string | null;
@@ -405,7 +420,12 @@ export interface BulletinDocumentRecord {
 export interface BulletinsRepository {
   list(): Promise<Bulletin[]>;
   findById(bulletinId: string): Promise<Bulletin | null>;
-  createDraft(payload: BulletinDraftWriteRecord): Promise<Bulletin>;
+  createPendingGeneration(payload: BulletinPendingGenerationWriteRecord): Promise<Bulletin>;
+  claimPendingGeneration(bulletinId: string): Promise<boolean>;
+  findGenerationInput(bulletinId: string): Promise<BulletinGenerationInputRecord | null>;
+  completeGeneration(bulletinId: string, payload: BulletinDraftInput): Promise<Bulletin>;
+  failGeneration(bulletinId: string, message: string): Promise<Bulletin>;
+  retryGeneration(bulletinId: string): Promise<Bulletin>;
   updateDraft(bulletinId: string, payload: BulletinDraftWriteRecord): Promise<Bulletin>;
   approve(bulletinId: string, payload: BulletinApprovalWriteRecord): Promise<Bulletin>;
   uploadApproved(payload: BulletinUploadWriteRecord): Promise<Bulletin>;

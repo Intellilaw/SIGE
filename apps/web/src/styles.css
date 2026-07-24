@@ -13742,6 +13742,57 @@ div.sales-product-card-main {
   font-size: 0.68rem;
 }
 
+.bulletins-status-processing {
+  background: rgba(31, 95, 153, 0.12);
+  color: #1f5f99;
+}
+
+.bulletins-generation-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 12px;
+  min-height: 430px;
+  padding: 36px;
+  text-align: center;
+}
+
+.bulletins-generation-state h2,
+.bulletins-generation-state p {
+  max-width: 620px;
+  margin: 0;
+}
+
+.bulletins-generation-state .danger-button {
+  margin-top: 12px;
+}
+
+.bulletins-progress-mark {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+  border: 3px solid rgba(31, 95, 153, 0.18);
+  border-top-color: var(--bulletin-blue);
+  border-radius: 50%;
+  animation: bulletins-spin 900ms linear infinite;
+}
+
+.bulletins-generation-failed {
+  border-radius: 10px;
+  background: rgba(180, 35, 24, 0.035);
+}
+
+.bulletins-generation-failed .bulletins-eyebrow,
+.bulletins-generation-failed p {
+  color: #9f2d24;
+}
+
+@keyframes bulletins-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .bulletins-empty-list,
 .bulletins-empty-detail {
   display: grid;

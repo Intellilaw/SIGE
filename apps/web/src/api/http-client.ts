@@ -218,7 +218,7 @@ async function executeWithTransientRetry(execute: () => Promise<Response>, init:
   throw lastError instanceof Error ? lastError : new Error("La solicitud fallo temporalmente. Intenta de nuevo.");
 }
 
-async function request(path: string, init: RequestInit, fallback: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+async function request(path: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const execute = () =>
     fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...init,
@@ -248,7 +248,11 @@ async function request(path: string, init: RequestInit, fallback: string, timeou
       throw new ApiError("La sesion expiro. Inicia sesion nuevamente.", 401, "SESSION_EXPIRED");
     }
 
-    throw await toError(response, fallback);
+    const method = (init.method ?? "GET").toUpperCase();
+    throw await toError(
+      response,
+      `No fue posible completar ${method} ${path} (HTTP ${response.status}).`
+    );
   }
 
   return response;
@@ -273,7 +277,7 @@ export async function apiGet<T>(path: string): Promise<T> {
     headers: {
       "Content-Type": "application/json"
     }
-  }, `GET ${path} failed with status request`);
+  });
 
   return readJson<T>(response);
 }
@@ -285,7 +289,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
       "Content-Type": "application/json"
     },
     body: JSON.stringify(body)
-  }, `POST ${path} failed with status request`);
+  });
 
   return readJson<T>(response);
 }
@@ -297,7 +301,7 @@ export async function apiPostLongRunning<T>(path: string, body: unknown): Promis
       "Content-Type": "application/json"
     },
     body: JSON.stringify(body)
-  }, `POST ${path} failed with status request`, LONG_RUNNING_REQUEST_TIMEOUT_MS);
+  }, LONG_RUNNING_REQUEST_TIMEOUT_MS);
 
   return readJson<T>(response);
 }
@@ -309,7 +313,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
       "Content-Type": "application/json"
     },
     body: JSON.stringify(body)
-  }, `PATCH ${path} failed with status request`);
+  });
 
   return readJson<T>(response);
 }
@@ -317,11 +321,11 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 export async function apiDelete(path: string): Promise<void> {
   await request(path, {
     method: "DELETE"
-  }, `DELETE ${path} failed with status request`);
+  });
 }
 
 export async function apiDownload(path: string): Promise<{ blob: Blob; filename?: string }> {
-  const response = await request(path, {}, `GET ${path} failed with status request`);
+  const response = await request(path, {});
 
   return {
     blob: await response.blob(),

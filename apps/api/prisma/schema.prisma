@@ -542,6 +542,10 @@ model Bulletin {
   organizationId       String       @default("org-rusconi")
   origin               String       @default("GENERATED")
   status               String       @default("DRAFT")
+  generationStatus     String       @default("READY")
+  generationError      String?      @db.Text
+  generationStartedAt  DateTime?
+  generationCompletedAt DateTime?
   bulletinDate         DateTime     @db.Date
   titleEs              String
   titleEn              String
@@ -571,6 +575,7 @@ model Bulletin {
 
   @@index([organizationId, deletedAt, bulletinDate])
   @@index([organizationId, status, updatedAt])
+  @@index([organizationId, generationStatus, updatedAt])
 }
 
 model BulletinAttachment {

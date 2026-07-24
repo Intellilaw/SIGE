@@ -5,6 +5,7 @@ import type { BulletinBlock, BulletinDraftInput } from "@sige/contracts";
 import { env } from "../../config/env";
 import { AppError } from "../../core/errors/app-error";
 import type { BulletinAttachmentWriteRecord } from "../../repositories/types";
+import { getCurrentMexicoDate } from "./bulletin-date";
 
 type ResponsesOutputContent = {
   text?: string;
@@ -270,7 +271,7 @@ export async function generateBulletinDraft(input: BulletinGenerationRequest): P
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getCurrentMexicoDate();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), env.OPENAI_BULLETIN_TIMEOUT_MS);
   const safetyIdentifier = createHash("sha256")
