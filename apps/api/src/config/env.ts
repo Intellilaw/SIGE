@@ -50,6 +50,8 @@ const envSchema = z.object({
   OPENAI_EXTERNAL_CONTRACT_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   OPENAI_RUSCONI_INTELLIGENCE_MODEL: z.string().min(1).default("gpt-5.5"),
   OPENAI_RUSCONI_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  OPENAI_BULLETIN_MODEL: z.string().min(1).default("gpt-5.5"),
+  OPENAI_BULLETIN_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   INTELLILAW_BOT_API_URL: z.string().url().default("http://localhost:8000"),
   INTELLILAW_BOT_API_KEY: optionalNonEmptyString,
   INTELLILAW_BOT_PROMOTION_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),

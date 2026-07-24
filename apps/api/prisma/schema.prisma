@@ -74,6 +74,8 @@ model Organization {
   periodicMessages                       PeriodicMessage[]
   periodicMessageDeliveries              PeriodicMessageDelivery[]
   googleWorkspaceConnections             GoogleWorkspaceConnection[]
+  bulletins                              Bulletin[]
+  bulletinAttachments                    BulletinAttachment[]
 
   @@index([isActive, name])
 }
@@ -533,6 +535,57 @@ model DailyDocumentAssignment {
   @@index([organizationId, clientId, createdAt])
   @@index([organizationId, templateId, createdAt])
   @@index([organizationId, createdAt])
+}
+
+model Bulletin {
+  id                   String       @id @default(uuid())
+  organizationId       String       @default("org-rusconi")
+  origin               String       @default("GENERATED")
+  status               String       @default("DRAFT")
+  bulletinDate         DateTime     @db.Date
+  titleEs              String
+  titleEn              String
+  pageCount            Int          @default(1)
+  twoPageReason        String?
+  blocks               Json         @default("[]")
+  sourceText           String?      @db.Text
+  sourceUrls           Json         @default("[]")
+  docxOriginalFileName String?
+  docxFileMimeType     String?
+  docxFileSizeBytes    Int?
+  docxFileContent      Bytes?
+  pdfOriginalFileName  String?
+  pdfFileMimeType      String?
+  pdfFileSizeBytes     Int?
+  pdfFileContent       Bytes?
+  approvedAt           DateTime?
+  approvedByUserId     String?
+  approvedByName       String?
+  createdByUserId      String?
+  createdByName        String?
+  deletedAt            DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  attachments          BulletinAttachment[]
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, deletedAt, bulletinDate])
+  @@index([organizationId, status, updatedAt])
+}
+
+model BulletinAttachment {
+  id               String       @id @default(uuid())
+  organizationId   String       @default("org-rusconi")
+  bulletinId       String
+  originalFileName String
+  fileMimeType     String?
+  fileSizeBytes    Int
+  fileContent      Bytes
+  uploadedAt       DateTime     @default(now())
+  bulletin         Bulletin     @relation(fields: [bulletinId], references: [id], onDelete: Cascade)
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, bulletinId, uploadedAt])
 }
 
 model Quote {

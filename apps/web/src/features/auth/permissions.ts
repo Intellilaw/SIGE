@@ -12,8 +12,8 @@ export interface PermissionUser {
 }
 
 type AccessRule = {
-  read: string[] | "all";
-  write?: string[];
+  read: string[] | "all" | "internal";
+  write?: string[] | "all" | "internal";
 };
 
 const MODULE_ACCESS: Record<string, AccessRule> = {
@@ -70,6 +70,7 @@ const MODULE_ACCESS: Record<string, AccessRule> = {
     read: ["documents-third-party:read", "documents-third-party:write"],
     write: ["documents-third-party:write"]
   },
+  bulletins: { read: "internal", write: "internal" },
   "guidelines-manuals": { read: "all" },
   holidays: { read: ["holidays:read", "holidays:write"], write: ["holidays:write"] },
   users: { read: ["users:read", "users:manage"], write: ["users:manage"] }
@@ -79,9 +80,13 @@ export function hasPermission(user: PermissionUser | null | undefined, permissio
   return Boolean(user?.permissions?.includes("*") || user?.permissions?.includes(permission));
 }
 
-function hasAnyPermission(user: PermissionUser | null | undefined, permissions: string[] | "all") {
+function hasAnyPermission(user: PermissionUser | null | undefined, permissions: string[] | "all" | "internal") {
   if (permissions === "all") {
     return Boolean(user);
+  }
+
+  if (permissions === "internal") {
+    return Boolean(user && !user.isExternal);
   }
 
   return Boolean(user?.permissions?.includes("*") || permissions.some((permission) => user?.permissions?.includes(permission)));

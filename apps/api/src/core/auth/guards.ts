@@ -18,6 +18,12 @@ export function getSessionUser(request: FastifyRequest) {
   return request.user as SessionUser;
 }
 
+export async function requireInternalUser(request: FastifyRequest) {
+  if (getSessionUser(request).isExternal) {
+    throw new AppError(403, "INTERNAL_USER_REQUIRED", "Este modulo es exclusivo para usuarios internos.");
+  }
+}
+
 export function requireRoles(allowedRoles: SystemRole[]) {
   return async function roleGuard(request: FastifyRequest) {
     const user = getSessionUser(request);

@@ -235,6 +235,18 @@ export const appModules = [
         coverage: ["Documentos externos", "Buscador por nombre o archivo", "Apertura y descarga de documentos"]
     },
     {
+        id: "bulletins",
+        path: "/app/bulletins",
+        label: "Boletines",
+        shortLabel: "Boletines",
+        icon: "\u{1F4F0}",
+        description: "Biblioteca y generador bilingue de boletines breves para clientes.",
+        phase: "Operativo",
+        available: true,
+        access: "internal",
+        coverage: ["Borradores bilingues", "Aprobacion humana", "Consulta web y adjuntos", "Descarga Word y PDF"]
+    },
+    {
         id: "guidelines-manuals",
         path: "/app/guidelines-manuals",
         label: "Lineamientos y manuales internos",
@@ -337,6 +349,9 @@ export function getVisibleAppModules(user, disabledModuleIds = []) {
     const disabledModules = new Set(disabledModuleIds);
     return appModules.filter((module) => {
         if (module.access === "emrt-superadmin" && !canAccessGeneralSupervision(user)) {
+            return false;
+        }
+        if (module.access === "internal" && (!user || user.isExternal)) {
             return false;
         }
         return isAlwaysEnabledModule(module.id) || !disabledModules.has(module.id);

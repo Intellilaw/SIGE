@@ -18,6 +18,7 @@ function resolveApiBaseUrl(configuredBaseUrl) {
 }
 const API_BASE_URL = resolveApiBaseUrl(configuredApiBaseUrl);
 const REQUEST_TIMEOUT_MS = 75_000;
+const LONG_RUNNING_REQUEST_TIMEOUT_MS = 180_000;
 const TRANSIENT_RETRY_STATUS_CODES = new Set([502, 503, 504]);
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAY_MS = 700;
@@ -128,9 +129,9 @@ async function refreshAccessToken() {
     }
     return refreshRequest;
 }
-async function fetchWithTimeout(input, init = {}) {
+async function fetchWithTimeout(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
         return await fetch(input, {
             ...init,
@@ -174,12 +175,12 @@ async function executeWithTransientRetry(execute, init) {
     }
     throw lastError instanceof Error ? lastError : new Error("La solicitud fallo temporalmente. Intenta de nuevo.");
 }
-async function request(path, init, fallback) {
+async function request(path, init, fallback, timeoutMs = REQUEST_TIMEOUT_MS) {
     const execute = () => fetchWithTimeout(`${API_BASE_URL}${path}`, {
         ...init,
         credentials: "include",
         headers: withAuthHeaders(init.headers)
-    });
+    }, timeoutMs);
     let response = await executeWithTransientRetry(execute, init);
     if (response.status === 401 && shouldRetryWithRefresh(path)) {
         const refreshResult = await refreshAccessToken();
@@ -229,6 +230,16 @@ export async function apiPost(path, body) {
         },
         body: JSON.stringify(body)
     }, `POST ${path} failed with status request`);
+    return readJson(response);
+}
+export async function apiPostLongRunning(path, body) {
+    const response = await request(path, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+    }, `POST ${path} failed with status request`, LONG_RUNNING_REQUEST_TIMEOUT_MS);
     return readJson(response);
 }
 export async function apiPatch(path, body) {

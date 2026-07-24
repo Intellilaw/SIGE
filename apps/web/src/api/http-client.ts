@@ -26,6 +26,7 @@ function resolveApiBaseUrl(configuredBaseUrl?: string) {
 
 const API_BASE_URL = resolveApiBaseUrl(configuredApiBaseUrl);
 const REQUEST_TIMEOUT_MS = 75_000;
+const LONG_RUNNING_REQUEST_TIMEOUT_MS = 180_000;
 const TRANSIENT_RETRY_STATUS_CODES = new Set([502, 503, 504]);
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAY_MS = 700;
@@ -165,9 +166,9 @@ async function refreshAccessToken(): Promise<RefreshAccessTokenResult> {
   return refreshRequest;
 }
 
-async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}) {
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(input, {
@@ -217,13 +218,13 @@ async function executeWithTransientRetry(execute: () => Promise<Response>, init:
   throw lastError instanceof Error ? lastError : new Error("La solicitud fallo temporalmente. Intenta de nuevo.");
 }
 
-async function request(path: string, init: RequestInit, fallback: string): Promise<Response> {
+async function request(path: string, init: RequestInit, fallback: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const execute = () =>
     fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...init,
       credentials: "include",
       headers: withAuthHeaders(init.headers)
-    });
+    }, timeoutMs);
 
   let response = await executeWithTransientRetry(execute, init);
   if (response.status === 401 && shouldRetryWithRefresh(path)) {
@@ -285,6 +286,18 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body)
   }, `POST ${path} failed with status request`);
+
+  return readJson<T>(response);
+}
+
+export async function apiPostLongRunning<T>(path: string, body: unknown): Promise<T> {
+  const response = await request(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  }, `POST ${path} failed with status request`, LONG_RUNNING_REQUEST_TIMEOUT_MS);
 
   return readJson<T>(response);
 }

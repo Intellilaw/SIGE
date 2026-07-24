@@ -15,6 +15,7 @@ import { ModuleAvailabilityProvider, useModuleAvailability } from "./features/mo
 import { ModuleEnablementPage } from "./features/modules/ModuleEnablementPage";
 import { MyAccountPage } from "./features/account/MyAccountPage";
 import { ThirdPartyDocumentsPage } from "./features/modules/ThirdPartyDocumentsPage";
+import { BulletinsPage } from "./features/modules/BulletinsPage";
 import { AppShell } from "./features/shell/AppShell";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { ExecutionPage } from "./features/execution/ExecutionPage";
@@ -150,6 +151,7 @@ export default function App() {
             <Route path="labor-file" element={withEnabledModule("labor-file", <LaborFilesPage />)} />
             <Route path="daily-documents" element={withEnabledModule("daily-documents", <DailyDocumentsPage />)} />
             <Route path="third-party-documents" element={withEnabledModule("third-party-documents", <ThirdPartyDocumentsPage />)} />
+            <Route path="bulletins" element={withEnabledModule("bulletins", <BulletinsPage />)} />
             <Route path="guidelines-manuals" element={withEnabledModule("guidelines-manuals", <GuidelinesManualsPage />)} />
             <Route path="holidays" element={withEnabledModule("holidays", <HolidaysPage />)} />
             <Route path="users" element={<UsersPage />} />

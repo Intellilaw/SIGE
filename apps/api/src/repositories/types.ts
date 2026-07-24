@@ -21,6 +21,8 @@ import type {
   BudgetPlan,
   BudgetPlanExpenseBreakdownItem,
   BudgetPlanSnapshot,
+  Bulletin,
+  BulletinDraftInput,
   Client,
   CommissionRecipientAssignment,
   CommissionReceiver,
@@ -358,6 +360,57 @@ export interface DailyDocumentsRepository {
   create(payload: DailyDocumentAssignmentWriteRecord): Promise<DailyDocumentAssignment>;
   update(documentId: string, payload: DailyDocumentAssignmentWriteRecord): Promise<DailyDocumentAssignment>;
   delete(documentId: string): Promise<void>;
+}
+
+export interface BulletinAttachmentWriteRecord {
+  originalFileName: string;
+  fileMimeType?: string | null;
+  fileContent: Buffer;
+}
+
+export interface BulletinDraftWriteRecord extends BulletinDraftInput {
+  sourceText?: string | null;
+  sourceUrls?: string[];
+  attachments?: BulletinAttachmentWriteRecord[];
+  createdByUserId?: string | null;
+  createdByName?: string | null;
+}
+
+export interface BulletinApprovalWriteRecord {
+  approvedByUserId?: string | null;
+  approvedByName?: string | null;
+  docxOriginalFileName: string;
+  docxFileMimeType: string;
+  docxFileContent: Buffer;
+  pdfOriginalFileName: string;
+  pdfFileMimeType: string;
+  pdfFileContent: Buffer;
+}
+
+export interface BulletinUploadWriteRecord {
+  title: string;
+  bulletinDate: string;
+  createdByUserId?: string | null;
+  createdByName?: string | null;
+  docx?: BulletinAttachmentWriteRecord | null;
+  pdf?: BulletinAttachmentWriteRecord | null;
+}
+
+export interface BulletinDocumentRecord {
+  originalFileName: string;
+  fileMimeType: string;
+  fileContent: Buffer;
+}
+
+export interface BulletinsRepository {
+  list(): Promise<Bulletin[]>;
+  findById(bulletinId: string): Promise<Bulletin | null>;
+  createDraft(payload: BulletinDraftWriteRecord): Promise<Bulletin>;
+  updateDraft(bulletinId: string, payload: BulletinDraftWriteRecord): Promise<Bulletin>;
+  approve(bulletinId: string, payload: BulletinApprovalWriteRecord): Promise<Bulletin>;
+  uploadApproved(payload: BulletinUploadWriteRecord): Promise<Bulletin>;
+  findDocument(bulletinId: string, format: "docx" | "pdf"): Promise<BulletinDocumentRecord | null>;
+  delete(bulletinId: string): Promise<void>;
 }
 
 export interface QuotesRepository {

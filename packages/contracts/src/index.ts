@@ -1,4 +1,5 @@
 export * from "./app-version.js";
+export * from "./bulletins.js";
 export * from "./domain.js";
 export type { GeneralExpenseEmrtDailyAcknowledgement } from "./domain.js";
 export * from "./execution.js";

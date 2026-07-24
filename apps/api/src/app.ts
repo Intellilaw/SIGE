@@ -12,6 +12,7 @@ import { assertTenantScopedDatabaseSchema, prisma } from "./lib/prisma";
 import { AccountingService } from "./modules/accounting/accounting.service";
 import { AuthService } from "./modules/auth/auth.service";
 import { BudgetPlanningService } from "./modules/budget-planning/budget-planning.service";
+import { BulletinsService } from "./modules/bulletins/bulletins.service";
 import { ClientsService } from "./modules/clients/clients.service";
 import { CommissionsService } from "./modules/commissions/commissions.service";
 import { DailyDocumentsService } from "./modules/daily-documents/daily-documents.service";
@@ -36,6 +37,7 @@ import { accountingRoutes } from "./modules/accounting/accounting.routes";
 import { healthRoutes } from "./modules/health/health.routes";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { budgetPlanningRoutes } from "./modules/budget-planning/budget-planning.routes";
+import { bulletinsRoutes } from "./modules/bulletins/bulletins.routes";
 import { commissionsRoutes } from "./modules/commissions/commissions.routes";
 import { dailyDocumentsRoutes } from "./modules/daily-documents/daily-documents.routes";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes";
@@ -60,6 +62,7 @@ import { tasksRoutes } from "./modules/tasks/tasks.routes";
 import { PrismaAccountingRepository } from "./repositories/accounting.repository";
 import { PrismaAuthRepository } from "./repositories/auth.repository";
 import { PrismaBudgetPlanningRepository } from "./repositories/budget-planning.repository";
+import { PrismaBulletinsRepository } from "./repositories/bulletins.repository";
 import { PrismaClientsRepository } from "./repositories/clients.repository";
 import { PrismaCommissionsRepository } from "./repositories/commissions.repository";
 import { PrismaDailyDocumentsRepository } from "./repositories/daily-documents.repository";
@@ -90,6 +93,7 @@ import { PrismaUsersRepository } from "./repositories/users.repository";
 import type {
   AuthRepository,
   AccountingRepository,
+  BulletinsRepository,
   ClientsRepository,
   DailyDocumentsRepository,
   FinanceRepository,
@@ -114,6 +118,7 @@ declare module "fastify" {
       auth: AuthRepository;
       accounting: AccountingRepository;
       budgetPlanning: PrismaBudgetPlanningRepository;
+      bulletins: BulletinsRepository;
       clients: ClientsRepository;
       commissions: PrismaCommissionsRepository;
       kpiCommissionRequirements: KpiCommissionRequirementsService;
@@ -138,6 +143,7 @@ declare module "fastify" {
       AuthService: typeof AuthService;
       AccountingService: typeof AccountingService;
       BudgetPlanningService: typeof BudgetPlanningService;
+      BulletinsService: typeof BulletinsService;
       ClientsService: typeof ClientsService;
       CommissionsService: typeof CommissionsService;
       DailyDocumentsService: typeof DailyDocumentsService;
@@ -215,6 +221,7 @@ export async function buildApp() {
     auth: authRepository,
     accounting: new PrismaAccountingRepository(prisma),
     budgetPlanning: new PrismaBudgetPlanningRepository(prisma),
+    bulletins: new PrismaBulletinsRepository(prisma),
     clients: new ResilientClientsRepository(
       new PrismaClientsRepository(prisma),
       null,
@@ -263,6 +270,7 @@ export async function buildApp() {
     AuthService,
     AccountingService,
     BudgetPlanningService,
+    BulletinsService,
     ClientsService,
     CommissionsService,
     DailyDocumentsService,
@@ -315,6 +323,7 @@ export async function buildApp() {
     await api.register(healthRoutes);
     await api.register(authRoutes);
     await api.register(budgetPlanningRoutes);
+    await api.register(bulletinsRoutes);
     await api.register(commissionsRoutes);
     await api.register(dailyDocumentsRoutes);
     await api.register(dashboardRoutes);

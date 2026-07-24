@@ -52,6 +52,7 @@ const MODULE_ACCESS = {
         read: ["documents-third-party:read", "documents-third-party:write"],
         write: ["documents-third-party:write"]
     },
+    bulletins: { read: "internal", write: "internal" },
     "guidelines-manuals": { read: "all" },
     holidays: { read: ["holidays:read", "holidays:write"], write: ["holidays:write"] },
     users: { read: ["users:read", "users:manage"], write: ["users:manage"] }
@@ -62,6 +63,9 @@ export function hasPermission(user, permission) {
 function hasAnyPermission(user, permissions) {
     if (permissions === "all") {
         return Boolean(user);
+    }
+    if (permissions === "internal") {
+        return Boolean(user && !user.isExternal);
     }
     return Boolean(user?.permissions?.includes("*") || permissions.some((permission) => user?.permissions?.includes(permission)));
 }
